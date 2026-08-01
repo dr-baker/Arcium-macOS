@@ -249,6 +249,7 @@ def profile_info_template(local_state: dict[str, Any]) -> dict[str, Any]:
 def prepare_profile(
     stage_profile: Path,
     template_profile: Path,
+    profile_name: str,
     bookmarks: dict[str, Any],
     cookies: list[tuple[Any, bytes]],
     helium_key: bytes,
@@ -258,6 +259,10 @@ def prepare_profile(
         source = template_profile / name
         if source.exists():
             shutil.copy2(source, stage_profile / name)
+    preferences_path = stage_profile / "Preferences"
+    preferences = json.loads(preferences_path.read_text())
+    preferences.setdefault("profile", {})["name"] = profile_name
+    preferences_path.write_text(json.dumps(preferences, indent=2) + "\n")
     shutil.copy2(template_profile / "Cookies", stage_profile / "Cookies")
     (stage_profile / "Bookmarks").write_text(json.dumps(bookmarks, indent=2) + "\n")
     return write_cookies(stage_profile / "Cookies", cookies, helium_key)
@@ -293,6 +298,7 @@ def apply_import(
             count = prepare_profile(
                 destination,
                 template_profile,
+                space.name,
                 bookmarks,
                 source_cache[space.source_profile],
                 helium_key,
