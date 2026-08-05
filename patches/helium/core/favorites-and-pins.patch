@@ -308,17 +308,17 @@
 +        <message name="IDS_TAB_CXMENU_HIBERNATE_OTHER_TABS" desc="The label of the 'Hibernate other tabs' Tab context menu item.">
 +          Hibernate other tabs
 +        </message>
-+        <message name="IDS_TAB_CXMENU_PIN_AS_PERSISTENT_SHORTCUT" desc="The label of the tab context menu item for making a pinned tab persistent.">
-+          Pin as persistent shortcut
++        <message name="IDS_TAB_CXMENU_MAKE_PIN" desc="The label of the tab context menu item for pinning a tab in the pins section.">
++          Pin
 +        </message>
-+        <message name="IDS_TAB_CXMENU_RESET_PERSISTENT_SHORTCUT" desc="The label of the tab context menu item for resetting a persistent tab to its home URL.">
++        <message name="IDS_TAB_CXMENU_RESET_PIN_HOME" desc="The label of the tab context menu item for resetting a pin to its home URL.">
 +          Reset to home
 +        </message>
-+        <message name="IDS_TAB_CXMENU_REPLACE_PERSISTENT_SHORTCUT" desc="The label of the tab context menu item for replacing a persistent tab home URL.">
++        <message name="IDS_TAB_CXMENU_REPLACE_PIN_HOME" desc="The label of the tab context menu item for replacing a pin home URL.">
 +          Replace home with current page
 +        </message>
-+        <message name="IDS_TAB_CXMENU_REMOVE_PERSISTENT_SHORTCUT" desc="The label of the tab context menu item for removing persistence from a tab.">
-+          Remove persistent shortcut
++        <message name="IDS_TAB_CXMENU_REMOVE_PIN" desc="The label of the tab context menu item for unpinning a tab.">
++          Unpin
 +        </message>
 +        <message name="IDS_TAB_CXMENU_COPY_URL" desc="The label of the 'Copy URL' Tab context menu item.">
 +          Copy URL
@@ -349,17 +349,17 @@
 +        <message name="IDS_TAB_CXMENU_HIBERNATE_OTHER_TABS" desc="In Title Case: The label of the 'Hibernate Other Tabs' Tab context menu item.">
 +          Hibernate Other Tabs
 +        </message>
-+        <message name="IDS_TAB_CXMENU_PIN_AS_PERSISTENT_SHORTCUT" desc="In Title Case: The label of the tab context menu item for making a pinned tab persistent.">
-+          Pin as Persistent Shortcut
++        <message name="IDS_TAB_CXMENU_MAKE_PIN" desc="In Title Case: The label of the tab context menu item for pinning a tab in the pins section.">
++          Pin
 +        </message>
-+        <message name="IDS_TAB_CXMENU_RESET_PERSISTENT_SHORTCUT" desc="In Title Case: The label of the tab context menu item for resetting a persistent tab to its home URL.">
++        <message name="IDS_TAB_CXMENU_RESET_PIN_HOME" desc="In Title Case: The label of the tab context menu item for resetting a pin to its home URL.">
 +          Reset to Home
 +        </message>
-+        <message name="IDS_TAB_CXMENU_REPLACE_PERSISTENT_SHORTCUT" desc="In Title Case: The label of the tab context menu item for replacing a persistent tab home URL.">
++        <message name="IDS_TAB_CXMENU_REPLACE_PIN_HOME" desc="In Title Case: The label of the tab context menu item for replacing a pin home URL.">
 +          Replace Home With Current Page
 +        </message>
-+        <message name="IDS_TAB_CXMENU_REMOVE_PERSISTENT_SHORTCUT" desc="In Title Case: The label of the tab context menu item for removing persistence from a tab.">
-+          Remove Persistent Shortcut
++        <message name="IDS_TAB_CXMENU_REMOVE_PIN" desc="In Title Case: The label of the tab context menu item for unpinning a tab.">
++          Unpin
 +        </message>
 +        <message name="IDS_TAB_CXMENU_COPY_URL" desc="In Title Case: The label of the 'Copy URL' Tab context menu item.">
 +          Copy URL
@@ -424,8 +424,8 @@
      "enterprise_startup_dialog.h",
      "helium/helium_layout_state_controller.cc",
      "helium/helium_layout_state_controller.h",
-+    "helium/helium_arc_reserve_tabs.cc",
-+    "helium/helium_arc_reserve_tabs.h",
++    "helium/helium_favorites_and_pins.cc",
++    "helium/helium_favorites_and_pins.h",
      "idle_bubble.h",
      "managed_ui.cc",
      "managed_ui.h",
@@ -473,7 +473,7 @@
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
  #include "chrome/browser/ui/tabs/tab_group_model.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -487,13 +487,13 @@
    return extra_data;
  }
 --- /dev/null
-+++ b/chrome/browser/ui/helium/helium_arc_reserve_tabs.cc
++++ b/chrome/browser/ui/helium/helium_favorites_and_pins.cc
 @@ -0,0 +1,328 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
 +
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
 +
 +#include <string>
 +#include <utility>
@@ -519,14 +519,14 @@
 +
 +namespace helium {
 +
-+BASE_FEATURE(kHeliumArcReserveTabs,
-+             "HeliumArcReserveTabs",
++BASE_FEATURE(kHeliumFavoritesAndPins,
++             "HeliumFavoritesAndPins",
 +             base::FEATURE_DISABLED_BY_DEFAULT);
 +
 +namespace {
 +
-+constexpr char kAnchorURLKey[] = "helium.arc.reserve_tabs.anchor_url";
-+constexpr char kAnchorTitleKey[] = "helium.arc.reserve_tabs.anchor_title";
++constexpr char kAnchorURLKey[] = "helium.favorites_and_pins.anchor_url";
++constexpr char kAnchorTitleKey[] = "helium.favorites_and_pins.anchor_title";
 +
 +bool IsHTTPOrHTTPS(const GURL& url) {
 +  return url.is_valid() && url.SchemeIsHTTPOrHTTPS();
@@ -542,7 +542,7 @@
 +}
 +
 +// Persistent folders are allowed (they are not Chromium tab groups). Splits
-+// remain ineligible for anchored/persistent shortcut membership.
++// remain ineligible for anchored favorite/pin membership.
 +bool IsStandaloneTab(const tabs::TabInterface* tab) {
 +  return tab && !tab->IsSplit() && !tab->GetGroup().has_value();
 +}
@@ -608,25 +608,25 @@
 +
 +}  // namespace
 +
-+bool IsHeliumArcReserveTabsEnabled() {
-+  return base::FeatureList::IsEnabled(kHeliumArcReserveTabs);
++bool IsHeliumFavoritesAndPinsEnabled() {
++  return base::FeatureList::IsEnabled(kHeliumFavoritesAndPins);
 +}
 +
-+bool IsPersistentTab(const tabs::TabInterface* tab) {
-+  if (!IsHeliumArcReserveTabsEnabled() || !IsEligibleTabContext(tab)) {
++bool IsPinTab(const tabs::TabInterface* tab) {
++  if (!IsHeliumFavoritesAndPinsEnabled() || !IsEligibleTabContext(tab)) {
 +    return false;
 +  }
 +  const tabs::TabStripCollection* const strip = GetTabStripCollection(tab);
-+  return strip && strip->IsPersistentTab(tab);
++  return strip && strip->IsPinTab(tab);
 +}
 +
 +bool IsAnchoredTab(const tabs::TabInterface* tab) {
-+  if (!IsHeliumArcReserveTabsEnabled() || !IsEligibleTabContext(tab) ||
++  if (!IsHeliumFavoritesAndPinsEnabled() || !IsEligibleTabContext(tab) ||
 +      !IsStandaloneTab(tab) || !HasHomeMetadata(tab)) {
 +    return false;
 +  }
-+  // Native pinned tabs and persistent-section tabs share anchored-home UX.
-+  return tab->IsPinned() || IsPersistentTab(tab);
++  // Native pinned tabs and pins-section tabs share anchored-home UX.
++  return tab->IsPinned() || IsPinTab(tab);
 +}
 +
 +bool IsAnchoredTabAwayFromHome(const tabs::TabInterface* tab) {
@@ -648,16 +648,16 @@
 +  return IsAnchoredTabAwayFromHome(tab);
 +}
 +
-+bool CanPinAsPersistentShortcut(const tabs::TabInterface* tab) {
-+  if (!IsHeliumArcReserveTabsEnabled() || !IsEligibleTabContext(tab) ||
-+      !IsStandaloneTab(tab) || IsPersistentTab(tab) || tab->IsPinned()) {
++bool CanMakePin(const tabs::TabInterface* tab) {
++  if (!IsHeliumFavoritesAndPinsEnabled() || !IsEligibleTabContext(tab) ||
++      !IsStandaloneTab(tab) || IsPinTab(tab) || tab->IsPinned()) {
 +    return false;
 +  }
 +  return IsHTTPOrHTTPS(tab->GetContents()->GetLastCommittedURL());
 +}
 +
-+bool PinAsPersistentShortcut(tabs::TabInterface* tab) {
-+  if (!CanPinAsPersistentShortcut(tab)) {
++bool MakePin(tabs::TabInterface* tab) {
++  if (!CanMakePin(tab)) {
 +    return false;
 +  }
 +
@@ -674,7 +674,7 @@
 +  }
 +
 +  helper->SetAnchoredPinnedTabHome(home_url, std::move(title));
-+  strip->MoveTabToPersistent(tab);
++  strip->MoveTabToPin(tab);
 +  PersistAnchoredPinnedTabExtraData(tab);
 +  return true;
 +}
@@ -697,7 +697,7 @@
 +                                  std::u16string home_title) {
 +  TabUIHelper* const helper = GetTabUIHelper(tab);
 +  const Profile* const profile = tab ? tab->GetProfile() : nullptr;
-+  if (!helper || !IsHeliumArcReserveTabsEnabled() || !profile ||
++  if (!helper || !IsHeliumFavoritesAndPinsEnabled() || !profile ||
 +      profile->IsOffTheRecord() || profile->IsGuestSession() ||
 +      !IsStandaloneTab(tab) || !IsHTTPOrHTTPS(home_url)) {
 +    return;
@@ -750,9 +750,9 @@
 +    helper->ClearAnchoredPinnedTabHome();
 +    PersistAnchoredPinnedTabExtraData(tab);
 +  }
-+  if (IsPersistentTab(tab)) {
++  if (IsPinTab(tab)) {
 +    if (tabs::TabStripCollection* const strip = GetTabStripCollection(tab)) {
-+      strip->MoveTabFromPersistent(tab);
++      strip->MoveTabFromPin(tab);
 +    }
 +  }
 +}
@@ -781,7 +781,7 @@
 +  }
 +
 +  const Profile* const profile = tab ? tab->GetProfile() : nullptr;
-+  if (!helper || !IsHeliumArcReserveTabsEnabled() || !profile ||
++  if (!helper || !IsHeliumFavoritesAndPinsEnabled() || !profile ||
 +      profile->IsOffTheRecord() || profile->IsGuestSession() ||
 +      !IsStandaloneTab(tab)) {
 +    return;
@@ -801,31 +801,31 @@
 +  RestoreAnchoredPinnedTabHome(tab, home_url,
 +                               base::UTF8ToUTF16(title_it->second));
 +
-+  // Place restored anchored tabs that are not native pins into persistent.
++  // Place restored anchored tabs that are not native pins into the pins section.
 +  if (tab && !tab->IsPinned()) {
 +    if (tabs::TabStripCollection* const strip = GetTabStripCollection(tab)) {
-+      if (!strip->IsPersistentTab(tab)) {
-+        strip->MoveTabToPersistent(tab);
++      if (!strip->IsPinTab(tab)) {
++        strip->MoveTabToPin(tab);
 +      }
 +    }
 +  }
 +}
 +
-+bool MaybeConvertAnchoredPinnedTabNavigation(NavigateParams* params) {
-+  // Persistent/pinned anchored tabs navigate in place.
++bool MaybeConvertAnchoredFavoriteOrPinNavigation(NavigateParams* params) {
++  // Pin/favorite anchored tabs navigate in place.
 +  return false;
 +}
 +
 +}  // namespace helium
 --- /dev/null
-+++ b/chrome/browser/ui/helium/helium_arc_reserve_tabs.h
++++ b/chrome/browser/ui/helium/helium_favorites_and_pins.h
 @@ -0,0 +1,58 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
 +
-+#ifndef CHROME_BROWSER_UI_HELIUM_HELIUM_ARC_RESERVE_TABS_H_
-+#define CHROME_BROWSER_UI_HELIUM_HELIUM_ARC_RESERVE_TABS_H_
++#ifndef CHROME_BROWSER_UI_HELIUM_HELIUM_FAVORITES_AND_PINS_H_
++#define CHROME_BROWSER_UI_HELIUM_HELIUM_FAVORITES_AND_PINS_H_
 +
 +#include <map>
 +#include <string>
@@ -841,12 +841,12 @@
 +
 +namespace helium {
 +
-+BASE_DECLARE_FEATURE(kHeliumArcReserveTabs);
++BASE_DECLARE_FEATURE(kHeliumFavoritesAndPins);
 +
-+bool IsHeliumArcReserveTabsEnabled();
++bool IsHeliumFavoritesAndPinsEnabled();
 +
-+bool CanPinAsPersistentShortcut(const tabs::TabInterface* tab);
-+bool IsPersistentTab(const tabs::TabInterface* tab);
++bool CanMakePin(const tabs::TabInterface* tab);
++bool IsPinTab(const tabs::TabInterface* tab);
 +bool IsAnchoredTab(const tabs::TabInterface* tab);
 +bool IsAnchoredTabAwayFromHome(const tabs::TabInterface* tab);
 +
@@ -854,7 +854,7 @@
 +bool IsAnchoredPinnedTab(const tabs::TabInterface* tab);
 +bool IsAnchoredPinnedTabAwayFromHome(const tabs::TabInterface* tab);
 +
-+bool PinAsPersistentShortcut(tabs::TabInterface* tab);
++bool MakePin(tabs::TabInterface* tab);
 +bool GetAnchoredPinnedTabHome(const tabs::TabInterface* tab,
 +                              GURL* home_url,
 +                              std::u16string* home_title);
@@ -872,19 +872,19 @@
 +    tabs::TabInterface* tab,
 +    const std::map<std::string, std::string>& extra_data);
 +
-+// Persistent tabs navigate in place; this remains a no-op converter.
-+bool MaybeConvertAnchoredPinnedTabNavigation(NavigateParams* params);
++// Pins navigate in place; this remains a no-op converter.
++bool MaybeConvertAnchoredFavoriteOrPinNavigation(NavigateParams* params);
 +
 +}  // namespace helium
 +
-+#endif  // CHROME_BROWSER_UI_HELIUM_HELIUM_ARC_RESERVE_TABS_H_
++#endif  // CHROME_BROWSER_UI_HELIUM_HELIUM_FAVORITES_AND_PINS_H_
 --- a/chrome/browser/ui/navigator/browser_navigator.cc
 +++ b/chrome/browser/ui/navigator/browser_navigator.cc
 @@ -34,6 +34,7 @@
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
  #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
  #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/incognito_allowed_url.h"
  #include "chrome/browser/ui/location_bar/location_bar.h"
  #include "chrome/browser/ui/navigator/browser_navigator_params.h"
@@ -892,7 +892,7 @@
                                    ->GetActiveWebContents();
    }
  
-+  helium::MaybeConvertAnchoredPinnedTabNavigation(params);
++  helium::MaybeConvertAnchoredFavoriteOrPinNavigation(params);
 +
    WebContents* contents_to_navigate_or_insert =
        params->contents_to_insert.get();
@@ -974,7 +974,7 @@
  #include "chrome/browser/send_tab_to_self/send_tab_to_self_util.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/color/chrome_color_id.h"
  #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
  #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_context_menu_delegate.h"
@@ -982,24 +982,24 @@
        TabStripModel::CommandTogglePinned,
        will_pin ? IDS_TAB_CXMENU_PIN_TAB : IDS_TAB_CXMENU_UNPIN_TAB);
  
-+  if (helium::IsHeliumArcReserveTabsEnabled() && tab_interface_) {
-+    if (helium::IsPersistentTab(tab_interface_.get()) ||
++  if (helium::IsHeliumFavoritesAndPinsEnabled() && tab_interface_) {
++    if (helium::IsPinTab(tab_interface_.get()) ||
 +        helium::IsAnchoredPinnedTab(tab_interface_.get())) {
 +      AddSeparator(ui::NORMAL_SEPARATOR);
-+      if (helium::IsPersistentTab(tab_interface_.get())) {
-+        AddItemWithStringId(TabStripModel::CommandNewPersistentFolder,
-+                            IDS_TAB_CXMENU_NEW_PERSISTENT_FOLDER);
++      if (helium::IsPinTab(tab_interface_.get())) {
++        AddItemWithStringId(TabStripModel::CommandNewPinFolder,
++                            IDS_TAB_CXMENU_NEW_PIN_FOLDER);
 +      }
-+      AddItemWithStringId(TabStripModel::CommandResetPersistentShortcut,
-+                          IDS_TAB_CXMENU_RESET_PERSISTENT_SHORTCUT);
-+      AddItemWithStringId(TabStripModel::CommandReplacePersistentShortcut,
-+                          IDS_TAB_CXMENU_REPLACE_PERSISTENT_SHORTCUT);
-+      AddItemWithStringId(TabStripModel::CommandRemovePersistentShortcut,
-+                          IDS_TAB_CXMENU_REMOVE_PERSISTENT_SHORTCUT);
-+    } else if (helium::CanPinAsPersistentShortcut(tab_interface_.get())) {
++      AddItemWithStringId(TabStripModel::CommandResetPinHome,
++                          IDS_TAB_CXMENU_RESET_PIN_HOME);
++      AddItemWithStringId(TabStripModel::CommandReplacePinHome,
++                          IDS_TAB_CXMENU_REPLACE_PIN_HOME);
++      AddItemWithStringId(TabStripModel::CommandRemovePin,
++                          IDS_TAB_CXMENU_REMOVE_PIN);
++    } else if (helium::CanMakePin(tab_interface_.get())) {
 +      AddSeparator(ui::NORMAL_SEPARATOR);
-+      AddItemWithStringId(TabStripModel::CommandPinAsPersistentShortcut,
-+                          IDS_TAB_CXMENU_PIN_AS_PERSISTENT_SHORTCUT);
++      AddItemWithStringId(TabStripModel::CommandMakePin,
++                          IDS_TAB_CXMENU_MAKE_PIN);
 +    }
 +  }
 +
@@ -1032,7 +1032,7 @@
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
  #include "chrome/browser/ui/tab_ui_helper.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/tabs/features.h"
  #include "chrome/browser/ui/tabs/split_tab_metrics.h"
  #include "chrome/browser/ui/tabs/tab_change_type.h"
@@ -1065,7 +1065,7 @@
  #include "components/tabs/public/tab_interface.h"
  #include "components/tabs/public/tab_strip_collection.h"
 +#include "components/tabs/public/folder_tab_collection.h"
-+#include "components/tabs/public/persistent_tab_collection.h"
++#include "components/tabs/public/pin_tab_collection.h"
  #include "components/tabs/public/unpinned_tab_collection.h"
  #include "components/web_modal/web_contents_modal_dialog_manager.h"
  #include "components/webapps/common/web_app_id.h"
@@ -1229,17 +1229,17 @@
      case CommandTogglePinned:
        return true;
  
-+    case CommandPinAsPersistentShortcut:
-+      return helium::CanPinAsPersistentShortcut(
++    case CommandMakePin:
++      return helium::CanMakePin(
 +          GetTabAtIndex(context_index));
 +
-+    case CommandResetPersistentShortcut:
-+    case CommandReplacePersistentShortcut:
-+    case CommandRemovePersistentShortcut:
++    case CommandResetPinHome:
++    case CommandReplacePinHome:
++    case CommandRemovePin:
 +      return helium::IsAnchoredPinnedTab(GetTabAtIndex(context_index));
 +
-+    case CommandNewPersistentFolder:
-+      return helium::IsPersistentTab(GetTabAtIndex(context_index));
++    case CommandNewPinFolder:
++      return helium::IsPinTab(GetTabAtIndex(context_index));
 +
      case CommandToggleGrouped:
 -      return SupportsTabGroups();
@@ -1313,28 +1313,28 @@
        break;
      }
  
-+    case CommandPinAsPersistentShortcut:
-+      helium::PinAsPersistentShortcut(GetTabAtIndex(context_index));
++    case CommandMakePin:
++      helium::MakePin(GetTabAtIndex(context_index));
 +      break;
 +
-+    case CommandResetPersistentShortcut:
++    case CommandResetPinHome:
 +      helium::ResetAnchoredPinnedTab(GetTabAtIndex(context_index));
 +      break;
 +
-+    case CommandReplacePersistentShortcut:
++    case CommandReplacePinHome:
 +      helium::ReplaceAnchoredPinnedTabHome(GetTabAtIndex(context_index));
 +      break;
 +
-+    case CommandRemovePersistentShortcut:
++    case CommandRemovePin:
 +      helium::RemoveAnchoredPinnedTab(GetTabAtIndex(context_index));
 +      break;
 +
-+    case CommandNewPersistentFolder: {
++    case CommandNewPinFolder: {
 +      tabs::TabInterface* tab = GetTabAtIndex(context_index);
 +      if (auto* strip = static_cast<tabs::TabStripCollection*>(
 +              const_cast<tabs::TabCollection*>(Root()))) {
 +        tabs::TabCollection* parent =
-+            static_cast<tabs::TabCollection*>(strip->persistent_collection());
++            static_cast<tabs::TabCollection*>(strip->pin_collection());
 +        // Nest under the tab's current folder when possible.
 +        tabs::TabCollection* tab_parent =
 +            const_cast<tabs::TabCollection*>(tab->GetParentCollection());
@@ -1344,7 +1344,7 @@
 +        }
 +        tabs::FolderTabCollection* folder = strip->FindOrCreateFolder(
 +            parent, u"Folder", /*collapsed=*/false);
-+        if (folder && strip->IsPersistentTab(tab)) {
++        if (folder && strip->IsPinTab(tab)) {
 +          strip->MoveTabToCollection(tab, folder);
 +        }
 +      }
@@ -1575,11 +1575,11 @@
    // Returns the index of the first tab that is not a pinned tab. This returns
    // |count()| if all of the tabs are pinned tabs, and 0 if none of the tabs are
 -  // pinned tabs.
-+  // pinned tabs. Persistent tabs (if any) begin at this index.
++  // pinned tabs. Pins (if any) begin at this index.
    int IndexOfFirstNonPinnedTab() const;
  
 +  // Returns the index of the first ordinary unpinned tab (after pinned and
-+  // Helium persistent sections). Equals |count()| when there are no unpinned
++  // Helium pins sections). Equals |count()| when there are no unpinned
 +  // tabs.
 +  int IndexOfFirstUnpinnedTab() const;
 +
@@ -1603,11 +1603,11 @@
      CommandCloseTabsToRight,
 +    CommandCloseTabsToLeft,
      CommandTogglePinned,
-+    CommandPinAsPersistentShortcut,
-+    CommandResetPersistentShortcut,
-+    CommandReplacePersistentShortcut,
-+    CommandRemovePersistentShortcut,
-+    CommandNewPersistentFolder,
++    CommandMakePin,
++    CommandResetPinHome,
++    CommandReplacePinHome,
++    CommandRemovePin,
++    CommandNewPinFolder,
      CommandToggleGrouped,
      CommandToggleSiteMuted,
      CommandSendTabToSelf,
@@ -1663,14 +1663,14 @@
        summary="the Move to existing window command"/>
    <variant name="MoveToNewWindow" summary="the Move to new window command"/>
    <variant name="NewTabToRight" summary="the New Tab To Right command"/>
-+  <variant name="PinAsPersistentShortcut"
-+      summary="the Pin as Persistent Shortcut command"/>
++  <variant name="MakePin"
++      summary="the Pin command"/>
 +  <variant name="NewPersistentFolder"
 +      summary="the New Persistent Folder command"/>
    <variant name="Reload" summary="the Reload command"/>
    <variant name="RemoveFromGroup" summary="the Remove from Group command"/>
 +  <variant name="RemovePersistentShortcut"
-+      summary="the Remove Persistent Shortcut command"/>
++      summary="the Unpin command"/>
 +  <variant name="ReplacePersistentShortcut"
 +      summary="the Replace Persistent Shortcut command"/>
 +  <variant name="ResetPersistentShortcut"
@@ -1684,7 +1684,7 @@
  #include "chrome/browser/tab_contents/tab_util.h"
  #include "chrome/browser/ui/browser.h"
  #include "chrome/browser/ui/browser_window.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_activation_tracker.h"
  #include "chrome/browser/ui/tab_ui_helper.h"
  #include "chrome/browser/ui/tabs/public/tab_features.h"
@@ -1720,7 +1720,7 @@
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/navigator/browser_navigator.h"
  #include "chrome/browser/ui/navigator/browser_navigator_params.h"
  #include "chrome/browser/ui/startup/infobar_utils.h"
@@ -1731,7 +1731,7 @@
 +#include "components/tabs/public/tab_interface.h"
 +#include "components/tabs/public/tab_strip_collection.h"
 +#include "components/tabs/public/folder_tab_collection.h"
-+#include "components/tabs/public/persistent_tab_collection.h"
++#include "components/tabs/public/pin_tab_collection.h"
  #include "chrome/browser/ui/startup/startup_tab_provider.h"
  #include "chrome/browser/ui/startup/startup_types.h"
  #include "chrome/browser/ui/tabs/shared_tab_group_version_upgrade_modal.h"
@@ -1750,28 +1750,28 @@
  #endif  // BUILDFLAG(ENABLE_RLZ)
  
      Navigate(&params);
-+    if ((tab.type == StartupTab::Type::kPersistent ||
-+         tab.helium_persistent_shortcut) &&
++    if ((tab.type == StartupTab::Type::kPin ||
++         tab.helium_has_home) &&
 +        params.navigated_or_inserted_contents) {
 +      tabs::TabInterface* const tab_interface =
 +          tabs::TabInterface::MaybeGetFromContents(
 +              params.navigated_or_inserted_contents);
 +      helium::RestoreAnchoredPinnedTabHome(
-+          tab_interface, tab.url, tab.helium_persistent_shortcut_title);
++          tab_interface, tab.url, tab.helium_home_title);
 +      if (tab_interface && !tab_interface->IsPinned()) {
 +        if (auto* strip = static_cast<tabs::TabStripCollection*>(
 +                const_cast<tabs::TabCollection*>(
 +                    browser->tab_strip_model()->Root()))) {
 +          tabs::TabCollection* parent = static_cast<tabs::TabCollection*>(
-+              strip->persistent_collection());
++              strip->pin_collection());
 +          for (const auto& segment : tab.helium_folder_path) {
 +            parent = static_cast<tabs::TabCollection*>(strip->FindOrCreateFolder(
 +                parent, segment.title, segment.collapsed));
 +          }
 +          if (parent == static_cast<tabs::TabCollection*>(
-+                            strip->persistent_collection())) {
-+            if (!strip->IsPersistentTab(tab_interface)) {
-+              strip->MoveTabToPersistent(tab_interface);
++                            strip->pin_collection())) {
++            if (!strip->IsPinTab(tab_interface)) {
++              strip->MoveTabToPin(tab_interface);
 +            }
 +          } else {
 +            strip->MoveTabToCollection(tab_interface, parent);
@@ -1812,8 +1812,8 @@
      kNormal,
      // The tab is pinned.
      kPinned,
-+    // Helium Arc-style persistent tab (not a native pin).
-+    kPersistent,
++    // Helium pin (not a Chromium favorite).
++    kPin,
      // The url is from the LAST_AND_URLS startup pref.
      kFromLastAndUrlsStartupPref,
    };
@@ -1821,11 +1821,11 @@
  
    Type type = Type::kNormal;
  
-+  // Helium-only home metadata for anchored pinned/persistent tabs.
-+  bool helium_persistent_shortcut = false;
-+  std::u16string helium_persistent_shortcut_title;
++  // Helium-only home metadata for anchored favorite/pin tabs.
++  bool helium_has_home = false;
++  std::u16string helium_home_title;
 +
-+  // When restoring a persistent tab into nested folders, each segment is an
++  // When restoring a pin into nested folders, each segment is an
 +  // ancestor folder title (outermost first) plus that folder's collapsed state.
 +  struct FolderPathSegment {
 +    std::u16string title;
@@ -1847,7 +1847,7 @@
  #include "chrome/browser/profiles/profile.h"
  #include "chrome/browser/ui/browser.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "chrome/common/pref_names.h"
  #include "components/pref_registry/pref_registry_syncable.h"
@@ -1855,20 +1855,20 @@
  
  // Key used in dictionaries for the url.
  const char kURL[] = "url";
-+const char kHeliumPersistentShortcut[] = "helium_persistent_shortcut";
-+const char kHeliumPersistentShortcutTitle[] =
-+    "helium_persistent_shortcut_title";
++const char kHeliumHasHome[] = "helium_has_home";
++const char kHeliumHomeTitle[] =
++    "helium_home_title";
  
  // Returns a base::DictValue representing the supplied StartupTab.
 -base::DictValue EncodeTab(const GURL& url) {
 +base::DictValue EncodeTab(const GURL& url,
-+                          bool helium_persistent_shortcut,
++                          bool helium_has_home,
 +                          const std::u16string& shortcut_title) {
    base::DictValue dict;
    dict.Set(kURL, url.spec());
-+  if (helium_persistent_shortcut) {
-+    dict.Set(kHeliumPersistentShortcut, true);
-+    dict.Set(kHeliumPersistentShortcutTitle,
++  if (helium_has_home) {
++    dict.Set(kHeliumHasHome, true);
++    dict.Set(kHeliumHomeTitle,
 +             base::UTF16ToUTF8(shortcut_title));
 +  }
    return dict;
@@ -1883,7 +1883,7 @@
 +      GURL shortcut_url;
 +      std::u16string shortcut_title;
 +      // Only encode home metadata for native pinned tabs that are away-capable.
-+      // Persistent-section tabs are handled by PersistentTabCodec.
++      // Persistent-section tabs are handled by PinTabCodec.
 +      const bool has_home = tab->IsPinned() &&
 +                            helium::GetAnchoredPinnedTabHome(tab, &shortcut_url,
 +                                                             &shortcut_title);
@@ -1906,16 +1906,16 @@
 +  }
 +
 +  StartupTab tab(GURL(*url_string), StartupTab::Type::kPinned);
-+  tab.helium_persistent_shortcut =
-+      value.FindBool(kHeliumPersistentShortcut).value_or(false);
-+  if (tab.helium_persistent_shortcut) {
++  tab.helium_has_home =
++      value.FindBool(kHeliumHasHome).value_or(false);
++  if (tab.helium_has_home) {
 +    // Legacy pref entries may have stored persistent shortcuts in the pinned
 +    // list; restore them as persistent, not native pins.
-+    tab.type = StartupTab::Type::kPersistent;
++    tab.type = StartupTab::Type::kPin;
 +  }
 +  if (const std::string* const title =
-+          value.FindString(kHeliumPersistentShortcutTitle)) {
-+    tab.helium_persistent_shortcut_title = base::UTF8ToUTF16(*title);
++          value.FindString(kHeliumHomeTitle)) {
++    tab.helium_home_title = base::UTF8ToUTF16(*title);
 +  }
 +  return tab;
  }
@@ -1926,8 +1926,8 @@
    values.clear();
    for (const auto& tab : tabs) {
 -    values.Append(EncodeTab(tab.url));
-+    values.Append(EncodeTab(tab.url, tab.helium_persistent_shortcut,
-+                            tab.helium_persistent_shortcut_title));
++    values.Append(EncodeTab(tab.url, tab.helium_has_home,
++                            tab.helium_home_title));
    }
  }
  
@@ -1945,7 +1945,7 @@
  #include "chrome/browser/themes/theme_properties.h"
  #include "chrome/browser/ui/browser_element_identifiers.h"
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/layout_constants.h"
  #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
  #include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
@@ -2269,7 +2269,7 @@
        case tabs::TabCollection::Type::SPLIT:
          // Intentional fallthrough. Split tabs is currently desktop only.
        case tabs::TabCollection::Type::TABSTRIP:
-+      case tabs::TabCollection::Type::PERSISTENT:
++      case tabs::TabCollection::Type::PIN:
        case tabs::TabCollection::Type::UNPINNED:
 +      case tabs::TabCollection::Type::FOLDER:
          break;
@@ -2313,7 +2313,7 @@
  #include "chrome/browser/ui/side_panel/side_panel_prefs.h"
  #include "chrome/browser/ui/startup/startup_browser_creator.h"
  #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
-+#include "chrome/browser/ui/tabs/persistent_tab_codec.h"
++#include "chrome/browser/ui/tabs/pin_tab_codec.h"
  #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_pref_names.h"
  #include "chrome/browser/ui/tabs/tab_strip_prefs.h"
  #include "chrome/browser/ui/webui/certificate_manager/certificate_manager_handler.h"
@@ -2389,7 +2389,7 @@
    MicrosoftFilesPageHandler::RegisterProfilePrefs(registry);
    OutlookCalendarPageHandler::RegisterProfilePrefs(registry);
    PinnedTabCodec::RegisterProfilePrefs(registry);
-+  PersistentTabCodec::RegisterProfilePrefs(registry);
++  PinTabCodec::RegisterProfilePrefs(registry);
    promos_utils::RegisterProfilePrefs(registry);
    PromoService::RegisterProfilePrefs(registry);
    RegisterReadAnythingProfilePrefs(registry);
@@ -2426,8 +2426,8 @@
    kGroup = 5,
    kSplit = 6,
 -  kMaxValue = kSplit,
-+  // Helium Arc-style persistent section and nested folders.
-+  kPersistent = 7,
++  // Helium pins section and nested folders.
++  kPin = 7,
 +  kFolder = 8,
 +  kMaxValue = kFolder,
  };
@@ -2447,8 +2447,8 @@
        return TabStorageType::kTabStrip;
      case TabCollection::Type::PINNED:
        return TabStorageType::kPinned;
-+    case TabCollection::Type::PERSISTENT:
-+      return TabStorageType::kPersistent;
++    case TabCollection::Type::PIN:
++      return TabStorageType::kPin;
      case TabCollection::Type::UNPINNED:
        return TabStorageType::kUnpinned;
      case TabCollection::Type::GROUP:
@@ -2464,8 +2464,8 @@
        return TabCollection::Type::TABSTRIP;
      case TabStorageType::kPinned:
        return TabCollection::Type::PINNED;
-+    case TabStorageType::kPersistent:
-+      return TabCollection::Type::PERSISTENT;
++    case TabStorageType::kPin:
++      return TabCollection::Type::PIN;
      case TabStorageType::kUnpinned:
        return TabCollection::Type::UNPINNED;
      case TabStorageType::kGroup:
@@ -2486,7 +2486,7 @@
    constexpr auto kCollectionTypes = base::MakeFixedFlatSet<TabStorageType>({
        TabStorageType::kTabStrip,
        TabStorageType::kPinned,
-+      TabStorageType::kPersistent,
++      TabStorageType::kPin,
        TabStorageType::kUnpinned,
        TabStorageType::kGroup,
        TabStorageType::kSplit,
@@ -2500,7 +2500,7 @@
  #include "chrome/browser/ui/startup/startup_types.h"
  #include "chrome/browser/ui/startup/url_util.h"
  #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
-+#include "chrome/browser/ui/tabs/persistent_tab_codec.h"
++#include "chrome/browser/ui/tabs/pin_tab_codec.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "chrome/browser/ui/webui/settings/reset_settings_handler.h"
  #include "chrome/common/pref_names.h"
@@ -2513,8 +2513,8 @@
        StartupBrowserCreator::GetSessionStartupPref(command_line, profile),
        PinnedTabCodec::ReadPinnedTabs(profile),
        ProfileHasOtherTabbedBrowser(profile));
-+  // Append Helium persistent tabs (not native pins).
-+  StartupTabs persistent = PersistentTabCodec::ReadPersistentTabs(profile);
++  // Append Helium pins (not native pins).
++  StartupTabs persistent = PinTabCodec::ReadPins(profile);
 +  tabs.insert(tabs.end(), persistent.begin(), persistent.end());
 +  return tabs;
  }
@@ -2526,7 +2526,7 @@
        "new_tab_grouping_user_data.h",
        "page_context_eligibility_helper.h",
        "pinned_tab_codec.h",
-+      "persistent_tab_codec.h",
++      "pin_tab_codec.h",
        "pinned_tab_service.h",
        "pinned_tab_service_factory.h",
        "split_tab_highlight_controller.h",
@@ -2534,18 +2534,18 @@
        "hover_tab_selector.cc",
        "page_context_eligibility_helper.cc",
        "pinned_tab_codec.cc",
-+      "persistent_tab_codec.cc",
++      "pin_tab_codec.cc",
        "pinned_tab_service.cc",
        "pinned_tab_service_factory.cc",
        "recent_tabs_sub_menu_model.cc",
 --- /dev/null
-+++ b/chrome/browser/ui/tabs/persistent_tab_codec.cc
++++ b/chrome/browser/ui/tabs/pin_tab_codec.cc
 @@ -0,0 +1,246 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
 +
-+#include "chrome/browser/ui/tabs/persistent_tab_codec.h"
++#include "chrome/browser/ui/tabs/pin_tab_codec.h"
 +
 +#include <utility>
 +#include <vector>
@@ -2555,14 +2555,14 @@
 +#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 +#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
-+#include "chrome/browser/ui/helium/helium_arc_reserve_tabs.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
 +#include "chrome/browser/ui/tabs/tab_strip_model.h"
 +#include "chrome/common/pref_names.h"
 +#include "components/pref_registry/pref_registry_syncable.h"
 +#include "components/prefs/pref_service.h"
 +#include "components/prefs/scoped_user_pref_update.h"
 +#include "components/tabs/public/folder_tab_collection.h"
-+#include "components/tabs/public/persistent_tab_collection.h"
++#include "components/tabs/public/pin_tab_collection.h"
 +#include "components/tabs/public/tab_collection.h"
 +#include "components/tabs/public/tab_strip_collection.h"
 +#include "content/public/browser/navigation_controller.h"
@@ -2634,21 +2634,21 @@
 +          static_cast<const tabs::FolderTabCollection*>(child_collection),
 +          out);
 +    } else if (child_collection->type() == tabs::TabCollection::Type::SPLIT) {
-+      // Persist split members as ordinary persistent tabs.
++      // Persist split members as ordinary pins.
 +      EncodeCollectionChildren(child_collection, out);
 +    }
 +  }
 +}
 +
-+void EncodePersistentTree(BrowserWindowInterface* browser,
++void EncodePinTree(BrowserWindowInterface* browser,
 +                          base::ListValue& serialized) {
 +  TabStripModel* const model = browser->GetTabStripModel();
 +  auto* strip = static_cast<tabs::TabStripCollection*>(
 +      const_cast<tabs::TabCollection*>(model->Root()));
-+  if (!strip || !strip->persistent_collection()) {
++  if (!strip || !strip->pin_collection()) {
 +    return;
 +  }
-+  EncodeCollectionChildren(strip->persistent_collection(), serialized);
++  EncodeCollectionChildren(strip->pin_collection(), serialized);
 +}
 +
 +void DecodeTreeList(
@@ -2684,10 +2684,10 @@
 +  if (!url_string) {
 +    return;
 +  }
-+  StartupTab tab(GURL(*url_string), StartupTab::Type::kPersistent);
-+  tab.helium_persistent_shortcut = true;
++  StartupTab tab(GURL(*url_string), StartupTab::Type::kPin);
++  tab.helium_has_home = true;
 +  if (const std::string* title = value.FindString(kTitle)) {
-+    tab.helium_persistent_shortcut_title = base::UTF8ToUTF16(*title);
++    tab.helium_home_title = base::UTF8ToUTF16(*title);
 +  }
 +  tab.helium_folder_path = ancestors;
 +  results->push_back(std::move(tab));
@@ -2708,13 +2708,13 @@
 +}  // namespace
 +
 +// static
-+void PersistentTabCodec::RegisterProfilePrefs(
++void PinTabCodec::RegisterProfilePrefs(
 +    user_prefs::PrefRegistrySyncable* registry) {
-+  registry->RegisterListPref(prefs::kHeliumPersistentTabs);
++  registry->RegisterListPref(prefs::kHeliumPins);
 +}
 +
 +// static
-+void PersistentTabCodec::WritePersistentTabs(Profile* profile) {
++void PinTabCodec::WritePins(Profile* profile) {
 +  PrefService* prefs = profile->GetPrefs();
 +  if (!prefs || profile->IsOffTheRecord() || profile->IsGuestSession()) {
 +    return;
@@ -2725,15 +2725,15 @@
 +      [profile, &values](BrowserWindowInterface* browser) {
 +        if (browser->GetType() == BrowserWindowInterface::TYPE_NORMAL &&
 +            browser->GetProfile() == profile) {
-+          EncodePersistentTree(browser, values);
++          EncodePinTree(browser, values);
 +        }
 +        return true;
 +      });
-+  prefs->SetList(prefs::kHeliumPersistentTabs, std::move(values));
++  prefs->SetList(prefs::kHeliumPins, std::move(values));
 +}
 +
 +// static
-+void PersistentTabCodec::WritePersistentTabs(Profile* profile,
++void PinTabCodec::WritePins(Profile* profile,
 +                                             const StartupTabs& tabs) {
 +  PrefService* prefs = profile->GetPrefs();
 +  if (!prefs) {
@@ -2771,31 +2771,31 @@
 +      CHECK(target);
 +    }
 +    target->Append(
-+        EncodeTabNode(tab.url, tab.helium_persistent_shortcut_title));
++        EncodeTabNode(tab.url, tab.helium_home_title));
 +  }
 +
-+  prefs->SetList(prefs::kHeliumPersistentTabs, std::move(root));
++  prefs->SetList(prefs::kHeliumPins, std::move(root));
 +}
 +
 +// static
-+StartupTabs PersistentTabCodec::ReadPersistentTabs(Profile* profile) {
++StartupTabs PinTabCodec::ReadPins(Profile* profile) {
 +  PrefService* prefs = profile->GetPrefs();
 +  if (!prefs) {
 +    return {};
 +  }
 +  StartupTabs results;
-+  DecodeTreeList(prefs->GetList(prefs::kHeliumPersistentTabs), {}, &results);
++  DecodeTreeList(prefs->GetList(prefs::kHeliumPins), {}, &results);
 +  return results;
 +}
 --- /dev/null
-+++ b/chrome/browser/ui/tabs/persistent_tab_codec.h
++++ b/chrome/browser/ui/tabs/pin_tab_codec.h
 @@ -0,0 +1,34 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
 +
-+#ifndef CHROME_BROWSER_UI_TABS_PERSISTENT_TAB_CODEC_H_
-+#define CHROME_BROWSER_UI_TABS_PERSISTENT_TAB_CODEC_H_
++#ifndef CHROME_BROWSER_UI_TABS_PIN_TAB_CODEC_H_
++#define CHROME_BROWSER_UI_TABS_PIN_TAB_CODEC_H_
 +
 +#include "chrome/browser/ui/startup/startup_tab.h"
 +
@@ -2805,32 +2805,32 @@
 +class PrefRegistrySyncable;
 +}
 +
-+// Persists Helium Arc-style persistent tabs, nested folders, and home metadata
++// Persists Helium pins, nested folders, and home metadata
 +// per profile. Pref shape is a recursive list of tab/folder nodes.
-+class PersistentTabCodec {
++class PinTabCodec {
 + public:
-+  PersistentTabCodec(const PersistentTabCodec&) = delete;
-+  PersistentTabCodec& operator=(const PersistentTabCodec&) = delete;
++  PinTabCodec(const PinTabCodec&) = delete;
++  PinTabCodec& operator=(const PinTabCodec&) = delete;
 +
 +  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-+  static void WritePersistentTabs(Profile* profile);
-+  static void WritePersistentTabs(Profile* profile, const StartupTabs& tabs);
++  static void WritePins(Profile* profile);
++  static void WritePins(Profile* profile, const StartupTabs& tabs);
 +  // Depth-first flatten of the tree; folder ancestry is on each StartupTab.
-+  static StartupTabs ReadPersistentTabs(Profile* profile);
++  static StartupTabs ReadPins(Profile* profile);
 +
 + private:
-+  PersistentTabCodec();
-+  ~PersistentTabCodec();
++  PinTabCodec();
++  ~PinTabCodec();
 +};
 +
-+#endif  // CHROME_BROWSER_UI_TABS_PERSISTENT_TAB_CODEC_H_
++#endif  // CHROME_BROWSER_UI_TABS_PIN_TAB_CODEC_H_
 --- a/chrome/browser/ui/tabs/pinned_tab_service.cc
 +++ b/chrome/browser/ui/tabs/pinned_tab_service.cc
 @@ -12,6 +12,7 @@
  #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/tabs/pinned_tab_codec.h"
-+#include "chrome/browser/ui/tabs/persistent_tab_codec.h"
++#include "chrome/browser/ui/tabs/pin_tab_codec.h"
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  
  PinnedTabService::PinnedTabService(Profile* profile) : profile_(profile) {
@@ -2838,7 +2838,7 @@
  void PinnedTabService::WritePinnedTabsIfNecessary() {
    if (need_to_write_pinned_tabs_) {
      PinnedTabCodec::WritePinnedTabs(profile_);
-+    PersistentTabCodec::WritePersistentTabs(profile_);
++    PinTabCodec::WritePins(profile_);
    }
    need_to_write_pinned_tabs_ = false;
  }
@@ -2848,8 +2848,8 @@
      case StartupTab::Type::kPinned:
        type_description = "pinned";
        break;
-+    case StartupTab::Type::kPersistent:
-+      type_description = "persistent";
++    case StartupTab::Type::kPin:
++      type_description = "pin";
 +      break;
      case StartupTab::Type::kFromLastAndUrlsStartupPref:
        type_description = "from LAST_AND_URLS startup pref";
@@ -2860,7 +2860,7 @@
          split = static_cast<SplitTabCollection*>(ancestor)->GetSplitTabId();
          break;
        case TabCollection::Type::TABSTRIP:
-+      case TabCollection::Type::PERSISTENT:
++      case TabCollection::Type::PIN:
        case TabCollection::Type::UNPINNED:
 +      case TabCollection::Type::FOLDER:
          break;
@@ -2874,7 +2874,7 @@
      case tabs::TabCollection::Type::UNPINNED:
 +      to_position = root_->IndexOfFirstUnpinnedTab() + position.index();
 +      break;
-+    case tabs::TabCollection::Type::PERSISTENT:
++    case tabs::TabCollection::Type::PIN:
        to_position = root_->IndexOfFirstNonPinnedTab() + position.index();
        break;
      case tabs::TabCollection::Type::TABSTRIP:
@@ -2889,7 +2889,7 @@
      case tabs::TabCollection::Type::UNPINNED:
 +      index = root_->IndexOfFirstUnpinnedTab() + position.index();
 +      break;
-+    case tabs::TabCollection::Type::PERSISTENT:
++    case tabs::TabCollection::Type::PIN:
        index = root_->IndexOfFirstNonPinnedTab() + position.index();
        break;
  
@@ -2907,7 +2907,7 @@
        unpinned->id = NodeId::FromTabCollectionHandle(handle);
        return mojom::Data::NewUnpinnedTabs(std::move(unpinned));
      }
-+    case tabs::TabCollection::Type::PERSISTENT: {
++    case tabs::TabCollection::Type::PIN: {
 +      auto unpinned = mojom::UnpinnedTabs::New();
 +      unpinned->id = NodeId::FromTabCollectionHandle(handle);
 +      return mojom::Data::NewUnpinnedTabs(std::move(unpinned));
@@ -2926,8 +2926,8 @@
        return tabs_api::mojom::Data::NewUnpinnedTabs(
            std::move(mojo_unpinned_tabs));
      }
-+    case tabs::TabCollection::Type::PERSISTENT: {
-+      // Surface persistent tabs as unpinned-shaped nodes until a dedicated
++    case tabs::TabCollection::Type::PIN: {
++      // Surface pins as unpinned-shaped nodes until a dedicated
 +      // mojo type exists.
 +      auto mojo_unpinned_tabs = tabs_api::mojom::UnpinnedTabs::New();
 +      mojo_unpinned_tabs->id = node_id;
@@ -2948,7 +2948,7 @@
  #include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_model_impl/tree_builder/mojo_tree_builder.h"
  #include "components/browser_apis/tab_strip/types/tab_states.h"
  #include "components/tab_groups/tab_group_visual_data.h"
-+#include "components/tabs/public/persistent_tab_collection.h"
++#include "components/tabs/public/pin_tab_collection.h"
  #include "components/tabs/public/split_tab_collection.h"
  #include "components/tabs/public/tab_collection.h"
  #include "components/tabs/public/tab_group.h"
@@ -2958,7 +2958,7 @@
        to_position =
 +          tab_strip_model_->IndexOfFirstUnpinnedTab() + position.index();
 +      break;
-+    case tabs::TabCollection::Type::PERSISTENT:
++    case tabs::TabCollection::Type::PIN:
 +      to_position =
            tab_strip_model_->IndexOfFirstNonPinnedTab() + position.index();
        break;
@@ -2974,7 +2974,7 @@
        break;
      }
      case tabs::TabCollection::Type::PINNED:
-+    case tabs::TabCollection::Type::PERSISTENT:
++    case tabs::TabCollection::Type::PIN:
      case tabs::TabCollection::Type::UNPINNED:
 +    case tabs::TabCollection::Type::FOLDER:
      case tabs::TabCollection::Type::TABSTRIP:
@@ -3000,7 +3000,7 @@
 +    relative_index = absolute_index - first_non_pinned;
 +    parent_handle =
 +        static_cast<const tabs::TabStripCollection*>(tab_strip_model_->Root())
-+            ->persistent_collection()
++            ->pin_collection()
 +            ->GetHandle();
    } else if (tab_group_id.has_value()) {
      const TabGroup* tab_group =
@@ -3012,7 +3012,7 @@
    sources = [
      "dragged_tabs_container.h",
 +    "folder_tab_container_view.h",
-+    "persistent_tab_container_view.h",
++    "pin_tab_container_view.h",
      "pinned_tab_container_view.h",
      "root_tab_collection_node.h",
      "split_tab_view.h",
@@ -3021,7 +3021,7 @@
    sources = [
      "dragged_tabs_container.cc",
 +    "folder_tab_container_view.cc",
-+    "persistent_tab_container_view.cc",
++    "pin_tab_container_view.cc",
      "pinned_tab_container_view.cc",
      "root_tab_collection_node.cc",
      "split_tab_view.cc",
@@ -3210,7 +3210,7 @@
 +class LabelButton;
 +}  // namespace views
 +
-+// Helium Arc-style persistent folder: header + nested children. When collapsed,
++// Helium pin folder: header + nested children. When collapsed,
 +// non-active children are hidden while the active tab row stays visible.
 +class FolderTabContainerView : public views::View,
 +                               public views::LayoutDelegate {
@@ -3241,13 +3241,13 @@
 +
 +#endif  // CHROME_BROWSER_UI_VIEWS_TABS_COMMON_FOLDER_TAB_CONTAINER_VIEW_H_
 --- /dev/null
-+++ b/chrome/browser/ui/views/tabs/common/persistent_tab_container_view.cc
++++ b/chrome/browser/ui/views/tabs/common/pin_tab_container_view.cc
 @@ -0,0 +1,380 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
-+#include "chrome/browser/ui/views/tabs/common/persistent_tab_container_view.h"
++#include "chrome/browser/ui/views/tabs/common/pin_tab_container_view.h"
 +
 +#include "chrome/browser/ui/layout_constants.h"
 +#include "chrome/browser/ui/views/tabs/common/dragged_tabs_container.h"
@@ -3292,10 +3292,10 @@
 +static_assert(kMinHeaderHeightPctForGroupExit <
 +              kMinHeaderHeightPctForGroupEntry);
 +
-+class PersistentTabContainerViewTargeter : public views::ViewTargeterDelegate {
++class PinTabContainerViewTargeter : public views::ViewTargeterDelegate {
 + public:
-+  explicit PersistentTabContainerViewTargeter(views::View* view) : view_(view) {}
-+  ~PersistentTabContainerViewTargeter() override = default;
++  explicit PinTabContainerViewTargeter(views::View* view) : view_(view) {}
++  ~PinTabContainerViewTargeter() override = default;
 +
 +  bool DoesIntersectRect(const views::View* target,
 +                         const gfx::Rect& rect) const override {
@@ -3314,7 +3314,7 @@
 +
 +}  // namespace
 +
-+PersistentTabContainerView::PersistentTabContainerView(
++PinTabContainerView::PinTabContainerView(
 +    TabCollectionNode* collection_node)
 +    : DraggedTabsContainer(static_cast<views::View&>(*this),
 +                           collection_node,
@@ -3329,7 +3329,7 @@
 +              TabCollectionAnimatingLayoutManager::AnimationAxis::kVertical,
 +              /*animate_host_size=*/true))) {
 +  SetEventTargeter(std::make_unique<views::ViewTargeter>(
-+      std::make_unique<PersistentTabContainerViewTargeter>(this)));
++      std::make_unique<PinTabContainerViewTargeter>(this)));
 +
 +  collection_node->set_remove_child_from_node(base::BindRepeating(
 +      &TabCollectionAnimatingLayoutManager::AnimateAndDestroyChildView,
@@ -3339,13 +3339,13 @@
 +      base::Unretained(&layout_manager_.get())));
 +
 +  node_destroyed_subscription_ = collection_node_->RegisterWillDestroyCallback(
-+      base::BindOnce(&PersistentTabContainerView::ResetCollectionNode,
++      base::BindOnce(&PinTabContainerView::ResetCollectionNode,
 +                     base::Unretained(this)));
 +}
 +
-+PersistentTabContainerView::~PersistentTabContainerView() = default;
++PinTabContainerView::~PinTabContainerView() = default;
 +
-+views::ProposedLayout PersistentTabContainerView::CalculateProposedLayout(
++views::ProposedLayout PinTabContainerView::CalculateProposedLayout(
 +    const views::SizeBounds& size_bounds) const {
 +  views::ProposedLayout layouts;
 +  int width = 0;
@@ -3414,7 +3414,7 @@
 +  return layouts;
 +}
 +
-+gfx::Size PersistentTabContainerView::GetMinimumSize() const {
++gfx::Size PinTabContainerView::GetMinimumSize() const {
 +  if (!collection_node_) {
 +    return gfx::Size();
 +  }
@@ -3430,7 +3430,7 @@
 +}
 +
 +std::optional<BrowserRootView::DropIndex>
-+PersistentTabContainerView::GetLinkDropIndex(const gfx::Point& loc_in_container) {
++PinTabContainerView::GetLinkDropIndex(const gfx::Point& loc_in_container) {
 +  if (!collection_node_) {
 +    return std::nullopt;
 +  }
@@ -3488,14 +3488,14 @@
 +                                                  std::nullopt);
 +}
 +
-+bool PersistentTabContainerView::IsDragging() const {
++bool PinTabContainerView::IsDragging() const {
 +  if (!collection_node_ || !collection_node_->GetController()) {
 +    return false;
 +  }
 +  return GetDragHandler().IsDragging();
 +}
 +
-+bool PersistentTabContainerView::IsViewDragging(
++bool PinTabContainerView::IsViewDragging(
 +    const views::View& child_view) const {
 +  if (!collection_node_ || !collection_node_->GetController()) {
 +    return false;
@@ -3503,36 +3503,36 @@
 +  return GetDragHandler().IsViewDragging(child_view);
 +}
 +
-+bool PersistentTabContainerView::ShouldAnimateOpacityForAddAndRemove(
++bool PinTabContainerView::ShouldAnimateOpacityForAddAndRemove(
 +    const views::View& child_view) const {
 +  // Only animate opacity for tab views.
 +  return views::IsViewClass<TabView>(&child_view);
 +}
 +
-+bool PersistentTabContainerView::ShouldSnapToTarget(
++bool PinTabContainerView::ShouldSnapToTarget(
 +    const views::View& child_view) const {
 +  return views::IsViewClass<SplitTabView>(&child_view);
 +}
 +
-+void PersistentTabContainerView::ResetCollectionNode() {
++void PinTabContainerView::ResetCollectionNode() {
 +  collection_node_ = nullptr;
 +}
 +
-+views::ScrollView* PersistentTabContainerView::GetScrollViewForContainer() const {
++views::ScrollView* PinTabContainerView::GetScrollViewForContainer() const {
 +  return views::ScrollView::GetScrollViewForContents(
-+      const_cast<PersistentTabContainerView*>(this));
++      const_cast<PinTabContainerView*>(this));
 +}
 +
-+void PersistentTabContainerView::UpdateTargetLayoutForDrag(
++void PinTabContainerView::UpdateTargetLayoutForDrag(
 +    const std::vector<const views::View*>& views_to_snap) {
 +  layout_manager_->ResetViewsToTargetLayout(views_to_snap);
 +}
-+const views::ProposedLayout& PersistentTabContainerView::GetLayoutForDrag()
++const views::ProposedLayout& PinTabContainerView::GetLayoutForDrag()
 +    const {
 +  return layout_manager_->target_layout();
 +}
 +
-+DraggedTabsContainer& PersistentTabContainerView::GetTabDragTarget(
++DraggedTabsContainer& PinTabContainerView::GetTabDragTarget(
 +    const gfx::Point& point_in_screen) {
 +  if (GetDragHandler().IsDraggingGroups()) {
 +    // Don't consider other tab group views as a drag target if we're dragging
@@ -3584,7 +3584,7 @@
 +  return *this;
 +}
 +
-+bool PersistentTabContainerView::ShouldDragRemainInGroup(
++bool PinTabContainerView::ShouldDragRemainInGroup(
 +    const TabGroupView& group_view,
 +    const gfx::Rect& proposed_group_bounds,
 +    const gfx::Point& point_in_screen) const {
@@ -3609,7 +3609,7 @@
 +                           required_overlap_amount);
 +}
 +
-+const TabCollectionNode* PersistentTabContainerView::GetCollectionNodeFromView(
++const TabCollectionNode* PinTabContainerView::GetCollectionNodeFromView(
 +    const views::View& view) const {
 +  if (auto* tab_view = views::AsViewClass<TabView>(&view)) {
 +    return tab_view->collection_node();
@@ -3621,17 +3621,17 @@
 +  return nullptr;
 +}
 +
-+BEGIN_METADATA(PersistentTabContainerView)
++BEGIN_METADATA(PinTabContainerView)
 +END_METADATA
 --- /dev/null
-+++ b/chrome/browser/ui/views/tabs/common/persistent_tab_container_view.h
++++ b/chrome/browser/ui/views/tabs/common/pin_tab_container_view.h
 @@ -0,0 +1,79 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
-+#ifndef CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PERSISTENT_TAB_CONTAINER_VIEW_H_
-+#define CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PERSISTENT_TAB_CONTAINER_VIEW_H_
++#ifndef CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PIN_TAB_CONTAINER_VIEW_H_
++#define CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PIN_TAB_CONTAINER_VIEW_H_
 +
 +#include "base/callback_list.h"
 +#include "base/memory/raw_ptr.h"
@@ -3645,20 +3645,20 @@
 +class TabCollectionNode;
 +class TabGroupView;
 +
-+// The view class that represents the persistent tab region for the
++// The view class that represents the pins region for the
 +// tab strip. Full-width rows like unpinned, between pinned and ordinary tabs.
-+class PersistentTabContainerView
++class PinTabContainerView
 +    : public views::View,
 +      public views::LayoutDelegate,
 +      public DraggedTabsContainer,
 +      public TabCollectionAnimatingLayoutManager::Delegate {
-+  METADATA_HEADER(PersistentTabContainerView, views::View)
++  METADATA_HEADER(PinTabContainerView, views::View)
 +
 + public:
-+  explicit PersistentTabContainerView(TabCollectionNode* collection_node);
-+  PersistentTabContainerView(const PersistentTabContainerView&) = delete;
-+  PersistentTabContainerView& operator=(const PersistentTabContainerView&) = delete;
-+  ~PersistentTabContainerView() override;
++  explicit PinTabContainerView(TabCollectionNode* collection_node);
++  PinTabContainerView(const PinTabContainerView&) = delete;
++  PinTabContainerView& operator=(const PinTabContainerView&) = delete;
++  ~PinTabContainerView() override;
 +
 +  // LayoutDelegate:
 +  views::ProposedLayout CalculateProposedLayout(
@@ -3704,7 +3704,7 @@
 +  base::CallbackListSubscription node_destroyed_subscription_;
 +};
 +
-+#endif  // CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PERSISTENT_TAB_CONTAINER_VIEW_H_
++#endif  // CHROME_BROWSER_UI_VIEWS_TABS_COMMON_PIN_TAB_CONTAINER_VIEW_H_
 --- a/chrome/browser/ui/views/tabs/common/tab_collection_node.cc
 +++ b/chrome/browser/ui/views/tabs/common/tab_collection_node.cc
 @@ -8,7 +8,9 @@
@@ -3713,7 +3713,7 @@
  #include "base/notreached.h"
 +#include "chrome/browser/ui/views/tabs/common/folder_tab_container_view.h"
  #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
-+#include "chrome/browser/ui/views/tabs/common/persistent_tab_container_view.h"
++#include "chrome/browser/ui/views/tabs/common/pin_tab_container_view.h"
  #include "chrome/browser/ui/views/tabs/common/split_tab_view.h"
  #include "chrome/browser/ui/views/tabs/common/tab_group_view.h"
  #include "chrome/browser/ui/views/tabs/common/tab_strip_view.h"
@@ -3721,8 +3721,8 @@
          return TabCollectionNode::Type::TABSTRIP;
        case tabs::TabCollection::Type::PINNED:
          return TabCollectionNode::Type::PINNED;
-+      case tabs::TabCollection::Type::PERSISTENT:
-+        return TabCollectionNode::Type::PERSISTENT;
++      case tabs::TabCollection::Type::PIN:
++        return TabCollectionNode::Type::PIN;
        case tabs::TabCollection::Type::UNPINNED:
          return TabCollectionNode::Type::UNPINNED;
        case tabs::TabCollection::Type::GROUP:
@@ -3738,8 +3738,8 @@
        return std::make_unique<TabStripView>(node_for_view);
      case Type::PINNED:
        return std::make_unique<PinnedTabContainerView>(node_for_view);
-+    case Type::PERSISTENT:
-+      return std::make_unique<PersistentTabContainerView>(node_for_view);
++    case Type::PIN:
++      return std::make_unique<PinTabContainerView>(node_for_view);
      case Type::UNPINNED:
        return std::make_unique<UnpinnedTabContainerView>(node_for_view);
      case Type::SPLIT:
@@ -3761,7 +3761,7 @@
 +  enum class Type {
 +    TABSTRIP,
 +    PINNED,
-+    PERSISTENT,
++    PIN,
 +    UNPINNED,
 +    GROUP,
 +    SPLIT,
@@ -3778,7 +3778,7 @@
      case TabCollectionNode::Type::PINNED:
        return gfx::Range(0, tab_strip_model.IndexOfFirstNonPinnedTab());
 -    case TabCollectionNode::Type::UNPINNED:
-+    case TabCollectionNode::Type::PERSISTENT:
++    case TabCollectionNode::Type::PIN:
        return gfx::Range(tab_strip_model.IndexOfFirstNonPinnedTab(),
 +                        tab_strip_model.IndexOfFirstUnpinnedTab());
 +    case TabCollectionNode::Type::UNPINNED:
@@ -3797,7 +3797,7 @@
        return GetDropIndexForSplit(node, position_hint);
      case TabCollectionNode::Type::PINNED:
        return GetDropIndexForPinned();
-+    case TabCollectionNode::Type::PERSISTENT:
++    case TabCollectionNode::Type::PIN:
      case TabCollectionNode::Type::UNPINNED:
        return GetDropIndexForUnpinned();
 +    case TabCollectionNode::Type::FOLDER:
@@ -3811,7 +3811,7 @@
  #include "chrome/browser/ui/tabs/tab_strip_model.h"
  #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
  #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
-+#include "chrome/browser/ui/views/tabs/common/persistent_tab_container_view.h"
++#include "chrome/browser/ui/views/tabs/common/pin_tab_container_view.h"
  #include "chrome/browser/ui/views/tabs/common/tab_collection_node.h"
  #include "chrome/browser/ui/views/tabs/common/tab_group_view.h"
  #include "chrome/browser/ui/views/tabs/common/tab_strip_collection_controller.h"
@@ -3821,10 +3821,10 @@
  
 -  auto tabs_separator = std::make_unique<views::Separator>();
 -  tabs_separator_ = AddChildView(std::move(tabs_separator));
-+  persistent_tabs_scroll_view_ = AddChildView(
++  pins_scroll_view_ = AddChildView(
 +      std::make_unique<views::ScrollView>(
 +          views::ScrollView::ScrollWithLayers::kEnabled));
-+  SetScrollViewProperties(persistent_tabs_scroll_view_);
++  SetScrollViewProperties(pins_scroll_view_);
 +
 +  tabs_separator_ = AddChildView(std::make_unique<views::Separator>());
 +  tabs_separator_->SetOrientation(views::Separator::Orientation::kHorizontal);
@@ -3848,9 +3848,9 @@
        pinned_tabs_scroll_view_
            ->GetPreferredSize(pinned_tab_container_size_bounds)
            .height();
-+  const int persistent_preferred_height =
-+      persistent_tabs_scroll_view_
-+          ? persistent_tabs_scroll_view_->GetPreferredSize(size_bounds).height()
++  const int pins_preferred_height =
++      pins_scroll_view_
++          ? pins_scroll_view_->GetPreferredSize(size_bounds).height()
 +          : 0;
    const int unpinned_preferred_height =
        unpinned_tabs_scroll_view_->GetPreferredSize(size_bounds).height();
@@ -3859,7 +3859,7 @@
 -                                     unpinned_preferred_height != 0 &&
 -                                     is_collapsed_;
 +  const bool show_separator =
-+      persistent_preferred_height > 0 && unpinned_preferred_height > 0;
++      pins_preferred_height > 0 && unpinned_preferred_height > 0;
  
 -  // If the height is bounded, calculate the available space for laying out the
 -  // pinned and unpinned containers.
@@ -3872,7 +3872,7 @@
 +    if (pinned_preferred_height != 0) {
 +      ++sections_with_content;
 +    }
-+    if (persistent_preferred_height != 0) {
++    if (pins_preferred_height != 0) {
 +      ++sections_with_content;
 +    }
 +    if (unpinned_preferred_height != 0) {
@@ -3900,7 +3900,7 @@
 -    // sure the height is at least the minimum.
 +  if (size_bounds.height().is_bounded() && pinned_tabs_container_view_) {
 +    const int other_preferred =
-+        persistent_preferred_height + unpinned_preferred_height;
++        pins_preferred_height + unpinned_preferred_height;
      pinned_container_height = std::max(
          std::min(pinned_preferred_height,
 -                 std::max(remaining_height / 2,
@@ -3919,7 +3919,7 @@
      y += pinned_container_bounds.height();
 -    // Add padding only if there are pinned and unpinned tabs.
 -    if (unpinned_preferred_height != 0) {
-+    if (persistent_preferred_height != 0 || unpinned_preferred_height != 0) {
++    if (pins_preferred_height != 0 || unpinned_preferred_height != 0) {
        y += region_vertical_padding;
      }
    }
@@ -3935,29 +3935,29 @@
 -    layouts.child_layouts.emplace_back(tabs_separator_.get(), true,
 -                                       tabs_separator_bounds);
 +  // Persistent
-+  int persistent_container_height = persistent_preferred_height;
-+  if (size_bounds.height().is_bounded() && persistent_tabs_container_view_) {
-+    persistent_container_height = std::max(
-+        std::min(persistent_preferred_height,
++  int pins_container_height = pins_preferred_height;
++  if (size_bounds.height().is_bounded() && pins_container_view_) {
++    pins_container_height = std::max(
++        std::min(pins_preferred_height,
 +                 std::max(remaining_height / 2,
 +                          remaining_height - unpinned_preferred_height)),
-+        persistent_tabs_container_view_->GetMinimumSize().height());
-+    remaining_height -= persistent_container_height;
++        pins_container_view_->GetMinimumSize().height());
++    remaining_height -= pins_container_height;
 +  }
-+  gfx::Rect persistent_container_bounds(0, y, size_bounds.width().value(),
-+                                        persistent_container_height);
-+  if (persistent_tabs_scroll_view_) {
++  gfx::Rect pins_container_bounds(0, y, size_bounds.width().value(),
++                                        pins_container_height);
++  if (pins_scroll_view_) {
 +    layouts.child_layouts.emplace_back(
-+        persistent_tabs_scroll_view_.get(),
-+        persistent_tabs_scroll_view_->GetVisible() &&
-+            persistent_container_height > 0,
-+        persistent_container_bounds);
++        pins_scroll_view_.get(),
++        pins_scroll_view_->GetVisible() &&
++            pins_container_height > 0,
++        pins_container_bounds);
 +  }
-+  if (persistent_container_bounds.height()) {
-+    y += persistent_container_bounds.height();
++  if (pins_container_bounds.height()) {
++    y += pins_container_bounds.height();
 +  }
 +
-+  // Divider between persistent and ordinary unpinned tabs.
++  // Divider between pins and ordinary unpinned tabs.
 +  if (tabs_separator_) {
 +    if (show_separator) {
 +      y += kSeparatorVerticalPadding;
@@ -3978,7 +3978,7 @@
 -  } else {
 -    layouts.child_layouts.emplace_back(tabs_separator_.get(), false,
 -                                       gfx::Rect());
-+  if (persistent_container_bounds.height() && unpinned_preferred_height != 0 &&
++  if (pins_container_bounds.height() && unpinned_preferred_height != 0 &&
 +      !show_separator) {
 +    y += region_vertical_padding;
    }
@@ -3999,7 +3999,7 @@
          break;
        case TabCollectionNode::Type::TABSTRIP:
        case TabCollectionNode::Type::PINNED:
-+      case TabCollectionNode::Type::PERSISTENT:
++      case TabCollectionNode::Type::PIN:
        case TabCollectionNode::Type::UNPINNED:
 +      case TabCollectionNode::Type::FOLDER:
          break;
@@ -4020,9 +4020,9 @@
 +  if (pinned_tabs_container_view_ &&
 +      pinned_tabs_container_view_->Contains(view)) {
 +    target_scroll_view = pinned_tabs_scroll_view_;
-+  } else if (persistent_tabs_container_view_ &&
-+             persistent_tabs_container_view_->Contains(view)) {
-+    target_scroll_view = persistent_tabs_scroll_view_;
++  } else if (pins_container_view_ &&
++             pins_container_view_->Contains(view)) {
++    target_scroll_view = pins_scroll_view_;
 +  } else if (unpinned_tabs_container_view_ &&
 +             unpinned_tabs_container_view_->Contains(view)) {
 +    target_scroll_view = unpinned_tabs_scroll_view_;
@@ -4037,8 +4037,8 @@
    return pinned_tabs_container_view_;
  }
  
-+PersistentTabContainerView* TabStripView::GetPersistentTabsContainer() {
-+  return persistent_tabs_container_view_;
++PinTabContainerView* TabStripView::GetPinsContainer() {
++  return pins_container_view_;
 +}
 +
  UnpinnedTabContainerView* TabStripView::GetUnpinnedTabsContainer() {
@@ -4049,7 +4049,7 @@
  void TabStripView::SetIsAnimatingSize(bool is_animating) {
    for (views::ScrollView* scroll_view :
 -       {pinned_tabs_scroll_view_, unpinned_tabs_scroll_view_}) {
-+       {pinned_tabs_scroll_view_, persistent_tabs_scroll_view_,
++       {pinned_tabs_scroll_view_, pins_scroll_view_,
 +        unpinned_tabs_scroll_view_}) {
      if (scroll_view) {
        static_cast<VerticalTabStripScrollBar*>(
@@ -4058,9 +4058,9 @@
  views::View* TabStripView::AddScrollViewContents(
      std::unique_ptr<views::View> view) {
    if (auto* container =
-+          views::AsViewClass<PersistentTabContainerView>(view.get())) {
-+    persistent_tabs_container_view_ = container;
-+    return persistent_tabs_scroll_view_->SetContents(std::move(view));
++          views::AsViewClass<PinTabContainerView>(view.get())) {
++    pins_container_view_ = container;
++    return pins_scroll_view_->SetContents(std::move(view));
 +  }
 +  if (auto* container =
            views::AsViewClass<UnpinnedTabContainerView>(view.get())) {
@@ -4076,9 +4076,9 @@
  }
  
  void TabStripView::RemoveScrollViewContents(views::View* view) {
-+  if (views::IsViewClass<PersistentTabContainerView>(view)) {
-+    persistent_tabs_container_view_ = nullptr;
-+    persistent_tabs_scroll_view_->SetContents(nullptr);
++  if (views::IsViewClass<PinTabContainerView>(view)) {
++    pins_container_view_ = nullptr;
++    pins_scroll_view_->SetContents(nullptr);
 +    return;
 +  }
    if (views::IsViewClass<UnpinnedTabContainerView>(view)) {
@@ -4111,7 +4111,7 @@
  
  class TabCollectionNode;
  class PinnedTabContainerView;
-+class PersistentTabContainerView;
++class PinTabContainerView;
  class UnpinnedTabContainerView;
  
  namespace views {
@@ -4122,7 +4122,7 @@
 -// The view class for tab strip which holds the pinned and unpinned
 -// regions and associates them to their scroll views. It also is responsible for
 -// scrolling to the active tab view when the active tab changes.
-+// The view class for tab strip which holds the pinned, persistent, and
++// The view class for tab strip which holds the favorites, pins, and
 +// unpinned regions and associates them to their scroll views. It also is
 +// responsible for scrolling to the active tab view when the active tab changes.
  class TabStripView final : public views::View,
@@ -4132,14 +4132,14 @@
    views::Separator* GetTabsSeparator() { return tabs_separator_; }
  
    PinnedTabContainerView* GetPinnedTabsContainer();
-+  PersistentTabContainerView* GetPersistentTabsContainer();
++  PinTabContainerView* GetPinsContainer();
    UnpinnedTabContainerView* GetUnpinnedTabsContainer();
  
    views::ScrollView* pinned_tabs_scroll_view() {
      return pinned_tabs_scroll_view_;
    }
-+  views::ScrollView* persistent_tabs_scroll_view() {
-+    return persistent_tabs_scroll_view_;
++  views::ScrollView* pins_scroll_view() {
++    return pins_scroll_view_;
 +  }
    views::ScrollView* unpinned_tabs_scroll_view() {
      return unpinned_tabs_scroll_view_;
@@ -4148,8 +4148,8 @@
    raw_ptr<TabCollectionNode> collection_node_ = nullptr;
    raw_ptr<views::ScrollView> pinned_tabs_scroll_view_ = nullptr;
    raw_ptr<PinnedTabContainerView> pinned_tabs_container_view_ = nullptr;
-+  raw_ptr<views::ScrollView> persistent_tabs_scroll_view_ = nullptr;
-+  raw_ptr<PersistentTabContainerView> persistent_tabs_container_view_ = nullptr;
++  raw_ptr<views::ScrollView> pins_scroll_view_ = nullptr;
++  raw_ptr<PinTabContainerView> pins_container_view_ = nullptr;
    raw_ptr<views::Separator> tabs_separator_ = nullptr;
    raw_ptr<views::ScrollView> unpinned_tabs_scroll_view_ = nullptr;
    raw_ptr<UnpinnedTabContainerView> unpinned_tabs_container_view_ = nullptr;
@@ -4179,7 +4179,7 @@
        unpinned_tabs->id = std::move(node_id);
        return mojom::Data::NewUnpinnedTabCollection(std::move(unpinned_tabs));
      }
-+    case tabs::TabCollection::Type::PERSISTENT: {
++    case tabs::TabCollection::Type::PIN: {
 +      auto unpinned_tabs = mojom::UnpinnedCollection::New();
 +      unpinned_tabs->id = std::move(node_id);
 +      return mojom::Data::NewUnpinnedTabCollection(std::move(unpinned_tabs));
@@ -4336,7 +4336,7 @@
  
  #if !BUILDFLAG(IS_ANDROID)
  inline constexpr char kPinnedTabs[] = "pinned_tabs";
-+inline constexpr char kHeliumPersistentTabs[] = "helium.persistent_tabs";
++inline constexpr char kHeliumPins[] = "helium.pins";
  #endif  // !BUILDFLAG(IS_ANDROID)
  
  // Preference to disable 3D APIs (WebGL).
@@ -4388,7 +4388,7 @@
    sources = [
      "public/direct_child_walker.h",
 +    "public/folder_tab_collection.h",
-+    "public/persistent_tab_collection.h",
++    "public/pin_tab_collection.h",
      "public/pinned_tab_collection.h",
      "public/split_tab_collection.h",
      "public/split_tab_data.h",
@@ -4397,7 +4397,7 @@
  source_set("impl") {
    sources = [
 +    "impl/folder_tab_collection.cc",
-+    "impl/persistent_tab_collection.cc",
++    "impl/pin_tab_collection.cc",
      "impl/pinned_tab_collection.cc",
      "impl/split_tab_collection.cc",
      "impl/split_tab_data.cc",
@@ -4424,22 +4424,22 @@
 +
 +}  // namespace tabs
 --- /dev/null
-+++ b/components/tabs/impl/persistent_tab_collection.cc
++++ b/components/tabs/impl/pin_tab_collection.cc
 @@ -0,0 +1,16 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
 +
-+#include "components/tabs/public/persistent_tab_collection.h"
++#include "components/tabs/public/pin_tab_collection.h"
 +
 +namespace tabs {
 +
-+PersistentTabCollection::PersistentTabCollection()
-+    : TabCollection(TabCollection::Type::PERSISTENT,
++PinTabCollection::PinTabCollection()
++    : TabCollection(TabCollection::Type::PIN,
 +                    {TabCollection::Type::FOLDER, TabCollection::Type::SPLIT},
 +                    /*supports_tabs=*/true) {}
 +
-+PersistentTabCollection::~PersistentTabCollection() = default;
++PinTabCollection::~PinTabCollection() = default;
 +
 +}  // namespace tabs
 --- a/components/tabs/impl/tab_strip_collection.cc
@@ -4456,7 +4456,7 @@
  #include "components/split_tabs/split_tab_id.h"
  #include "components/split_tabs/split_tab_visual_data.h"
 +#include "components/tabs/public/folder_tab_collection.h"
-+#include "components/tabs/public/persistent_tab_collection.h"
++#include "components/tabs/public/pin_tab_collection.h"
  #include "components/tabs/public/pinned_tab_collection.h"
  #include "components/tabs/public/split_tab_collection.h"
  #include "components/tabs/public/tab_collection.h"
@@ -4465,14 +4465,14 @@
      : TabCollection(
            TabCollection::Type::TABSTRIP,
 -          {TabCollection::Type::PINNED, TabCollection::Type::UNPINNED},
-+          {TabCollection::Type::PINNED, TabCollection::Type::PERSISTENT,
++          {TabCollection::Type::PINNED, TabCollection::Type::PIN,
 +           TabCollection::Type::UNPINNED},
            /*supports_tabs=*/false,
            send_notifications_immediately) {
    pinned_collection_ =
        AddCollection(std::make_unique<PinnedTabCollection>(), 0);
-+  persistent_collection_ =
-+      AddCollection(std::make_unique<PersistentTabCollection>(), 1);
++  pin_collection_ =
++      AddCollection(std::make_unique<PinTabCollection>(), 1);
    unpinned_collection_ =
 -      AddCollection(std::make_unique<UnpinnedTabCollection>(), 1);
 +      AddCollection(std::make_unique<UnpinnedTabCollection>(), 2);
@@ -4485,16 +4485,16 @@
  
 +size_t TabStripCollection::IndexOfFirstUnpinnedTab() const {
 +  return pinned_collection_->TabCountRecursive() +
-+         persistent_collection_->TabCountRecursive();
++         pin_collection_->TabCountRecursive();
 +}
 +
-+bool TabStripCollection::IsPersistentTab(const TabInterface* tab) const {
++bool TabStripCollection::IsPinTab(const TabInterface* tab) const {
 +  if (!tab) {
 +    return false;
 +  }
 +  const TabCollection* ancestor = tab->GetParentCollection();
 +  while (ancestor) {
-+    if (ancestor == persistent_collection_) {
++    if (ancestor == pin_collection_) {
 +      return true;
 +    }
 +    if (ancestor == pinned_collection_ || ancestor == unpinned_collection_ ||
@@ -4506,35 +4506,35 @@
 +  return false;
 +}
 +
-+size_t TabStripCollection::MoveTabToPersistent(TabInterface* tab,
++size_t TabStripCollection::MoveTabToPin(TabInterface* tab,
 +                                               size_t direct_index) {
 +  CHECK(tab);
 +  const size_t dst_direct =
-+      std::min(direct_index, persistent_collection_->ChildCount());
-+  TabCollection::Position position{persistent_collection_->GetHandle(),
++      std::min(direct_index, pin_collection_->ChildCount());
++  TabCollection::Position position{pin_collection_->GetHandle(),
 +                                   dst_direct};
 +  MoveTabImpl(tab, position);
 +  return GetIndexOfTabRecursive(tab).value();
 +}
 +
-+size_t TabStripCollection::MoveTabFromPersistent(TabInterface* tab) {
++size_t TabStripCollection::MoveTabFromPin(TabInterface* tab) {
 +  CHECK(tab);
-+  CHECK(IsPersistentTab(tab));
++  CHECK(IsPinTab(tab));
 +  TabCollection::Position position{unpinned_collection_->GetHandle(), 0};
 +  MoveTabImpl(tab, position);
 +  return GetIndexOfTabRecursive(tab).value();
 +}
 +
-+FolderTabCollection* TabStripCollection::CreatePersistentFolder(
++FolderTabCollection* TabStripCollection::CreatePinFolder(
 +    std::u16string title,
 +    size_t direct_index) {
 +  const size_t dst_direct =
-+      std::min(direct_index, persistent_collection_->ChildCount());
++      std::min(direct_index, pin_collection_->ChildCount());
 +  auto folder = std::make_unique<FolderTabCollection>(std::move(title));
 +  FolderTabCollection* folder_ptr = folder.get();
 +  AddTabCollectionImpl(
 +      std::move(folder),
-+      TabCollection::Position{persistent_collection_->GetHandle(), dst_direct});
++      TabCollection::Position{pin_collection_->GetHandle(), dst_direct});
 +  return folder_ptr;
 +}
 +
@@ -4543,7 +4543,7 @@
 +    const std::u16string& title,
 +    bool collapsed) {
 +  CHECK(parent);
-+  CHECK(parent == persistent_collection_ ||
++  CHECK(parent == pin_collection_ ||
 +        parent->type() == TabCollection::Type::FOLDER);
 +
 +  for (const auto& child : parent->GetChildren()) {
@@ -4576,7 +4576,7 @@
 +                                               size_t direct_index) {
 +  CHECK(tab);
 +  CHECK(parent);
-+  CHECK(parent == persistent_collection_ ||
++  CHECK(parent == pin_collection_ ||
 +        parent->type() == TabCollection::Type::FOLDER);
 +  const size_t dst_direct = direct_index == SIZE_MAX
 +                                ? parent->ChildCount()
@@ -4593,7 +4593,7 @@
      // collection is removed.
      if (src_parent_collection != unpinned_collection_ &&
          src_parent_collection != pinned_collection_ &&
-+        src_parent_collection != persistent_collection_ &&
++        src_parent_collection != pin_collection_ &&
          src_parent_collection->TabCountRecursive() == 0) {
        RemoveTabCollectionImpl(src_parent_collection);
      }
@@ -4604,7 +4604,7 @@
 -  // `pinned_collection_` or `unpinned_collection_` return it directly as it
 -  // needs to be removed directly. Otherwise potentially return the biggest
 -  // subcollection that contains the tab to be removed.
-+  // `pinned_collection_`, `persistent_collection_`, or `unpinned_collection_`
++  // `pinned_collection_`, `pin_collection_`, or `unpinned_collection_`
 +  // return it directly as it needs to be removed directly. Otherwise
 +  // potentially return the biggest subcollection that contains the tab to be
 +  // removed.
@@ -4613,7 +4613,7 @@
      TabInterface* tab = GetTabAtIndexRecursive(tab_indices[array_index]);
      TabCollection* collection = tab->GetParentCollection(GetPassKey());
      if (collection == pinned_collection_ ||
-+        collection == persistent_collection_ ||
++        collection == pin_collection_ ||
          collection == unpinned_collection_) {
        TabInterface* move_data =
            GetTabAtIndexRecursive(tab_indices[array_index]);
@@ -4621,7 +4621,7 @@
        // `candidate_subtree_collection` is the next potential subcollection to
        // remove.
        while ((candidate_subtree_collection != pinned_collection_ &&
-+              candidate_subtree_collection != persistent_collection_ &&
++              candidate_subtree_collection != pin_collection_ &&
                candidate_subtree_collection != unpinned_collection_) &&
               selected_collections.contains(candidate_subtree_collection)) {
          subtree_to_remove = candidate_subtree_collection;
@@ -4629,7 +4629,7 @@
    // If it is the only tab in the group remove the collection.
    if (parent_collection != unpinned_collection_ &&
        parent_collection != pinned_collection_ &&
-+      parent_collection != persistent_collection_ &&
++      parent_collection != pin_collection_ &&
        parent_collection->TabCountRecursive() == 1) {
      RemoveTabCollectionImpl(parent_collection);
      return parent_collection->MaybeRemoveTab(tab_to_be_removed);
@@ -4638,7 +4638,7 @@
      insert_collection = group_collection;
    } else {
 -    size_t offset = pinned_collection_->TabCountRecursive();
-+    // Ordinary unpinned tabs live after pinned + persistent. Chromium call
++    // Ordinary unpinned tabs live after favorites + pins. Chromium call
 +    // sites still pass IndexOfFirstNonPinnedTab() as the unpinned start;
 +    // clamp so inserts never land inside the persistent section.
 +    size_t offset = IndexOfFirstUnpinnedTab();
@@ -4664,7 +4664,7 @@
 +
 +namespace tabs {
 +
-+// Nested folder under a PersistentTabCollection (or another folder). Not a
++// Nested folder under a PinTabCollection (or another folder). Not a
 +// Chromium tab group — folders exist only in the persistent section.
 +class FolderTabCollection : public TabCollection {
 + public:
@@ -4688,33 +4688,33 @@
 +
 +#endif  // COMPONENTS_TABS_PUBLIC_FOLDER_TAB_COLLECTION_H_
 --- /dev/null
-+++ b/components/tabs/public/persistent_tab_collection.h
++++ b/components/tabs/public/pin_tab_collection.h
 @@ -0,0 +1,25 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
 +
-+#ifndef COMPONENTS_TABS_PUBLIC_PERSISTENT_TAB_COLLECTION_H_
-+#define COMPONENTS_TABS_PUBLIC_PERSISTENT_TAB_COLLECTION_H_
++#ifndef COMPONENTS_TABS_PUBLIC_PIN_TAB_COLLECTION_H_
++#define COMPONENTS_TABS_PUBLIC_PIN_TAB_COLLECTION_H_
 +
 +#include "components/tabs/public/tab_collection.h"
 +
 +namespace tabs {
 +
-+// Container for Arc-style persistent tabs. Lives between PINNED and UNPINNED
++// Container for Helium pins. Lives between PINNED (favorites) and UNPINNED
 +// in TabStripCollection. May contain tabs, nested FOLDER collections, and
 +// splits — but not Chromium tab groups.
-+class PersistentTabCollection : public TabCollection {
++class PinTabCollection : public TabCollection {
 + public:
-+  PersistentTabCollection();
-+  ~PersistentTabCollection() override;
-+  PersistentTabCollection(const PersistentTabCollection&) = delete;
-+  PersistentTabCollection& operator=(const PersistentTabCollection&) = delete;
++  PinTabCollection();
++  ~PinTabCollection() override;
++  PinTabCollection(const PinTabCollection&) = delete;
++  PinTabCollection& operator=(const PinTabCollection&) = delete;
 +};
 +
 +}  // namespace tabs
 +
-+#endif  // COMPONENTS_TABS_PUBLIC_PERSISTENT_TAB_COLLECTION_H_
++#endif  // COMPONENTS_TABS_PUBLIC_PIN_TAB_COLLECTION_H_
 --- a/components/tabs/public/tab_collection.h
 +++ b/components/tabs/public/tab_collection.h
 @@ -118,24 +118,28 @@ class TabCollection : public SupportsHan
@@ -4728,17 +4728,17 @@
 -  // - SPLIT:     A container for split tabs.
 +  // - TABSTRIP:    The main container for tabs in a browser window.
 +  // - PINNED:      A container for pinned tabs.
-+  // - PERSISTENT:  Helium Arc-style persistent tabs (between pinned/unpinned).
++  // - PIN:  Helium pins (between pinned/unpinned).
 +  // - UNPINNED:    A container for unpinned tabs.
 +  // - GROUP:       A container to grouped tabs.
 +  // - SPLIT:       A container for split tabs.
-+  // - FOLDER:      Helium nested folder under PERSISTENT (not a tab group).
++  // - FOLDER:      Helium nested folder under PIN (not a tab group).
    // LINT.IfChange(TYPE)
    enum class Type {
      MIN,
      TABSTRIP = MIN,
      PINNED,
-+    PERSISTENT,
++    PIN,
      UNPINNED,
      GROUP,
      SPLIT,
@@ -4767,7 +4767,7 @@
  
  class TabInterface;
  class UnpinnedTabCollection;
-+class PersistentTabCollection;
++class PinTabCollection;
  class PinnedTabCollection;
  class TabGroupTabCollection;
 +class FolderTabCollection;
@@ -4776,7 +4776,7 @@
  // TabStripCollection is the storage representation of a tabstrip
 -// in a browser. This contains a pinned collection and an unpinned
 -// collection which then contain different tabs and group.
-+// in a browser. Children are PINNED → PERSISTENT → UNPINNED.
++// in a browser. Children are PINNED → PIN → UNPINNED.
  class TabStripCollection : public TabCollection {
   public:
    explicit TabStripCollection(bool send_notifications_immediately = true);
@@ -4784,25 +4784,25 @@
    TabStripCollection& operator=(const TabStripCollection&) = delete;
  
    PinnedTabCollection* pinned_collection() { return pinned_collection_; }
-+  PersistentTabCollection* persistent_collection() {
-+    return persistent_collection_;
++  PinTabCollection* pin_collection() {
++    return pin_collection_;
 +  }
    UnpinnedTabCollection* unpinned_collection() { return unpinned_collection_; }
  
-+  // First recursive index after the pinned section (may be persistent).
++  // First recursive index after the pinned section (may be pins).
    size_t IndexOfFirstNonPinnedTab() const;
 +  // First recursive index of the ordinary unpinned section.
 +  size_t IndexOfFirstUnpinnedTab() const;
 +
-+  bool IsPersistentTab(const TabInterface* tab) const;
++  bool IsPinTab(const TabInterface* tab) const;
 +
 +  // Moves `tab` into the persistent section at `direct_index` within that
 +  // section (or its folder). Returns the new recursive index.
-+  size_t MoveTabToPersistent(TabInterface* tab, size_t direct_index = 0);
-+  // Moves `tab` out of persistent into unpinned at the front of that section.
-+  size_t MoveTabFromPersistent(TabInterface* tab);
++  size_t MoveTabToPin(TabInterface* tab, size_t direct_index = 0);
++  // Moves `tab` out of pins into unpinned at the front of that section.
++  size_t MoveTabFromPin(TabInterface* tab);
 +
-+  FolderTabCollection* CreatePersistentFolder(std::u16string title,
++  FolderTabCollection* CreatePinFolder(std::u16string title,
 +                                              size_t direct_index = 0);
 +
 +  // Finds a direct child folder titled `title` under `parent`, or creates one.
@@ -4811,7 +4811,7 @@
 +                                          const std::u16string& title,
 +                                          bool collapsed = false);
 +
-+  // Moves `tab` under `parent` (persistent root or folder). Appends by default.
++  // Moves `tab` under `parent` (pins root or folder). Appends by default.
 +  size_t MoveTabToCollection(TabInterface* tab,
 +                             TabCollection* parent,
 +                             size_t direct_index = SIZE_MAX);
@@ -4822,9 +4822,46 @@
    // destruction.
    raw_ptr<PinnedTabCollection> pinned_collection_ = nullptr;
  
-+  // Helium Arc-style persistent tabs between pinned and unpinned.
-+  raw_ptr<PersistentTabCollection> persistent_collection_ = nullptr;
++  // Helium pins between favorites and normal tabs.
++  raw_ptr<PinTabCollection> pin_collection_ = nullptr;
 +
    // All of the unpined tabs and groups for this tabstrip is present in this
    // collection. This should be below `impl_` to avoid being a dangling pointer
    // during destruction.
+
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -11982,11 +11982,11 @@
+         <message name="IDS_TAB_CXMENU_FOCUS_THIS_TAB" desc="The label of the 'Focus this tab' Tab context menu item.">
+           Focus this tab
+         </message>
+-        <message name="IDS_TAB_CXMENU_PIN_TAB" desc="The label of the tab context menu item for pinning one or more tabs.">
+-          Pin
+-        </message>
+-        <message name="IDS_TAB_CXMENU_UNPIN_TAB" desc="The label of the tab context menu item for unpinning one or more tabs.">
+-          Unpin
++        <message name="IDS_TAB_CXMENU_PIN_TAB" desc="The label of the tab context menu item for favoriting one or more tabs.">
++          Favorite
++        </message>
++        <message name="IDS_TAB_CXMENU_UNPIN_TAB" desc="The label of the tab context menu item for unfavoriting one or more tabs.">
++          Unfavorite
+         </message>
+         <message name="IDS_TAB_CXMENU_SOUND_MUTE_SITE" desc="The label of the tab context menu item for muting one or more sites. NOTE: If having no explicit # makes the phrasing awkward, feel free to add a # as necessary. [ICU Syntax]">
+           {NUM_TABS, plural, =1 {Mute site} other {Mute sites}}
+@@ -12098,11 +12098,11 @@
+         <message name="IDS_TAB_CXMENU_FOCUS_THIS_TAB" desc="In Title Case: The label of the 'Focus This Tab' Tab context menu item.">
+           Focus This Tab
+         </message>
+-        <message name="IDS_TAB_CXMENU_PIN_TAB" desc="In Title Case: The label of the tab context menu item for pinning one or more tabs.">
+-          Pin
+-        </message>
+-        <message name="IDS_TAB_CXMENU_UNPIN_TAB" desc="In Title Case: The label of the tab context menu item for unpinning one or more tabs.">
+-          Unpin
++        <message name="IDS_TAB_CXMENU_PIN_TAB" desc="In Title Case: The label of the tab context menu item for favoriting one or more tabs.">
++          Favorite
++        </message>
++        <message name="IDS_TAB_CXMENU_UNPIN_TAB" desc="In Title Case: The label of the tab context menu item for unfavoriting one or more tabs.">
++          Unfavorite
+         </message>
+         <message name="IDS_TAB_CXMENU_SOUND_MUTE_SITE" desc="In Title Case: The label of the tab context menu item for muting one or more sites. NOTE: If having no explicit # makes the phrasing awkward, feel free to add a # as necessary. [ICU Syntax]">
+           {NUM_TABS, plural, =1 {Mute Site} other {Mute Sites}}
