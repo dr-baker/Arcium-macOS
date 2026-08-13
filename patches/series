@@ -18,3 +18,5 @@ helium/macos/applescript-tab-select-command.patch
 helium/macos/open-shortcuts-settings-action.patch
 
 helium/macos/native-translation-context-option.patch
+
+helium/core/arc-spaces-normalized-import.patch
