@@ -217,14 +217,17 @@ def _is_broad_compile_target(target: str) -> bool:
 def parse_dry_run_edge_count(output: str) -> int | None:
     """Return Siso/Ninja's planned edge total, or ``None`` when unprovable."""
 
-    if re.search(r"(?:no work to do|no build steps)", output, re.I):
-        return 0
-
     candidates: list[int] = []
     for pattern in _EDGE_PATTERNS:
         for match in pattern.finditer(output):
             candidates.append(int(match.group(1).replace(",", "")))
-    return max(candidates) if candidates else None
+    if candidates:
+        return max(candidates)
+
+    lines = tuple(line.strip() for line in output.splitlines() if line.strip())
+    if lines and re.fullmatch(r"(?:ninja|siso):?\s*(?:no work to do|no build steps)\.?", lines[-1], re.I):
+        return 0
+    return None
 
 
 def parse_siso_query_commands(output: str) -> tuple[str, ...]:
@@ -427,9 +430,24 @@ class HeliumDevBuilder:
         return tuple(args)
 
     def _dry_run(self, targets: tuple[str, ...]) -> int:
+        explain_before = {
+            path: path.stat().st_mtime_ns for path in self.paths.out_dir.glob("siso_explain*") if path.is_file()
+        }
         result = self._run(self._autoninja_command(targets, dry_run=True))
         if result.returncode != 0:
             raise BuildGraphError("autoninja dry-run failed; refusing to build")
+        if result.stdout_truncated or result.stderr_truncated:
+            raise BuildBudgetError("dry-run diagnostics were truncated; refusing to build")
+        fresh_explains = [
+            path for path in self.paths.out_dir.glob("siso_explain*")
+            if path.is_file() and path.stat().st_mtime_ns != explain_before.get(path)
+        ]
+        if not fresh_explains:
+            raise BuildBudgetError("dry-run did not produce a fresh Siso explain record; refusing to build")
+        explain = max(fresh_explains, key=lambda path: path.stat().st_mtime_ns)
+        explain_text = explain.read_bytes()[:64 * 1024].decode("utf-8", errors="replace")
+        if re.search(r"(?:build\.ninja(?:\.stamp)?|args\.gn|toolchain(?:\.ninja)?)\b.*\b(?:older than|stale)", explain_text, re.I):
+            raise BuildBudgetError("dry-run used a stale generated graph; regenerate it before building")
         edge_count = parse_dry_run_edge_count(result.output)
         if edge_count is None:
             raise BuildBudgetError("dry-run did not report a recognizable edge count; refusing to build")
@@ -458,6 +476,15 @@ class HeliumDevBuilder:
         )
 
     def _execute_planned(self, action: str, plan: BuildResult, *, proof_gates: Sequence[str]) -> BuildResult:
+        if plan.edge_count == 0:
+            return self._result(
+                ok=True,
+                action=action,
+                targets=plan.targets,
+                edge_count=0,
+                proof_gates=tuple(plan.proof_gates) + ("no-work-plan",),
+                warnings=("dry-run reported no work; build was not executed",),
+            )
         result = self._run(self._autoninja_command(plan.targets, dry_run=False))
         if result.returncode != 0:
             detail = "autoninja build failed"

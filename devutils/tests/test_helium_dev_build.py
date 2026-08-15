@@ -22,6 +22,8 @@ class FakeRunner:
     def __init__(self, *, edge_count: int = 2, missing_edge_count: bool = False) -> None:
         self.edge_count = edge_count
         self.missing_edge_count = missing_edge_count
+        self.write_explain = True
+        self.explain_text = ""
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, args, *, cwd, env):
@@ -35,6 +37,8 @@ class FakeRunner:
                 output = "command = python3 linker_driver.py -o current-target\n"
             return CommandResult(args=argv, returncode=0, stdout=output)
         if "-n" in argv:
+            if self.write_explain:
+                (Path(argv[argv.index("-C") + 1]) / "siso_explain").write_text(self.explain_text)
             output = "ninja: no work to do.\n" if self.edge_count == 0 else f"[1/{self.edge_count}] CXX obj/example.o\n"
             if self.missing_edge_count:
                 output = "ninja: Entering directory out/Default\n"
@@ -85,6 +89,8 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertEqual(parse_dry_run_edge_count("planned 17 actions\n"), 17)
         self.assertEqual(parse_dry_run_edge_count("ninja: no work to do.\n"), 0)
         self.assertIsNone(parse_dry_run_edge_count("ninja: entering directory out/Default\n"))
+        self.assertIsNone(parse_dry_run_edge_count("ninja: no work to do.\nwarning: graph changed\n"))
+        self.assertEqual(parse_dry_run_edge_count("ninja: no work to do.\n[1/61] CXX obj/a.o\n"), 61)
 
     def test_build_plan_is_autoninja_dry_run_after_graph_validation(self) -> None:
         result = self.builder.build_plan(("obj/chrome/foo.o",))
@@ -149,6 +155,27 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertEqual(completed.targets, ("chrome", "chromedriver"))
         self.assertIn("-n", self.runner.calls[-2])
         self.assertNotIn("-n", self.runner.calls[-1])
+
+    def test_zero_edge_plan_never_executes_a_broad_build(self) -> None:
+        self.runner.edge_count = 0
+        result = self.builder.build_full(approved=True)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.edge_count, 0)
+        self.assertIn("no-work-plan", result.proof_gates)
+        self.assertTrue(all("-n" in call or "query" in call for call in self.runner.calls))
+
+    def test_stale_or_missing_explain_refuses_before_execution(self) -> None:
+        self.runner.edge_count = 0
+        self.runner.explain_text = "output build.ninja.stamp older than most recent input BUILD.gn\n"
+        stale = self.builder.build_full(approved=True)
+        self.assertFalse(stale.ok)
+        self.assertIn("stale generated graph", stale.error)
+        self.assertTrue(all("-n" in call or "query" in call for call in self.runner.calls))
+        self.runner.calls.clear()
+        self.runner.write_explain = False
+        missing = self.builder.build_full(approved=True)
+        self.assertFalse(missing.ok)
+        self.assertIn("fresh Siso explain", missing.error)
 
     def test_build_full_keeps_the_edge_budget_after_approval(self) -> None:
         self.runner.edge_count = DEFAULT_EDGE_BUDGET + 1
