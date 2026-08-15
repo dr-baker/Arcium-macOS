@@ -1,9 +1,44 @@
 #!/usr/bin/env bash
 
-_root_dir=$(dirname $(greadlink -f $0))
+# This file is normally sourced.  $0 points at the caller in both Bash and
+# zsh, so resolve the source file first.  HELIUM_DEV_WORKTREE lets a landed
+# harness safely operate on another worktree without copying tooling into its
+# possibly dirty checkout.
+if [ -n "${ZSH_VERSION:-}" ]; then
+    _helium_dev_script_path="${(%):-%x}"
+elif [ -n "${BASH_SOURCE[0]:-}" ]; then
+    _helium_dev_script_path="${BASH_SOURCE[0]}"
+else
+    _helium_dev_script_path="$0"
+fi
+_helium_harness_root="$(cd -P "$(dirname "$_helium_dev_script_path")" && pwd)"
+_root_dir="${HELIUM_DEV_WORKTREE:-$_helium_harness_root}"
+_root_dir="$(cd -P "$_root_dir" && pwd)"
 
-source "$_root_dir/env.sh"
-source "$_root_dir/devutils/set_quilt_vars.sh"
+# Keep the old environment contract while making its paths unambiguously
+# relative to the selected worktree rather than the interactive shell.
+_arch="$(/usr/bin/uname -m)"
+_download_cache="$_root_dir/build/download_cache"
+_src_dir="$_root_dir/build/src"
+_out_dir="$_src_dir/out/Default"
+_main_repo="$_root_dir/helium-chromium"
+_subs_cache="$_root_dir/build/subs.tar.gz"
+_namesubs_cache="$_root_dir/build/namesubs.tar"
+_depot_tools_dir="$_src_dir/third_party/depot_tools"
+_siso_dir="$_src_dir/third_party/siso/cipd"
+_siso_path="$_siso_dir/siso"
+
+alias quilt='quilt --quiltrc -'
+export QUILT_PATCHES="$_root_dir/patches"
+export QUILT_SERIES="series.merged"
+export QUILT_PUSH_ARGS="--color=auto"
+export QUILT_DIFF_OPTS="--show-c-function"
+export QUILT_PATCH_OPTS="--unified --reject-format=unified"
+export QUILT_DIFF_ARGS="-p ab --no-timestamps --no-index --color=auto"
+export QUILT_REFRESH_ARGS="-p ab --no-timestamps --no-index"
+export QUILT_COLORS="diff_hdr=1;32:diff_add=1;34:diff_rem=1;31:diff_hunk=1;33:diff_ctx=35:diff_cctx=33"
+export QUILT_SERIES_ARGS="--color=auto"
+export QUILT_PATCHES_ARGS="--color=auto"
 
 ___helium_setup_siso() {
     if [ -x "$_siso_path" ]; then
@@ -173,17 +208,49 @@ ___helium_substitution() {
 }
 
 ___helium_build() {
-    cd "$_src_dir"
-    SISO_PATH="$_siso_path" python3 "$_depot_tools_dir/autoninja.py" \
-    -k 0 -C "$_out_dir" chrome chromedriver
+    echo "he build is disabled because it would start a broad Chromium build." >&2
+    echo "use he build-plan TARGET..., he compile TARGET..., he relink, or he build-full --approved" >&2
+    return 2
+}
+
+___helium_harness() {
+    python3 "$_helium_harness_root/devutils/helium_dev.py" --root "$_root_dir" "$@"
 }
 
 ___helium_run() {
-    "$_out_dir/Helium.app/Contents/MacOS/Helium" \
-    --user-data-dir="$HOME/Library/Application Support/net.imput.helium.dev" \
-    --enable-ui-devtools \
-    --use-mock-keychain \
-    --disable-features=DialMediaRouteProvider
+    ___helium_harness run "$@"
+}
+
+___helium_status() {
+    ___helium_harness status "$@"
+}
+
+___helium_activate() {
+    ___helium_harness activate "$@"
+}
+
+___helium_stop() {
+    ___helium_harness stop "$@"
+}
+
+___helium_restart() {
+    ___helium_harness restart "$@"
+}
+
+___helium_build_plan() {
+    ___helium_harness build-plan "$@"
+}
+
+___helium_compile() {
+    ___helium_harness compile "$@"
+}
+
+___helium_relink() {
+    ___helium_harness relink "$@"
+}
+
+___helium_build_full() {
+    ___helium_harness build-full "$@"
 }
 
 ___helium_pull() {
@@ -317,7 +384,15 @@ __helium_menu() {
         lint) ___helium_lint;;
 
         build) ___helium_build;;
-        run) ___helium_run;;
+        run) shift; ___helium_run "$@";;
+        status) shift; ___helium_status "$@";;
+        activate) shift; ___helium_activate "$@";;
+        stop) shift; ___helium_stop "$@";;
+        restart) shift; ___helium_restart "$@";;
+        build-plan) shift; ___helium_build_plan "$@";;
+        compile) shift; ___helium_compile "$@";;
+        relink) shift; ___helium_relink "$@";;
+        build-full) shift; ___helium_build_full "$@";;
         reset) ___helium_reset;;
         *)
             echo "usage: he <command>" >&2
@@ -351,8 +426,13 @@ __helium_menu() {
             echo "\tlint - he format + he tidy" >&2
 
             echo "\n" >&2
-            echo "\tbuild - builds a development binary" >&2
-            echo "\trun - runs a development build of helium with dev data dir & ui devtools enabled" >&2
+            echo "\trun [--isolated NAME|--fresh NAME] [--json] [browser flags...] - runs the exact Dev bundle" >&2
+            echo "\tstatus|activate|stop|restart [profile options] [--json] - manage one exact Dev profile" >&2
+            echo "\tbuild-plan TARGET... - graph-validate and dry-run explicit targets" >&2
+            echo "\tcompile TARGET... - compile explicit focused targets within the edge budget" >&2
+            echo "\trelink [--resources] - relink the component, optionally repackage resources" >&2
+            echo "\tbuild-full --approved - explicitly permit the broad development build" >&2
+            echo "\tbuild - disabled; cannot accidentally start a broad Chromium build" >&2
             echo "\treset - nukes everything" >&2
     esac
 }
