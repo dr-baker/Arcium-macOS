@@ -29,7 +29,7 @@ def get_asset_url(release, arch):
 
 
 def get_historic_dmg_urls():
-  repo = os.environ.get('GITHUB_REPOSITORY', 'imputnet/helium-macos')
+  repo = os.environ.get('GITHUB_REPOSITORY', 'dr-baker/Arcium-macOS')
   response = requests.get(
     f'https://api.github.com/repos/{repo}/releases?per_page=5',
     headers=REQUEST_HEADERS,

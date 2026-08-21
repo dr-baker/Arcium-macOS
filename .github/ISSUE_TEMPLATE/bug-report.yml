@@ -1,17 +1,16 @@
-name: Bug Report
-description: Report a bug building or running Helium
+name: Bug report
+description: Report a macOS build or platform bug in Arcium
 labels: ["bug"]
 title: "[Bug]: "
 body:
   - type: markdown
     attributes:
       value: |
-        Before submitting this bug report, please search existing issues and make sure it's unique.
-        If you ignore this text, and create this one, you will be permanently banned from
-        interacting with the entire organization.
+        Search existing issues before you submit this report.
+        You can use AI-assisted tools, but you must review and understand the result.
+        Do not submit automated or duplicate reports.
 
-        If you suspect your bug might apply to all platforms and not just macOS,
-        please submit it to the relevant shared "helium" repository instead.
+        Submit shared browser bugs to the Arcium core repository.
   - type: input
     id: version
     attributes:
@@ -25,7 +24,7 @@ body:
       options:
         - label: I have tried reproducing this issue in Chrome and it could not be reproduced there
         - label: I have tried reproducing this issue in ungoogled-chromium and it could not be reproduced there
-        - label: I have tried reproducing this issue in Helium with a new and empty profile using `--user-data-dir` command line argument and it could not be reproduced there
+        - label: I tried to reproduce this issue in Arcium with a new profile and could not reproduce it there
   - type: input
     id: description
     attributes:
@@ -36,7 +35,7 @@ body:
   - type: textarea
     id: repro
     attributes:
-      label: How to Reproduce?
+      label: Steps to reproduce
       description: Steps to reproduce the behavior
       placeholder: |
         1. Go to '...'

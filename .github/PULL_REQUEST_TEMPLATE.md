@@ -1,14 +1,13 @@
-For your pull request to not get closed without review, please confirm that:
+Before you submit the pull request, confirm that:
 
-- [ ] An issue exists where the maintainers agreed that this should be implemented.
-      If such issue did not exist before, I opened one.
-- [ ] I tested that my contribution works locally, and does not break anything,
-      otherwise I have marked my PR as draft.
-- [ ] If my contribution is non-trivial, I did not use AI to write most of it.
-- [x] I understand that I will be permanently banned from interacting with this
-      organization if I lied by checking any of these checkboxes.
-- [ ] The pull request contents are only relevant to the macOS platform, and can in
-      no way be applied to other platforms.
+- [ ] An approved feature request or confirmed bug describes this change.
+- [ ] I understand and reviewed every change, including AI-assisted work.
+- [ ] I tested the affected behavior. I marked this pull request as a draft if
+      required tests are incomplete.
+- [ ] I described the completed tests, missing tests, and any uncertainty.
+- [ ] This change is specific to the macOS build, packaging, or platform
+      integration. Shared browser work belongs in Arcium core.
+
 ---
 
-[short description of your PR goes here]
+[Describe the change, why it belongs in Arcium-macOS, and the verification here.]

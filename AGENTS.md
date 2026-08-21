@@ -1,42 +1,40 @@
-# Arcium
+# Arcium-macOS
 
 ## What we're after
 
-Build Daniel's private AI-enabled, Arc-style macOS Helium fork as isolated,
-reviewable Quilt changes and prove them in the real browser UI.
-This outer repository is the canonical development, worktree, build, packaging,
-personal-patch, and landing authority. Nested `helium-chromium` supplies the
-pinned Chromium/Helium baseline.
+Build and package Arcium for macOS. This repository pins one exact Arcium core
+commit and adds the macOS build, packaging, signing, resources, and platform
+integration. Shared browser features belong in Arcium core.
+
+AI-assisted development is welcome. The author remains responsible for every
+change, regardless of which tools helped create it.
 
 ## Where to go
 
-- `patches/personal/` — Daniel-owned Chromium behavior patches.
-- `patches/series` — active outer patch order.
-- `helium-chromium/` — pinned baseline and upstream patch catalog.
-- `docs/private-patch-validation.md` — active/inactive inventory and proof gates.
-- `dev.sh` — worktree-aware build, relink, and Dev launch control plane.
+- `helium-chromium/` - pinned Arcium core checkout.
+- `patches/` - macOS-only Quilt patches.
+- `docs/building.md` - build and development procedure.
+- `dev.sh` - development build and launch commands.
+- `resources/` - macOS application resources.
 
 ## Ground rules
 
-- Treat outer `main` as Arcium's product line; start feature branches and COW
-  worktrees here. Keep `upstream-main` only as the public Helium mirror.
-- Keep nested `helium-chromium` detached at the outer gitlink during normal
-  development. Do not create parallel personal feature branches there.
-- Put personal Chromium behavior in new `patches/personal/*.patch` files. Do
-  not edit existing upstream patch files to carry personal behavior.
-- Land the patch, series entry, verifier, and any intentional gitlink update
-  together in the outer feature branch.
-- Handle upstream baseline changes on a dedicated outer integration branch:
-  advance the inner baseline, regenerate the merged series, replay it fully,
-  and rebase only personal patches that need new context.
-- Never push or open a pull request against public Helium unless Daniel asks.
-- Use the active worktree's `Helium Dev.app`; keep packaging, compilation,
-  launch, behavior, persistence, and teardown as separate proof gates.
+- Start macOS feature branches and COW worktrees in this repository.
+- Keep `helium-chromium/` at the commit recorded by the outer gitlink.
+- Put shared browser behavior in Arcium core. Keep only macOS-specific changes
+  here.
+- Understand and inspect all generated or AI-assisted output before submission.
+- Test the affected behavior and state each completed proof gate accurately.
+- Disclose uncertainty, missing tests, and tool-generated work that needs extra
+  review.
+- Do not send duplicate, automated, or unreviewed contributions.
+- Never push to an upstream repository unless Daniel asks.
 
 ## Vocabulary
 
-- **Outer repository** — Arcium; the canonical product and landing history.
-- **Inner repository** — `helium-chromium`; the baseline selected by the gitlink.
-- **Personal overlay** — ordered `patches/personal/*.patch` entries applied after
-  the baseline and existing macOS patches.
-- **Dev build** — `out/Default/Helium Dev.app` from the active outer worktree.
+- **Arcium core** - the shared browser product pinned by this repository.
+- **Arcium-macOS** - this macOS build, package, and platform repository.
+- **Dev build** - `out/Default/Helium Dev.app` from the active worktree. This is
+  the current artifact name until the application branding changes.
+- **Proof gate** - one verified stage, such as patch replay, compilation, launch,
+  visible behavior, persistence, or teardown.
