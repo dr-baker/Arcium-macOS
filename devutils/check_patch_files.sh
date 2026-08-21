@@ -1,6 +1,8 @@
-#!/bin/bash -eux
+#!/usr/bin/env bash
+set -euo pipefail
 
-PLATFORM_ROOT=$(dirname $(dirname $(greadlink -f ${BASH_SOURCE[0]})))
-UNGOOGLED_REPO=$PLATFORM_ROOT/helium-chromium
+SCRIPT_DIR="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLATFORM_ROOT="$(cd -P "$SCRIPT_DIR/.." && pwd)"
 
-$UNGOOGLED_REPO/devutils/check_patch_files.py -p $PLATFORM_ROOT/patches
+exec python3 "$PLATFORM_ROOT/devutils/check_patch_files.py" \
+    -p "$PLATFORM_ROOT/patches" "$@"
