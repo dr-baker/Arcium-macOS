@@ -42,10 +42,11 @@ _EXPLICITLY_BROAD_TARGETS = frozenset(
         "default",
     }
 )
-_EDGE_PATTERNS = (
-    re.compile(r"\b([0-9][0-9,]*)\s+(?:edges|actions|commands|steps)\b", re.I),
-    re.compile(r"\[\s*[0-9][0-9,]*\s*/\s*([0-9][0-9,]*)\s*\]"),
-)
+_EDGE_SUMMARY_PATTERN = re.compile(r"\b([0-9][0-9,]*)\s+(?:edges|actions|commands|steps)\b", re.I)
+_EDGE_PROGRESS_PATTERN = re.compile(r"\[\s*[0-9][0-9,]*\s*/\s*([0-9][0-9,]*)\s*\]")
+_EDGE_PATTERNS = (_EDGE_SUMMARY_PATTERN, _EDGE_PROGRESS_PATTERN)
+_NO_WORK_PATTERN = re.compile(r"(?:ninja|siso):?\s*(?:no work to do|no build steps)\.?", re.I)
+_EDGE_PARSER_TAIL = 512
 
 
 class BuildError(RuntimeError):
@@ -75,10 +76,81 @@ class CommandResult:
     timed_out: bool = False
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+    streamed_edge_count: int | None = None
+    streamed_edge_count_ambiguous: bool = False
 
     @property
     def output(self) -> str:
         return "\n".join(part for part in (self.stdout, self.stderr) if part)
+
+
+@dataclass(frozen=True)
+class _EdgeCountObservation:
+    count: int | None
+    ambiguous: bool = False
+
+
+class _EdgeCountParser:
+    """Bounded incremental parser for Siso/Ninja dry-run progress output.
+
+    The dry-run can emit many thousands of progress lines.  Keeping only the
+    largest complete total from each evidence format lets callers make the
+    same conservative budget decision without retaining the full transcript.
+    A short tail handles a pattern split across pipe reads; malformed or
+    conflicting evidence remains fail-closed.
+    """
+
+    def __init__(self) -> None:
+        self._tail = ""
+        self._last_nonempty_line = ""
+        self._summary_max: int | None = None
+        self._progress_max: int | None = None
+        self._invalid = False
+
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        combined = self._tail + text
+        for pattern, kind in (
+            (_EDGE_SUMMARY_PATTERN, "summary"),
+            (_EDGE_PROGRESS_PATTERN, "progress"),
+        ):
+            for match in pattern.finditer(combined):
+                try:
+                    count = int(match.group(1).replace(",", ""))
+                except ValueError:
+                    self._invalid = True
+                    continue
+                if kind == "summary":
+                    self._summary_max = max(self._summary_max or 0, count)
+                else:
+                    self._progress_max = max(self._progress_max or 0, count)
+
+        for line in combined.splitlines():
+            stripped = line.strip()
+            self._last_nonempty_line = stripped if stripped and len(stripped) <= _EDGE_PARSER_TAIL else ""
+        self._tail = combined[-_EDGE_PARSER_TAIL:]
+
+    def observe(self) -> _EdgeCountObservation:
+        candidates = tuple(
+            count for count in (self._summary_max, self._progress_max) if count is not None
+        )
+        if candidates:
+            count = max(candidates)
+        elif _NO_WORK_PATTERN.fullmatch(self._last_nonempty_line):
+            count = 0
+        else:
+            count = None
+        # A progress denominator and an explicit summary should agree.  If
+        # they do not, choosing one would turn ambiguous diagnostics into a
+        # build decision, so retain the maximum only as evidence and mark it
+        # unsafe for the caller.
+        ambiguous = self._invalid or (
+            self._summary_max is not None
+            and self._progress_max is not None
+            and self._summary_max != self._progress_max
+        )
+        return _EdgeCountObservation(count=count, ambiguous=ambiguous)
 
 
 class CommandRunner(Protocol):
@@ -217,17 +289,10 @@ def _is_broad_compile_target(target: str) -> bool:
 def parse_dry_run_edge_count(output: str) -> int | None:
     """Return Siso/Ninja's planned edge total, or ``None`` when unprovable."""
 
-    candidates: list[int] = []
-    for pattern in _EDGE_PATTERNS:
-        for match in pattern.finditer(output):
-            candidates.append(int(match.group(1).replace(",", "")))
-    if candidates:
-        return max(candidates)
-
-    lines = tuple(line.strip() for line in output.splitlines() if line.strip())
-    if lines and re.fullmatch(r"(?:ninja|siso):?\s*(?:no work to do|no build steps)\.?", lines[-1], re.I):
-        return 0
-    return None
+    parser = _EdgeCountParser()
+    parser.feed(output)
+    observation = parser.observe()
+    return None if observation.ambiguous else observation.count
 
 
 def parse_siso_query_commands(output: str) -> tuple[str, ...]:
@@ -277,6 +342,7 @@ def subprocess_runner(
     )
     retained: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
     truncated = {"stdout": False, "stderr": False}
+    parsers = {"stdout": _EdgeCountParser(), "stderr": _EdgeCountParser()}
 
     def drain(name: str, pipe: object) -> None:
         assert hasattr(pipe, "read")
@@ -284,6 +350,7 @@ def subprocess_runner(
             chunk = pipe.read(8192)  # type: ignore[union-attr]
             if not chunk:
                 return
+            parsers[name].feed(chunk.decode("utf-8", errors="replace"))
             remaining = max_output_bytes - len(retained[name])
             if remaining > 0:
                 retained[name].extend(chunk[:remaining])
@@ -314,6 +381,12 @@ def subprocess_runner(
     assert proc.stderr is not None
     proc.stdout.close()
     proc.stderr.close()
+    observations = tuple(parsers[name].observe() for name in ("stdout", "stderr"))
+    observed_counts = tuple(observation.count for observation in observations if observation.count is not None)
+    streamed_edge_count = max(observed_counts) if observed_counts else None
+    streamed_edge_count_ambiguous = any(observation.ambiguous for observation in observations)
+    if len(set(observed_counts)) > 1:
+        streamed_edge_count_ambiguous = True
     return CommandResult(
         args=argv,
         returncode=124 if timed_out else returncode,
@@ -322,6 +395,8 @@ def subprocess_runner(
         timed_out=timed_out,
         stdout_truncated=truncated["stdout"],
         stderr_truncated=truncated["stderr"],
+        streamed_edge_count=streamed_edge_count,
+        streamed_edge_count_ambiguous=streamed_edge_count_ambiguous,
     )
 
 
@@ -436,8 +511,15 @@ class HeliumDevBuilder:
         result = self._run(self._autoninja_command(targets, dry_run=True))
         if result.returncode != 0:
             raise BuildGraphError("autoninja dry-run failed; refusing to build")
-        if result.stdout_truncated or result.stderr_truncated:
-            raise BuildBudgetError("dry-run diagnostics were truncated; refusing to build")
+        if result.streamed_edge_count_ambiguous:
+            raise BuildBudgetError("dry-run reported conflicting edge totals; refusing to build")
+        if (
+            (result.stdout_truncated or result.stderr_truncated)
+            and result.streamed_edge_count is None
+        ):
+            raise BuildBudgetError(
+                "dry-run diagnostics were truncated before a recognizable edge count was observed; refusing to build"
+            )
         fresh_explains = [
             path for path in self.paths.out_dir.glob("siso_explain*")
             if path.is_file() and path.stat().st_mtime_ns != explain_before.get(path)
@@ -448,7 +530,9 @@ class HeliumDevBuilder:
         explain_text = explain.read_bytes()[:64 * 1024].decode("utf-8", errors="replace")
         if re.search(r"(?:build\.ninja(?:\.stamp)?|args\.gn|toolchain(?:\.ninja)?)\b.*\b(?:older than|stale)", explain_text, re.I):
             raise BuildBudgetError("dry-run used a stale generated graph; regenerate it before building")
-        edge_count = parse_dry_run_edge_count(result.output)
+        edge_count = result.streamed_edge_count
+        if edge_count is None:
+            edge_count = parse_dry_run_edge_count(result.output)
         if edge_count is None:
             raise BuildBudgetError("dry-run did not report a recognizable edge count; refusing to build")
         if edge_count > self.edge_budget:
