@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from check_patch_files import active_series, validate_patches_dir
+from devutils.check_patch_files import active_series, validate_patches_dir
 
 
 _PATCH = """--- a/file.txt
