@@ -120,11 +120,28 @@ ___helium_resources() {
     python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir"
 }
 
+___helium_version() {
+    if [ ! -f "$_src_dir/chrome/VERSION" ]; then
+        echo "error: Chromium source is missing chrome/VERSION" >&2
+        return 1
+    fi
+    if grep -q '^HELIUM_MAJOR=' "$_src_dir/chrome/VERSION"; then
+        return 0
+    fi
+
+    ___helium_setup_python
+    python3 "$_main_repo/utils/helium_version.py" \
+        --tree "$_main_repo" \
+        --platform-tree "$_root_dir" \
+        --chromium-tree "$_src_dir"
+}
+
 ___helium_setup_presetup() {
     ___helium_setup_python
 
     if [ -d "$_src_dir/out" ]; then
         echo "$_src_dir/out already exists" >&2
+        ___helium_version
         return
     fi
 
@@ -136,10 +153,7 @@ ___helium_setup_presetup() {
     ___helium_resources
     ___helium_setup_gn
 
-    python3 "$_main_repo/utils/helium_version.py" \
-        --tree "$_main_repo" \
-        --platform-tree "$_root_dir" \
-        --chromium-tree "$_src_dir"
+    ___helium_version
 }
 
 ___helium_setup() {
