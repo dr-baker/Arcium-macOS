@@ -28,6 +28,8 @@ _depot_tools_dir="$_src_dir/third_party/depot_tools"
 _siso_dir="$_src_dir/third_party/siso/cipd"
 _siso_path="$_siso_dir/siso"
 
+source "$_root_dir/devutils/setup_python.sh"
+
 alias quilt='quilt --quiltrc -'
 export QUILT_PATCHES="$_root_dir/patches"
 export QUILT_SERIES="series.merged"
@@ -97,6 +99,8 @@ ___helium_info_pull() {
 }
 
 ___helium_configure() {
+    ___helium_setup_python
+
     cd "$_src_dir"
     ___helium_setup_siso
     "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch"
@@ -109,12 +113,16 @@ ___helium_toolchain() {
 }
 
 ___helium_resources() {
+    ___helium_setup_python
+
     python3 "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources"
     python3 "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir"
     python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir"
 }
 
 ___helium_setup_presetup() {
+    ___helium_setup_python
+
     if [ -d "$_src_dir/out" ]; then
         echo "$_src_dir/out already exists" >&2
         return
