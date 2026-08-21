@@ -6,44 +6,39 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before submitting this request, please search existing issues and make sure it's unique.
-        If you ignore this text, and create this one, you will be permanently banned from
-        interacting with the entire organization.
+        Search existing issues before you submit this request.
+        You can use AI-assisted tools, but you must review and understand the result.
+        Do not submit automated or duplicate requests.
 
-        Please do not use AI for writing your request's description, no one wishes
-        to read that and thus your request will be closed.
-
-        If your request is for a feature that would apply to all platforms, and
-        not just macOS, please submit it to the generic "helium" repo instead.
+        Submit shared browser requests to the Arcium core repository.
   - type: input
     id: description
     attributes:
       label: Description
-      description: A clear and concise description (in one line) of what your suggestion is
+      description: Describe your suggestion in one clear sentence
     validations:
       required: true
   - type: checkboxes
     attributes:
-      label: Who's implementing?
+      label: Implementation
       options:
         - label: I'm willing to implement this feature myself
   - type: textarea
     id: prob
     attributes:
       label: The problem
-      description: Please describe the problem you are solving or new feature you're suggesting
-      placeholder: I'm always frustrated when [...] happens
+      description: Describe the macOS problem that the feature would solve
     validations:
       required: true
   - type: textarea
     id: sol
     attributes:
       label: Possible solutions
-      description: Please describe possible solution(-s) to your problem
+      description: Describe possible solutions
     validations:
       required: true
   - type: textarea
     id: additional
     attributes:
       label: Additional context
-      description: Add any other context about the feature request here
+      description: Add relevant examples, screenshots, or constraints
