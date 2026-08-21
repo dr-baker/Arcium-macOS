@@ -1,4 +1,4 @@
-# Building and developing Helium
+# Building and developing Arcium-macOS
 
 ### Navigation
 - [Official (non-development) build](#official-non-development-build)
@@ -42,8 +42,8 @@ If you want to notarize the build, you need to have an Apple Developer ID and a 
 If you don't have an Apple Developer ID to sign the build (or you don't want to sign it), you can simply not specify MACOS_CERTIFICATE_NAME.
 
 ```sh
-git clone --recurse-submodules https://github.com/imputnet/helium-macos.git
-cd helium-macos
+git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git
+cd Arcium-macOS
 ```
 
 to switch to the desired release or development branch.
@@ -174,4 +174,3 @@ Confused about quilt? Run ```man quilt``` to read more about its functionality.
 1. Ensure that patches and series are formatted correctly, e.g. no blank lines.
 1. Check the consistency of the series file: `he validate series`
 1. Use git to add changes and commit. Refer to recent commit history for an appropriate commit comment.
-
