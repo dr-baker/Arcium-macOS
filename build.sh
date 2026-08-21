@@ -6,6 +6,7 @@ set -eux
 _root_dir="$(dirname "$(greadlink -f "$0")")"
 
 source "$_root_dir/env.sh"
+___helium_setup_python
 
 # Clone to get the Chromium Source
 clone=true

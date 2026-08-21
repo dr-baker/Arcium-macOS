@@ -17,9 +17,9 @@
 ### Build dependencies
 
 1. Install Python 3 via Homebrew: `brew install python@3.13`
-1. Install Python dependencies via `pip3`: `pip3 install httplib2==0.22.0 requests pillow`
-    * Note that you might need to use `--break-system-packages` if you don't want to use a
-      dedicated Python environment for building Helium.
+1. The development and build scripts create a worktree-local Python environment at
+   `build/python-env` on first use and install the pinned dependencies from
+   `requirements-dev.txt`. No global `pip3` install is required.
 1. Install Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
 1. Install Ninja via Homebrew: `brew install ninja`
 1. Install wget via Homebrew: `brew install wget`
