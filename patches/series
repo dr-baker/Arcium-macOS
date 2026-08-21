@@ -18,3 +18,11 @@ helium/macos/applescript-tab-select-command.patch
 helium/macos/open-shortcuts-settings-action.patch
 
 helium/macos/native-translation-context-option.patch
+
+personal/favorites-and-pins.patch
+personal/arc-sidebar-import-to-pins.patch
+personal/helium-space.patch
+personal/mru-tab-switcher-overlay.patch
+personal/centered-address-bar-personal-label.patch
+personal/little-arc-peek.patch
+personal/little-arc-hardening.patch

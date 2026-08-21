@@ -1,0 +1,410 @@
+Index: src/chrome/app/settings_strings.grdp
+===================================================================
+--- src.orig/chrome/app/settings_strings.grdp
++++ src/chrome/app/settings_strings.grdp
+@@ -310,6 +310,15 @@
+     <message name="IDS_SETTINGS_MINIMAL_LOCATION_BAR" desc="Label for the toggle that enables the minimal address bar.">
+       Minimal address bar
+     </message>
++    <message name="IDS_SETTINGS_LITTLE_ARC_EXTERNAL_LINKS" desc="Label for the toggle that opens external web links in a temporary Little Arc window.">
++      Open links from other apps in Little Arc
++    </message>
++    <message name="IDS_SETTINGS_LITTLE_ARC_EXTERNAL_LINKS_DESCRIPTION" desc="Description for the Little Arc external links toggle.">
++      Opens one web link in a temporary window. Press Command-O to move it to a tab.
++    </message>
++    <message name="IDS_LITTLE_ARC_OPEN_IN_TAB" desc="Tooltip for the button that moves a Little Arc page into the active browser window.">
++      Open in tab (Command-O)
++    </message>
+     <message name="IDS_SETTINGS_BROWSER_ZEN_MODE" desc="Label for the toggle that enables zen mode, hiding browser chrome until hover.">
+       Frameless mode
+     </message>
+Index: src/chrome/browser/app_controller_mac.mm
+===================================================================
+--- src.orig/chrome/browser/app_controller_mac.mm
++++ src/chrome/browser/app_controller_mac.mm
+@@ -2700,8 +2700,8 @@ void OpenUrlsInBrowserWithProfile(const
+         profile->GetOriginalProfile());
+   }
+   // Little Arc: keep the main window's tab state intact for external links.
+-  if (helium::ShouldOpenExternalLinksInLittleArc(profile)) {
+-    helium::OpenUrlsInLittleArc(profile, urls);
++  if (helium::ShouldOpenExternalLinksInLittleArc(profile) &&
++      helium::OpenUrlsInLittleArc(profile, urls)) {
+     return;
+   }
+   // Use FindTabbedBrowser() to ensure URLs open in a normal tabbed browser
+Index: src/chrome/browser/app_controller_mac_browsertest.mm
+===================================================================
+--- src.orig/chrome/browser/app_controller_mac_browsertest.mm
++++ src/chrome/browser/app_controller_mac_browsertest.mm
+@@ -56,6 +56,7 @@
+ #include "chrome/browser/shortcuts/chrome_webloc_file.h"
+ #include "chrome/browser/signin/signin_util.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+@@ -63,6 +64,7 @@
+ #include "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
+ #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
+ #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
++#include "chrome/browser/ui/helium/helium_little_arc.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/profiles/profile_picker.h"
+ #include "chrome/browser/ui/profiles/profile_ui_test_utils.h"
+@@ -294,6 +296,61 @@ size_t ExpectedWindowCountForBrowserCoun
+   return browsers;
+ }
+
++IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest,
++                       LittleArcExternalLinkPromotesLiveTab) {
++  ASSERT_TRUE(embedded_test_server()->Start());
++  std::ignore = AppController.sharedController;
++  browser()->profile()->GetPrefs()->SetBoolean(
++      prefs::kHeliumLittleArcExternalLinks, true);
++
++  const int original_tab_count = browser()->tab_strip_model()->count();
++  content::WebContents* original_active_tab =
++      browser()->tab_strip_model()->GetActiveWebContents();
++  const GURL url = embedded_test_server()->GetURL("/simple.html");
++  ui_test_utils::BrowserCreatedObserver browser_created_observer;
++  content::TestNavigationObserver navigation_observer(url);
++  navigation_observer.StartWatchingNewWebContents();
++
++  SendOpenUrlToAppController(url);
++  BrowserWindowInterface* popup_window = browser_created_observer.Wait();
++  navigation_observer.Wait();
++  ASSERT_TRUE(popup_window);
++  Browser* popup = popup_window->GetBrowserForMigrationOnly();
++  ASSERT_TRUE(popup);
++  EXPECT_TRUE(popup->is_type_popup());
++  EXPECT_TRUE(helium::IsLittleArcBrowser(popup));
++  EXPECT_TRUE(popup->omit_from_session_restore());
++  EXPECT_FALSE(popup->should_trigger_session_restore());
++  EXPECT_EQ(original_tab_count, browser()->tab_strip_model()->count());
++  EXPECT_EQ(original_active_tab,
++            browser()->tab_strip_model()->GetActiveWebContents());
++
++  content::WebContents* promoted_contents =
++      popup->tab_strip_model()->GetActiveWebContents();
++  ASSERT_TRUE(promoted_contents);
++  ui_test_utils::BrowserDestroyedObserver destroyed_observer(popup);
++  EXPECT_TRUE(chrome::ExecuteCommand(popup, IDC_OPEN_FILE));
++  destroyed_observer.Wait();
++
++  EXPECT_EQ(original_tab_count + 1, browser()->tab_strip_model()->count());
++  EXPECT_EQ(promoted_contents,
++            browser()->tab_strip_model()->GetActiveWebContents());
++  EXPECT_EQ(url, promoted_contents->GetLastCommittedURL());
++}
++
++IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest,
++                       LittleArcSkipsMultipleExternalLinks) {
++  std::ignore = AppController.sharedController;
++  browser()->profile()->GetPrefs()->SetBoolean(
++      prefs::kHeliumLittleArcExternalLinks, true);
++
++  EXPECT_EQ(nullptr, helium::OpenUrlsInLittleArc(
++                         browser()->profile(),
++                         {GURL("https://example.test/one"),
++                          GURL("https://example.test/two")}));
++  EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
++}
++
+ // Test browser shutdown with a command in the message queue.
+ IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, CommandDuringShutdown) {
+   EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
+Index: src/chrome/browser/extensions/api/settings_private/prefs_util.cc
+===================================================================
+--- src.orig/chrome/browser/extensions/api/settings_private/prefs_util.cc
++++ src/chrome/browser/extensions/api/settings_private/prefs_util.cc
+@@ -301,6 +301,8 @@ const PrefsUtil::TypedPrefMap& PrefsUtil
+       settings_api::PrefType::kBoolean;
+   (*s_allowlist)[::prefs::kShiftRightClickContextMenu] =
+       settings_api::PrefType::kBoolean;
++  (*s_allowlist)[::prefs::kHeliumLittleArcExternalLinks] =
++      settings_api::PrefType::kBoolean;
+   (*s_allowlist)[::prefs::kShowZoomIndicator] =
+       settings_api::PrefType::kBoolean;
+   (*s_allowlist)[::prefs::kHeliumRoundedFrame] =
+Index: src/chrome/browser/extensions/api/settings_private/prefs_util_unittest.cc
+===================================================================
+--- src.orig/chrome/browser/extensions/api/settings_private/prefs_util_unittest.cc
++++ src/chrome/browser/extensions/api/settings_private/prefs_util_unittest.cc
+@@ -66,6 +66,22 @@ TEST_F(PrefsUtilTest, SetAllowlistedPref
+   EXPECT_FALSE(profile_->GetPrefs()->GetBoolean(::prefs::kShowHomeButton));
+ }
+
++TEST_F(PrefsUtilTest, SetLittleArcExternalLinksPref) {
++  base::Value value(true);
++  EXPECT_EQ(prefs_util_->SetPref(::prefs::kHeliumLittleArcExternalLinks,
++                                 &value),
++            settings_private::SetPrefResult::SUCCESS);
++  EXPECT_TRUE(profile_->GetPrefs()->GetBoolean(
++      ::prefs::kHeliumLittleArcExternalLinks));
++
++  std::optional<api::settings_private::PrefObject> pref =
++      prefs_util_->GetPref(::prefs::kHeliumLittleArcExternalLinks);
++  ASSERT_TRUE(pref.has_value());
++  EXPECT_EQ(pref->type, api::settings_private::PrefType::kBoolean);
++  ASSERT_TRUE(pref->value);
++  EXPECT_TRUE(pref->value->GetBool());
++}
++
+ TEST_F(PrefsUtilTest, GetNonAllowlistedPref) {
+   std::optional<api::settings_private::PrefObject> pref =
+       prefs_util_->GetPref("non_allowlisted_pref");
+Index: src/chrome/browser/resources/settings/appearance_page/appearance_behavior_page.html
+===================================================================
+--- src.orig/chrome/browser/resources/settings/appearance_page/appearance_behavior_page.html
++++ src/chrome/browser/resources/settings/appearance_page/appearance_behavior_page.html
+@@ -11,6 +11,12 @@
+       label="$i18n{cycleTabsInMRUOrder}">
+   </settings-toggle-button>
+
++  <settings-toggle-button class="hr" id="littleArcExternalLinks"
++      pref="{{prefs.helium.little_arc.external_links}}"
++      label="$i18n{littleArcExternalLinks}"
++      sub-label="$i18n{littleArcExternalLinksDescription}">
++  </settings-toggle-button>
++
+   <settings-toggle-button class="hr" id="shiftRightClickContextMenu"
+       pref="{{prefs.helium.browser.shift_right_click_context_menu}}"
+       label="$i18n{shiftRightClickContextMenu}">
+Index: src/chrome/browser/ui/browser_ui_prefs.cc
+===================================================================
+--- src.orig/chrome/browser/ui/browser_ui_prefs.cc
++++ src/chrome/browser/ui/browser_ui_prefs.cc
+@@ -135,7 +135,7 @@ void RegisterBrowserUserPrefs(user_prefs
+
+   registry->RegisterBooleanPref(prefs::kHeliumMinimalLocationBar, false);
+
+-  registry->RegisterBooleanPref(prefs::kHeliumLittleArcExternalLinks, true);
++  registry->RegisterBooleanPref(prefs::kHeliumLittleArcExternalLinks, false);
+
+   registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
+                                 pref_registration_flags);
+Index: src/chrome/browser/ui/helium/helium_little_arc.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/helium_little_arc.cc
++++ src/chrome/browser/ui/helium/helium_little_arc.cc
+@@ -10,16 +10,26 @@
+ #include "base/memory/weak_ptr.h"
+ #include "base/no_destructor.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/search/search.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
++#include "chrome/browser/ui/helium/helium_space.h"
++#include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/helium/helium_space_service_factory.h"
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/tabs/tab_enums.h"
+ #include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/prefs/pref_service.h"
++#include "content/public/browser/navigation_controller.h"
++#include "content/public/browser/web_contents.h"
+ #include "ui/base/mojom/window_show_state.mojom.h"
+ #include "ui/base/page_transition_types.h"
+ #include "ui/base/window_open_disposition.h"
+@@ -90,12 +100,20 @@ gfx::Rect CalculateLittleArcBounds() {
+
+ Browser* FindPromotionTarget(Profile* profile, Browser* source) {
+   Browser* target = nullptr;
++  HeliumSpaceService* space_service =
++      IsHeliumFavoritesAndPinsEnabled()
++          ? HeliumSpaceServiceFactory::GetForProfile(profile)
++          : nullptr;
+   ProfileBrowserCollection::GetForProfile(profile)->ForEach(
+-      [&](BrowserWindowInterface* window) {
++      [&, space_service](BrowserWindowInterface* window) {
+         Browser* candidate = window->GetBrowserForMigrationOnly();
+         if (candidate == source || !candidate->is_type_normal()) {
+           return true;
+         }
++        if (space_service &&
++            space_service->GetSpaceIdForBrowser(candidate).empty()) {
++          return true;
++        }
+         target = candidate;
+         return false;
+       },
+@@ -105,6 +123,13 @@ Browser* FindPromotionTarget(Profile* pr
+     return target;
+   }
+
++  if (space_service) {
++    HeliumSpace* active_space = space_service->GetActiveSpace();
++    BrowserWindowInterface* window =
++        active_space ? active_space->ActivateOrCreatePrimaryWindow() : nullptr;
++    return window ? window->GetBrowserForMigrationOnly() : nullptr;
++  }
++
+   if (BrowserWindowInterface* tabbed =
+           ProfileBrowserCollection::GetForProfile(profile)
+               ->FindTabbedBrowser()) {
+@@ -138,7 +163,8 @@ bool IsLittleArcBrowser(const Browser* b
+ }
+
+ Browser* OpenUrlsInLittleArc(Profile* profile, const std::vector<GURL>& urls) {
+-  if (!profile || urls.empty()) {
++  if (!profile || urls.size() != 1u || !urls.front().is_valid() ||
++      !urls.front().SchemeIsHTTPOrHTTPS()) {
+     return nullptr;
+   }
+   if (Browser::GetCreationStatusForProfile(profile) !=
+@@ -159,18 +185,28 @@ Browser* OpenUrlsInLittleArc(Profile* pr
+   if (!browser) {
+     return nullptr;
+   }
+-  LittleArcTracker::GetInstance().Mark(browser);
+-
+-  bool first_tab = true;
+-  for (const GURL& url : urls) {
+-    NavigateParams nav(browser, url, ui::PAGE_TRANSITION_LINK);
+-    nav.disposition = first_tab ? WindowOpenDisposition::NEW_FOREGROUND_TAB
+-                                : WindowOpenDisposition::NEW_BACKGROUND_TAB;
+-    nav.window_action = NavigateParams::WindowAction::kShowWindow;
+-    Navigate(&nav);
+-    first_tab = false;
++  NavigateParams nav(browser, urls.front(), ui::PAGE_TRANSITION_LINK);
++  nav.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++  nav.window_action = NavigateParams::WindowAction::kNoAction;
++  nav.web_app_navigation_data.emplace();
++  nav.web_app_navigation_data->SetNavigationCapturingForceOff(true);
++  base::WeakPtr<content::NavigationHandle> navigation = Navigate(&nav);
++  content::WebContents* contents = nav.navigated_or_inserted_contents;
++  if (!navigation || !contents || !nav.browser ||
++      nav.browser->GetBrowserForMigrationOnly() != browser ||
++      browser->tab_strip_model()->GetIndexOfWebContents(contents) ==
++          TabStripModel::kNoTab) {
++    browser->window()->Close();
++    return nullptr;
+   }
+
++  LittleArcTracker::GetInstance().Mark(browser);
++  if (BrowserView* browser_view =
++          BrowserView::GetBrowserViewForBrowser(browser)) {
++    if (ToolbarView* toolbar = browser_view->toolbar()) {
++      toolbar->AddLittleArcOpenInTabButton();
++    }
++  }
+   browser->window()->Show();
+   return browser;
+ }
+@@ -191,11 +227,28 @@ bool PromoteLittleArcToTab(Browser* brow
+     return false;
+   }
+
++  TabStripModel* target_model = target->tab_strip_model();
++  content::WebContents* disposable_ntp = nullptr;
++  if (target_model && target_model->count() == 1) {
++    content::WebContents* contents = target_model->GetActiveWebContents();
++    if (contents && !contents->GetController().CanGoBack() &&
++        search::IsNTPOrRelatedURL(contents->GetLastCommittedURL(),
++                                  target->profile())) {
++      disposable_ntp = contents;
++    }
++  }
++
+   std::vector<int> indices(static_cast<size_t>(model->count()));
+   for (int i = 0; i < model->count(); ++i) {
+     indices[static_cast<size_t>(i)] = i;
+   }
+   chrome::MoveTabsToExistingWindow(browser, target, indices);
++  if (disposable_ntp) {
++    const int ntp_index = target_model->GetIndexOfWebContents(disposable_ntp);
++    if (ntp_index != TabStripModel::kNoTab) {
++      target_model->CloseWebContentsAt(ntp_index, TabCloseTypes::CLOSE_NONE);
++    }
++  }
+   target->window()->Show();
+   return true;
+ }
+Index: src/chrome/browser/ui/views/toolbar/toolbar_view.cc
+===================================================================
+--- src.orig/chrome/browser/ui/views/toolbar/toolbar_view.cc
++++ src/chrome/browser/ui/views/toolbar/toolbar_view.cc
+@@ -23,6 +23,7 @@
+ #include "base/trace_event/trace_event.h"
+ #include "build/build_config.h"
+ #include "chrome/app/chrome_command_ids.h"
++#include "chrome/app/vector_icons/vector_icons.h"
+ #include "chrome/browser/actor/ui/actor_ui_metrics.h"
+ #include "chrome/browser/actor/ui/task_list_bubble/actor_task_list_bubble_controller.h"
+ #include "chrome/browser/command_updater.h"
+@@ -827,6 +828,28 @@ void ToolbarView::Init() {
+   initialized_ = true;
+ }
+
++void ToolbarView::AddLittleArcOpenInTabButton() {
++  if (display_mode_ != DisplayMode::kLocation ||
++      little_arc_open_in_tab_button_) {
++    return;
++  }
++
++  little_arc_open_in_tab_button_ =
++      AddChildView(std::make_unique<ToolbarButton>(base::BindRepeating(
++          [](Browser* browser) {
++            chrome::ExecuteCommand(browser, IDC_OPEN_FILE);
++          },
++          browser_)));
++  little_arc_open_in_tab_button_->SetVectorIcon(kOpenInNewIcon);
++  little_arc_open_in_tab_button_->SetTooltipText(
++      l10n_util::GetStringUTF16(IDS_LITTLE_ARC_OPEN_IN_TAB));
++  little_arc_open_in_tab_button_->GetViewAccessibility().SetName(
++      l10n_util::GetStringUTF16(IDS_LITTLE_ARC_OPEN_IN_TAB));
++  little_arc_open_in_tab_button_->SetFocusBehavior(
++      views::View::FocusBehavior::ALWAYS);
++  InvalidateLayout();
++}
++
+ void ToolbarView::InitGlicContainer() {
+   if (base::FeatureList::IsEnabled(features::kGlicActorUi) &&
+       features::kGlicActorUiTaskIcon.Get()) {
+Index: src/chrome/browser/ui/views/toolbar/toolbar_view.h
+===================================================================
+--- src.orig/chrome/browser/ui/views/toolbar/toolbar_view.h
++++ src/chrome/browser/ui/views/toolbar/toolbar_view.h
+@@ -182,6 +182,9 @@ class ToolbarView : public views::Access
+   // Updates the vertical tabs collapse button visibility and icon.
+   void UpdateVerticalTabsCollapseButton();
+
++  // Adds the promotion control to a compact Little Arc toolbar.
++  void AddLittleArcOpenInTabButton();
++
+   // Accessors.
+   Browser* browser() const { return browser_; }
+   views::Button* GetChromeLabsButton() const;
+@@ -521,6 +524,8 @@ class ToolbarView : public views::Access
+   // `toolbar_controller_`.
+   raw_ptr<OverflowButton> overflow_button_ = nullptr;
+
++  raw_ptr<ToolbarButton> little_arc_open_in_tab_button_ = nullptr;
++
+   base::CallbackListSubscription vertical_tab_mode_subscription_;
+   base::CallbackListSubscription vertical_tab_collapse_subscription_;
+
+Index: src/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+===================================================================
+--- src.orig/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ src/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -585,6 +585,9 @@ void AddAppearanceStrings(content::WebUI
+       {"centeredLocationBar", IDS_SETTINGS_CENTERED_LOCATION_BAR},
+       {"verticalCollapseShortcut", IDS_SETTINGS_VERTICAL_COLLAPSE_SHORTCUT},
+       {"minimalLocationBar", IDS_SETTINGS_MINIMAL_LOCATION_BAR},
++      {"littleArcExternalLinks", IDS_SETTINGS_LITTLE_ARC_EXTERNAL_LINKS},
++      {"littleArcExternalLinksDescription",
++       IDS_SETTINGS_LITTLE_ARC_EXTERNAL_LINKS_DESCRIPTION},
+       {"shiftRightClickContextMenu",
+        IDS_SETTINGS_SHIFT_RIGHT_CLICK_CONTEXT_MENU},
+       {"showZoomIndicator", IDS_SETTINGS_SHOW_ZOOM_INDICATOR},

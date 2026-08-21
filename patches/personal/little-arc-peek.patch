@@ -1,0 +1,321 @@
+--- a/chrome/browser/app_controller_mac.mm
++++ b/chrome/browser/app_controller_mac.mm
+@@ -79,6 +79,7 @@
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_live_tab_context.h"
+ #include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
++#include "chrome/browser/ui/helium/helium_little_arc.h"
+ #include "chrome/browser/ui/helium/helium_space.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
+ #include "chrome/browser/ui/helium/helium_space_service_factory.h"
+@@ -2674,6 +2675,11 @@ void OpenUrlsInBrowserWithProfile(const
+     profile = ProfileManager::MaybeForceOffTheRecordMode(
+         profile->GetOriginalProfile());
+   }
++  // Little Arc: keep the main window's tab state intact for external links.
++  if (helium::ShouldOpenExternalLinksInLittleArc(profile)) {
++    helium::OpenUrlsInLittleArc(profile, urls);
++    return;
++  }
+   // Use FindTabbedBrowser() to ensure URLs open in a normal tabbed browser
+   // window, not in PWA/app windows which cannot accept new tabs.
+   BrowserWindowInterface* browser =
+--- a/chrome/browser/ui/BUILD.gn
++++ b/chrome/browser/ui/BUILD.gn
+@@ -376,6 +376,8 @@ static_library("ui") {
+     "helium/helium_layout_state_controller.h",
+     "helium/helium_favorites_and_pins.cc",
+     "helium/helium_favorites_and_pins.h",
++    "helium/helium_little_arc.cc",
++    "helium/helium_little_arc.h",
+     "helium/helium_space.cc",
+     "helium/helium_space.h",
+     "helium/helium_space_service.cc",
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -70,6 +70,7 @@
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "chrome/browser/ui/fullscreen/browser_window_fullscreen_controller.h"
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
++#include "chrome/browser/ui/helium/helium_little_arc.h"
+ #include "chrome/browser/ui/lens/lens_overlay_controller.h"
+ #include "chrome/browser/ui/managed_ui.h"
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+@@ -1123,6 +1124,11 @@ void BrowserCommandController::HandleCom
+
+     // Show various bits of UI
+     case IDC_OPEN_FILE:
++      // Little Arc remaps ⌘O from Open File to "promote peek into a tab".
++      if (helium::IsLittleArcBrowser(browser_)) {
++        helium::PromoteLittleArcToTab(browser_);
++        break;
++      }
+       browser_->GetFeatures()
+           .browser_select_file_dialog_controller()
+           ->OpenFile();
+--- a/chrome/browser/ui/browser_ui_prefs.cc
++++ b/chrome/browser/ui/browser_ui_prefs.cc
+@@ -135,6 +135,8 @@ void RegisterBrowserUserPrefs(user_prefs
+
+   registry->RegisterBooleanPref(prefs::kHeliumMinimalLocationBar, false);
+
++  registry->RegisterBooleanPref(prefs::kHeliumLittleArcExternalLinks, true);
++
+   registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
+                                 pref_registration_flags);
+   registry->RegisterBooleanPref(prefs::kShowHomeButton, false,
+--- /dev/null
++++ b/chrome/browser/ui/helium/helium_little_arc.cc
+@@ -0,0 +1,203 @@
++// Copyright 2026 The Helium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/helium/helium_little_arc.h"
++
++#include <algorithm>
++#include <vector>
++
++#include "base/memory/weak_ptr.h"
++#include "base/no_destructor.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/browser_window.h"
++#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
++#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
++#include "chrome/browser/ui/tabs/tab_strip_model.h"
++#include "chrome/common/pref_names.h"
++#include "components/prefs/pref_service.h"
++#include "ui/base/mojom/window_show_state.mojom.h"
++#include "ui/base/page_transition_types.h"
++#include "ui/base/window_open_disposition.h"
++#include "ui/display/display.h"
++#include "ui/display/screen.h"
++#include "ui/gfx/geometry/rect.h"
++#include "url/gurl.h"
++
++namespace helium {
++namespace {
++
++constexpr int kLittleArcDefaultWidth = 960;
++constexpr int kLittleArcDefaultHeight = 700;
++constexpr float kLittleArcMaxWorkAreaFraction = 0.85f;
++
++class LittleArcTracker {
++ public:
++  static LittleArcTracker& GetInstance() {
++    static base::NoDestructor<LittleArcTracker> instance;
++    return *instance;
++  }
++
++  void Mark(Browser* browser) {
++    Prune();
++    browsers_.push_back(browser->AsWeakPtr());
++  }
++
++  bool Contains(const Browser* browser) {
++    Prune();
++    for (const base::WeakPtr<Browser>& weak : browsers_) {
++      if (weak.get() == browser) {
++        return true;
++      }
++    }
++    return false;
++  }
++
++ private:
++  friend class base::NoDestructor<LittleArcTracker>;
++
++  LittleArcTracker() = default;
++
++  void Prune() {
++    std::erase_if(browsers_,
++                  [](const base::WeakPtr<Browser>& weak) { return !weak; });
++  }
++
++  std::vector<base::WeakPtr<Browser>> browsers_;
++};
++
++gfx::Rect CalculateLittleArcBounds() {
++  display::Screen* screen = display::Screen::Get();
++  const display::Display display =
++      screen ? screen->GetPrimaryDisplay() : display::Display();
++  const gfx::Rect work_area = display.work_area();
++
++  const int width = std::min(
++      kLittleArcDefaultWidth,
++      static_cast<int>(work_area.width() * kLittleArcMaxWorkAreaFraction));
++  const int height = std::min(
++      kLittleArcDefaultHeight,
++      static_cast<int>(work_area.height() * kLittleArcMaxWorkAreaFraction));
++
++  return gfx::Rect(work_area.x() + (work_area.width() - width) / 2,
++                   work_area.y() + (work_area.height() - height) / 2, width,
++                   height);
++}
++
++Browser* FindPromotionTarget(Profile* profile, Browser* source) {
++  Browser* target = nullptr;
++  ProfileBrowserCollection::GetForProfile(profile)->ForEach(
++      [&](BrowserWindowInterface* window) {
++        Browser* candidate = window->GetBrowserForMigrationOnly();
++        if (candidate == source || !candidate->is_type_normal()) {
++          return true;
++        }
++        target = candidate;
++        return false;
++      },
++      BrowserCollection::Order::kActivation);
++
++  if (target) {
++    return target;
++  }
++
++  if (BrowserWindowInterface* tabbed =
++          ProfileBrowserCollection::GetForProfile(profile)
++              ->FindTabbedBrowser()) {
++    return tabbed->GetBrowserForMigrationOnly();
++  }
++
++  if (Browser::GetCreationStatusForProfile(profile) !=
++      Browser::CreationStatus::kOk) {
++    return nullptr;
++  }
++
++  Browser::CreateParams params(Browser::TYPE_NORMAL, profile, true);
++  params.should_trigger_session_restore = false;
++  Browser* created = Browser::Create(params);
++  created->window()->Show();
++  return created;
++}
++
++}  // namespace
++
++bool ShouldOpenExternalLinksInLittleArc(Profile* profile) {
++  if (!profile) {
++    return false;
++  }
++  PrefService* prefs = profile->GetPrefs();
++  return prefs && prefs->GetBoolean(prefs::kHeliumLittleArcExternalLinks);
++}
++
++bool IsLittleArcBrowser(const Browser* browser) {
++  return browser && LittleArcTracker::GetInstance().Contains(browser);
++}
++
++Browser* OpenUrlsInLittleArc(Profile* profile, const std::vector<GURL>& urls) {
++  if (!profile || urls.empty()) {
++    return nullptr;
++  }
++  if (Browser::GetCreationStatusForProfile(profile) !=
++      Browser::CreationStatus::kOk) {
++    return nullptr;
++  }
++
++  Browser::CreateParams params(Browser::TYPE_POPUP, profile, true);
++  params.omit_from_session_restore = true;
++  params.should_trigger_session_restore = false;
++  params.initial_bounds = CalculateLittleArcBounds();
++  params.initial_origin_specified = Browser::ValueSpecified::kSpecified;
++  params.initial_show_state = ui::mojom::WindowShowState::kNormal;
++  params.can_maximize = true;
++  params.can_fullscreen = true;
++
++  Browser* browser = Browser::Create(params);
++  if (!browser) {
++    return nullptr;
++  }
++  LittleArcTracker::GetInstance().Mark(browser);
++
++  bool first_tab = true;
++  for (const GURL& url : urls) {
++    NavigateParams nav(browser, url, ui::PAGE_TRANSITION_LINK);
++    nav.disposition = first_tab ? WindowOpenDisposition::NEW_FOREGROUND_TAB
++                                : WindowOpenDisposition::NEW_BACKGROUND_TAB;
++    nav.window_action = NavigateParams::WindowAction::kShowWindow;
++    Navigate(&nav);
++    first_tab = false;
++  }
++
++  browser->window()->Show();
++  return browser;
++}
++
++bool PromoteLittleArcToTab(Browser* browser) {
++  if (!IsLittleArcBrowser(browser)) {
++    return false;
++  }
++
++  TabStripModel* model = browser->tab_strip_model();
++  if (!model || model->empty()) {
++    browser->window()->Close();
++    return true;
++  }
++
++  Browser* target = FindPromotionTarget(browser->profile(), browser);
++  if (!target) {
++    return false;
++  }
++
++  std::vector<int> indices(static_cast<size_t>(model->count()));
++  for (int i = 0; i < model->count(); ++i) {
++    indices[static_cast<size_t>(i)] = i;
++  }
++  chrome::MoveTabsToExistingWindow(browser, target, indices);
++  target->window()->Show();
++  return true;
++}
++
++}  // namespace helium
+--- /dev/null
++++ b/chrome/browser/ui/helium/helium_little_arc.h
+@@ -0,0 +1,32 @@
++// Copyright 2026 The Helium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_HELIUM_HELIUM_LITTLE_ARC_H_
++#define CHROME_BROWSER_UI_HELIUM_HELIUM_LITTLE_ARC_H_
++
++#include <vector>
++
++class Browser;
++class GURL;
++class Profile;
++
++namespace helium {
++
++// Opens external links in a temporary popup so the main window's tab state is
++// left alone. ⌘O promotes the peek into a normal tab.
++bool ShouldOpenExternalLinksInLittleArc(Profile* profile);
++
++bool IsLittleArcBrowser(const Browser* browser);
++
++// Opens |urls| in a new Little Arc popup for |profile|. Returns the popup, or
++// nullptr if creation failed.
++Browser* OpenUrlsInLittleArc(Profile* profile, const std::vector<GURL>& urls);
++
++// Moves the Little Arc contents into the profile's last tabbed window and
++// closes the popup. Returns false if |browser| is not a Little Arc window.
++bool PromoteLittleArcToTab(Browser* browser);
++
++}  // namespace helium
++
++#endif  // CHROME_BROWSER_UI_HELIUM_HELIUM_LITTLE_ARC_H_
+--- a/chrome/common/pref_names.h
++++ b/chrome/common/pref_names.h
+@@ -647,6 +647,11 @@ inline constexpr char kHeliumZenModeTopC
+ inline constexpr char kHeliumCenteredLocationBar[] =
+     "helium.browser.centered_location_bar";
+
++// When true, links opened from other apps use a temporary Little Arc popup
++// instead of inserting a tab into the current window. ⌘O promotes to a tab.
++inline constexpr char kHeliumLittleArcExternalLinks[] =
++    "helium.little_arc.external_links";
++
+ // A boolean pref set to true if the minimal location bar should be used.
+ inline constexpr char kHeliumMinimalLocationBar[] =
+     "helium.browser.minimal_location_bar";
