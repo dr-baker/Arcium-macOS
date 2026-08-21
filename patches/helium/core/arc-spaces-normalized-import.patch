@@ -741,8 +741,12 @@ Index: src/chrome/browser/ui/BUILD.gn
  # Use a static library here because many test binaries depend on this but don't
  # require many files from it. This makes linking more efficient.
  # TODO(https://crbug.com/353332589): Once //chrome/browser is properly
-@@ -380,6 +394,8 @@ static_library("ui") {
+@@ -378,8 +392,12 @@ static_library("ui") {
+     "helium/helium_favorites_and_pins.h",
+     "helium/helium_little_arc.cc",
      "helium/helium_little_arc.h",
++    "helium/helium_persistent_item_metrics.cc",
++    "helium/helium_persistent_item_metrics.h",
      "helium/helium_space.cc",
      "helium/helium_space.h",
 +    "helium/helium_space_model.cc",
@@ -3600,3 +3604,344 @@ Index: src/chrome/browser/ui/views/tabs/common/folder_tab_container_view.cc
 +        gfx::Rect(kChildIndent, y, std::max(0, width - kChildIndent), height));
      y += height + kTabVerticalPadding;
    }
+
+Index: src/chrome/browser/ui/helium/helium_persistent_item_metrics.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/helium_persistent_item_metrics.cc
++++ src/chrome/browser/ui/helium/helium_persistent_item_metrics.cc
+@@ -8,6 +8,7 @@
+
+ #include "base/functional/bind.h"
+ #include "base/metrics/histogram_functions.h"
++#include "base/strings/strcat.h"
+ #include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "components/tabs/public/tab_interface.h"
+ #include "content/public/browser/navigation_handle.h"
+@@ -37,12 +38,18 @@ std::string HistogramName(PersistentItem
+
+ }  // namespace
+
++BASE_FEATURE(kHeliumPersistentItemMetrics,
++             base::FEATURE_ENABLED_BY_DEFAULT);
++
+ DEFINE_USER_DATA(HeliumPersistentItemMetrics);
+
+ HeliumPersistentItemMetrics::HeliumPersistentItemMetrics(
+     tabs::TabInterface& tab)
+     : tabs::ContentsObservingTabFeature(tab),
+       scoped_unowned_user_data_(tab.GetUnownedUserDataHost(), *this) {
++  tab_subscriptions_.push_back(tab.RegisterDidActivate(base::BindRepeating(
++      &HeliumPersistentItemMetrics::OnDidActivate,
++      weak_factory_.GetWeakPtr())));
+   tab_subscriptions_.push_back(tab.RegisterDidBecomeVisible(
+       base::BindRepeating(&HeliumPersistentItemMetrics::OnDidBecomeVisible,
+                           weak_factory_.GetWeakPtr())));
+@@ -120,6 +127,14 @@ void HeliumPersistentItemMetrics::DidSto
+   pending_open_->recorded_load_stop = true;
+ }
+
++void HeliumPersistentItemMetrics::OnDidActivate(tabs::TabInterface* tab) {
++  if (!pending_open_) {
++    BeginInferredOpen(PersistentItemOpenState::kWarm,
++                      base::TimeTicks::Now());
++  }
++  MarkActivated();
++}
++
+ void HeliumPersistentItemMetrics::OnDidBecomeVisible(
+     tabs::TabInterface* tab) {
+   if (!pending_open_ || pending_open_->recorded_visible) {
+@@ -134,6 +149,34 @@ void HeliumPersistentItemMetrics::OnWill
+   Finish(PersistentItemOpenOutcome::kDeactivated);
+ }
+
++void HeliumPersistentItemMetrics::OnDiscardContents(
++    tabs::TabInterface* tab,
++    content::WebContents* old_contents,
++    content::WebContents* new_contents) {
++  tabs::ContentsObservingTabFeature::OnDiscardContents(tab, old_contents,
++                                                       new_contents);
++  // This callback is the earliest stable tab-scoped point in a discarded-tab
++  // wake. It precedes activation and primary navigation while surviving the
++  // WebContents replacement.
++  if (old_contents->WasDiscarded() && !new_contents->WasDiscarded()) {
++    BeginInferredOpen(PersistentItemOpenState::kDiscarded,
++                      base::TimeTicks::Now());
++  }
++}
++
++bool HeliumPersistentItemMetrics::BeginInferredOpen(
++    PersistentItemOpenState state,
++    base::TimeTicks request_time) {
++  if (!tab().IsPinned() && !IsPinTab(&tab())) {
++    return false;
++  }
++  const PersistentItemKind kind =
++      IsPinTab(&tab()) ? PersistentItemKind::kPin
++                       : PersistentItemKind::kFavorite;
++  BeginOpen(kind, state, request_time);
++  return true;
++}
++
+ void HeliumPersistentItemMetrics::RecordMilestone(const char* milestone,
+                                                   base::TimeTicks now) {
+   CHECK(pending_open_);
+@@ -165,7 +208,11 @@ bool BeginPersistentItemOpen(tabs::TabIn
+ bool BeginPersistentItemOpen(tabs::TabInterface* tab,
+                              PersistentItemOpenState state,
+                              base::TimeTicks request_time) {
+-  if (!IsAnchoredTab(tab)) {
++  // Favorites are represented by native pinned tabs, while Space Pins live in
++  // the Pins section. Timing must not depend on anchored-home metadata being
++  // restored yet: measuring incomplete restore is itself useful, and this
++  // keeps profile Favorites within the same reusable lifecycle path.
++  if (!tab || (!tab->IsPinned() && !IsPinTab(tab))) {
+     return false;
+   }
+   HeliumPersistentItemMetrics* metrics =
+Index: src/chrome/browser/ui/helium/helium_persistent_item_metrics_unittest.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/helium_persistent_item_metrics_unittest.cc
++++ src/chrome/browser/ui/helium/helium_persistent_item_metrics_unittest.cc
+@@ -6,11 +6,10 @@
+
+ #include <memory>
+
+-#include "base/metrics/histogram_tester.h"
++#include "base/test/metrics/histogram_tester.h"
+ #include "chrome/test/base/chrome_render_view_host_test_harness.h"
+ #include "components/tabs/public/mock_tab_interface.h"
+ #include "content/public/browser/web_contents.h"
+-#include "content/public/test/test_web_contents_factory.h"
+ #include "testing/gmock/include/gmock/gmock.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+ #include "ui/base/unowned_user_data/unowned_user_data_host.h"
+@@ -25,11 +24,30 @@ class HeliumPersistentItemMetricsTest
+  public:
+   void SetUp() override {
+     ChromeRenderViewHostTestHarness::SetUp();
+-    mock_tab_ = std::make_unique<testing::NiceMock<tabs::MockTabInterface>>();
++    mock_tab_ = std::make_unique<tabs::MockTabInterface>();
+     ON_CALL(*mock_tab_, GetContents()).WillByDefault(Return(web_contents()));
+     ON_CALL(*mock_tab_, IsVisible()).WillByDefault(Return(true));
++    ON_CALL(*mock_tab_, IsPinned()).WillByDefault(Return(true));
+     ON_CALL(*mock_tab_, GetUnownedUserDataHost())
+         .WillByDefault(ReturnRef(unowned_user_data_host_));
++    ON_CALL(*mock_tab_, RegisterWillDiscardContents)
++        .WillByDefault(
++            [this](tabs::TabInterface::WillDiscardContentsCallback callback) {
++              will_discard_contents_ = std::move(callback);
++              return base::CallbackListSubscription();
++            });
++    ON_CALL(*mock_tab_, RegisterWillDeactivate)
++        .WillByDefault(
++            [this](tabs::TabInterface::WillDeactivateCallback callback) {
++              will_deactivate_ = std::move(callback);
++              return base::CallbackListSubscription();
++            });
++    ON_CALL(*mock_tab_, RegisterDidActivate)
++        .WillByDefault(
++            [this](tabs::TabInterface::DidActivateCallback callback) {
++              did_activate_ = std::move(callback);
++              return base::CallbackListSubscription();
++            });
+     metrics_ = std::make_unique<HeliumPersistentItemMetrics>(*mock_tab_);
+   }
+
+@@ -41,7 +59,10 @@ class HeliumPersistentItemMetricsTest
+
+  protected:
+   ui::UnownedUserDataHost unowned_user_data_host_;
+-  std::unique_ptr<testing::NiceMock<tabs::MockTabInterface>> mock_tab_;
++  tabs::TabInterface::WillDiscardContentsCallback will_discard_contents_;
++  tabs::TabInterface::DidActivateCallback did_activate_;
++  tabs::TabInterface::WillDeactivateCallback will_deactivate_;
++  std::unique_ptr<tabs::MockTabInterface> mock_tab_;
+   std::unique_ptr<HeliumPersistentItemMetrics> metrics_;
+ };
+
+@@ -62,6 +83,18 @@ TEST_F(HeliumPersistentItemMetricsTest,
+       PersistentItemOpenOutcome::kWarmActivated, 1);
+ }
+
++TEST_F(HeliumPersistentItemMetricsTest, ActivationAutomaticallyMeasuresWarmItem) {
++  base::HistogramTester histograms;
++
++  did_activate_.Run(mock_tab_.get());
++
++  histograms.ExpectUniqueSample("Helium.PersistentItem.Open.State",
++                                PersistentItemOpenState::kWarm, 1);
++  histograms.ExpectUniqueSample(
++      "Helium.PersistentItem.Open.Outcome",
++      PersistentItemOpenOutcome::kWarmActivated, 1);
++}
++
+ TEST_F(HeliumPersistentItemMetricsTest, NewOpenSupersedesPendingOpen) {
+   base::HistogramTester histograms;
+
+@@ -71,7 +104,7 @@ TEST_F(HeliumPersistentItemMetricsTest,
+   metrics_->BeginOpen(PersistentItemKind::kPin,
+                       PersistentItemOpenState::kDiscarded,
+                       base::TimeTicks::Now());
+-  metrics_->OnWillDeactivate(mock_tab_.get());
++  will_deactivate_.Run(mock_tab_.get());
+
+   histograms.ExpectBucketCount("Helium.PersistentItem.Open.Outcome",
+                                PersistentItemOpenOutcome::kSuperseded, 1);
+@@ -81,11 +114,10 @@ TEST_F(HeliumPersistentItemMetricsTest,
+
+ TEST_F(HeliumPersistentItemMetricsTest, FollowsDiscardedWebContents) {
+   std::unique_ptr<content::WebContents> replacement =
+-      content::TestWebContentsFactory().CreateWebContents(
+-          profile(), content::SiteInstance::Create(profile()));
++      CreateTestWebContents();
+
+-  metrics_->OnDiscardContents(mock_tab_.get(), web_contents(),
+-                              replacement.get());
++  will_discard_contents_.Run(mock_tab_.get(), web_contents(),
++                             replacement.get());
+
+   EXPECT_EQ(metrics_->web_contents(), replacement.get());
+ }
+Index: src/chrome/browser/ui/tabs/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/tabs/BUILD.gn
++++ src/chrome/browser/ui/tabs/BUILD.gn
+@@ -756,6 +756,7 @@ if (!is_android) {
+   source_set("unit_tests") {
+     testonly = true
+     sources = [
++      "../helium/helium_persistent_item_metrics_unittest.cc",
+       "inactive_window_mouse_event_controller_unittest.cc",
+       "page_context_eligibility_helper_unittest.cc",
+       "split_view_iph_controller_unittest.cc",
+Index: src/chrome/browser/ui/tabs/tab_features.cc
+===================================================================
+--- src.orig/chrome/browser/ui/tabs/tab_features.cc
++++ src/chrome/browser/ui/tabs/tab_features.cc
+@@ -56,6 +56,7 @@
+ #include "chrome/browser/ui/commerce/commerce_ui_tab_helper.h"
+ #include "chrome/browser/ui/context_highlight/context_highlight_tab_feature.h"
+ #include "chrome/browser/ui/cookie_controls/roll_back_mode_b_infobar_controller.h"
++#include "chrome/browser/ui/helium/helium_persistent_item_metrics.h"
+ #include "chrome/browser/ui/lens/lens_overlay_controller.h"
+ #include "chrome/browser/ui/lens/lens_search_controller.h"
+ #include "chrome/browser/ui/page_action/action_ids.h"
+@@ -630,6 +631,13 @@ void TabFeatures::Init(TabInterface& tab
+       GetUserDataFactory().CreateInstance<tabs::PageContextEligibilityHelper>(
+           tab, tab);
+
++  if (base::FeatureList::IsEnabled(helium::kHeliumPersistentItemMetrics)) {
++    helium_persistent_item_metrics_ = GetUserDataFactory()
++                                          .CreateInstance<
++                                              helium::HeliumPersistentItemMetrics>(
++                                              tab, tab);
++  }
++
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+   if (base::FeatureList::IsEnabled(enterprise_reporting::kSaasUsageReporting)) {
+     saas_usage_navigation_observer_ =
+Index: src/tools/metrics/histograms/enums.xml
+===================================================================
+--- src.orig/tools/metrics/histograms/enums.xml
++++ src/tools/metrics/histograms/enums.xml
+@@ -4951,6 +4951,26 @@ shown properly on the user-facing crash
+   <int value="4" label="Ready, other status (not success, not empty index)"/>
+ </enum>
+
++<enum name="HeliumPersistentItemKind">
++  <int value="0" label="Favorite"/>
++  <int value="1" label="Pin"/>
++</enum>
++
++<enum name="HeliumPersistentItemOpenOutcome">
++  <int value="0" label="Warm item activated"/>
++  <int value="1" label="First visually non-empty paint"/>
++  <int value="2" label="Superseded by a newer open request"/>
++  <int value="3" label="Deactivated before completion"/>
++  <int value="4" label="Timed out"/>
++  <int value="5" label="Tab destroyed before completion"/>
++</enum>
++
++<enum name="HeliumPersistentItemOpenState">
++  <int value="0" label="Cold"/>
++  <int value="1" label="Warm"/>
++  <int value="2" label="Discarded"/>
++</enum>
++
+ <enum name="HlsDemuxerStatus">
+   <int value="0" label="kOk"/>
+   <int value="1" label="kNoSegmentData"/>
+Index: src/tools/metrics/histograms/histograms_xml_files.gni
+===================================================================
+--- src.orig/tools/metrics/histograms/histograms_xml_files.gni
++++ src/tools/metrics/histograms/histograms_xml_files.gni
+@@ -126,6 +126,7 @@ histograms_xml_files = [
+   "//tools/metrics/histograms/metadata/gpu/histograms.xml",
+   "//tools/metrics/histograms/metadata/hang_watcher/enums.xml",
+   "//tools/metrics/histograms/metadata/hang_watcher/histograms.xml",
++  "//tools/metrics/histograms/metadata/helium/histograms.xml",
+   "//tools/metrics/histograms/metadata/help_app/histograms.xml",
+   "//tools/metrics/histograms/metadata/histogram_suffixes_list.xml",
+   "//tools/metrics/histograms/metadata/history/enums.xml",
+Index: src/chrome/browser/ui/helium/helium_persistent_item_metrics.h
+===================================================================
+--- src.orig/chrome/browser/ui/helium/helium_persistent_item_metrics.h
++++ src/chrome/browser/ui/helium/helium_persistent_item_metrics.h
+@@ -9,6 +9,7 @@
+ #include <vector>
+
+ #include "base/callback_list.h"
++#include "base/feature_list.h"
+ #include "base/memory/weak_ptr.h"
+ #include "base/time/time.h"
+ #include "base/timer/timer.h"
+@@ -26,6 +27,8 @@ class TabInterface;
+
+ namespace helium {
+
++BASE_DECLARE_FEATURE(kHeliumPersistentItemMetrics);
++
+ // These values are persisted to UMA. Do not renumber or reuse them.
+ enum class PersistentItemKind {
+   kFavorite = 0,
+@@ -94,8 +97,14 @@ class HeliumPersistentItemMetrics
+     bool recorded_load_stop = false;
+   };
+
++  void OnDidActivate(tabs::TabInterface* tab);
+   void OnDidBecomeVisible(tabs::TabInterface* tab);
+   void OnWillDeactivate(tabs::TabInterface* tab);
++  void OnDiscardContents(tabs::TabInterface* tab,
++                         content::WebContents* old_contents,
++                         content::WebContents* new_contents) override;
++  bool BeginInferredOpen(PersistentItemOpenState state,
++                         base::TimeTicks request_time);
+   void RecordMilestone(const char* milestone, base::TimeTicks now);
+   void Finish(PersistentItemOpenOutcome outcome);
+
+Index: src/chrome/browser/ui/tabs/public/tab_features.h
+===================================================================
+--- src.orig/chrome/browser/ui/tabs/public/tab_features.h
++++ src/chrome/browser/ui/tabs/public/tab_features.h
+@@ -117,6 +117,10 @@ namespace memory_saver {
+ class MemorySaverChipController;
+ }  // namespace memory_saver
+
++namespace helium {
++class HeliumPersistentItemMetrics;
++}  // namespace helium
++
+ namespace zoom {
+ class ZoomViewController;
+ }  // namespace zoom
+@@ -567,6 +571,9 @@ class TabFeatures {
+   std::unique_ptr<tabs::PageContextEligibilityHelper>
+       page_context_eligibility_helper_;
+
++  std::unique_ptr<helium::HeliumPersistentItemMetrics>
++      helium_persistent_item_metrics_;
++
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+     BUILDFLAG(IS_CHROMEOS)
+   std::unique_ptr<wallet::ChromeWalletablePassClient> walletable_pass_client_;
