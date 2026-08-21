@@ -49,7 +49,7 @@ class RuntimeTestCase(unittest.TestCase):
             manifest_path="/registry/runs/isolated--test.json",
         )
 
-    def test_normal_profile_is_the_historic_dev_profile(self) -> None:
+    def test_normal_profile_is_the_canonical_persistent_dev_profile(self) -> None:
         spec = runtime.resolve_profile(home=self.home)
         self.assertEqual(spec.mode, "normal")
         self.assertEqual(

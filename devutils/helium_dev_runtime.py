@@ -155,10 +155,10 @@ def resolve_profile(
 ) -> ProfileSpec:
     """Resolve a profile without creating it.
 
-    ``normal`` is intentionally the historic persistent Dev profile.  Named
-    isolated and fresh profiles live below the harness registry parent, never
-    below the release profile.  ``fresh`` creation is enforced by
-    :func:`prepare_profile`.
+    ``normal`` is the canonical persistent Dev profile for ongoing Spaces and
+    Pins work. Named isolated and fresh profiles live below the harness
+    registry parent, never below the release profile. ``fresh`` creation is
+    enforced by :func:`prepare_profile`.
     """
 
     if mode not in {"normal", "isolated", "fresh"}:
