@@ -302,13 +302,21 @@ ___helium_validate() {
     if [ "$1" = "config" ]; then
         python3 "$_main_repo/devutils/validate_config.py"
     elif [ "$1" = "patches" ]; then
-        if [ ! -f "patches/series.merged" ]; then
-            echo "patches/series.merged doesn't exist. did you forget to merge?" >&2
+        local _series_path
+        if [ -f "$_root_dir/patches/series" ] && [ -f "$_root_dir/patches/series.merged" ]; then
+            echo "both patches/series and patches/series.merged exist; resolve the merge state" >&2
+            return 1
+        elif [ -f "$_root_dir/patches/series.merged" ]; then
+            _series_path="$_root_dir/patches/series.merged"
+        elif [ -f "$_root_dir/patches/series" ]; then
+            _series_path="$_root_dir/patches/series"
+        else
+            echo "neither patches/series nor patches/series.merged exists" >&2
             return 1
         fi
         python3 "$_main_repo/devutils/validate_patches.py" \
             -l "$_src_dir" \
-            -s patches/series.merged
+            -s "$_series_path"
     elif [ "$1" = "series" ]; then
         "$_root_dir/devutils/check_patch_files.sh"
     else
