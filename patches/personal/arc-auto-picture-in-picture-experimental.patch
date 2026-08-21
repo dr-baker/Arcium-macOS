@@ -1,0 +1,74 @@
+Index: src/chrome/browser/picture_in_picture/auto_picture_in_picture_tab_helper.cc
+===================================================================
+--- src.orig/chrome/browser/picture_in_picture/auto_picture_in_picture_tab_helper.cc
++++ src/chrome/browser/picture_in_picture/auto_picture_in_picture_tab_helper.cc
+@@ -630,7 +630,9 @@ void AutoPictureInPictureTabHelper::Mayb
+ }
+
+ void AutoPictureInPictureTabHelper::MaybeStartOrStopObservers() {
+-  if (is_enter_auto_picture_in_picture_available_ ||
++  if (base::FeatureList::IsEnabled(
++          blink::features::kBrowserInitiatedAutomaticPictureInPicture) ||
++      is_enter_auto_picture_in_picture_available_ ||
+       is_in_auto_picture_in_picture_) {
+     tab_observer_helper_->StartObserving();
+
+@@ -665,8 +667,11 @@ bool AutoPictureInPictureTabHelper::IsEl
+     return false;
+   }
+
+-  // The website must have registered for autopip.
+-  if (!is_enter_auto_picture_in_picture_available_) {
++  // Browser-initiated auto-PiP can select the active video directly. Keep the
++  // registration requirement for the website-driven path.
++  if (!base::FeatureList::IsEnabled(
++          blink::features::kBrowserInitiatedAutomaticPictureInPicture) &&
++      !is_enter_auto_picture_in_picture_available_) {
+     return false;
+   }
+
+@@ -713,8 +718,11 @@ bool AutoPictureInPictureTabHelper::IsEl
+ }
+
+ bool AutoPictureInPictureTabHelper::MeetsVideoPlaybackConditions() const {
++  const bool browser_initiated_auto_pip = base::FeatureList::IsEnabled(
++      blink::features::kBrowserInitiatedAutomaticPictureInPicture);
+   return has_audio_focus_ && is_playing_ && WasRecentlyAudible() &&
+-         has_safe_url_ && MeetsMediaEngagementConditions();
++         has_safe_url_ &&
++         (browser_initiated_auto_pip || MeetsMediaEngagementConditions());
+ }
+
+ bool AutoPictureInPictureTabHelper::IsUsingCameraOrMicrophone() const {
+Index: src/content/browser/media/session/media_session_impl.cc
+===================================================================
+--- src.orig/content/browser/media/session/media_session_impl.cc
++++ src/content/browser/media/session/media_session_impl.cc
+@@ -1341,6 +1341,12 @@ void MediaSessionImpl::ExitPictureInPict
+ }
+
+ void MediaSessionImpl::EnterAutoPictureInPicture() {
++  if (base::FeatureList::IsEnabled(
++          blink::features::kBrowserInitiatedAutomaticPictureInPicture)) {
++    MaybeEnterBrowserInitiatedAutomaticPictureInPicture();
++    return;
++  }
++
+   if (!ShouldRouteAction(
+           media_session::mojom::MediaSessionAction::kEnterPictureInPicture)) {
+     MaybeEnterBrowserInitiatedAutomaticPictureInPicture();
+@@ -2267,9 +2273,11 @@ bool MediaSessionImpl::CanEnterBrowserIn
+     return false;
+   }
+
+-  // If the website has specified an action handler for 'enterpictureinpicture',
+-  // then we should not enter browser-initiated automatic picture-in-picture.
+-  if (routed_service_ &&
++  // Preserve website-owned automatic PiP unless the browser-initiated feature
++  // explicitly asks Chromium to select the active video itself.
++  if (!base::FeatureList::IsEnabled(
++          blink::features::kBrowserInitiatedAutomaticPictureInPicture) &&
++      routed_service_ &&
+       routed_service_->actions().contains(
+           media_session::mojom::MediaSessionAction::kEnterPictureInPicture)) {
+     return false;
