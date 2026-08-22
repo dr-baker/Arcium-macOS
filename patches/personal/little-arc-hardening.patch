@@ -22,7 +22,7 @@ Index: src/chrome/browser/app_controller_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/app_controller_mac.mm
 +++ src/chrome/browser/app_controller_mac.mm
-@@ -2700,8 +2700,8 @@ void OpenUrlsInBrowserWithProfile(const
+@@ -2673,8 +2673,8 @@ void OpenUrlsInBrowserWithProfile(const
          profile->GetOriginalProfile());
    }
    // Little Arc: keep the main window's tab state intact for external links.
