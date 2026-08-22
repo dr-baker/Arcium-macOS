@@ -243,6 +243,10 @@ ___helium_run() {
     ___helium_harness run "$@"
 }
 
+___helium_dev_bundle() {
+    ___helium_harness dev-bundle "$@"
+}
+
 ___helium_status() {
     ___helium_harness status "$@"
 }
@@ -415,6 +419,7 @@ __helium_menu() {
 
         build) ___helium_build;;
         run) shift; ___helium_run "$@";;
+        dev-bundle) shift; ___helium_dev_bundle "$@";;
         status) shift; ___helium_status "$@";;
         activate) shift; ___helium_activate "$@";;
         stop) shift; ___helium_stop "$@";;
@@ -456,7 +461,8 @@ __helium_menu() {
             echo "\tlint - he format + he tidy" >&2
 
             echo "\n" >&2
-            echo "\trun [--isolated NAME|--fresh NAME] [--json] [browser flags...] - runs the exact Dev bundle" >&2
+            echo "\trun [--isolated NAME|--fresh NAME] [--preflight] [--json] [browser flags...] - runs or checks the exact Dev bundle" >&2
+            echo "\tdev-bundle [--json] - clones the fresh Helium.app into a signed Helium Dev.app" >&2
             echo "\tstatus|activate|stop|restart [profile options] [--json] - manage one exact Dev profile" >&2
             echo "\tbuild-plan TARGET... - graph-validate and dry-run explicit targets" >&2
             echo "\tcompile TARGET... - compile explicit focused targets within the edge budget" >&2

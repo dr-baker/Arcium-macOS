@@ -28,6 +28,7 @@ from helium_dev_build import (
     BuildPaths,
     HeliumDevBuilder,
 )
+from helium_dev_bundle import BundleError, package_dev_bundle
 from helium_dev_runtime import (
     MANIFEST_FIELDS,
     LockBusyError,
@@ -395,8 +396,41 @@ def runtime_action(
 ) -> dict[str, object]:
     """Perform one scoped runtime action and persist its privacy-safe result."""
 
-    profile, passthrough = _runtime_profile(arguments, home=home)
+    preflight = sum(argument == "--preflight" for argument in arguments)
+    if preflight > 1:
+        raise RuntimeInputError("--preflight may be supplied only once")
+    if preflight and action != "run":
+        raise RuntimeInputError("--preflight is only valid with run")
+    runtime_arguments = tuple(argument for argument in arguments if argument != "--preflight")
+    profile, passthrough = _runtime_profile(runtime_arguments, home=home)
     paths = resolve_worktree_paths(root)
+    if preflight:
+        if not paths.component_path.is_file():
+            raise HarnessError(f"Helium Dev component is missing: {paths.component_path}")
+        cohort = discover_chromium_processes(
+            _ps_snapshot(), executable_path=paths.executable_path, user_data_dir=profile.user_data_dir
+        )
+        if cohort.records:
+            raise HarnessError("an exact Helium Dev process is already running for this profile")
+        return {
+            "ok": True,
+            "action": "run-preflight",
+            "app_path": str(paths.app_path),
+            "executable_path": str(paths.executable_path),
+            "bundle_identifier": paths.bundle_identifier,
+            "profile_mode": profile.mode,
+            "user_data_dir": str(profile.user_data_dir),
+            "profile_directory": profile.profile_directory,
+            "launch_arguments": list(launch_arguments(profile, passthrough)),
+            "process_state": "not-running",
+            "proof_gates": (
+                "dev-bundle-resolved",
+                "executable-ready",
+                "component-ready",
+                "profile-scope-validated",
+                "launch-not-started",
+            ),
+        }
     registry = None if registry_root is None else Path(registry_root)
     manifest_path = manifest_path_for(profile, registry)
     lock = acquire_profile_lock(profile, root=registry)
@@ -508,6 +542,14 @@ def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, 
     return result.as_dict()
 
 
+def dev_bundle_action(root: str, arguments: Sequence[str]) -> dict[str, object]:
+    """Create the active worktree's independently identifiable Dev bundle."""
+
+    if arguments:
+        raise RuntimeInputError("dev-bundle takes no arguments")
+    return package_dev_bundle(root)
+
+
 def _edge_budget_from_environment() -> int:
     value = os.environ.get("HELIUM_DEV_EDGE_BUDGET", str(DEFAULT_EDGE_BUDGET))
     try:
@@ -578,6 +620,15 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
     if "proof_gates" in document:
         state = "ok" if document.get("ok") else "refused"
         gates = ", ".join(str(gate) for gate in document.get("proof_gates", ())) or "none"
+        if document.get("action") == "dev-bundle":
+            print(
+                f"dev-bundle: {state} · {document.get('display_name', '-') } · "
+                f"{document.get('copy_method', '-')} · proof {gates}"
+            )
+            return
+        if document.get("action") == "run-preflight":
+            print(f"run preflight: {state} · proof {gates}")
+            return
         edges = document.get("edge_count")
         artifact = document.get("artifact_state")
         print(f"{document['action']}: {state} · {edges if edges is not None else '-'} edges · {artifact} · proof {gates}")
@@ -590,9 +641,10 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
 def _usage() -> str:
     return (
         "usage: helium_dev.py --root WORKTREE <run|status|activate|stop|restart|"
-        "build-plan|compile|relink|build-full> [options]\n"
-        "runtime profiles: --isolated NAME | --fresh NAME; --json\n"
-        "build: --edge-budget N; relink --resources; build-full --approved"
+        "build-plan|compile|relink|build-full|dev-bundle> [options]\n"
+        "runtime profiles: --isolated NAME | --fresh NAME; run --preflight; --json\n"
+        "build: --edge-budget N; relink --resources; build-full --approved; "
+        "dev-bundle: clone and sign Helium Dev.app"
     )
 
 
@@ -611,9 +663,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             document = runtime_action(action, namespace.root, normalized_arguments)
         elif action in {"build-plan", "compile", "relink", "build-full"}:
             document = build_action(action, namespace.root, normalized_arguments)
+        elif action == "dev-bundle":
+            document = dev_bundle_action(namespace.root, normalized_arguments)
         else:
             raise RuntimeInputError(f"unknown he command: {action}")
-    except (HarnessError, LockBusyError, RuntimeInputError, OSError, subprocess.SubprocessError) as error:
+    except (BundleError, HarnessError, LockBusyError, RuntimeInputError, OSError, subprocess.SubprocessError) as error:
         document = structured_result(ok=False, action=action, error=str(error))
         print(str(error), file=sys.stderr)
         _emit(document, json_mode="--json" in action_arguments)
