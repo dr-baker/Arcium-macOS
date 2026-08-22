@@ -9,6 +9,9 @@ _download_cache="$_root_dir/build/download_cache"
 _src_dir="$_root_dir/build/src"
 _main_repo="$_root_dir/helium-chromium"
 
+source "$_root_dir/devutils/setup_python.sh"
+___helium_setup_python
+
 # Clone to get the Chromium Source
 clone=true
 retrieve_generic=false

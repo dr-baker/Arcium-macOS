@@ -28,6 +28,8 @@ _depot_tools_dir="$_src_dir/third_party/depot_tools"
 _siso_dir="$_src_dir/third_party/siso/cipd"
 _siso_path="$_siso_dir/siso"
 
+source "$_root_dir/devutils/setup_python.sh"
+
 alias quilt='quilt --quiltrc -'
 export QUILT_PATCHES="$_root_dir/patches"
 export QUILT_SERIES="series.merged"
@@ -97,6 +99,8 @@ ___helium_info_pull() {
 }
 
 ___helium_configure() {
+    ___helium_setup_python
+
     cd "$_src_dir"
     ___helium_setup_siso
     "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch"
@@ -109,14 +113,35 @@ ___helium_toolchain() {
 }
 
 ___helium_resources() {
+    ___helium_setup_python
+
     python3 "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources"
     python3 "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir"
     python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir"
 }
 
+___helium_version() {
+    if [ ! -f "$_src_dir/chrome/VERSION" ]; then
+        echo "error: Chromium source is missing chrome/VERSION" >&2
+        return 1
+    fi
+    if grep -q '^HELIUM_MAJOR=' "$_src_dir/chrome/VERSION"; then
+        return 0
+    fi
+
+    ___helium_setup_python
+    python3 "$_main_repo/utils/helium_version.py" \
+        --tree "$_main_repo" \
+        --platform-tree "$_root_dir" \
+        --chromium-tree "$_src_dir"
+}
+
 ___helium_setup_presetup() {
+    ___helium_setup_python
+
     if [ -d "$_src_dir/out" ]; then
         echo "$_src_dir/out already exists" >&2
+        ___helium_version
         return
     fi
 
@@ -128,10 +153,7 @@ ___helium_setup_presetup() {
     ___helium_resources
     ___helium_setup_gn
 
-    python3 "$_main_repo/utils/helium_version.py" \
-        --tree "$_main_repo" \
-        --platform-tree "$_root_dir" \
-        --chromium-tree "$_src_dir"
+    ___helium_version
 }
 
 ___helium_setup() {
@@ -221,6 +243,10 @@ ___helium_run() {
     ___helium_harness run "$@"
 }
 
+___helium_dev_bundle() {
+    ___helium_harness dev-bundle "$@"
+}
+
 ___helium_status() {
     ___helium_harness status "$@"
 }
@@ -294,13 +320,21 @@ ___helium_validate() {
     if [ "$1" = "config" ]; then
         python3 "$_main_repo/devutils/validate_config.py"
     elif [ "$1" = "patches" ]; then
-        if [ ! -f "patches/series.merged" ]; then
-            echo "patches/series.merged doesn't exist. did you forget to merge?" >&2
+        local _series_path
+        if [ -f "$_root_dir/patches/series" ] && [ -f "$_root_dir/patches/series.merged" ]; then
+            echo "both patches/series and patches/series.merged exist; resolve the merge state" >&2
+            return 1
+        elif [ -f "$_root_dir/patches/series.merged" ]; then
+            _series_path="$_root_dir/patches/series.merged"
+        elif [ -f "$_root_dir/patches/series" ]; then
+            _series_path="$_root_dir/patches/series"
+        else
+            echo "neither patches/series nor patches/series.merged exists" >&2
             return 1
         fi
         python3 "$_main_repo/devutils/validate_patches.py" \
             -l "$_src_dir" \
-            -s patches/series.merged
+            -s "$_series_path"
     elif [ "$1" = "series" ]; then
         "$_root_dir/devutils/check_patch_files.sh"
     else
@@ -385,6 +419,7 @@ __helium_menu() {
 
         build) ___helium_build;;
         run) shift; ___helium_run "$@";;
+        dev-bundle) shift; ___helium_dev_bundle "$@";;
         status) shift; ___helium_status "$@";;
         activate) shift; ___helium_activate "$@";;
         stop) shift; ___helium_stop "$@";;
@@ -426,7 +461,8 @@ __helium_menu() {
             echo "\tlint - he format + he tidy" >&2
 
             echo "\n" >&2
-            echo "\trun [--isolated NAME|--fresh NAME] [--json] [browser flags...] - runs the exact Dev bundle" >&2
+            echo "\trun [--isolated NAME|--fresh NAME] [--preflight] [--json] [browser flags...] - runs or checks the exact Dev bundle" >&2
+            echo "\tdev-bundle [--json] - clones the fresh Helium.app into a signed Helium Dev.app" >&2
             echo "\tstatus|activate|stop|restart [profile options] [--json] - manage one exact Dev profile" >&2
             echo "\tbuild-plan TARGET... - graph-validate and dry-run explicit targets" >&2
             echo "\tcompile TARGET... - compile explicit focused targets within the edge budget" >&2

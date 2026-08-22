@@ -1,0 +1,5 @@
+# Python packages used by the Arcium-macOS build and validation scripts.
+# Keep these in the worktree-local environment created by setup_python.sh.
+Pillow==12.3.0
+httplib2==0.22.0
+requests==2.34.2

@@ -19,9 +19,20 @@ from devutils.helium_dev_build import (
 
 
 class FakeRunner:
-    def __init__(self, *, edge_count: int = 2, missing_edge_count: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        edge_count: int = 2,
+        missing_edge_count: bool = False,
+        truncate_output: bool = False,
+        streamed_edge_count: int | None = None,
+        streamed_edge_count_ambiguous: bool = False,
+    ) -> None:
         self.edge_count = edge_count
         self.missing_edge_count = missing_edge_count
+        self.truncate_output = truncate_output
+        self.streamed_edge_count = streamed_edge_count
+        self.streamed_edge_count_ambiguous = streamed_edge_count_ambiguous
         self.write_explain = True
         self.explain_text = ""
         self.calls: list[tuple[str, ...]] = []
@@ -42,7 +53,14 @@ class FakeRunner:
             output = "ninja: no work to do.\n" if self.edge_count == 0 else f"[1/{self.edge_count}] CXX obj/example.o\n"
             if self.missing_edge_count:
                 output = "ninja: Entering directory out/Default\n"
-            return CommandResult(args=argv, returncode=0, stdout=output)
+            return CommandResult(
+                args=argv,
+                returncode=0,
+                stdout=output,
+                stdout_truncated=self.truncate_output,
+                streamed_edge_count=self.streamed_edge_count,
+                streamed_edge_count_ambiguous=self.streamed_edge_count_ambiguous,
+            )
         return CommandResult(args=argv, returncode=0, stdout="built\n")
 
 
@@ -91,6 +109,8 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertIsNone(parse_dry_run_edge_count("ninja: entering directory out/Default\n"))
         self.assertIsNone(parse_dry_run_edge_count("ninja: no work to do.\nwarning: graph changed\n"))
         self.assertEqual(parse_dry_run_edge_count("ninja: no work to do.\n[1/61] CXX obj/a.o\n"), 61)
+        self.assertEqual(parse_dry_run_edge_count("[1/61] CXX obj/a.o\n[2/61] CXX obj/b.o\n"), 61)
+        self.assertIsNone(parse_dry_run_edge_count("[1/61] CXX obj/a.o\nplanned 60 actions\n"))
 
     def test_build_plan_is_autoninja_dry_run_after_graph_validation(self) -> None:
         result = self.builder.build_plan(("obj/chrome/foo.o",))
@@ -113,6 +133,21 @@ class HeliumDevBuildTest(unittest.TestCase):
         result = self.builder.build_plan(("obj/chrome/foo.o",))
         self.assertFalse(result.ok)
         self.assertIn("recognizable edge count", result.error)
+
+    def test_truncated_dry_run_uses_streamed_edge_count(self) -> None:
+        self.runner.truncate_output = True
+        self.runner.streamed_edge_count = 2
+        result = self.builder.build_plan(("obj/chrome/foo.o",))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.edge_count, 2)
+
+    def test_ambiguous_truncated_dry_run_fails_closed(self) -> None:
+        self.runner.truncate_output = True
+        self.runner.streamed_edge_count = 2
+        self.runner.streamed_edge_count_ambiguous = True
+        result = self.builder.build_plan(("obj/chrome/foo.o",))
+        self.assertFalse(result.ok)
+        self.assertIn("conflicting edge totals", result.error)
 
     def test_compile_rejects_broad_targets(self) -> None:
         for target in ("chrome", "//chrome:chrome", "chrome:chrome", "libchrome_dll.dylib"):
@@ -201,6 +236,22 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertTrue(result.stdout_truncated)
         self.assertLessEqual(len(result.stdout.encode()), 8)
+
+    def test_subprocess_runner_parses_edge_total_beyond_retained_output(self) -> None:
+        result = subprocess_runner(
+            (
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.write('x' * 100000); sys.stdout.write('\\n[1/1,234] CXX obj/a.o\\n')",
+            ),
+            cwd=self.source,
+            env={},
+            max_output_bytes=8,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(result.stdout_truncated)
+        self.assertEqual(result.streamed_edge_count, 1234)
+        self.assertFalse(result.streamed_edge_count_ambiguous)
 
 
 if __name__ == "__main__":

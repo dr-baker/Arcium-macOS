@@ -8,7 +8,7 @@
  #include "chrome/browser/ui/helium/helium_space.h"
  #include "chrome/browser/ui/helium/helium_space_service.h"
  #include "chrome/browser/ui/helium/helium_space_service_factory.h"
-@@ -2674,6 +2675,11 @@ void OpenUrlsInBrowserWithProfile(const
+@@ -2671,6 +2672,11 @@ void OpenUrlsInBrowserWithProfile(const
      profile = ProfileManager::MaybeForceOffTheRecordMode(
          profile->GetOriginalProfile());
    }
