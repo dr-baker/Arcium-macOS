@@ -75,6 +75,35 @@ exact path.
 - A Dev test must use the exact worktree's `Helium Dev.app`, an isolated
   profile, and the mock keychain.
 
+## Dev bundle preparation
+
+After a successful zero-work or focused build has produced
+`build/src/out/Default/Helium.app`, create the worktree-local runtime bundle:
+
+```sh
+source dev.sh
+he dev-bundle --json
+```
+
+`he dev-bundle` refuses a missing or stale executable/component, refuses to
+overwrite an existing `Helium Dev.app`, and stages the copy before publishing
+it. On APFS it uses a clonefile-aware copy; the fallback is an ordinary
+metadata-preserving copy. Only the staged copy's bundle identifiers and
+display names receive the `.dev`/` Dev` identity. Executable names remain
+unchanged for Chromium helper lookup, and the copied bundle is ad-hoc signed
+and verified before publication.
+
+Check the launch contract without starting Chromium:
+
+```sh
+he status --json
+he run --preflight --fresh arcium-validation --json
+```
+
+The preflight checks the exact worktree bundle, component, profile scope, and
+that no matching process is already running. `he run` is the separate gate that
+actually launches the bundle.
+
 ## Proof gates for the next test pass
 
 1. Run focused Chromium tests.
