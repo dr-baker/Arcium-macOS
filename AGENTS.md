@@ -17,6 +17,13 @@ change, regardless of which tools helped create it.
 - `dev.sh` - development build and launch commands.
 - `resources/` - macOS application resources.
 
+## Development loop
+
+- Once per Chromium version: `source dev.sh; he bootstrap --approved`.
+- After patch edits: `he check`.
+- To build and run incrementally: `he dev`.
+- Use `he status` or `he stop` for the exact Dev app.
+
 ## Ground rules
 
 - Start macOS feature branches and COW worktrees in this repository.
