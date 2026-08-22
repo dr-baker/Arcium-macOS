@@ -187,7 +187,7 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertEqual(self.runner.calls, [])
         completed = self.builder.build_full(approved=True)
         self.assertTrue(completed.ok)
-        self.assertEqual(completed.targets, ("chrome", "chromedriver"))
+        self.assertEqual(completed.targets, ("chrome",))
         self.assertIn("-n", self.runner.calls[-2])
         self.assertNotIn("-n", self.runner.calls[-1])
 

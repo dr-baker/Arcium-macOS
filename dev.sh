@@ -161,13 +161,17 @@ ___helium_setup() {
 
     "$_root_dir/devutils/update_patches.sh" merge
 
-    cd "$_src_dir"
-    quilt push -a --refresh
+    ___helium_quilt_push
 
     ___helium_configure
 }
 
 ___helium_reset() {
+    if [ "$1" != "--warm-output" ] || [ "$2" != "--approved" ] || [ -n "$3" ]; then
+        echo "reset preserves the warm build by default." >&2
+        echo "use 'he reset --warm-output --approved' to remove it deliberately." >&2
+        return 2
+    fi
     "$_root_dir/devutils/update_patches.sh" unmerge || true
     rm "$_subs_cache" || true
     rm "$_namesubs_cache" || true
@@ -279,6 +283,48 @@ ___helium_build_full() {
     ___helium_harness build-full "$@"
 }
 
+___helium_check() {
+    "$_root_dir/devutils/check_patch_files.sh" || return
+
+    if [ ! -d "$_src_dir" ] || [ ! -f "$_root_dir/patches/series.merged" ]; then
+        echo "check: patch catalogs passed; no merged source replay is present"
+        return 0
+    fi
+
+    ___helium_quilt_push || return
+    if find "$_src_dir" -name '*.rej' -print -quit | grep -q .; then
+        echo "check: patch rejects remain in the development source" >&2
+        return 1
+    fi
+    git -C "$_src_dir" diff --check || return
+    echo "check: active patch stack passed"
+}
+
+___helium_bootstrap() {
+    if [ "$1" != "--approved" ] || [ -n "$2" ]; then
+        echo "bootstrap performs the rare cold browser build." >&2
+        echo "use 'he bootstrap --approved' after reviewing the cost." >&2
+        return 2
+    fi
+    if [ -x "$_out_dir/Helium.app/Contents/MacOS/Helium" ]; then
+        echo "bootstrap: warm output already exists; use 'he dev'" >&2
+        return 2
+    fi
+
+    ___helium_setup || return
+    echo "bootstrap: starting the approved cold Arcium browser build" >&2
+    ___helium_build_full --approved --edge-budget 100000 || return
+    ___helium_dev_bundle
+}
+
+___helium_dev() {
+    ___helium_check || return
+    ___helium_configure || return
+    ___helium_relink --resources || return
+    ___helium_dev_bundle || return
+    ___helium_run "$@"
+}
+
 ___helium_pull() {
     if [ -f "$_subs_cache" ]; then
         echo "source files are substituted, please run 'he unsub' first" >&2
@@ -297,7 +343,7 @@ ___helium_pull() {
     done
 
     "$_root_dir/devutils/update_patches.sh" merge
-    cd "$_src_dir" && quilt push -a --refresh
+    ___helium_quilt_push
 }
 
 ___helium_patches_merge() {
@@ -309,7 +355,7 @@ ___helium_patches_unmerge() {
 }
 
 ___helium_quilt_push() {
-    cd "$_src_dir" && quilt push -a --refresh
+    cd "$_src_dir" && QUILT_PATCH_OPTS="$QUILT_PATCH_OPTS --fuzz=0" quilt push -a
 }
 
 ___helium_quilt_pop() {
@@ -396,6 +442,9 @@ ___helium_lint() {
 __helium_menu() {
     set -e
     case $1 in
+        bootstrap) shift; ___helium_bootstrap "$@";;
+        check) shift; ___helium_check "$@";;
+        dev) shift; ___helium_dev "$@";;
         setup) ___helium_setup;;
         presetup) ___helium_setup_presetup;;
         configure) ___helium_configure;;
@@ -428,11 +477,21 @@ __helium_menu() {
         compile) shift; ___helium_compile "$@";;
         relink) shift; ___helium_relink "$@";;
         build-full) shift; ___helium_build_full "$@";;
-        reset) ___helium_reset;;
+        reset) shift; ___helium_reset "$@";;
         *)
             echo "usage: he <command>" >&2
-            echo "\tsetup - sets up the dev environment fully for the first time" >&2
-            echo "\t         equivalent of: [presetup, merge, push, configure]" >&2
+            echo "\tbootstrap --approved - one-time cold browser build" >&2
+            echo "\tcheck - validate and strictly apply the active patch stack" >&2
+            echo "\tdev [profile options] - incrementally rebuild, package, and run Dev" >&2
+            echo "\tstatus|stop [profile options] - inspect or stop the exact Dev app" >&2
+            echo "\thelp --advanced - show low-level maintenance commands" >&2
+
+            if [ "$1" != "help" ] || [ "$2" != "--advanced" ]; then
+                return 0
+            fi
+
+            echo "\nadvanced:" >&2
+            echo "\tsetup - prepares source, patches, and the generated graph without building" >&2
             echo "\tpresetup - downloads sources, sets up GN, and prepares third-party dependencies" >&2
             echo "\tconfigure - generates build configuration and tools" >&2
             echo "\tresources - generates and copies helium resources (such as icons)" >&2
@@ -467,9 +526,9 @@ __helium_menu() {
             echo "\tbuild-plan TARGET... - graph-validate and dry-run explicit targets" >&2
             echo "\tcompile TARGET... - compile explicit focused targets within the edge budget" >&2
             echo "\trelink [--resources] - relink the component, optionally repackage resources" >&2
-            echo "\tbuild-full --approved - explicitly permit the broad development build" >&2
+            echo "\tbuild-full --approved - explicitly permit a broad browser build" >&2
             echo "\tbuild - disabled; cannot accidentally start a broad Chromium build" >&2
-            echo "\treset - nukes everything" >&2
+            echo "\treset --warm-output --approved - deliberately remove prepared source and output" >&2
     esac
 }
 
