@@ -24,7 +24,7 @@ from typing import Callable, Mapping, Protocol, Sequence
 DEFAULT_EDGE_BUDGET = 500
 COMPONENT_RELINK_TARGET = "libchrome_dll.dylib"
 RESOURCE_RELINK_TARGET = "chrome_app"
-FULL_BUILD_TARGETS = ("chrome", "chromedriver")
+FULL_BUILD_TARGETS = ("chrome",)
 
 # Output targets and GN labels use this conservative character set.  The
 # generated graph remains the authority on whether a syntactically valid
