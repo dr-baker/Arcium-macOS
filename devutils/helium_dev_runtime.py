@@ -22,15 +22,26 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 
 
-SCHEMA_VERSION = 1
+# Version two adds the selected feature bundle to persisted run manifests.
+SCHEMA_VERSION = 2
 DEFAULT_PROFILE_DIRECTORY = "Default"
+# Keep the Dev harness's accepted personal features in one named bundle.  This
+# is deliberately separate from Chromium's feature defaults: the bundle is a
+# product decision owned by the harness and is visible in its manifest.
+PRODUCTION_FEATURE_BUNDLE = "personal-production"
+PRODUCTION_FEATURES = ("HeliumFavoritesAndPins",)
+# BrowserInitiatedAutomaticPictureInPicture is used by the unlanded
+# auto-PiP experiment.  It must never be pulled into the production bundle.
+UNSAFE_EXPERIMENTAL_FEATURES = frozenset(
+    {"BrowserInitiatedAutomaticPictureInPicture"}
+)
 DEFAULT_DEV_FLAGS = (
     "--enable-ui-devtools",
     "--use-mock-keychain",
     "--no-first-run",
     "--disable-session-crashed-bubble",
-    "--disable-features=DialMediaRouteProvider",
 )
+DEFAULT_DISABLED_FEATURES = ("DialMediaRouteProvider",)
 MANIFEST_FIELDS = (
     "schema_version",
     "ok",
@@ -46,6 +57,9 @@ MANIFEST_FIELDS = (
     "profile_mode",
     "user_data_dir",
     "profile_directory",
+    "feature_bundle",
+    "effective_features",
+    "disabled_features",
     "mock_keychain",
     "quilt_top",
     "component_path",
@@ -56,6 +70,7 @@ MANIFEST_FIELDS = (
     "warnings",
 )
 _PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+_FEATURE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]*(?:<[^,\s]+)?\Z")
 
 
 class RuntimeInputError(ValueError):
@@ -64,6 +79,15 @@ class RuntimeInputError(ValueError):
 
 class LockBusyError(RuntimeError):
     """The requested profile is already reserved by a live harness action."""
+
+
+@dataclass(frozen=True)
+class FeatureSelection:
+    """The privacy-safe feature state passed to one Dev browser process."""
+
+    bundle: str
+    enabled: tuple[str, ...]
+    disabled: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -261,14 +285,143 @@ def parse_runtime_arguments(argv: Sequence[str]) -> RuntimeArguments:
     return RuntimeArguments(mode, name, profile_directory, tuple(passthrough))
 
 
-def launch_arguments(spec: ProfileSpec, passthrough: Iterable[str] = ()) -> tuple[str, ...]:
-    """Build the fixed Dev flags plus a selected profile scope."""
+def _normalize_feature_name(name: str, *, allow_unsafe: bool = False) -> str:
+    if not isinstance(name, str):
+        raise RuntimeInputError("feature name must be a string")
+    value = name.strip()
+    if not _FEATURE_NAME.fullmatch(value):
+        raise RuntimeInputError("feature names must be comma-separated Chromium feature names")
+    base_name = value.split("<", 1)[0]
+    if not allow_unsafe and base_name in UNSAFE_EXPERIMENTAL_FEATURES:
+        raise RuntimeInputError(
+            "experimental feature is not enabled by the production bundle: %s" % value
+        )
+    return value
 
+
+def _feature_names(value: str, *, allow_unsafe: bool = False) -> tuple[str, ...]:
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeInputError("feature switch needs at least one feature name")
+    names = tuple(
+        _normalize_feature_name(item, allow_unsafe=allow_unsafe)
+        for item in value.split(",")
+    )
+    if not names:
+        raise RuntimeInputError("feature switch needs at least one feature name")
+    return names
+
+
+def _append_unique(target: list[str], values: Iterable[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
+
+
+def _feature_switch_value(
+    argv: Sequence[str], index: int, switch: str
+) -> tuple[str, int] | None:
+    """Read both ``--switch=value`` and ``--switch value`` forms."""
+
+    argument = argv[index]
+    if argument == switch:
+        if index + 1 >= len(argv):
+            raise RuntimeInputError("%s needs a value" % switch)
+        return argv[index + 1], index + 1
+    prefix = switch + "="
+    if argument.startswith(prefix):
+        return argument[len(prefix) :], index
+    return None
+
+
+def _feature_selection_and_passthrough(
+    passthrough: Iterable[str],
+) -> tuple[FeatureSelection, tuple[str, ...]]:
+    """Normalize feature switches while retaining every unrelated argument.
+
+    The harness emits one switch per feature state.  An explicit disable wins
+    over an enable, including the production default, so a caller can turn a
+    personal feature off without creating two contradictory switches.
+    """
+
+    arguments = tuple(passthrough)
+    user_enabled: list[str] = []
+    user_disabled: list[str] = []
+    retained: list[str] = []
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        matched = False
+        for switch, target, allow_unsafe in (
+            ("--enable-features", user_enabled, False),
+            ("--disable-features", user_disabled, True),
+        ):
+            value = _feature_switch_value(arguments, index, switch)
+            if value is None:
+                continue
+            _append_unique(target, _feature_names(value[0], allow_unsafe=allow_unsafe))
+            index = value[1] + 1
+            matched = True
+            break
+        if matched:
+            continue
+        retained.append(argument)
+        index += 1
+
+    enabled = list(PRODUCTION_FEATURES)
+    disabled = list(DEFAULT_DISABLED_FEATURES)
+    # User enables may override an internal default disable, but a feature
+    # explicitly listed in both user switches remains disabled below.
+    for feature in user_enabled:
+        if feature not in user_disabled:
+            if feature not in enabled:
+                enabled.append(feature)
+            if feature in disabled:
+                disabled.remove(feature)
+    for feature in user_disabled:
+        if feature in enabled:
+            enabled.remove(feature)
+        if feature not in disabled:
+            disabled.append(feature)
+    return (
+        FeatureSelection(
+            PRODUCTION_FEATURE_BUNDLE,
+            tuple(enabled),
+            tuple(disabled),
+        ),
+        tuple(retained),
+    )
+
+
+def effective_feature_selection(passthrough: Iterable[str] = ()) -> FeatureSelection:
+    """Return the feature state that one Dev launch will actually receive."""
+
+    selection, _ = _feature_selection_and_passthrough(passthrough)
+    return selection
+
+
+def effective_feature_list(passthrough: Iterable[str] = ()) -> tuple[str, ...]:
+    """Return only enabled feature names for privacy-safe status output."""
+
+    return effective_feature_selection(passthrough).enabled
+
+
+def _feature_switches(selection: FeatureSelection) -> tuple[str, ...]:
+    return (
+        "--enable-features=%s" % ",".join(selection.enabled),
+        "--disable-features=%s" % ",".join(selection.disabled),
+    )
+
+
+def launch_arguments(spec: ProfileSpec, passthrough: Iterable[str] = ()) -> tuple[str, ...]:
+    """Build fixed Dev flags, the production feature bundle, and profile scope."""
+
+    selection, retained = _feature_selection_and_passthrough(passthrough)
     return (
         "--user-data-dir=%s" % spec.user_data_dir,
         "--profile-directory=%s" % spec.profile_directory,
         *DEFAULT_DEV_FLAGS,
-        *tuple(passthrough),
+        *_feature_switches(selection),
+        *retained,
     )
 
 
@@ -382,11 +535,34 @@ def build_manifest(
     artifact_state: str = "unverified",
     manifest_path: str | os.PathLike[str] | None = None,
     warnings: Iterable[str] = (),
+    passthrough: Iterable[str] = (),
+    effective_features: Iterable[str] | None = None,
+    disabled_features: Iterable[str] | None = None,
 ) -> dict[str, object]:
     """Build the fixed privacy-safe manifest schema without process details."""
 
     if started_at is not None and not isinstance(started_at, str):
         raise RuntimeInputError("started_at must be an ISO-8601 string or null")
+
+    selection = effective_feature_selection(passthrough)
+    enabled = (
+        selection.enabled
+        if effective_features is None
+        else tuple(
+            _normalize_feature_name(feature)
+            for feature in effective_features
+        )
+    )
+    disabled = (
+        selection.disabled
+        if disabled_features is None
+        else tuple(
+            _normalize_feature_name(feature, allow_unsafe=True)
+            for feature in disabled_features
+        )
+    )
+    disabled_set = set(disabled)
+    enabled = tuple(feature for feature in enabled if feature not in disabled_set)
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -403,6 +579,9 @@ def build_manifest(
         "profile_mode": profile.mode,
         "user_data_dir": str(profile.user_data_dir),
         "profile_directory": profile.profile_directory,
+        "feature_bundle": selection.bundle,
+        "effective_features": list(enabled),
+        "disabled_features": list(disabled),
         "mock_keychain": True,
         "quilt_top": None if quilt_top is None else str(quilt_top),
         "component_path": None if component_path is None else str(component_path),

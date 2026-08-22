@@ -17,6 +17,7 @@ WORKTREE = Path(__file__).resolve().parents[2]
 CLI = WORKTREE / "devutils" / "helium_dev.py"
 sys.path.insert(0, str(WORKTREE / "devutils"))
 import helium_dev  # noqa: E402
+import helium_dev_runtime as runtime  # noqa: E402
 
 
 class HeliumDevCliTests(unittest.TestCase):
@@ -117,6 +118,97 @@ class HeliumDevCliTests(unittest.TestCase):
                 )
         self.assertFalse(manifest["ok"])
         self.assertIsNone(manifest["main_pid"])
+
+    def test_manifest_carries_custom_effective_features_from_launch_passthrough(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            component = root / "libchrome_dll.dylib"
+            component.write_bytes(b"component")
+            executable = root / "Helium Dev.app" / "Contents" / "MacOS" / "Helium"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("fixture", encoding="utf-8")
+            paths = helium_dev.WorktreePaths(
+                root,
+                root,
+                root,
+                root / "Helium Dev.app",
+                executable,
+                "local.test.helium",
+                component,
+                root / "siso",
+                root / "autoninja.py",
+            )
+            profile = helium_dev.resolve_profile("isolated", "features", home=root / "home")
+            ps_text = f"101 {executable} --user-data-dir={profile.user_data_dir}"
+            with patch("helium_dev._quilt_top", return_value=(None, [])):
+                manifest = helium_dev._manifest_for(
+                    paths=paths,
+                    profile=profile,
+                    action="run",
+                    cohort_text=ps_text,
+                    run_id="run",
+                    manifest_path=root / "manifest.json",
+                    passthrough=("--enable-features=CustomFeature",),
+                )
+        self.assertEqual(manifest["feature_bundle"], runtime.PRODUCTION_FEATURE_BUNDLE)
+        self.assertEqual(
+            manifest["effective_features"],
+            ["HeliumFavoritesAndPins", "CustomFeature"],
+        )
+        self.assertEqual(manifest["disabled_features"], ["DialMediaRouteProvider"])
+
+    def test_status_manifest_inherits_features_from_prior_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            component = root / "libchrome_dll.dylib"
+            component.write_bytes(b"component")
+            executable = root / "Helium Dev.app" / "Contents" / "MacOS" / "Helium"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("fixture", encoding="utf-8")
+            paths = helium_dev.WorktreePaths(
+                root,
+                root,
+                root,
+                root / "Helium Dev.app",
+                executable,
+                "local.test.helium",
+                component,
+                root / "siso",
+                root / "autoninja.py",
+            )
+            profile = helium_dev.resolve_profile("isolated", "prior", home=root / "home")
+            manifest_path = root / "manifest.json"
+            prior = runtime.build_manifest(
+                ok=True,
+                run_id="prior",
+                action="run",
+                main_pid=101,
+                process_count=1,
+                started_at="1970-01-01T00:01:40+00:00",
+                worktree=root,
+                source_dir=root,
+                app_path=paths.app_path,
+                executable_path=paths.executable_path,
+                profile=profile,
+                passthrough=("--enable-features=CustomFeature",),
+                manifest_path=manifest_path,
+            )
+            runtime.write_manifest_atomic(manifest_path, prior)
+            ps_text = ""
+            with patch("helium_dev._quilt_top", return_value=(None, [])):
+                manifest = helium_dev._manifest_for(
+                    paths=paths,
+                    profile=profile,
+                    action="status",
+                    cohort_text=ps_text,
+                    run_id="status",
+                    manifest_path=manifest_path,
+                )
+        self.assertEqual(
+            manifest["effective_features"],
+            ["HeliumFavoritesAndPins", "CustomFeature"],
+        )
+        self.assertEqual(manifest["disabled_features"], ["DialMediaRouteProvider"])
 
 
 if __name__ == "__main__":
