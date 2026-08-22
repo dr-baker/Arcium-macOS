@@ -177,7 +177,12 @@ class HeliumDevBundleTests(unittest.TestCase):
             result = helium_dev.runtime_action(
                 "run",
                 str(root),
-                ["--preflight", "--fresh", "preflight"],
+                [
+                    "--preflight",
+                    "--fresh",
+                    "preflight",
+                    "--enable-features=CustomFeature",
+                ],
                 home=root / "home",
                 registry_root=root / "registry",
             )
@@ -185,6 +190,12 @@ class HeliumDevBundleTests(unittest.TestCase):
         self.assertEqual(result["action"], "run-preflight")
         self.assertEqual(result["process_state"], "not-running")
         self.assertIn("launch-not-started", result["proof_gates"])
+        self.assertEqual(result["feature_bundle"], "personal-production")
+        self.assertEqual(
+            result["effective_features"],
+            ["HeliumFavoritesAndPins", "CustomFeature"],
+        )
+        self.assertEqual(result["disabled_features"], ["DialMediaRouteProvider"])
         popen.assert_not_called()
         self.assertFalse((root / "home").exists())
 

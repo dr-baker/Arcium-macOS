@@ -90,6 +90,73 @@ class RuntimeTestCase(unittest.TestCase):
         self.assertIn("--incognito", launch)
         self.assertEqual(sum(item.startswith("--user-data-dir=") for item in launch), 1)
 
+    def test_production_feature_bundle_is_enabled_once_by_default(self) -> None:
+        spec = self.profile()
+        launch = runtime.launch_arguments(spec)
+        enabled = [item for item in launch if item.startswith("--enable-features=")]
+        disabled = [item for item in launch if item.startswith("--disable-features=")]
+        self.assertEqual(enabled, ["--enable-features=HeliumFavoritesAndPins"])
+        self.assertEqual(disabled, ["--disable-features=DialMediaRouteProvider"])
+        self.assertEqual(
+            runtime.effective_feature_list(),
+            ("HeliumFavoritesAndPins",),
+        )
+        self.assertNotIn(
+            "BrowserInitiatedAutomaticPictureInPicture",
+            runtime.effective_feature_list(),
+        )
+
+    def test_feature_switches_merge_deduplicate_and_honor_explicit_disable(self) -> None:
+        spec = self.profile()
+        launch = runtime.launch_arguments(
+            spec,
+            (
+                "--enable-features=CustomFeature,HeliumFavoritesAndPins",
+                "--enable-features",
+                "CustomFeature",
+                "--disable-features=OtherFeature,CustomFeature",
+                "--incognito",
+            ),
+        )
+        self.assertEqual(
+            [item for item in launch if item.startswith("--enable-features=")],
+            ["--enable-features=HeliumFavoritesAndPins"],
+        )
+        self.assertEqual(
+            [item for item in launch if item.startswith("--disable-features=")],
+            ["--disable-features=DialMediaRouteProvider,OtherFeature,CustomFeature"],
+        )
+        self.assertEqual(launch[-1], "--incognito")
+        self.assertEqual(
+            runtime.effective_feature_list(
+                ("--enable-features=CustomFeature", "--disable-features=CustomFeature")
+            ),
+            ("HeliumFavoritesAndPins",),
+        )
+
+    def test_unsafe_experimental_feature_cannot_enter_production_bundle(self) -> None:
+        spec = self.profile()
+        for feature in (
+            "BrowserInitiatedAutomaticPictureInPicture",
+            "BrowserInitiatedAutomaticPictureInPicture<TrialGroup",
+        ):
+            with self.assertRaisesRegex(runtime.RuntimeInputError, "experimental feature"):
+                runtime.launch_arguments(spec, ("--enable-features=" + feature,))
+        launch = runtime.launch_arguments(
+            spec,
+            ("--disable-features=BrowserInitiatedAutomaticPictureInPicture",),
+        )
+        self.assertNotIn(
+            "BrowserInitiatedAutomaticPictureInPicture",
+            next(item for item in launch if item.startswith("--enable-features=")),
+        )
+
+    def test_feature_switches_are_rejected_when_missing_values(self) -> None:
+        spec = self.profile()
+        for argument in ("--enable-features", "--disable-features", "--enable-features="):
+            with self.assertRaises(runtime.RuntimeInputError):
+                runtime.launch_arguments(spec, (argument,))
+
     def test_manifest_is_fixed_schema_atomic_and_private(self) -> None:
         spec = self.profile()
         path = runtime.manifest_path_for(spec, self.registry)
@@ -99,6 +166,10 @@ class RuntimeTestCase(unittest.TestCase):
         loaded = runtime.read_manifest(path)
         self.assertEqual(loaded, manifest)
         self.assertEqual(set(loaded or ()), set(runtime.MANIFEST_FIELDS))
+        self.assertEqual(loaded["feature_bundle"], runtime.PRODUCTION_FEATURE_BUNDLE)
+        self.assertEqual(loaded["effective_features"], ["HeliumFavoritesAndPins"])
+        self.assertEqual(loaded["disabled_features"], ["DialMediaRouteProvider"])
+        self.assertNotIn("BrowserInitiatedAutomaticPictureInPicture", json.dumps(loaded))
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertFalse(list(path.parent.glob("*.tmp")))
         malformed = dict(manifest)
@@ -119,6 +190,28 @@ class RuntimeTestCase(unittest.TestCase):
                 executable_path=None,
                 profile=spec,
             )
+
+    def test_manifest_can_report_the_effective_user_feature_overrides(self) -> None:
+        manifest = runtime.build_manifest(
+            ok=True,
+            run_id="run-2",
+            action="run",
+            main_pid=123,
+            process_count=1,
+            started_at="1970-01-01T00:01:40+00:00",
+            worktree="/worktree",
+            source_dir="/source",
+            app_path="/app",
+            executable_path="/app/Contents/MacOS/Helium",
+            profile=self.profile(),
+            passthrough=("--enable-features=CustomFeature",),
+        )
+        self.assertEqual(manifest["feature_bundle"], runtime.PRODUCTION_FEATURE_BUNDLE)
+        self.assertEqual(
+            manifest["effective_features"],
+            ["HeliumFavoritesAndPins", "CustomFeature"],
+        )
+        self.assertEqual(manifest["disabled_features"], ["DialMediaRouteProvider"])
 
     def test_lock_live_ownership_and_stale_file_overwrite(self) -> None:
         spec = self.profile()

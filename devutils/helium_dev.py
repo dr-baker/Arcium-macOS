@@ -40,6 +40,7 @@ from helium_dev_runtime import (
     component_metadata,
     classify_artifact_state,
     discover_chromium_processes,
+    effective_feature_selection,
     launch_arguments,
     manifest_path_for,
     parse_runtime_arguments,
@@ -172,6 +173,7 @@ def _manifest_for(
     warnings: Iterable[str] = (),
     started_at: str | None = None,
     process_started_at: float | None = None,
+    passthrough: Sequence[str] | None = None,
 ) -> dict[str, object]:
     cohort = discover_chromium_processes(
         cohort_text,
@@ -205,6 +207,20 @@ def _manifest_for(
     # unique main is not: callers must get a nonzero result rather than a
     # warning that can be mistaken for success.
     manifest_ok = ok and not (cohort.records and cohort.main_pid is None)
+    inherited_effective: tuple[str, ...] | None = None
+    inherited_disabled: tuple[str, ...] | None = None
+    if passthrough is None:
+        prior = read_manifest(manifest_path)
+        prior_effective = prior.get("effective_features") if prior else None
+        prior_disabled = prior.get("disabled_features") if prior else None
+        if isinstance(prior_effective, list) and all(
+            isinstance(feature, str) for feature in prior_effective
+        ):
+            inherited_effective = tuple(prior_effective)
+        if isinstance(prior_disabled, list) and all(
+            isinstance(feature, str) for feature in prior_disabled
+        ):
+            inherited_disabled = tuple(prior_disabled)
     return build_manifest(
         ok=manifest_ok,
         run_id=run_id,
@@ -224,6 +240,9 @@ def _manifest_for(
         artifact_state=artifact_state,
         manifest_path=manifest_path,
         warnings=local_warnings,
+        passthrough=() if passthrough is None else passthrough,
+        effective_features=inherited_effective,
+        disabled_features=inherited_disabled,
     )
 
 
@@ -279,6 +298,7 @@ def _run_locked(
                 run_id=uuid.uuid4().hex,
                 manifest_path=manifest_path,
                 process_started_at=started,
+                passthrough=passthrough,
             )
             write_manifest_atomic(manifest_path, manifest)
             # A verified browser deliberately outlives this short-lived CLI.
@@ -412,6 +432,7 @@ def runtime_action(
         )
         if cohort.records:
             raise HarnessError("an exact Helium Dev process is already running for this profile")
+        feature_selection = effective_feature_selection(passthrough)
         return {
             "ok": True,
             "action": "run-preflight",
@@ -422,6 +443,9 @@ def runtime_action(
             "user_data_dir": str(profile.user_data_dir),
             "profile_directory": profile.profile_directory,
             "launch_arguments": list(launch_arguments(profile, passthrough)),
+            "feature_bundle": feature_selection.bundle,
+            "effective_features": list(feature_selection.enabled),
+            "disabled_features": list(feature_selection.disabled),
             "process_state": "not-running",
             "proof_gates": (
                 "dev-bundle-resolved",
