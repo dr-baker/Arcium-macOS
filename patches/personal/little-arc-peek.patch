@@ -30,6 +30,8 @@
 +    "helium/helium_little_arc.h",
      "helium/helium_space.cc",
      "helium/helium_space.h",
+     "helium/helium_space_model.cc",
+     "helium/helium_space_model.h",
      "helium/helium_space_service.cc",
 --- a/chrome/browser/ui/browser_command_controller.cc
 +++ b/chrome/browser/ui/browser_command_controller.cc
