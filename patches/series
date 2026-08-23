@@ -20,5 +20,3 @@ helium/macos/open-shortcuts-settings-action.patch
 helium/macos/native-translation-context-option.patch
 
 personal/helium-space-macos.patch
-personal/little-arc-peek.patch
-personal/little-arc-hardening.patch
