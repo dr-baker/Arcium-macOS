@@ -1,0 +1,132 @@
+Index: src/chrome/browser/app_controller_mac.mm
+===================================================================
+--- src.orig/chrome/browser/app_controller_mac.mm
++++ src/chrome/browser/app_controller_mac.mm
+@@ -78,7 +78,11 @@
+ #include "chrome/browser/ui/browser_command_controller.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_live_tab_context.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "chrome/browser/ui/helium/helium_little_arc.h"
++#include "chrome/browser/ui/helium/helium_space.h"
++#include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/helium/helium_space_service_factory.h"
+ #include "chrome/browser/ui/browser_mac.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -2131,14 +2135,110 @@ class AppControllerProfileObserver : pub
+   [self commandDispatch:sender];
+ }
+ 
++- (IBAction)openSpaceFromDock:(id)sender {
++  [NSApp activateIgnoringOtherApps:YES];
++  NSDictionary* identity = [sender representedObject];
++  if (![identity isKindOfClass:[NSDictionary class]]) {
++    return;
++  }
++  NSString* pathString = identity[@"profilePath"];
++  NSString* spaceID = identity[@"spaceID"];
++  if (![pathString isKindOfClass:[NSString class]] || pathString.length == 0 ||
++      ![spaceID isKindOfClass:[NSString class]] || spaceID.length == 0) {
++    return;
++  }
++  const base::FilePath profile_path(
++      base::SysNSStringToUTF8(pathString));
++  const std::string space_id = base::SysNSStringToUTF8(spaceID);
++  ProfileManager* profile_manager = g_browser_process->profile_manager();
++  Profile* profile = profile_manager->GetProfileByPath(profile_path);
++  auto activate_space = [](std::string space_id, Profile* profile) {
++    if (!profile || !helium::IsHeliumFavoritesAndPinsEnabled()) {
++      return;
++    }
++    if (auto* space_service =
++            helium::HeliumSpaceServiceFactory::GetForProfile(profile)) {
++      if (helium::HeliumSpace* space =
++              space_service->GetSpaceById(space_id)) {
++        space_service->SetActiveSpace(space_id);
++        space->ActivateOrCreatePrimaryWindow();
++      }
++    }
++  };
++  if (profile) {
++    activate_space(space_id, profile);
++    return;
++  }
++  profile_manager->LoadProfileByPath(
++      profile_path, /*incognito=*/false,
++      base::BindOnce(activate_space, space_id));
++}
++
+ - (NSMenu*)applicationDockMenu:(NSApplication*)sender {
+   NSMenu* dockMenu = [[NSMenu alloc] initWithTitle:@""];
+ 
+-  BOOL profilesAdded = [_profileMenuController insertItemsIntoMenu:dockMenu
+-                                                          atOffset:0
+-                                                          fromDock:YES];
+-  if (profilesAdded) {
+-    [dockMenu addItem:[NSMenuItem separatorItem]];
++  const bool spaces_enabled = helium::IsHeliumFavoritesAndPinsEnabled();
++  if (!spaces_enabled) {
++    BOOL profilesAdded = [_profileMenuController insertItemsIntoMenu:dockMenu
++                                                            atOffset:0
++                                                            fromDock:YES];
++    if (profilesAdded) {
++      [dockMenu addItem:[NSMenuItem separatorItem]];
++    }
++  }
++
++  // Helium Spaces: always list Spaces so dock can open the Space window.
++  if (spaces_enabled && g_browser_process->profile_manager()) {
++    ProfileAttributesStorage& storage =
++        g_browser_process->profile_manager()->GetProfileAttributesStorage();
++    std::vector<ProfileAttributesEntry*> entries =
++        storage.GetAllProfilesAttributesSortedByNameWithCheck();
++    if (!entries.empty()) {
++      NSMenuItem* header;
++      if (@available(macOS 14, *)) {
++        header = [NSMenuItem sectionHeaderWithTitle:@"Spaces"];
++      } else {
++        header = [[NSMenuItem alloc] initWithTitle:@"Spaces"
++                                            action:nil
++                                     keyEquivalent:@""];
++        header.enabled = NO;
++      }
++      [dockMenu addItem:header];
++
++      for (ProfileAttributesEntry* entry : entries) {
++        if (!entry || entry->IsOmitted()) {
++          continue;
++        }
++        Profile* profile = g_browser_process->profile_manager()->GetProfileByPath(
++            entry->GetPath());
++        if (!profile) {
++          continue;
++        }
++        auto* space_service =
++            helium::HeliumSpaceServiceFactory::GetForProfile(profile);
++        if (!space_service) {
++          continue;
++        }
++        for (helium::HeliumSpace* space : space_service->GetSpaces()) {
++          NSString* spaceName = base::SysUTF16ToNSString(space->name());
++          if (spaceName.length == 0) {
++            spaceName = @"Space";
++          }
++          NSMenuItem* spaceItem =
++              [[NSMenuItem alloc] initWithTitle:spaceName
++                                         action:@selector(openSpaceFromDock:)
++                                  keyEquivalent:@""];
++          spaceItem.target = self;
++          spaceItem.representedObject = @{
++            @"profilePath" : base::SysUTF8ToNSString(
++                entry->GetPath().AsUTF8Unsafe()),
++            @"spaceID" : base::SysUTF8ToNSString(space->id())
++          };
++          [dockMenu addItem:spaceItem];
++        }
++      }
++      [dockMenu addItem:[NSMenuItem separatorItem]];
++    }
+   }
+ 
+   NSString* titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_WINDOW_MAC);

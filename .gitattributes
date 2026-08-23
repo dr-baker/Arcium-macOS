@@ -1,1 +1,2 @@
 *.patch linguist-language=C++
+patches/personal/*.patch whitespace=-blank-at-eol
