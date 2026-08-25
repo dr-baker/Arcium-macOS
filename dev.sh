@@ -325,6 +325,20 @@ ___helium_dev() {
     ___helium_run "$@"
 }
 
+___helium_arcium() {
+    if [ -n "$1" ]; then
+        echo "he arcium takes no options" >&2
+        return 2
+    fi
+    python3 "$_helium_harness_root/devutils/arcium_app.py" \
+        --root "$_root_dir" preflight || return
+    ___helium_check || return
+    ___helium_configure || return
+    ___helium_relink --resources || return
+    python3 "$_helium_harness_root/devutils/arcium_app.py" \
+        --root "$_root_dir" update
+}
+
 ___helium_pull() {
     if [ -f "$_subs_cache" ]; then
         echo "source files are substituted, please run 'he unsub' first" >&2
@@ -443,6 +457,7 @@ __helium_menu() {
     set -e
     case $1 in
         bootstrap) shift; ___helium_bootstrap "$@";;
+        arcium) shift; ___helium_arcium "$@";;
         check) shift; ___helium_check "$@";;
         dev) shift; ___helium_dev "$@";;
         setup) ___helium_setup;;
@@ -480,6 +495,7 @@ __helium_menu() {
         reset) shift; ___helium_reset "$@";;
         *)
             echo "usage: he <command>" >&2
+            echo "\tarcium - update, install, and launch the stable personal browser" >&2
             echo "\tbootstrap --approved - one-time cold browser build" >&2
             echo "\tcheck - validate and strictly apply the active patch stack" >&2
             echo "\tdev [profile options] - incrementally rebuild, package, and run Dev" >&2

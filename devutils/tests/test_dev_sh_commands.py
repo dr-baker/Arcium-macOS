@@ -30,6 +30,7 @@ class DevShellCommandsTests(unittest.TestCase):
         result = run_zsh("he")
         self.assertEqual(result.returncode, 0)
         self.assertIn("bootstrap --approved - one-time cold browser build", result.stderr)
+        self.assertIn("arcium - update, install, and launch", result.stderr)
         self.assertIn("check - validate and strictly apply", result.stderr)
         self.assertIn("dev [profile options] - incrementally rebuild", result.stderr)
         self.assertNotIn("presetup", result.stderr)
@@ -67,6 +68,24 @@ class DevShellCommandsTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("setup", result.stdout)
+
+    def test_arcium_runs_one_guarded_update_flow(self) -> None:
+        result = run_zsh(
+            "python3(){ if [[ $* == *preflight* ]]; then echo preflight; else echo install; fi; }; "
+            "___helium_check(){ echo check; }; "
+            "___helium_configure(){ echo configure; }; "
+            "___helium_relink(){ echo relink:$*; }; "
+            "he arcium"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["preflight", "check", "configure", "relink:--resources", "install"],
+        )
+
+        refused = run_zsh("he arcium extra")
+        self.assertEqual(refused.returncode, 2)
+        self.assertIn("takes no options", refused.stderr)
 
 
 if __name__ == "__main__":

@@ -70,8 +70,12 @@ def _safe_executable_name(value: object) -> str:
     return value
 
 
-def _require_fresh_source(paths: BundlePaths) -> dict[str, object]:
-    if paths.dev_app.exists() or paths.dev_app.is_symlink():
+def _require_fresh_source(
+    paths: BundlePaths, *, require_dev_destination_absent: bool = True
+) -> dict[str, object]:
+    if require_dev_destination_absent and (
+        paths.dev_app.exists() or paths.dev_app.is_symlink()
+    ):
         raise BundleError(f"refusing to overwrite existing Dev bundle: {paths.dev_app}")
     if paths.source_app.is_symlink() or not paths.source_app.is_dir():
         raise BundleError(f"Helium.app is missing from {paths.out_dir}")
