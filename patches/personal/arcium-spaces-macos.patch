@@ -2,19 +2,13 @@ Index: src/chrome/browser/app_controller_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/app_controller_mac.mm
 +++ src/chrome/browser/app_controller_mac.mm
-@@ -78,7 +78,11 @@
+@@ -78,2 +78,5 @@
  #include "chrome/browser/ui/browser_command_controller.h"
- #include "chrome/browser/ui/browser_commands.h"
- #include "chrome/browser/ui/browser_live_tab_context.h"
-+#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
- #include "chrome/browser/ui/helium/helium_little_arc.h"
 +#include "chrome/browser/ui/helium/helium_space.h"
 +#include "chrome/browser/ui/helium/helium_space_service.h"
 +#include "chrome/browser/ui/helium/helium_space_service_factory.h"
- #include "chrome/browser/ui/browser_mac.h"
- #include "chrome/browser/ui/browser_window.h"
- #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-@@ -2131,14 +2135,110 @@ class AppControllerProfileObserver : pub
+ #include "chrome/browser/ui/browser_commands.h"
+@@ -2131,14 +2134,100 @@ class AppControllerProfileObserver : pub
    [self commandDispatch:sender];
  }
  
@@ -36,7 +30,7 @@ Index: src/chrome/browser/app_controller_mac.mm
 +  ProfileManager* profile_manager = g_browser_process->profile_manager();
 +  Profile* profile = profile_manager->GetProfileByPath(profile_path);
 +  auto activate_space = [](std::string space_id, Profile* profile) {
-+    if (!profile || !helium::IsHeliumFavoritesAndPinsEnabled()) {
++    if (!profile) {
 +      return;
 +    }
 +    if (auto* space_service =
@@ -65,18 +59,8 @@ Index: src/chrome/browser/app_controller_mac.mm
 -                                                          fromDock:YES];
 -  if (profilesAdded) {
 -    [dockMenu addItem:[NSMenuItem separatorItem]];
-+  const bool spaces_enabled = helium::IsHeliumFavoritesAndPinsEnabled();
-+  if (!spaces_enabled) {
-+    BOOL profilesAdded = [_profileMenuController insertItemsIntoMenu:dockMenu
-+                                                            atOffset:0
-+                                                            fromDock:YES];
-+    if (profilesAdded) {
-+      [dockMenu addItem:[NSMenuItem separatorItem]];
-+    }
-+  }
-+
 +  // Helium Spaces: always list Spaces so dock can open the Space window.
-+  if (spaces_enabled && g_browser_process->profile_manager()) {
++  if (g_browser_process->profile_manager()) {
 +    ProfileAttributesStorage& storage =
 +        g_browser_process->profile_manager()->GetProfileAttributesStorage();
 +    std::vector<ProfileAttributesEntry*> entries =
