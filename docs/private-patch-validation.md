@@ -43,8 +43,18 @@ policy. `arcium-spaces-macos` owns Dock and window integration only.
 - Verify the generated patch copies match the committed core patches.
 
 The current refactor replayed all 330 selected core and macOS patches with fuzz
-disabled on 2026-08-29. The final replay after the current test additions is
-still required before merge.
+disabled on 2026-08-29. After correcting the Arc importer browser test for the
+current TabGroup API, the stack replayed again to
+`patches/personal/arcium-spaces-macos.patch` with zero fuzz. The 312 active core
+patch copies were byte-identical to their committed core owners before that
+two-line correction; the corrected `arcium-arc-import.patch` was then verified
+byte-identical directly.
+
+`he validate patches` is not an acceptance gate in the partial Chromium
+checkout: it traverses inactive generated catalogs and upstream test inputs
+that are intentionally absent. The authoritative replay gate is Quilt applying
+the selected series from base with `--fuzz=0`, followed by source whitespace,
+GN, build-graph, and focused compile checks.
 
 ## Compile and test gates
 
@@ -62,10 +72,37 @@ Build and package the exact fully replayed source before runtime acceptance.
 Compiler-cache hits are valid because Siso still evaluates the generated build
 graph and orders every stale edge.
 
+The 2026-08-29 acceptance build regenerated GN's normal configuration and made
+31,342 targets from 4,765 files. A full `chrome` build completed 22,100 actions,
+then the final replay/API correction completed another 2,502 incremental
+actions. A second generated-graph build was a zero-action no-op.
+
+Focused results from the final replayed source:
+
+- `arcium_optional_navigation_tests`: 3/3 passed;
+- `helium_persistent_item_model_tests`: 55/55 passed;
+- `arc_sidebar_snapshot_tests`: 3/3 passed;
+- `arcium_arc_import_browsertest.cc`: compiled with its generated command;
+- `helium_space_service_unittest.cc`: compiled with its generated command.
+
+The broad `browser_tests` and `unit_tests` binaries cannot link in this partial
+checkout because Chromium's test graph requires the absent upstream fixture
+`chrome/test/data/extensions/extension_api_unittest/api_features.json`. Do not
+replace it with a placeholder. Restore the real upstream test-data input before
+claiming those cases executed.
+
 ## Runtime gates
 
 Use the exact `Helium Dev.app` from the replayed source. Record its bundle path,
 process path, profile, core commit, and enabled feature flags.
+
+The manual-acceptance candidate is outer commit `84e621b`, selecting core
+`579a0b99`. It runs from the acceptance worktree's
+`out/Default/Helium Dev.app`, profile
+`/Users/daniel/Library/Application Support/net.imput.helium.dev`, with
+`HeliumFavoritesAndPins` enabled. Its replay top is
+`patches/personal/arcium-spaces-macos.patch`; runtime behavior remains a manual
+gate until the matrix below is completed.
 
 The runtime matrix covers:
 
