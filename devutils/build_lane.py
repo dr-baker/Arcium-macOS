@@ -88,9 +88,25 @@ def probe_volume(path: Path) -> VolumeInfo:
     try:
         completed = subprocess.run(
             ["diskutil", "info", "-plist", str(existing)],
-            check=True,
+            check=False,
             capture_output=True,
         )
+        if completed.returncode:
+            filesystem = subprocess.run(
+                ["df", "-P", str(existing)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            rows = [line for line in filesystem.stdout.splitlines() if line.strip()]
+            if len(rows) < 2:
+                raise LaneError(f"could not resolve volume device for {path}")
+            device = rows[-1].split()[0]
+            completed = subprocess.run(
+                ["diskutil", "info", "-plist", device],
+                check=True,
+                capture_output=True,
+            )
         info = plistlib.loads(completed.stdout)
     except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
         raise LaneError(f"could not inspect volume for {path}") from error
@@ -128,9 +144,23 @@ def diagnose_lane(spec: LaneSpec, volume: VolumeInfo) -> LaneReport:
             volume.mount_point.resolve(strict=False)
         )
     except ValueError:
-        diagnostics.append(
-            LaneDiagnostic("error", "wrong-mount", f"lane root is not on {volume.mount_point}")
-        )
+        # macOS exposes the writable Data volume through root-level firmlinks
+        # such as /Users even though diskutil names its mount
+        # /System/Volumes/Data. Verify that mirrored path before rejecting it.
+        resolved_root = spec.root.expanduser().resolve(strict=False)
+        data_mirror = volume.mount_point / resolved_root.relative_to("/")
+        mirror_parent = _existing_ancestor(data_mirror)
+        if (
+            volume.mount_point != Path("/System/Volumes/Data")
+            or not mirror_parent.is_relative_to(volume.mount_point)
+        ):
+            diagnostics.append(
+                LaneDiagnostic(
+                    "error",
+                    "wrong-mount",
+                    f"lane root is not on {volume.mount_point}",
+                )
+            )
     if spec.expected_volume_uuid and volume.volume_uuid != spec.expected_volume_uuid:
         diagnostics.append(
             LaneDiagnostic(

@@ -3,10 +3,9 @@
 # Prepare the Python environment used by Arcium-macOS tooling.
 #
 # The caller must set _root_dir to the active worktree before sourcing this
-# file. The environment lives under build/, which is already ignored and is
-# intentionally local to the worktree.
+# file. The environment lives in the selected build lane.
 
-_python_env_dir="${HELIUM_DEV_PYTHON_ENV:-$_root_dir/build/python-env}"
+_python_env_dir="${HELIUM_DEV_PYTHON_ENV:-${HELIUM_DEV_BUILD_ROOT:-$_root_dir/build}/python-env}"
 _python_env_bin="$_python_env_dir/bin/python3"
 _python_requirements="$_root_dir/requirements-dev.txt"
 

@@ -126,6 +126,35 @@ class HeliumDevBundleTests(unittest.TestCase):
         for relative_path, content in source_bytes.items():
             self.assertEqual((source_app / relative_path).read_bytes(), content)
 
+    def test_package_can_use_a_build_root_outside_the_worktree(self) -> None:
+        root, _source_app, output, _source_bytes = self._fixture()
+        external_build = root.parent / "external-build"
+        shutil.move(str(root / "build"), external_build)
+
+        result = package_dev_bundle(
+            root,
+            build_root=external_build,
+            signer=lambda _path: None,
+        )
+
+        self.assertEqual(
+            Path(result["app_path"]),
+            external_build.resolve() / "src" / "out" / "Default" / "Helium Dev.app",
+        )
+        self.assertTrue((external_build / "src" / "out" / "Default" / "Helium Dev.app").is_dir())
+
+    def test_package_atomically_replaces_an_owned_dev_bundle(self) -> None:
+        root, _source_app, output, _source_bytes = self._fixture()
+        def signer(_path: Path) -> None:
+            return None
+
+        package_dev_bundle(root, signer=signer)
+
+        result = package_dev_bundle(root, signer=signer)
+
+        self.assertEqual(Path(result["app_path"]), output.resolve() / "Helium Dev.app")
+        self.assertEqual(list(output.glob(".Helium Dev.app.previous-*")), [])
+
     def test_stale_source_and_existing_destination_fail_closed(self) -> None:
         root, _source_app, output, _source_bytes = self._fixture()
         graph = output / "build.ninja"
@@ -137,7 +166,7 @@ class HeliumDevBundleTests(unittest.TestCase):
 
         root, _source_app, output, _source_bytes = self._fixture()
         (output / "Helium Dev.app").mkdir()
-        with self.assertRaisesRegex(BundleError, "refusing to overwrite"):
+        with self.assertRaisesRegex(BundleError, "refusing to replace unowned"):
             package_dev_bundle(root, signer=lambda _path: None)
 
     def test_failed_signing_cleans_owned_staging_directory(self) -> None:

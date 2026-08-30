@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+from build_lane import LaneError, acquire_lane_lock
 from helium_dev_build import (
     DEFAULT_EDGE_BUDGET,
     ArtifactStatus,
@@ -76,11 +77,19 @@ class WorktreePaths:
     autoninja_path: Path
 
 
-def resolve_worktree_paths(root: str | os.PathLike[str]) -> WorktreePaths:
+def resolve_worktree_paths(
+    root: str | os.PathLike[str],
+    build_root: str | os.PathLike[str] | None = None,
+) -> WorktreePaths:
     """Resolve only the active worktree's branded development artifact."""
 
     worktree = Path(root).expanduser().resolve()
-    source_dir = worktree / "build" / "src"
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
     app_path = out_dir / "Helium Dev.app"
     plist_path = app_path / "Contents" / "Info.plist"
@@ -411,6 +420,7 @@ def runtime_action(
     root: str,
     arguments: Sequence[str],
     *,
+    build_root: str | os.PathLike[str] | None = None,
     home: str | os.PathLike[str] | None = None,
     registry_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
@@ -423,7 +433,7 @@ def runtime_action(
         raise RuntimeInputError("--preflight is only valid with run")
     runtime_arguments = tuple(argument for argument in arguments if argument != "--preflight")
     profile, passthrough = _runtime_profile(runtime_arguments, home=home)
-    paths = resolve_worktree_paths(root)
+    paths = resolve_worktree_paths(root, build_root)
     if preflight:
         if not paths.component_path.is_file():
             raise HarnessError(f"Helium Dev component is missing: {paths.component_path}")
@@ -524,7 +534,13 @@ def runtime_action(
         lock.release()
 
 
-def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, object]:
+def build_action(
+    action: str,
+    root: str,
+    arguments: Sequence[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
     """Run a guarded build operation using the active worktree's graph only."""
 
     parser = HarnessArgumentParser(prog=f"he {action}", add_help=False)
@@ -535,7 +551,12 @@ def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, 
     parser.add_argument("targets", nargs="*")
     namespace = parser.parse_args(list(arguments))
     worktree = Path(root).expanduser().resolve()
-    source_dir = worktree / "build" / "src"
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
     builder = HeliumDevBuilder(
         BuildPaths(
@@ -546,32 +567,46 @@ def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, 
         ),
         edge_budget=namespace.edge_budget,
     )
-    if action == "build-plan":
-        result = builder.build_plan(namespace.targets)
-    elif action == "compile":
-        result = builder.compile(namespace.targets)
-    elif action == "relink":
-        if namespace.targets:
-            raise RuntimeInputError("relink takes no graph targets")
-        result = builder.relink(
-            resources=namespace.resources,
-            artifact_status_probe=lambda: _artifact_status_for_root(worktree),
-        )
-    elif action == "build-full":
-        if namespace.targets:
-            raise RuntimeInputError("build-full takes no graph targets")
-        result = builder.build_full(approved=namespace.approved)
-    else:
-        raise HarnessError(f"unknown build action: {action}")
+    lock_path = build_dir / ".arcium" / "lane.lock"
+    owner = {
+        "action": action,
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(worktree),
+    }
+    with acquire_lane_lock(lock_path, owner):
+        if action == "build-plan":
+            result = builder.build_plan(namespace.targets)
+        elif action == "compile":
+            result = builder.compile(namespace.targets)
+        elif action == "relink":
+            if namespace.targets:
+                raise RuntimeInputError("relink takes no graph targets")
+            result = builder.relink(
+                resources=namespace.resources,
+                artifact_status_probe=lambda: _artifact_status_for_root(
+                    worktree, build_root
+                ),
+            )
+        elif action == "build-full":
+            if namespace.targets:
+                raise RuntimeInputError("build-full takes no graph targets")
+            result = builder.build_full(approved=namespace.approved)
+        else:
+            raise HarnessError(f"unknown build action: {action}")
     return result.as_dict()
 
 
-def dev_bundle_action(root: str, arguments: Sequence[str]) -> dict[str, object]:
+def dev_bundle_action(
+    root: str,
+    arguments: Sequence[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
     """Create the active worktree's independently identifiable Dev bundle."""
 
     if arguments:
         raise RuntimeInputError("dev-bundle takes no arguments")
-    return package_dev_bundle(root)
+    return package_dev_bundle(root, build_root=build_root)
 
 
 def _edge_budget_from_environment() -> int:
@@ -617,9 +652,12 @@ def _artifact_status(paths: WorktreePaths) -> ArtifactStatus:
     return ArtifactStatus(state, state == "process-predates-artifact", ())
 
 
-def _artifact_status_for_root(root: Path) -> ArtifactStatus:
+def _artifact_status_for_root(
+    root: Path,
+    build_root: str | os.PathLike[str] | None = None,
+) -> ArtifactStatus:
     try:
-        return _artifact_status(resolve_worktree_paths(root))
+        return _artifact_status(resolve_worktree_paths(root, build_root))
     except HarnessError as error:
         return ArtifactStatus("unverified", None, (f"artifact freshness is unavailable: {error}",))
 
@@ -664,7 +702,8 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
 
 def _usage() -> str:
     return (
-        "usage: helium_dev.py --root WORKTREE <run|status|activate|stop|restart|"
+        "usage: helium_dev.py --root WORKTREE [--build-root PATH] "
+        "<run|status|activate|stop|restart|"
         "build-plan|compile|relink|build-full|dev-bundle> [options]\n"
         "runtime profiles: --isolated NAME | --fresh NAME; run --preflight; --json\n"
         "build: --edge-budget N; relink --resources; build-full --approved; "
@@ -676,6 +715,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     parser = HarnessArgumentParser(add_help=False)
     parser.add_argument("--root", required=True)
+    parser.add_argument("--build-root")
     namespace, remaining = parser.parse_known_args(values)
     if not remaining:
         print(_usage(), file=sys.stderr)
@@ -684,14 +724,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         json_mode, normalized_arguments = _split_json(action_arguments)
         if action in {"run", "status", "activate", "stop", "restart"}:
-            document = runtime_action(action, namespace.root, normalized_arguments)
+            document = runtime_action(
+                action,
+                namespace.root,
+                normalized_arguments,
+                build_root=namespace.build_root,
+            )
         elif action in {"build-plan", "compile", "relink", "build-full"}:
-            document = build_action(action, namespace.root, normalized_arguments)
+            document = build_action(
+                action,
+                namespace.root,
+                normalized_arguments,
+                build_root=namespace.build_root,
+            )
         elif action == "dev-bundle":
-            document = dev_bundle_action(namespace.root, normalized_arguments)
+            document = dev_bundle_action(
+                namespace.root,
+                normalized_arguments,
+                build_root=namespace.build_root,
+            )
         else:
             raise RuntimeInputError(f"unknown he command: {action}")
-    except (BundleError, HarnessError, LockBusyError, RuntimeInputError, OSError, subprocess.SubprocessError) as error:
+    except (
+        BundleError,
+        HarnessError,
+        LaneError,
+        LockBusyError,
+        RuntimeInputError,
+        OSError,
+        subprocess.SubprocessError,
+    ) as error:
         document = structured_result(ok=False, action=action, error=str(error))
         print(str(error), file=sys.stderr)
         _emit(document, json_mode="--json" in action_arguments)

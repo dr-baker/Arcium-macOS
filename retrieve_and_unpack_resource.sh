@@ -5,8 +5,9 @@
 set -eux
 
 _root_dir="$(dirname "$(greadlink -f "$0")")"
-_download_cache="$_root_dir/build/download_cache"
-_src_dir="$_root_dir/build/src"
+_build_dir="${HELIUM_DEV_BUILD_ROOT:-$_root_dir/build}"
+_download_cache="${HELIUM_DEV_DOWNLOAD_CACHE:-$_build_dir/download_cache}"
+_src_dir="$_build_dir/src"
 _main_repo="$_root_dir/helium-chromium"
 
 source "$_root_dir/devutils/setup_python.sh"

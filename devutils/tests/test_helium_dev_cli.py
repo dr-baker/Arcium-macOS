@@ -21,6 +21,30 @@ import helium_dev_runtime as runtime  # noqa: E402
 
 
 class HeliumDevCliTests(unittest.TestCase):
+    def test_cli_passes_external_build_root_to_runtime(self) -> None:
+        with patch(
+            "helium_dev.runtime_action",
+            return_value={"ok": True, "action": "status"},
+        ) as action:
+            with redirect_stdout(io.StringIO()):
+                code = helium_dev.main(
+                    [
+                        "--root",
+                        "/worktree",
+                        "--build-root",
+                        "/Volumes/T9/ArciumBuild/build",
+                        "status",
+                        "--json",
+                    ]
+                )
+        self.assertEqual(code, 0)
+        action.assert_called_once_with(
+            "status",
+            "/worktree",
+            (),
+            build_root="/Volumes/T9/ArciumBuild/build",
+        )
+
     def test_json_error_never_contaminates_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result = subprocess.run(

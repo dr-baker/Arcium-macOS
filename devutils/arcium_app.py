@@ -203,11 +203,12 @@ def _replace_directory(candidate: Path, destination: Path) -> None:
 def package_arcium(
     root: str | os.PathLike[str],
     *,
+    build_root: str | os.PathLike[str] | None = None,
     identity: str,
     signer: Signer = sign_and_verify,
     copy_runner: CommandRunner | None = None,
 ) -> dict[str, object]:
-    paths = resolve_bundle_paths(root)
+    paths = resolve_bundle_paths(root, build_root)
     source = _require_fresh_source(paths, require_dev_destination_absent=False)
     staging_root = Path(tempfile.mkdtemp(prefix=".arcium-bundle-", dir=paths.out_dir))
     staging_app = staging_root / "Arcium.app"
@@ -403,6 +404,7 @@ def launch_arcium(
 def update_action(
     root: str | os.PathLike[str],
     *,
+    build_root: str | os.PathLike[str] | None = None,
     home: str | os.PathLike[str] | None = None,
     install_path: Path = DEFAULT_INSTALL_PATH,
     ps_text: str | None = None,
@@ -419,7 +421,7 @@ def update_action(
         )
         identity = resolve_signing_identity()
         migration = initialize_profile(source_profile, target_profile)
-        package = package_arcium(root, identity=identity)
+        package = package_arcium(root, build_root=build_root, identity=identity)
         install_method = install_arcium(Path(str(package["app_path"])), install_path)
         verify_installed_arcium(install_path)
         require_closed(
@@ -482,6 +484,7 @@ def _emit(document: dict[str, object], json_mode: bool) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
+    parser.add_argument("--build-root")
     parser.add_argument("action", choices=("preflight", "update"))
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
@@ -489,7 +492,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.action == "preflight":
             document = preflight_action()
         else:
-            document = update_action(args.root)
+            document = update_action(args.root, build_root=args.build_root)
     except (ArciumError, BundleError, OSError, subprocess.SubprocessError) as error:
         print(str(error), file=sys.stderr)
         if args.json:

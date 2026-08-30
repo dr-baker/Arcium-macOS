@@ -15,15 +15,32 @@ _helium_harness_root="$(cd -P "$(dirname "$_helium_dev_script_path")" && pwd)"
 _root_dir="${HELIUM_DEV_WORKTREE:-$_helium_harness_root}"
 _root_dir="$(cd -P "$_root_dir" && pwd)"
 
+_git_common_dir="$(git -C "$_root_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
+_canonical_root="$(dirname "$_git_common_dir")"
+_dev_lane="${HELIUM_DEV_LANE:-local}"
+case "$_dev_lane" in
+    local) _default_build_dir="$_canonical_root/build";;
+    heavy) _default_build_dir="${HELIUM_DEV_HEAVY_ROOT:-/Volumes/T9/ArciumBuild/build}";;
+    worktree) _default_build_dir="$_root_dir/build";;
+    *)
+        echo "error: HELIUM_DEV_LANE must be local, heavy, or worktree" >&2
+        return 2 2>/dev/null || exit 2
+        ;;
+esac
+_build_dir="${HELIUM_DEV_BUILD_ROOT:-$_default_build_dir}"
+_heavy_volume_uuid="${HELIUM_DEV_HEAVY_VOLUME_UUID:-75279EDB-CF1D-4EBF-8C7C-FD7249DCBCAF}"
+export HELIUM_DEV_LANE="$_dev_lane"
+export HELIUM_DEV_BUILD_ROOT="$_build_dir"
+
 # Keep the old environment contract while making its paths unambiguously
 # relative to the selected worktree rather than the interactive shell.
 _arch="$(/usr/bin/uname -m)"
-_download_cache="$_root_dir/build/download_cache"
-_src_dir="$_root_dir/build/src"
+_download_cache="${HELIUM_DEV_DOWNLOAD_CACHE:-$_build_dir/download_cache}"
+_src_dir="$_build_dir/src"
 _out_dir="$_src_dir/out/Default"
 _main_repo="$_root_dir/helium-chromium"
-_subs_cache="$_root_dir/build/subs.tar.gz"
-_namesubs_cache="$_root_dir/build/namesubs.tar"
+_subs_cache="$_build_dir/subs.tar.gz"
+_namesubs_cache="$_build_dir/namesubs.tar"
 _depot_tools_dir="$_src_dir/third_party/depot_tools"
 _siso_dir="$_src_dir/third_party/siso/cipd"
 _siso_path="$_siso_dir/siso"
@@ -99,6 +116,7 @@ ___helium_info_pull() {
 }
 
 ___helium_configure() {
+    ___helium_lane_preflight 15 || return
     ___helium_setup_python
 
     cd "$_src_dir"
@@ -137,6 +155,11 @@ ___helium_version() {
 }
 
 ___helium_setup_presetup() {
+    if [ -d "$_src_dir/out" ]; then
+        ___helium_lane_preflight 15 || return
+    else
+        ___helium_lane_preflight 80 || return
+    fi
     ___helium_setup_python
 
     if [ -d "$_src_dir/out" ]; then
@@ -240,46 +263,95 @@ ___helium_build() {
 }
 
 ___helium_harness() {
-    python3 "$_helium_harness_root/devutils/helium_dev.py" --root "$_root_dir" "$@"
+    python3 "$_helium_harness_root/devutils/helium_dev.py" \
+        --root "$_root_dir" --build-root "$_build_dir" "$@"
+}
+
+___helium_lane_preflight() {
+    local _minimum_free_gib="${1:-15}"
+    local _uuid_args=()
+    if [ "$_dev_lane" = "heavy" ]; then
+        _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
+    fi
+    python3 "$_helium_harness_root/devutils/build_lane_cli.py" \
+        --name "$_dev_lane" \
+        --root "$_build_dir" \
+        --minimum-free-gib "$_minimum_free_gib" \
+        "${_uuid_args[@]}"
+}
+
+___helium_lane() {
+    local _json_args=()
+    if [ "$1" = "--json" ] && [ -z "$2" ]; then
+        _json_args=(--json)
+    elif [ -n "$1" ]; then
+        echo "he lane accepts only --json" >&2
+        return 2
+    fi
+    local _uuid_args=()
+    if [ "$_dev_lane" = "heavy" ]; then
+        _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
+    fi
+    python3 "$_helium_harness_root/devutils/build_lane_cli.py" \
+        --name "$_dev_lane" \
+        --root "$_build_dir" \
+        --minimum-free-gib 0 \
+        "${_uuid_args[@]}" \
+        "${_json_args[@]}"
 }
 
 ___helium_run() {
+    ___helium_lane_preflight 0 || return
     ___helium_harness run "$@"
 }
 
 ___helium_dev_bundle() {
-    ___helium_harness dev-bundle "$@"
+    ___helium_lane_preflight 5 || return
+    ___helium_harness dev-bundle "$@" || return
+    python3 "$_helium_harness_root/devutils/build_receipt_cli.py" \
+        --worktree "$_root_dir" \
+        --build-root "$_build_dir" \
+        --lane "$_dev_lane" \
+        packaged-build
 }
 
 ___helium_status() {
+    ___helium_lane_preflight 0 || return
     ___helium_harness status "$@"
 }
 
 ___helium_activate() {
+    ___helium_lane_preflight 0 || return
     ___helium_harness activate "$@"
 }
 
 ___helium_stop() {
+    ___helium_lane_preflight 0 || return
     ___helium_harness stop "$@"
 }
 
 ___helium_restart() {
+    ___helium_lane_preflight 0 || return
     ___helium_harness restart "$@"
 }
 
 ___helium_build_plan() {
+    ___helium_lane_preflight 5 || return
     ___helium_harness build-plan "$@"
 }
 
 ___helium_compile() {
+    ___helium_lane_preflight 15 || return
     ___helium_harness compile "$@"
 }
 
 ___helium_relink() {
+    ___helium_lane_preflight 15 || return
     ___helium_harness relink "$@"
 }
 
 ___helium_build_full() {
+    ___helium_lane_preflight 15 || return
     ___helium_harness build-full "$@"
 }
 
@@ -292,6 +364,16 @@ ___helium_check() {
     fi
 
     ___helium_quilt_push || return
+    python3 "$_helium_harness_root/devutils/quilt_state_cli.py" \
+        --source "$_src_dir" \
+        --patches "$_root_dir/patches" \
+        --series series.merged \
+        --complete || return
+    python3 "$_helium_harness_root/devutils/build_receipt_cli.py" \
+        --worktree "$_root_dir" \
+        --build-root "$_build_dir" \
+        --lane "$_dev_lane" \
+        source || return
     if find "$_src_dir" -name '*.rej' -print -quit | grep -q .; then
         echo "check: patch rejects remain in the development source" >&2
         return 1
@@ -310,6 +392,8 @@ ___helium_bootstrap() {
         echo "bootstrap: warm output already exists; use 'he dev'" >&2
         return 2
     fi
+
+    ___helium_lane_preflight 80 || return
 
     ___helium_setup || return
     echo "bootstrap: starting the approved cold Arcium browser build" >&2
@@ -331,12 +415,12 @@ ___helium_arcium() {
         return 2
     fi
     python3 "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" preflight || return
+        --root "$_root_dir" --build-root "$_build_dir" preflight || return
     ___helium_check || return
     ___helium_configure || return
     ___helium_relink --resources || return
     python3 "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" update
+        --root "$_root_dir" --build-root "$_build_dir" update
 }
 
 ___helium_pull() {
@@ -460,6 +544,7 @@ __helium_menu() {
         arcium) shift; ___helium_arcium "$@";;
         check) shift; ___helium_check "$@";;
         dev) shift; ___helium_dev "$@";;
+        lane) shift; ___helium_lane "$@";;
         setup) ___helium_setup;;
         presetup) ___helium_setup_presetup;;
         configure) ___helium_configure;;
@@ -499,6 +584,7 @@ __helium_menu() {
             echo "\tbootstrap --approved - one-time cold browser build" >&2
             echo "\tcheck - validate and strictly apply the active patch stack" >&2
             echo "\tdev [profile options] - incrementally rebuild, package, and run Dev" >&2
+            echo "\tlane - show the selected build lane and storage preflight" >&2
             echo "\tstatus|stop [profile options] - inspect or stop the exact Dev app" >&2
             echo "\thelp --advanced - show low-level maintenance commands" >&2
 
