@@ -36,6 +36,28 @@ _FUNCTIONS = {
 }
 
 
+def workflow_environment(
+    current: dict[str, str],
+    *,
+    build_root: Path,
+    lane: str,
+    worktree: Path,
+) -> dict[str, str]:
+    """Bind child tools and temporary traffic to the selected lane."""
+
+    environment = dict(current)
+    environment.update(
+        {
+            "HELIUM_DEV_BUILD_ROOT": str(build_root),
+            "HELIUM_DEV_LANE": lane,
+            "HELIUM_DEV_WORKTREE": str(worktree),
+        }
+    )
+    if lane == "heavy":
+        environment["TMPDIR"] = str(build_root / ".arcium" / "tmp")
+    return environment
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worktree", type=Path, required=True)
@@ -76,18 +98,19 @@ def main(argv: list[str] | None = None) -> int:
         "lane": arguments.lane,
         "worktree": str(worktree),
     }
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "HELIUM_DEV_BUILD_ROOT": str(build_root),
-            "HELIUM_DEV_LANE": arguments.lane,
-            "HELIUM_DEV_WORKTREE": str(worktree),
-        }
+    environment = workflow_environment(
+        os.environ,
+        build_root=build_root,
+        lane=arguments.lane,
+        worktree=worktree,
     )
     try:
         inspect_lane(spec).require_ok()
         with acquire_lane_lock(lock_path, owner) as descriptor:
             inspect_lane(spec).require_ok()
+            if heavy:
+                temporary_root = build_root / ".arcium" / "tmp"
+                temporary_root.mkdir(parents=True, exist_ok=True)
             environment["HELIUM_DEV_LANE_LOCK_FD"] = str(descriptor)
             completed = subprocess.run(
                 [

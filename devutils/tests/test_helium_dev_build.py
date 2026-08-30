@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+import io
 import tempfile
 from pathlib import Path
 import sys
@@ -36,10 +38,12 @@ class FakeRunner:
         self.write_explain = True
         self.explain_text = ""
         self.calls: list[tuple[str, ...]] = []
+        self.progress_totals: list[int | None] = []
 
-    def __call__(self, args, *, cwd, env):
+    def __call__(self, args, *, cwd, env, progress_total=None):
         argv = tuple(str(arg) for arg in args)
         self.calls.append(argv)
+        self.progress_totals.append(progress_total)
         if "query" in argv:
             kind = argv[argv.index("query") + 1]
             if kind == "rule":
@@ -190,6 +194,8 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertEqual(completed.targets, ("chrome",))
         self.assertIn("-n", self.runner.calls[-2])
         self.assertNotIn("-n", self.runner.calls[-1])
+        self.assertIsNone(self.runner.progress_totals[-2])
+        self.assertEqual(self.runner.progress_totals[-1], 2)
 
     def test_zero_edge_plan_never_executes_a_broad_build(self) -> None:
         self.runner.edge_count = 0
@@ -252,6 +258,23 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertTrue(result.stdout_truncated)
         self.assertEqual(result.streamed_edge_count, 1234)
         self.assertFalse(result.streamed_edge_count_ambiguous)
+
+    def test_subprocess_runner_reports_live_action_percentage_to_stderr(self) -> None:
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (
+                    sys.executable,
+                    "-c",
+                    "print('[1/4] CXX one'); print('[2/4] CXX two'); print('[4/4] LINK app')",
+                ),
+                cwd=self.source,
+                env={},
+                progress_total=4,
+            )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("build progress: 50.0% (2/4 actions)", progress.getvalue())
+        self.assertIn("build progress: 100.0% (4/4 actions)", progress.getvalue())
 
 
 if __name__ == "__main__":

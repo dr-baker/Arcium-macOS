@@ -17,7 +17,7 @@ import re
 import signal
 import subprocess
 import sys
-from threading import Thread
+from threading import Lock, Thread
 from typing import Callable, Mapping, Protocol, Sequence
 
 
@@ -44,6 +44,9 @@ _EXPLICITLY_BROAD_TARGETS = frozenset(
 )
 _EDGE_SUMMARY_PATTERN = re.compile(r"\b([0-9][0-9,]*)\s+(?:edges|actions|commands|steps)\b", re.I)
 _EDGE_PROGRESS_PATTERN = re.compile(r"\[\s*[0-9][0-9,]*\s*/\s*([0-9][0-9,]*)\s*\]")
+_ACTION_PROGRESS_PATTERN = re.compile(
+    r"\[\s*([0-9][0-9,]*)\s*/\s*([0-9][0-9,]*)\s*\]"
+)
 _EDGE_PATTERNS = (_EDGE_SUMMARY_PATTERN, _EDGE_PROGRESS_PATTERN)
 _NO_WORK_PATTERN = re.compile(r"(?:ninja|siso):?\s*(?:no work to do|no build steps)\.?", re.I)
 _EDGE_PARSER_TAIL = 512
@@ -160,6 +163,7 @@ class CommandRunner(Protocol):
         *,
         cwd: Path,
         env: Mapping[str, str],
+        progress_total: int | None = None,
     ) -> CommandResult:
         """Run one argv command without a shell."""
 
@@ -327,6 +331,7 @@ def subprocess_runner(
     env: Mapping[str, str],
     timeout_seconds: float | None = None,
     max_output_bytes: int = 64 * 1024,
+    progress_total: int | None = None,
 ) -> CommandResult:
     """Run safely while draining pipes and retaining only bounded diagnostics."""
 
@@ -343,14 +348,48 @@ def subprocess_runner(
     retained: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
     truncated = {"stdout": False, "stderr": False}
     parsers = {"stdout": _EdgeCountParser(), "stderr": _EdgeCountParser()}
+    progress_lock = Lock()
+    progress_completed = 0
+    progress_bucket = -1
+
+    def report_progress(text: str) -> None:
+        nonlocal progress_completed, progress_bucket
+        if progress_total is None or progress_total <= 0:
+            return
+        matches = tuple(_ACTION_PROGRESS_PATTERN.finditer(text))
+        if not matches:
+            return
+        with progress_lock:
+            for match in matches:
+                completed = int(match.group(1).replace(",", ""))
+                reported_total = int(match.group(2).replace(",", ""))
+                if reported_total != progress_total or completed <= progress_completed:
+                    continue
+                progress_completed = completed
+                percent = min(100.0, 100.0 * progress_completed / progress_total)
+                bucket = int(percent)
+                if bucket <= progress_bucket:
+                    continue
+                progress_bucket = bucket
+                print(
+                    f"build progress: {percent:.1f}% "
+                    f"({progress_completed:,}/{progress_total:,} actions)",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     def drain(name: str, pipe: object) -> None:
         assert hasattr(pipe, "read")
+        progress_tail = ""
         while True:
             chunk = pipe.read(8192)  # type: ignore[union-attr]
             if not chunk:
                 return
-            parsers[name].feed(chunk.decode("utf-8", errors="replace"))
+            decoded = chunk.decode("utf-8", errors="replace")
+            parsers[name].feed(decoded)
+            progress_text = progress_tail + decoded
+            report_progress(progress_text)
+            progress_tail = progress_text[-_EDGE_PARSER_TAIL:]
             remaining = max_output_bytes - len(retained[name])
             if remaining > 0:
                 retained[name].extend(chunk[:remaining])
@@ -418,10 +457,20 @@ class HeliumDevBuilder:
     def _reset_commands(self) -> None:
         self._commands.clear()
 
-    def _run(self, args: Sequence[str]) -> CommandResult:
+    def _run(
+        self,
+        args: Sequence[str],
+        *,
+        progress_total: int | None = None,
+    ) -> CommandResult:
         argv = tuple(str(arg) for arg in args)
         self._commands.append(argv)
-        return self.runner(argv, cwd=self.paths.source_dir, env=self._environment())
+        return self.runner(
+            argv,
+            cwd=self.paths.source_dir,
+            env=self._environment(),
+            progress_total=progress_total,
+        )
 
     def _result(
         self,
@@ -569,7 +618,10 @@ class HeliumDevBuilder:
                 proof_gates=tuple(plan.proof_gates) + ("no-work-plan",),
                 warnings=("dry-run reported no work; build was not executed",),
             )
-        result = self._run(self._autoninja_command(plan.targets, dry_run=False))
+        result = self._run(
+            self._autoninja_command(plan.targets, dry_run=False),
+            progress_total=plan.edge_count,
+        )
         if result.returncode != 0:
             detail = "autoninja build failed"
             if result.timed_out:

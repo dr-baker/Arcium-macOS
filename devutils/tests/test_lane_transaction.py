@@ -7,6 +7,11 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from lane_transaction import workflow_environment  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +19,18 @@ CLI = ROOT / "devutils" / "lane_transaction.py"
 
 
 class LaneTransactionTests(unittest.TestCase):
+    def test_heavy_lane_routes_temporary_traffic_to_build_volume(self) -> None:
+        environment = workflow_environment(
+            {"TMPDIR": "/internal/temp"},
+            build_root=Path("/Volumes/T9/ArciumBuild/build"),
+            lane="heavy",
+            worktree=Path("/worktree"),
+        )
+        self.assertEqual(
+            environment["TMPDIR"],
+            "/Volumes/T9/ArciumBuild/build/.arcium/tmp",
+        )
+
     def test_transaction_holds_lock_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -82,6 +99,40 @@ class LaneTransactionTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 2)
             self.assertFalse(build_root.exists())
+
+    def test_worktree_lane_preserves_callers_temporary_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            script = root / "dev.sh"
+            observed = root / "observed-temp"
+            script.write_text(
+                f'___helium_configure_inner() {{ printf "%s" "$TMPDIR" > {observed}; }}\n',
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [
+                    "python3",
+                    str(CLI),
+                    "--worktree",
+                    str(root),
+                    "--build-root",
+                    str(root / "build"),
+                    "--lane",
+                    "worktree",
+                    "--script",
+                    str(script),
+                    "configure",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                    "TMPDIR": str(root / "callers-temp"),
+                },
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(observed.read_text(encoding="utf-8"), str(root / "callers-temp"))
 
 
 if __name__ == "__main__":

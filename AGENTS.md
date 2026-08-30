@@ -32,6 +32,8 @@ change, regardless of which tools helped create it.
   from-zero, zero-fuzz receipt required by broad builds and Dev packaging.
 - Treat setup, configuration, build, packaging, and launch as one selected-lane
   transaction. Never bypass the lane lock to change generated source or graph state.
+- Keep heavy-lane temporary files and build logs on the heavy volume. Internal
+  free space is still required for macOS and swap.
 - Understand and inspect all generated or AI-assisted output before submission.
 - Use the exact Dev bundle and a development profile for behavior tests. State
   each completed proof gate accurately.

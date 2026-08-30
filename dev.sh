@@ -336,6 +336,15 @@ ___helium_lane_preflight() {
         "${_uuid_args[@]}"
 }
 
+___helium_prepare_lane_temp() {
+    if [ "$_dev_lane" != "heavy" ]; then
+        return
+    fi
+    local _lane_temp="$_build_dir/.arcium/tmp"
+    mkdir -p "$_lane_temp" || return
+    export TMPDIR="$_lane_temp"
+}
+
 ___helium_lane() {
     local _json_args=()
     if [ "$1" = "--json" ] && [ -z "$2" ]; then
@@ -398,21 +407,25 @@ ___helium_restart() {
 
 ___helium_build_plan() {
     ___helium_lane_preflight 5 || return
+    ___helium_prepare_lane_temp || return
     ___helium_harness build-plan "$@"
 }
 
 ___helium_compile() {
     ___helium_lane_preflight 15 || return
+    ___helium_prepare_lane_temp || return
     ___helium_harness compile "$@"
 }
 
 ___helium_relink() {
     ___helium_lane_preflight 15 || return
+    ___helium_prepare_lane_temp || return
     ___helium_harness relink "$@"
 }
 
 ___helium_build_full() {
     ___helium_lane_preflight 15 || return
+    ___helium_prepare_lane_temp || return
     ___helium_harness build-full "$@"
 }
 

@@ -85,6 +85,21 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertNotIn("setup", result.stdout)
 
+    def test_direct_heavy_build_routes_temporary_traffic_to_lane(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            build_root = Path(temporary) / "build"
+            result = run_zsh(
+                f"_dev_lane=heavy; _build_dir={build_root!s}; "
+                "___helium_lane_preflight(){ return 0; }; "
+                "___helium_harness(){ printf '%s\\n' \"$TMPDIR\"; }; "
+                "___helium_build_full --approved"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                str(build_root / ".arcium" / "tmp"),
+            )
+
     def test_arcium_runs_one_guarded_update_flow(self) -> None:
         result = run_zsh(
             "python3(){ if [[ $* == *preflight* ]]; then echo preflight; else echo install; fi; }; "

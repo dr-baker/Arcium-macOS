@@ -117,6 +117,12 @@ he lane
 For the heavy lane, `he lane` also checks that `/Volumes/T9` has the expected
 volume UUID. A different device mounted at that path fails the check.
 
+Heavy-lane transactions route temporary files and Siso logs to
+`/Volumes/T9/ArciumBuild/build/.arcium/tmp`. This matters when the internal
+volume is nearly full: putting `out/Default` on T9 alone does not move the
+default macOS temporary directory. Keep several GiB free internally for macOS
+and swap even though build traffic belongs to T9.
+
 The old `build` symlink in the active `arcium-patch-refactor` worktree points at
 `arcium-installed-browser`. Treat that link as stale. Do not use its source,
 profile, Siso state, or output for new proof.
@@ -140,6 +146,11 @@ patch stack with zero fuzz, generates the build graph, runs the broad browser
 build, and creates `Helium Dev.app`. The command requires at least 80 GiB free
 before cold setup. The `--approved` argument prevents an agent or a mistyped
 command from starting the expensive build silently.
+
+Broad builds report live action progress on standard error, for example
+`build progress: 60.0% (33,867/56,437 actions)`. The percentage is an action
+count, not a wall-clock estimate; linking and packaging near the end can take
+longer than an average compile action.
 
 Run `he bootstrap --approved` once per cold lane. If a runnable warm output
 already exists, the command stops and directs you to `he dev`.
