@@ -363,11 +363,20 @@ def _run_quilt(
 def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     """Pop and strictly replay the complete stack, then atomically publish proof."""
     _require_core_patch_copies(worktree)
+    try:
+        state = inspect_quilt_state(source_dir, worktree / "patches")
+        state.comparison.require_valid_prefix()
+    except QuiltStateError as error:
+        raise ReplayError(f"could not inspect Quilt state before replay: {error}") from error
     before = current_source_identity(worktree, source_dir)
     path = receipt_path(source_dir.parent)
     invalidate_downstream_receipts(source_dir.parent)
     environment = _quilt_environment(worktree)
-    for arguments in (("pop", "-a"), ("push", "-a")):
+    commands = (("push", "-a"),) if not state.comparison.applied else (
+        ("pop", "-a"),
+        ("push", "-a"),
+    )
+    for arguments in commands:
         result = _run_quilt(source_dir, environment, *arguments)
         if result.returncode:
             raise ReplayError(f"Quilt {' '.join(arguments)} failed; replay proof was not written")

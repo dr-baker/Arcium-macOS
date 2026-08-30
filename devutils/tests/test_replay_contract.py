@@ -185,11 +185,13 @@ class ReplayContractTests(unittest.TestCase):
                 applied.write_text("personal/feature.patch\n", encoding="utf-8")
             return subprocess.CompletedProcess(["quilt", *arguments], 0)
 
-        with patch("replay_contract._run_quilt", side_effect=run_quilt):
+        with patch("replay_contract._run_quilt", side_effect=run_quilt) as run:
             receipt = replay(outer, source)
 
         self.assertEqual(receipt.series_name, "series.merged")
         self.assertTrue(receipt_path(source.parent).is_file())
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args.args[2:], ("push", "-a"))
 
 
 if __name__ == "__main__":
