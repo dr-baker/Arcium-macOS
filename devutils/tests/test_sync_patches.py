@@ -86,6 +86,17 @@ class SyncPatchesTests(unittest.TestCase):
 
         self.assertEqual(generated.read_bytes(), before)
 
+    def test_sync_accepts_quilt_pop_state_without_applied_patches_file(self) -> None:
+        outer, source, _platform_series, _platform_patch = self.fixture()
+        (source / ".pc" / "applied-patches").unlink()
+
+        sync_generated_patches(outer, source)
+
+        self.assertEqual(
+            (outer / "patches" / "personal" / "core.patch").read_bytes(),
+            b"authoritative core\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

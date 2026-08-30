@@ -17,6 +17,36 @@ class SyncError(RuntimeError):
     """The generated patch catalog cannot be safely synchronized."""
 
 
+def _read_quilt_metadata(path: Path, description: str) -> str:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise SyncError(f"could not read {description}: {path}") from error
+    if not value or "\n" in value or "\x00" in value:
+        raise SyncError(f"invalid {description}: {path}")
+    return value
+
+
+def _require_missing_applied_is_clean(source_dir: Path, outer_patches: Path) -> None:
+    """Validate Quilt provenance when pop removed ``applied-patches``."""
+    pc_dir = source_dir / ".pc"
+    pointer = Path(_read_quilt_metadata(pc_dir / ".quilt_patches", "Quilt patch pointer"))
+    if not pointer.is_absolute():
+        pointer = source_dir / pointer
+    if pointer.resolve() != outer_patches.resolve():
+        raise SyncError(
+            "Quilt patch provenance does not point to the selected outer patches"
+        )
+    if _read_quilt_metadata(pc_dir / ".quilt_series", "Quilt series pointer") != "series.merged":
+        raise SyncError("Quilt series pointer does not select series.merged")
+    try:
+        declared = read_patch_list(outer_patches / "series.merged")
+    except QuiltStateError as error:
+        raise SyncError(f"could not validate the merged Quilt catalog: {error}") from error
+    if len(set(declared)) != len(declared):
+        raise SyncError("merged Quilt catalog contains duplicate patches")
+
+
 def _regular_bytes(path: Path, description: str) -> bytes:
     try:
         metadata = path.lstat()
@@ -99,15 +129,19 @@ def sync_generated_patches(worktree: Path, source_dir: Path) -> None:
             "generated patch state is not merged; run he merge with Quilt fully popped"
         )
 
-    try:
-        report = inspect_quilt_state(source_dir, outer_patches)
-        report.comparison.require_valid_prefix()
-    except QuiltStateError as error:
-        raise SyncError(f"cannot inspect Quilt state: {error}") from error
-    if report.comparison.applied:
-        raise SyncError(
-            "sync-patches requires Quilt to be fully popped; run he pop, then retry"
-        )
+    applied_path = source_dir / ".pc" / "applied-patches"
+    if applied_path.is_symlink() or applied_path.exists():
+        try:
+            report = inspect_quilt_state(source_dir, outer_patches)
+            report.comparison.require_valid_prefix()
+        except QuiltStateError as error:
+            raise SyncError(f"cannot inspect Quilt state: {error}") from error
+        if report.comparison.applied:
+            raise SyncError(
+                "sync-patches requires Quilt to be fully popped; run he pop, then retry"
+            )
+    else:
+        _require_missing_applied_is_clean(source_dir, outer_patches)
 
     try:
         authored = read_patch_list(core_series)
