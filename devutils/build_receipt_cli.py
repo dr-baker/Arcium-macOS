@@ -6,55 +6,24 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 from build_receipt import (
     BuildReceipt,
     ReceiptError,
     SourceReceipt,
-    require_expected_chromium_version,
+    current_source_receipt,
+    material_inputs_sha256,
     sha256_file,
     write_receipt_atomic,
 )
 from build_execution import ExecutionError, require_current_execution, tree_sha256
-from quilt_state import QuiltStateError, inspect_quilt_state
+from quilt_state import QuiltStateError
 from replay_contract import ReplayError, require_current_replay_proof
 
 
-def _git(repo: Path, *arguments: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), *arguments],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ReceiptError(f"could not inspect Git state in {repo}") from error
-    return result.stdout.strip()
-
-
 def _source_receipt(worktree: Path, source_dir: Path) -> tuple[SourceReceipt, str]:
-    outer = _git(worktree, "rev-parse", "HEAD")
-    core_dir = worktree / "helium-chromium"
-    core = _git(core_dir, "rev-parse", "HEAD")
-    fields = _git(worktree, "ls-tree", "HEAD", "helium-chromium").split()
-    if len(fields) < 3 or fields[1] != "commit":
-        raise ReceiptError("outer repository has no helium-chromium gitlink")
-    gitlink = fields[2]
-    report = inspect_quilt_state(source_dir, worktree / "patches")
-    report.comparison.require_complete()
-    return (
-        SourceReceipt.create(
-            outer_commit=outer,
-            core_commit=core,
-            gitlink_commit=gitlink,
-            chromium_version=require_expected_chromium_version(core_dir, source_dir),
-            patch_series_sha256=report.declared_sha256,
-        ),
-        report.applied_sha256,
-    )
+    return current_source_receipt(worktree, source_dir, require_complete=True)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -94,6 +63,7 @@ def _current_packaged_receipt(
         status="complete",
         gn_args_sha256=sha256_file(out_dir / "args.gn"),
         applied_series_sha256=applied_sha256,
+        material_inputs_sha256=material_inputs_sha256(worktree),
         targets=execution.targets,
         proof_gates=gates,
         artifacts=artifacts,

@@ -12,7 +12,13 @@ import re
 import stat
 from typing import Iterable
 
-from build_receipt import RECEIPT_SCHEMA, ReceiptError, sha256_file, write_receipt_atomic
+from build_receipt import (
+    RECEIPT_SCHEMA,
+    ReceiptError,
+    material_inputs_sha256,
+    sha256_file,
+    write_receipt_atomic,
+)
 from replay_contract import ReplayError, ReplayReceipt, require_current_replay_proof
 
 
@@ -95,6 +101,7 @@ class ExecutionReceipt:
     action: str
     targets: tuple[str, ...]
     gn_args_sha256: str
+    material_inputs_sha256: str
     applied_series_sha256: str
     artifacts: dict[str, str]
     receipt_id: str
@@ -109,6 +116,7 @@ class ExecutionReceipt:
         targets: Iterable[str],
         gn_args_sha256: str,
         artifacts: dict[str, str],
+        material_inputs_sha256: str = "0" * 64,
     ) -> "ExecutionReceipt":
         normalized_targets = tuple(dict.fromkeys(str(target) for target in targets))
         if not _LANE.fullmatch(lane):
@@ -119,6 +127,7 @@ class ExecutionReceipt:
             raise ReceiptError("execution targets are invalid")
         digests = {
             "gn_args_sha256": gn_args_sha256,
+            "material_inputs_sha256": material_inputs_sha256,
             "applied_series_sha256": replay.applied_series_sha256,
             **artifacts,
         }
@@ -143,6 +152,7 @@ class ExecutionReceipt:
             action=action,
             targets=normalized_targets,
             gn_args_sha256=gn_args_sha256,
+            material_inputs_sha256=material_inputs_sha256,
             applied_series_sha256=replay.applied_series_sha256,
             artifacts=dict(sorted(artifacts.items())),
             receipt_id=receipt_id,
@@ -158,6 +168,7 @@ class ExecutionReceipt:
             "action": self.action,
             "targets": list(self.targets),
             "gn_args_sha256": self.gn_args_sha256,
+            "material_inputs_sha256": self.material_inputs_sha256,
             "applied_series_sha256": self.applied_series_sha256,
             "artifacts": dict(self.artifacts),
         }
@@ -195,6 +206,7 @@ def record_execution(
             targets=targets,
             gn_args_sha256=args_digest,
             artifacts=_artifact_digests(build_root),
+            material_inputs_sha256=material_inputs_sha256(worktree),
         )
         write_receipt_atomic(execution_path(build_root), receipt)  # type: ignore[arg-type]
         return receipt
@@ -214,6 +226,7 @@ def _read_execution(path: Path, replay: ReplayReceipt) -> ExecutionReceipt:
             targets=tuple(str(target) for target in value["targets"]),
             gn_args_sha256=str(value["gn_args_sha256"]),
             artifacts={str(name): str(digest) for name, digest in value["artifacts"].items()},
+            material_inputs_sha256=str(value["material_inputs_sha256"]),
         )
     except (OSError, KeyError, TypeError, ValueError, ReceiptError) as error:
         raise ExecutionError("build execution receipt is missing or malformed; rebuild") from error
@@ -238,8 +251,13 @@ def require_current_execution(
     try:
         current_args = sha256_file(build_root / "src" / "out" / "Default" / "args.gn")
         current_artifacts = _artifact_digests(build_root)
+        current_material_inputs = material_inputs_sha256(worktree)
     except (OSError, ReceiptError) as error:
         raise ExecutionError("could not validate runnable build artifacts") from error
-    if receipt.gn_args_sha256 != current_args or receipt.artifacts != current_artifacts:
+    if (
+        receipt.gn_args_sha256 != current_args
+        or receipt.material_inputs_sha256 != current_material_inputs
+        or receipt.artifacts != current_artifacts
+    ):
         raise ExecutionError("runnable build artifacts changed after the recorded build; rebuild")
     return receipt

@@ -23,7 +23,7 @@ from build_receipt import (
     RECEIPT_SCHEMA,
     ReceiptError,
     SourceReceipt,
-    require_expected_chromium_version,
+    current_source_receipt as build_current_source_receipt,
     write_receipt_atomic,
 )
 from quilt_state import QuiltStateError, inspect_quilt_state, read_patch_list
@@ -105,45 +105,24 @@ def invalidate_downstream_receipts(build_root: Path) -> None:
             raise ReplayError(f"could not invalidate stale receipt: {name}") from error
 
 
-def _git(repo: Path, *arguments: str) -> str:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(repo), *arguments],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise ReplayError(f"could not inspect Git state in {repo}") from error
-    return result.stdout.strip()
-
-
 def current_source_identity(worktree: Path, source_dir: Path) -> SourceReceipt:
     """Compute source inputs without trusting Quilt's applied ledger."""
-    outer = _git(worktree, "rev-parse", "HEAD")
-    core_dir = worktree / "helium-chromium"
-    core = _git(core_dir, "rev-parse", "HEAD")
-    fields = _git(worktree, "ls-tree", "HEAD", "helium-chromium").split()
-    if len(fields) < 3 or fields[1] != "commit":
-        raise ReplayError("outer repository has no helium-chromium gitlink")
-    gitlink = fields[2]
-    report = inspect_quilt_state(source_dir, worktree / "patches")
-    report.comparison.require_valid_prefix()
-    return SourceReceipt.create(
-        outer_commit=outer,
-        core_commit=core,
-        gitlink_commit=gitlink,
-        chromium_version=require_expected_chromium_version(core_dir, source_dir),
-        patch_series_sha256=report.declared_sha256,
-    )
+    try:
+        return build_current_source_receipt(
+            worktree, source_dir, require_complete=False
+        )[0]
+    except ReceiptError as error:
+        raise ReplayError(str(error)) from error
 
 
 def current_source_receipt(worktree: Path, source_dir: Path) -> tuple[SourceReceipt, str]:
     """Compute current complete source identity and applied-series digest."""
-    source = current_source_identity(worktree, source_dir)
-    report = inspect_quilt_state(source_dir, worktree / "patches")
-    report.comparison.require_complete()
-    return source, report.applied_sha256
+    try:
+        return build_current_source_receipt(
+            worktree, source_dir, require_complete=True
+        )
+    except ReceiptError as error:
+        raise ReplayError(str(error)) from error
 
 
 def _require_core_patch_copies(worktree: Path) -> None:
@@ -296,7 +275,6 @@ def _read_receipt(path: Path) -> ReplayReceipt:
         if not isinstance(source_value, dict) or source_value.get("schema") != RECEIPT_SCHEMA:
             raise ReplayError("replay proof contains an unsupported source schema")
         source = SourceReceipt.create(
-            outer_commit=str(source_value["outer_commit"]),
             core_commit=str(source_value["core_commit"]),
             gitlink_commit=str(source_value["gitlink_commit"]),
             chromium_version=str(source_value["chromium_version"]),

@@ -96,6 +96,26 @@ class ReplayContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ReplayError, "no current"):
             require_current_replay_proof(outer, source)
 
+    def test_docs_and_tooling_only_changes_do_not_stale_replay_proof(self) -> None:
+        outer, source = self.fixture()
+        _write_proof(outer, source)
+        (outer / "docs").mkdir()
+        (outer / "docs" / "building.md").write_text("updated\n", encoding="utf-8")
+        (outer / "devutils").mkdir()
+        (outer / "devutils" / "test_helper.py").write_text("updated\n", encoding="utf-8")
+        git(outer, "add", "docs", "devutils")
+        git(
+            outer,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "docs and tooling",
+        )
+        self.assertIsNotNone(require_current_replay_proof(outer, source))
+
     def test_old_schema_receipt_is_rejected(self) -> None:
         outer, source = self.fixture()
         _write_proof(outer, source)

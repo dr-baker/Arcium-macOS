@@ -44,7 +44,7 @@ class BuildReceiptCliTests(unittest.TestCase):
                 )
         write.assert_not_called()
 
-    def test_source_receipt_records_matching_outer_core_and_quilt_state(self) -> None:
+    def test_source_receipt_records_matching_core_and_quilt_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             core_source = root / "core-source"
@@ -134,7 +134,7 @@ class BuildReceiptCliTests(unittest.TestCase):
             )
             self.assertEqual(receipt["core_commit"], core_commit)
             self.assertEqual(receipt["gitlink_commit"], core_commit)
-            self.assertEqual(receipt["outer_commit"], git(worktree, "rev-parse", "HEAD"))
+            self.assertNotIn("outer_commit", receipt)
 
             out = build_root / "src" / "out" / "Default"
             executable = out / "Helium Dev.app" / "Contents" / "MacOS" / "Helium"

@@ -17,7 +17,7 @@ from build_execution import (  # noqa: E402
     require_current_execution,
     tree_sha256,
 )
-from build_receipt import SourceReceipt  # noqa: E402
+from build_receipt import MATERIAL_BUILD_INPUTS, SourceReceipt  # noqa: E402
 from replay_contract import ReplayReceipt  # noqa: E402
 
 
@@ -29,7 +29,6 @@ _HASH_C = "c" * 64
 class BuildExecutionTests(unittest.TestCase):
     def replay(self) -> ReplayReceipt:
         source = SourceReceipt.create(
-            outer_commit="1" * 40,
             core_commit="2" * 40,
             gitlink_commit="2" * 40,
             chromium_version="151.0.7922.71",
@@ -43,6 +42,14 @@ class BuildExecutionTests(unittest.TestCase):
         )
 
     def artifacts(self, build_root: Path) -> None:
+        for declared in MATERIAL_BUILD_INPUTS:
+            path = build_root.parent / "worktree" / declared
+            if declared == "resources":
+                path.mkdir(parents=True, exist_ok=True)
+                (path / "icon.txt").write_text("icon\n", encoding="utf-8")
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(declared + "\n", encoding="utf-8")
         out = build_root / "src" / "out" / "Default"
         executable = out / "Helium.app" / "Contents" / "MacOS" / "Helium"
         executable.parent.mkdir(parents=True)
@@ -70,7 +77,7 @@ class BuildExecutionTests(unittest.TestCase):
         )
         self.assertEqual(first, second)
         self.assertEqual(first.replay_receipt_id, replay.receipt_id)
-        self.assertEqual(first.to_dict()["schema"], 2)
+        self.assertEqual(first.to_dict()["schema"], 3)
 
     def test_tree_digest_changes_when_artifact_content_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -116,6 +123,13 @@ class BuildExecutionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ExecutionError, "different lane"):
                     require_current_execution(
                         Path(temporary) / "worktree", build_root, lane="local"
+                    )
+                (Path(temporary) / "worktree" / "dev.sh").write_text(
+                    "changed\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(ExecutionError, "changed"):
+                    require_current_execution(
+                        Path(temporary) / "worktree", build_root, lane="heavy"
                     )
                 component = build_root / "src" / "out" / "Default" / "libchrome_dll.dylib"
                 component.write_bytes(b"changed")

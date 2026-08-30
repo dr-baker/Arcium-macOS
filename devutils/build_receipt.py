@@ -9,9 +9,10 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
+import stat
 import tempfile
 from typing import Iterable, Mapping
-
 
 _OBJECT_ID = re.compile(r"[0-9a-f]{40,64}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -32,7 +33,31 @@ _PROOF_GATES = {
     "persistence-observed",
     "teardown-observed",
 }
-RECEIPT_SCHEMA = 2
+RECEIPT_SCHEMA = 3
+
+# These are the outer-repository files that can change the generated build or
+# the Dev package.  Keep this list explicit: documentation, AGENTS.md, tests,
+# and other development-only files must not invalidate a runnable proof.
+MATERIAL_BUILD_INPUTS = (
+    "dev.sh",
+    "env.sh",
+    "retrieve_and_unpack_resource.sh",
+    "resources",
+    "devutils/arcium_app.py",
+    "devutils/build_execution.py",
+    "devutils/build_lane.py",
+    "devutils/build_receipt.py",
+    "devutils/build_receipt_cli.py",
+    "devutils/helium_dev.py",
+    "devutils/helium_dev_build.py",
+    "devutils/helium_dev_bundle.py",
+    "devutils/lane_transaction.py",
+    "devutils/quilt_state.py",
+    "devutils/replay_contract.py",
+    "devutils/set_quilt_vars.sh",
+    "devutils/setup_dawn_go.sh",
+    "devutils/setup_python.sh",
+)
 
 
 class ReceiptError(ValueError):
@@ -52,6 +77,63 @@ def sha256_file(path: Path) -> str:
 
 def _canonical_json(value: Mapping[str, object]) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _hash_material_path(root: Path, path: Path, digest: "hashlib._Hash") -> None:
+    """Hash one declared material path without following symlinks."""
+    relative = path.relative_to(root).as_posix()
+    try:
+        metadata = path.lstat()
+    except OSError as error:
+        raise ReceiptError(f"could not inspect material build input: {relative}") from error
+    if stat.S_ISDIR(metadata.st_mode):
+        kind = b"dir"
+        content = b""
+    elif stat.S_ISREG(metadata.st_mode):
+        kind = b"file"
+        try:
+            content = path.read_bytes()
+        except OSError as error:
+            raise ReceiptError(f"could not read material build input: {relative}") from error
+    elif stat.S_ISLNK(metadata.st_mode):
+        kind = b"symlink"
+        try:
+            content = os.readlink(path).encode("utf-8", errors="surrogateescape")
+        except OSError as error:
+            raise ReceiptError(f"could not read material build input: {relative}") from error
+    else:
+        raise ReceiptError(f"unsupported material build input: {relative}")
+    for field in (
+        relative.encode("utf-8", errors="surrogateescape"),
+        kind,
+        str(stat.S_IMODE(metadata.st_mode)).encode("ascii"),
+        content,
+    ):
+        digest.update(str(len(field)).encode("ascii"))
+        digest.update(b":")
+        digest.update(field)
+        digest.update(b"\n")
+
+
+def material_inputs_sha256(worktree: Path) -> str:
+    """Hash declared outer files that affect building or packaging."""
+    root = worktree.expanduser().resolve()
+    digest = hashlib.sha256()
+    for declared in MATERIAL_BUILD_INPUTS:
+        path = root / declared
+        if not path.exists() and not path.is_symlink():
+            raise ReceiptError(f"declared material build input is missing: {declared}")
+        paths = [path]
+        if path.is_dir() and not path.is_symlink():
+            paths.extend(
+                sorted(
+                    path.rglob("*"),
+                    key=lambda child: child.relative_to(root).as_posix(),
+                )
+            )
+        for candidate in paths:
+            _hash_material_path(root, candidate, digest)
+    return digest.hexdigest()
 
 
 def _require_object_id(name: str, value: str) -> str:
@@ -77,7 +159,6 @@ def _safe_build_target(target: str) -> bool:
 
 @dataclass(frozen=True)
 class SourceReceipt:
-    outer_commit: str
     core_commit: str
     gitlink_commit: str
     chromium_version: str
@@ -88,7 +169,6 @@ class SourceReceipt:
     def create(
         cls,
         *,
-        outer_commit: str,
         core_commit: str,
         gitlink_commit: str,
         chromium_version: str,
@@ -96,7 +176,6 @@ class SourceReceipt:
     ) -> "SourceReceipt":
         payload = {
             "schema": RECEIPT_SCHEMA,
-            "outer_commit": _require_object_id("outer_commit", outer_commit),
             "core_commit": _require_object_id("core_commit", core_commit),
             "gitlink_commit": _require_object_id("gitlink_commit", gitlink_commit),
             "chromium_version": chromium_version,
@@ -115,7 +194,6 @@ class SourceReceipt:
         return {
             "schema": RECEIPT_SCHEMA,
             "receipt_id": self.receipt_id,
-            "outer_commit": self.outer_commit,
             "core_commit": self.core_commit,
             "gitlink_commit": self.gitlink_commit,
             "chromium_version": self.chromium_version,
@@ -151,6 +229,49 @@ def require_expected_chromium_version(core_dir: Path, source_dir: Path) -> str:
     return expected
 
 
+def _git(repo: Path, *arguments: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ReceiptError(f"could not inspect Git state in {repo}") from error
+    return result.stdout.strip()
+
+
+def current_source_receipt(
+    worktree: Path, source_dir: Path, *, require_complete: bool
+) -> tuple[SourceReceipt, str]:
+    """Build one source identity for replay and receipt consumers."""
+    try:
+        from .quilt_state import inspect_quilt_state
+    except ImportError:
+        from quilt_state import inspect_quilt_state
+
+    core_dir = worktree / "helium-chromium"
+    core = _git(core_dir, "rev-parse", "HEAD")
+    fields = _git(worktree, "ls-tree", "HEAD", "helium-chromium").split()
+    if len(fields) < 3 or fields[1] != "commit":
+        raise ReceiptError("outer repository has no helium-chromium gitlink")
+    report = inspect_quilt_state(source_dir, worktree / "patches")
+    if require_complete:
+        report.comparison.require_complete()
+    else:
+        report.comparison.require_valid_prefix()
+    return (
+        SourceReceipt.create(
+            core_commit=core,
+            gitlink_commit=fields[2],
+            chromium_version=require_expected_chromium_version(core_dir, source_dir),
+            patch_series_sha256=report.declared_sha256,
+        ),
+        report.applied_sha256,
+    )
+
+
 @dataclass(frozen=True)
 class BuildReceipt:
     source: SourceReceipt
@@ -159,6 +280,7 @@ class BuildReceipt:
     lane: str
     status: str
     gn_args_sha256: str
+    material_inputs_sha256: str
     applied_series_sha256: str
     targets: tuple[str, ...]
     proof_gates: tuple[str, ...]
@@ -176,6 +298,7 @@ class BuildReceipt:
         status: str,
         gn_args_sha256: str,
         applied_series_sha256: str,
+        material_inputs_sha256: str = "0" * 64,
         targets: Iterable[str] = (),
         proof_gates: Iterable[str] = (),
         artifacts: Mapping[str, str] | None = None,
@@ -208,6 +331,9 @@ class BuildReceipt:
             "lane": lane,
             "status": status,
             "gn_args_sha256": _require_sha256("gn_args_sha256", gn_args_sha256),
+            "material_inputs_sha256": _require_sha256(
+                "material_inputs_sha256", material_inputs_sha256
+            ),
             "applied_series_sha256": _require_sha256(
                 "applied_series_sha256", applied_series_sha256
             ),
@@ -223,6 +349,7 @@ class BuildReceipt:
             lane=lane,
             status=status,
             gn_args_sha256=str(payload["gn_args_sha256"]),
+            material_inputs_sha256=str(payload["material_inputs_sha256"]),
             applied_series_sha256=str(payload["applied_series_sha256"]),
             targets=normalized_targets,
             proof_gates=normalized_gates,
@@ -240,6 +367,7 @@ class BuildReceipt:
             "lane": self.lane,
             "status": self.status,
             "gn_args_sha256": self.gn_args_sha256,
+            "material_inputs_sha256": self.material_inputs_sha256,
             "applied_series_sha256": self.applied_series_sha256,
             "targets": list(self.targets),
             "proof_gates": list(self.proof_gates),

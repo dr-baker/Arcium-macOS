@@ -8,14 +8,15 @@ from pathlib import Path
 
 from devutils.build_receipt import (
     BuildReceipt,
+    MATERIAL_BUILD_INPUTS,
     ReceiptError,
     SourceReceipt,
+    material_inputs_sha256,
     sha256_file,
     write_receipt_atomic,
 )
 
 
-_OUTER = "1" * 40
 _CORE = "2" * 40
 _HASH_A = "a" * 64
 _HASH_B = "b" * 64
@@ -24,7 +25,6 @@ _HASH_B = "b" * 64
 class BuildReceiptTest(unittest.TestCase):
     def source(self) -> SourceReceipt:
         return SourceReceipt.create(
-            outer_commit=_OUTER,
             core_commit=_CORE,
             gitlink_commit=_CORE,
             chromium_version="151.0.7922.71",
@@ -37,7 +37,6 @@ class BuildReceiptTest(unittest.TestCase):
         self.assertEqual(first.receipt_id, second.receipt_id)
         with self.assertRaisesRegex(ReceiptError, "gitlink"):
             SourceReceipt.create(
-                outer_commit=_OUTER,
                 core_commit=_CORE,
                 gitlink_commit="3" * 40,
                 chromium_version="151.0.7922.71",
@@ -60,7 +59,7 @@ class BuildReceiptTest(unittest.TestCase):
         self.assertEqual(receipt.targets, ("//chrome:chrome", "obj/example.o"))
         self.assertEqual(receipt.to_dict()["replay_receipt_id"], _HASH_B)
         self.assertEqual(receipt.to_dict()["execution_receipt_id"], _HASH_A)
-        self.assertEqual(receipt.to_dict()["schema"], 2)
+        self.assertEqual(receipt.to_dict()["schema"], 3)
         self.assertEqual(receipt.artifacts["Helium Dev.app"], _HASH_B)
         with self.assertRaisesRegex(ReceiptError, "unsafe artifact"):
             BuildReceipt.create(
@@ -117,7 +116,7 @@ class BuildReceiptTest(unittest.TestCase):
             path = Path(temporary) / "receipts" / "source.json"
             write_receipt_atomic(path, self.source())
             payload = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["outer_commit"], _OUTER)
+            self.assertEqual(payload["core_commit"], _CORE)
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
     def test_file_hashing_streams_artifact_contents(self) -> None:
@@ -125,6 +124,42 @@ class BuildReceiptTest(unittest.TestCase):
             path = Path(temporary) / "artifact"
             path.write_bytes(b"arcium")
             self.assertEqual(len(sha256_file(path)), 64)
+
+    def test_material_inputs_ignore_docs_and_tooling_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for declared in MATERIAL_BUILD_INPUTS:
+                path = root / declared
+                if declared == "resources":
+                    path.mkdir(parents=True)
+                    (path / "icon.txt").write_text("icon\n", encoding="utf-8")
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(declared + "\n", encoding="utf-8")
+            before = material_inputs_sha256(root)
+            (root / "docs").mkdir()
+            (root / "docs" / "building.md").write_text("docs\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("charter\n", encoding="utf-8")
+            (root / "devutils" / "tests").mkdir()
+            (root / "devutils" / "tests" / "test_only.py").write_text(
+                "test\n", encoding="utf-8"
+            )
+            self.assertEqual(before, material_inputs_sha256(root))
+
+    def test_material_build_input_change_invalidates_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for declared in MATERIAL_BUILD_INPUTS:
+                path = root / declared
+                if declared == "resources":
+                    path.mkdir(parents=True)
+                    (path / "icon.txt").write_text("icon\n", encoding="utf-8")
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(declared + "\n", encoding="utf-8")
+            before = material_inputs_sha256(root)
+            (root / "resources" / "icon.txt").write_text("changed\n", encoding="utf-8")
+            self.assertNotEqual(before, material_inputs_sha256(root))
 
 
 if __name__ == "__main__":
