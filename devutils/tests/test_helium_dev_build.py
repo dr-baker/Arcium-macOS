@@ -274,7 +274,73 @@ class HeliumDevBuildTest(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0)
         self.assertIn("build progress: 50.0% (2/4 actions)", progress.getvalue())
+        self.assertIn("build progress: finishing (4/4 actions)", progress.getvalue())
         self.assertIn("build progress: 100.0% (4/4 actions)", progress.getvalue())
+
+    def test_subprocess_runner_estimates_progress_from_new_localexec_records(self) -> None:
+        localexec = self.output / "siso_localexec"
+        localexec.write_text("cmd: stale\naction: stale.o\n", encoding="utf-8")
+        script = (
+            "from pathlib import Path; import sys, time; "
+            "path = Path(sys.argv[1]); "
+            "handle = path.open('w', encoding='utf-8'); "
+            "[(handle.write(f'action: obj/{i}.o\\n'), handle.flush(), time.sleep(.35)) "
+            "for i in range(1, 5)]; handle.close()"
+        )
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (sys.executable, "-c", script, str(localexec), "-C", str(self.output)),
+                cwd=self.source,
+                env={},
+                progress_total=4,
+            )
+        self.assertEqual(result.returncode, 0)
+        output = progress.getvalue()
+        self.assertIn("build progress: estimated 25.0% (1/4 actions)", output)
+        self.assertIn("build progress: estimated finishing (4/4 actions)", output)
+        self.assertNotIn("estimated 100.0%", output)
+        self.assertIn("build progress: 100.0% (4/4 actions)", output)
+
+    def test_subprocess_runner_resets_localexec_when_log_is_replaced(self) -> None:
+        localexec = self.output / "siso_localexec"
+        localexec.write_text("cmd: old\naction: old-1\naction: old-2\n", encoding="utf-8")
+        script = (
+            "from pathlib import Path; import sys, time; "
+            "path = Path(sys.argv[1]); time.sleep(.35); "
+            "path.write_text('cmd: new\\naction: new-1\\n', encoding='utf-8'); time.sleep(.35)"
+        )
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (sys.executable, "-c", script, str(localexec), "-C", str(self.output)),
+                cwd=self.source,
+                env={},
+                progress_total=1,
+            )
+        self.assertEqual(result.returncode, 0)
+        output = progress.getvalue()
+        self.assertIn("estimated finishing (1/1 actions)", output)
+        self.assertNotIn("2/1 actions", output)
+
+    def test_subprocess_runner_never_claims_completion_for_failed_build(self) -> None:
+        localexec = self.output / "siso_localexec"
+        script = (
+            "from pathlib import Path; import sys; "
+            "Path(sys.argv[1]).write_text('action: failed.o\\n', encoding='utf-8'); "
+            "raise SystemExit(1)"
+        )
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (sys.executable, "-c", script, str(localexec), "-C", str(self.output)),
+                cwd=self.source,
+                env={},
+                progress_total=1,
+            )
+        self.assertEqual(result.returncode, 1)
+        output = progress.getvalue()
+        self.assertNotIn("100.0%", output)
 
 
 if __name__ == "__main__":
