@@ -28,6 +28,10 @@ change, regardless of which tools helped create it.
   build lane. Never copy or symlink generated state between lanes.
 - Select the source worktree and the build lane separately. Record both when
   reporting build or runtime proof.
+- Treat `he check` as a fast state check. Run `he replay` to establish the
+  from-zero, zero-fuzz receipt required by broad builds and Dev packaging.
+- Treat setup, configuration, build, packaging, and launch as one selected-lane
+  transaction. Never bypass the lane lock to change generated source or graph state.
 - Understand and inspect all generated or AI-assisted output before submission.
 - Use the exact Dev bundle and a development profile for behavior tests. State
   each completed proof gate accurately.

@@ -17,8 +17,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Sequence
 
+from build_execution import ExecutionError, require_current_execution
+from build_lane import LaneError, acquire_lane_lock
 from helium_dev_bundle import (
     BundleError,
+    BundlePaths,
     _copy_source,
     _read_plist,
     _require_fresh_source,
@@ -200,15 +203,21 @@ def _replace_directory(candidate: Path, destination: Path) -> None:
         shutil.rmtree(previous)
 
 
-def package_arcium(
-    root: str | os.PathLike[str],
+def _package_arcium_locked(
+    paths: BundlePaths,
     *,
-    build_root: str | os.PathLike[str] | None = None,
     identity: str,
     signer: Signer = sign_and_verify,
     copy_runner: CommandRunner | None = None,
 ) -> dict[str, object]:
-    paths = resolve_bundle_paths(root, build_root)
+    try:
+        require_current_execution(
+            paths.worktree,
+            paths.source_dir.parent,
+            lane=os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        )
+    except ExecutionError as error:
+        raise ArciumError(str(error)) from error
     source = _require_fresh_source(paths, require_dev_destination_absent=False)
     staging_root = Path(tempfile.mkdtemp(prefix=".arcium-bundle-", dir=paths.out_dir))
     staging_app = staging_root / "Arcium.app"
@@ -231,6 +240,36 @@ def package_arcium(
         "plist_count": plist_count,
         "signing_identity": identity,
     }
+
+
+def package_arcium(
+    root: str | os.PathLike[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+    identity: str,
+    signer: Signer = sign_and_verify,
+    copy_runner: CommandRunner | None = None,
+) -> dict[str, object]:
+    """Package stable Arcium while owning the selected generated lane."""
+
+    paths = resolve_bundle_paths(root, build_root)
+    owner = {
+        "action": "arcium-package",
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(paths.worktree),
+    }
+    try:
+        with acquire_lane_lock(
+            paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ):
+            return _package_arcium_locked(
+                paths,
+                identity=identity,
+                signer=signer,
+                copy_runner=copy_runner,
+            )
+    except LaneError as error:
+        raise ArciumError(str(error)) from error
 
 
 def process_conflicts(
@@ -401,15 +440,22 @@ def launch_arcium(
     return process.pid
 
 
-def update_action(
-    root: str | os.PathLike[str],
+def _update_action_locked(
+    paths: BundlePaths,
     *,
-    build_root: str | os.PathLike[str] | None = None,
     home: str | os.PathLike[str] | None = None,
     install_path: Path = DEFAULT_INSTALL_PATH,
     ps_text: str | None = None,
     launch: bool = True,
 ) -> dict[str, object]:
+    try:
+        require_current_execution(
+            paths.worktree,
+            paths.source_dir.parent,
+            lane=os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        )
+    except ExecutionError as error:
+        raise ArciumError(str(error)) from error
     source_profile = source_profile_path(home)
     target_profile = arcium_profile_path(home)
     with update_lock(home):
@@ -421,7 +467,7 @@ def update_action(
         )
         identity = resolve_signing_identity()
         migration = initialize_profile(source_profile, target_profile)
-        package = package_arcium(root, build_root=build_root, identity=identity)
+        package = _package_arcium_locked(paths, identity=identity)
         install_method = install_arcium(Path(str(package["app_path"])), install_path)
         verify_installed_arcium(install_path)
         require_closed(
@@ -444,6 +490,38 @@ def update_action(
         "pid": pid,
         "source_profile_unchanged": True,
     }
+
+
+def update_action(
+    root: str | os.PathLike[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+    home: str | os.PathLike[str] | None = None,
+    install_path: Path = DEFAULT_INSTALL_PATH,
+    ps_text: str | None = None,
+    launch: bool = True,
+) -> dict[str, object]:
+    """Update stable Arcium while owning the complete generated-lane transaction."""
+
+    paths = resolve_bundle_paths(root, build_root)
+    owner = {
+        "action": "arcium",
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(paths.worktree),
+    }
+    try:
+        with acquire_lane_lock(
+            paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ):
+            return _update_action_locked(
+                paths,
+                home=home,
+                install_path=install_path,
+                ps_text=ps_text,
+                launch=launch,
+            )
+    except LaneError as error:
+        raise ArciumError(str(error)) from error
 
 
 def preflight_action(
@@ -493,7 +571,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             document = preflight_action()
         else:
             document = update_action(args.root, build_root=args.build_root)
-    except (ArciumError, BundleError, OSError, subprocess.SubprocessError) as error:
+    except (
+        ArciumError,
+        BundleError,
+        ExecutionError,
+        LaneError,
+        OSError,
+        subprocess.SubprocessError,
+    ) as error:
         print(str(error), file=sys.stderr)
         if args.json:
             print(json.dumps({"ok": False, "action": f"arcium-{args.action}", "error": str(error)}))

@@ -18,9 +18,15 @@ CLI = WORKTREE / "devutils" / "helium_dev.py"
 sys.path.insert(0, str(WORKTREE / "devutils"))
 import helium_dev  # noqa: E402
 import helium_dev_runtime as runtime  # noqa: E402
+from replay_contract import ReplayError  # noqa: E402
 
 
 class HeliumDevCliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        packaged = patch("helium_dev.require_current_packaged_build")
+        self.addCleanup(packaged.stop)
+        self.packaged_build = packaged.start()
+
     def test_cli_passes_external_build_root_to_runtime(self) -> None:
         with patch(
             "helium_dev.runtime_action",
@@ -86,6 +92,29 @@ class HeliumDevCliTests(unittest.TestCase):
         document = json.loads(result.stdout)
         self.assertFalse(document["ok"])
         self.assertIn("requires explicit approved=True", result.stdout)
+
+    def test_approved_build_full_requires_replay_before_building(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "helium_dev.HeliumDevBuilder"
+        ) as builder, patch(
+            "helium_dev.require_current_replay_proof",
+            side_effect=ReplayError("run he replay"),
+        ):
+            with self.assertRaisesRegex(ReplayError, "run he replay"):
+                helium_dev.build_action(
+                    "build-full",
+                    temporary,
+                    ("--approved",),
+                )
+        builder.return_value.build_full.assert_not_called()
+
+    def test_run_requires_current_packaged_build(self) -> None:
+        self.packaged_build.side_effect = helium_dev.ReceiptError(
+            "packaged build proof is stale"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(helium_dev.ReceiptError, "stale"):
+                helium_dev.runtime_action("run", temporary, ())
 
     def test_lock_contention_and_bad_build_argument_keep_json_stdout_clean(self) -> None:
         stdout, stderr = io.StringIO(), io.StringIO()

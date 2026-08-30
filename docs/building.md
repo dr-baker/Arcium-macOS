@@ -155,9 +155,40 @@ he lane
 he dev
 ```
 
-`he dev` checks patch files, strictly applies the complete stack, regenerates
+`he dev` checks patch files, requires a current full replay proof, regenerates
 the build configuration, relinks the component build with current resources,
 creates `Helium Dev.app`, and launches the persistent development profile.
+
+The expensive replay is explicit and serialized with every other build action:
+
+```sh
+he replay
+```
+
+It invalidates any previous proof, pops every patch, reapplies the complete
+`series.merged` with fuzz disabled, and publishes a new replay receipt only
+after the complete state has been verified. The receipt binds the selected
+outer and core commits, the core gitlink, the Chromium version, the exact
+merged-series syntax and patch bytes, and every patch-owned source path.
+Changing one of those inputs makes the receipt stale. Unrelated uncommitted
+files do not. Run `he replay` again before `he dev`,
+`he build-full --approved`, or packaging. `he check` remains a read-only patch
+catalog and applied-state check and does not create replay proof.
+
+The later receipts form one chain:
+
+1. `he replay` records the source and complete zero-fuzz replay.
+2. `he relink --resources` or `he build-full --approved` records the exact
+   runnable artifacts produced from that replay.
+3. `he dev-bundle` copies and signs those artifacts, then records the exact
+   `Helium Dev.app` it published.
+4. `he run` and `he restart` refuse to launch when any earlier receipt or
+   artifact is missing or stale.
+
+Replay attempts, builds, complete Dev workflows, setup, configuration, and
+stable Arcium updates share one lane transaction lock. A second worktree must
+wait instead of changing Quilt state, resources, or the generated graph during
+an active build.
 
 Pass profile options through `he dev` when the change needs isolated state:
 
@@ -186,8 +217,9 @@ can hide broad fan-out. `he relink` rebuilds the runnable component library. Add
 have changed.
 
 `he build-full --approved` is the explicit broad-build path. It still runs a
-dry run and enforces the pending-edge budget. If the plan exceeds the budget,
-inspect it before you pass a larger `--edge-budget N` value.
+dry run, requires a current replay receipt, and enforces the pending-edge
+budget. If the plan exceeds the budget, inspect it before you pass a larger
+`--edge-budget N` value.
 
 `he build` always refuses because an unqualified build can start hours of work.
 
@@ -301,8 +333,9 @@ with zero fuzz.
 4. Format the owning patch, refresh it, and check the complete stack:
 
    ```sh
-   quilt refresh
+   quilt refresh --no-timestamps
    he check
+   he replay
    ```
 
 5. Commit shared Chromium patches in `helium-chromium` first. Then advance the

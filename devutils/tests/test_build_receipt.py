@@ -27,6 +27,7 @@ class BuildReceiptTest(unittest.TestCase):
             outer_commit=_OUTER,
             core_commit=_CORE,
             gitlink_commit=_CORE,
+            chromium_version="151.0.7922.71",
             patch_series_sha256=_HASH_A,
         )
 
@@ -39,12 +40,15 @@ class BuildReceiptTest(unittest.TestCase):
                 outer_commit=_OUTER,
                 core_commit=_CORE,
                 gitlink_commit="3" * 40,
+                chromium_version="151.0.7922.71",
                 patch_series_sha256=_HASH_A,
             )
 
     def test_build_receipt_contains_no_absolute_artifact_paths(self) -> None:
         receipt = BuildReceipt.create(
             source=self.source(),
+            replay_receipt_id=_HASH_B,
+            execution_receipt_id=_HASH_A,
             lane="heavy",
             status="complete",
             gn_args_sha256=_HASH_A,
@@ -54,10 +58,15 @@ class BuildReceiptTest(unittest.TestCase):
             artifacts={"Helium Dev.app": _HASH_B},
         )
         self.assertEqual(receipt.targets, ("//chrome:chrome", "obj/example.o"))
+        self.assertEqual(receipt.to_dict()["replay_receipt_id"], _HASH_B)
+        self.assertEqual(receipt.to_dict()["execution_receipt_id"], _HASH_A)
+        self.assertEqual(receipt.to_dict()["schema"], 2)
         self.assertEqual(receipt.artifacts["Helium Dev.app"], _HASH_B)
         with self.assertRaisesRegex(ReceiptError, "unsafe artifact"):
             BuildReceipt.create(
                 source=self.source(),
+                replay_receipt_id=_HASH_B,
+                execution_receipt_id=_HASH_A,
                 lane="local",
                 status="complete",
                 gn_args_sha256=_HASH_A,
@@ -71,6 +80,8 @@ class BuildReceiptTest(unittest.TestCase):
                 with self.assertRaisesRegex(ReceiptError, "generated-build"):
                     BuildReceipt.create(
                         source=self.source(),
+                        replay_receipt_id=_HASH_B,
+                        execution_receipt_id=_HASH_A,
                         lane="local",
                         status="incomplete",
                         gn_args_sha256=_HASH_A,
@@ -82,6 +93,8 @@ class BuildReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(ReceiptError, "unknown proof"):
             BuildReceipt.create(
                 source=self.source(),
+                replay_receipt_id=_HASH_B,
+                execution_receipt_id=_HASH_A,
                 lane="local",
                 status="incomplete",
                 gn_args_sha256=_HASH_A,
@@ -91,6 +104,8 @@ class BuildReceiptTest(unittest.TestCase):
         with self.assertRaisesRegex(ReceiptError, "SHA-256"):
             BuildReceipt.create(
                 source=self.source(),
+                replay_receipt_id=_HASH_B,
+                execution_receipt_id=_HASH_A,
                 lane="local",
                 status="incomplete",
                 gn_args_sha256="short",

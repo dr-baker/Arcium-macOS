@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 DEVUTILS = Path(__file__).resolve().parents[1]
@@ -180,6 +181,21 @@ class ArciumAppTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIn("--user-data-dir=/profiles/arcium", calls[0])
         self.assertFalse(any("mock-keychain" in value for value in calls[0]))
+
+    def test_update_requires_current_execution_before_profile_changes(self) -> None:
+        with patch(
+            "arcium_app.require_current_execution",
+            side_effect=arcium_app.ExecutionError("rebuild first"),
+        ), patch("arcium_app.initialize_profile") as initialize:
+            with self.assertRaisesRegex(arcium_app.ArciumError, "rebuild first"):
+                arcium_app.update_action(
+                    self.temporary,
+                    build_root=self.temporary / "build",
+                    home=self.temporary / "home",
+                    install_path=self.temporary / "Arcium.app",
+                    launch=False,
+                )
+        initialize.assert_not_called()
 
 
 if __name__ == "__main__":

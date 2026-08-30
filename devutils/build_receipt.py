@@ -15,6 +15,7 @@ from typing import Iterable, Mapping
 
 _OBJECT_ID = re.compile(r"[0-9a-f]{40,64}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_CHROMIUM_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){3}")
 _BUILD_TARGET = re.compile(
     r"(?:[A-Za-z0-9_.+-]+(?:/[A-Za-z0-9_.+-]+)*|"
     r"//[A-Za-z0-9_./+-]+:[A-Za-z0-9_.+-]+)"
@@ -31,6 +32,7 @@ _PROOF_GATES = {
     "persistence-observed",
     "teardown-observed",
 }
+RECEIPT_SCHEMA = 2
 
 
 class ReceiptError(ValueError):
@@ -78,6 +80,7 @@ class SourceReceipt:
     outer_commit: str
     core_commit: str
     gitlink_commit: str
+    chromium_version: str
     patch_series_sha256: str
     receipt_id: str
 
@@ -88,36 +91,71 @@ class SourceReceipt:
         outer_commit: str,
         core_commit: str,
         gitlink_commit: str,
+        chromium_version: str,
         patch_series_sha256: str,
     ) -> "SourceReceipt":
         payload = {
-            "schema": 1,
+            "schema": RECEIPT_SCHEMA,
             "outer_commit": _require_object_id("outer_commit", outer_commit),
             "core_commit": _require_object_id("core_commit", core_commit),
             "gitlink_commit": _require_object_id("gitlink_commit", gitlink_commit),
+            "chromium_version": chromium_version,
             "patch_series_sha256": _require_sha256(
                 "patch_series_sha256", patch_series_sha256
             ),
         }
         if payload["core_commit"] != payload["gitlink_commit"]:
             raise ReceiptError("outer gitlink does not select the recorded core commit")
+        if not _CHROMIUM_VERSION.fullmatch(chromium_version):
+            raise ReceiptError("chromium_version must contain four numeric components")
         receipt_id = hashlib.sha256(_canonical_json(payload)).hexdigest()
         return cls(receipt_id=receipt_id, **{key: value for key, value in payload.items() if key != "schema"})
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schema": 1,
+            "schema": RECEIPT_SCHEMA,
             "receipt_id": self.receipt_id,
             "outer_commit": self.outer_commit,
             "core_commit": self.core_commit,
             "gitlink_commit": self.gitlink_commit,
+            "chromium_version": self.chromium_version,
             "patch_series_sha256": self.patch_series_sha256,
         }
+
+
+def require_expected_chromium_version(core_dir: Path, source_dir: Path) -> str:
+    """Bind generated source to the Chromium archive selected by Arcium core."""
+    try:
+        expected = (core_dir / "chromium_version.txt").read_text(
+            encoding="utf-8"
+        ).strip()
+        fields: dict[str, str] = {}
+        for line in (source_dir / "chrome" / "VERSION").read_text(
+            encoding="utf-8"
+        ).splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key in {"MAJOR", "MINOR", "BUILD", "PATCH"}:
+                fields[key] = value
+    except OSError as error:
+        raise ReceiptError("could not inspect the selected Chromium version") from error
+    if not _CHROMIUM_VERSION.fullmatch(expected):
+        raise ReceiptError("core chromium_version.txt is malformed")
+    try:
+        actual = ".".join(fields[key] for key in ("MAJOR", "MINOR", "BUILD", "PATCH"))
+    except KeyError as error:
+        raise ReceiptError("generated chrome/VERSION is incomplete") from error
+    if actual != expected:
+        raise ReceiptError(
+            f"generated Chromium version {actual} does not match selected {expected}"
+        )
+    return expected
 
 
 @dataclass(frozen=True)
 class BuildReceipt:
     source: SourceReceipt
+    replay_receipt_id: str
+    execution_receipt_id: str
     lane: str
     status: str
     gn_args_sha256: str
@@ -132,6 +170,8 @@ class BuildReceipt:
         cls,
         *,
         source: SourceReceipt,
+        replay_receipt_id: str,
+        execution_receipt_id: str,
         lane: str,
         status: str,
         gn_args_sha256: str,
@@ -157,8 +197,14 @@ class BuildReceipt:
                 raise ReceiptError(f"unsafe artifact name: {name}")
             _require_sha256(f"artifact {name}", digest)
         payload: dict[str, object] = {
-            "schema": 1,
+            "schema": RECEIPT_SCHEMA,
             "source_receipt_id": source.receipt_id,
+            "replay_receipt_id": _require_sha256(
+                "replay_receipt_id", replay_receipt_id
+            ),
+            "execution_receipt_id": _require_sha256(
+                "execution_receipt_id", execution_receipt_id
+            ),
             "lane": lane,
             "status": status,
             "gn_args_sha256": _require_sha256("gn_args_sha256", gn_args_sha256),
@@ -172,6 +218,8 @@ class BuildReceipt:
         receipt_id = hashlib.sha256(_canonical_json(payload)).hexdigest()
         return cls(
             source=source,
+            replay_receipt_id=str(payload["replay_receipt_id"]),
+            execution_receipt_id=str(payload["execution_receipt_id"]),
             lane=lane,
             status=status,
             gn_args_sha256=str(payload["gn_args_sha256"]),
@@ -184,9 +232,11 @@ class BuildReceipt:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schema": 1,
+            "schema": RECEIPT_SCHEMA,
             "receipt_id": self.receipt_id,
             "source": self.source.to_dict(),
+            "replay_receipt_id": self.replay_receipt_id,
+            "execution_receipt_id": self.execution_receipt_id,
             "lane": self.lane,
             "status": self.status,
             "gn_args_sha256": self.gn_args_sha256,

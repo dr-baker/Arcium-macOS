@@ -21,6 +21,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from build_lane import LaneError, acquire_lane_lock
+from build_execution import ExecutionError, require_current_execution, tree_sha256
+
 
 class BundleError(RuntimeError):
     """The current build cannot be packaged safely as a Dev bundle."""
@@ -280,16 +283,21 @@ def sign_and_verify_ad_hoc(app_path: Path) -> None:
         raise BundleError("ad-hoc signing or verification failed") from error
 
 
-def package_dev_bundle(
-    root: str | os.PathLike[str],
+def _package_dev_bundle_locked(
+    paths: BundlePaths,
     *,
-    build_root: str | os.PathLike[str] | None = None,
     copy_runner: CopyRunner | None = None,
     signer: Signer | None = None,
 ) -> dict[str, object]:
-    """Package and atomically publish ``Helium Dev.app`` for one worktree."""
-
-    paths = resolve_bundle_paths(root, build_root)
+    """Package while a verified parent owns the generated lane."""
+    try:
+        require_current_execution(
+            paths.worktree,
+            paths.source_dir.parent,
+            lane=os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        )
+    except ExecutionError as error:
+        raise BundleError(str(error)) from error
     source = _require_fresh_source(paths, require_dev_destination_absent=False)
     _require_owned_dev_destination(paths)
     staging_root = Path(tempfile.mkdtemp(prefix=".helium-dev-bundle-", dir=paths.out_dir))
@@ -330,6 +338,7 @@ def package_dev_bundle(
         },
         "copy_method": copy_method,
         "plist_count": plist_count,
+        "package_tree_sha256": tree_sha256(paths.dev_app),
         "signature": "ad-hoc",
         "proof_gates": (
             "source-present",
@@ -339,3 +348,29 @@ def package_dev_bundle(
             "atomic-publish",
         ),
     }
+
+
+def package_dev_bundle(
+    root: str | os.PathLike[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+    copy_runner: CopyRunner | None = None,
+    signer: Signer | None = None,
+) -> dict[str, object]:
+    """Package and atomically publish ``Helium Dev.app`` under the lane lock."""
+
+    paths = resolve_bundle_paths(root, build_root)
+    owner = {
+        "action": "dev-bundle",
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(paths.worktree),
+    }
+    try:
+        with acquire_lane_lock(
+            paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ):
+            return _package_dev_bundle_locked(
+                paths, copy_runner=copy_runner, signer=signer
+            )
+    except LaneError as error:
+        raise BundleError(str(error)) from error

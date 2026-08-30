@@ -2,7 +2,9 @@
 
 import tempfile
 import unittest
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from devutils.build_lane import (
     LaneError,
@@ -116,6 +118,28 @@ class BuildLaneTest(unittest.TestCase):
             with self.assertRaisesRegex(LaneError, "already locked"):
                 with acquire_lane_lock(lock_path, {"action": "other"}):
                     self.fail("contended lane lock was acquired")
+
+    def test_lane_transaction_child_reuses_exact_parent_lock(self) -> None:
+        lock_path = self.mount / "locks" / "heavy.lock"
+        with acquire_lane_lock(lock_path, {"action": "parent"}) as descriptor:
+            with patch.dict(
+                "os.environ", {"HELIUM_DEV_LANE_LOCK_FD": str(descriptor)}
+            ):
+                with acquire_lane_lock(lock_path, {"action": "child"}):
+                    payload = lock_path.read_text(encoding="utf-8")
+                    self.assertIn('"action":"parent"', payload)
+
+    def test_forged_inherited_descriptor_cannot_bypass_contention(self) -> None:
+        lock_path = self.mount / "locks" / "heavy.lock"
+        with acquire_lane_lock(lock_path, {"action": "parent"}):
+            forged = os.open(lock_path, os.O_RDWR)
+            self.addCleanup(os.close, forged)
+            with patch.dict(
+                "os.environ", {"HELIUM_DEV_LANE_LOCK_FD": str(forged)}
+            ):
+                with self.assertRaisesRegex(LaneError, "not owned"):
+                    with acquire_lane_lock(lock_path, {"action": "forged"}):
+                        self.fail("forged descriptor bypassed lane contention")
 
 
 if __name__ == "__main__":

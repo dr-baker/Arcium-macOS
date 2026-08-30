@@ -9,6 +9,7 @@ from devutils.quilt_state import (
     compare_patch_lists,
     inspect_quilt_state,
     patch_list_sha256,
+    patch_series_sha256,
     read_patch_list,
 )
 
@@ -33,6 +34,11 @@ class QuiltStateTest(unittest.TestCase):
         (self.patches / "series.merged").write_text(
             "\n".join(declared) + "\n", encoding="utf-8"
         )
+        for name in declared:
+            patch_path = self.patches / name
+            patch_path.parent.mkdir(parents=True, exist_ok=True)
+            if not patch_path.exists():
+                patch_path.write_text(f"patch {name}\n", encoding="utf-8")
         (self.source / ".pc" / "applied-patches").write_text(
             "\n".join(applied) + "\n", encoding="utf-8"
         )
@@ -91,6 +97,22 @@ class QuiltStateTest(unittest.TestCase):
             patch_list_sha256(("a.patch", "b.patch")),
             patch_list_sha256(("b.patch", "a.patch")),
         )
+
+    def test_declared_digest_changes_when_patch_content_changes(self) -> None:
+        declared = ("a.patch", "b.patch")
+        self.write_state(declared, declared)
+        first = patch_series_sha256(self.patches, declared)
+        (self.patches / "b.patch").write_text("changed\n", encoding="utf-8")
+        self.assertNotEqual(first, patch_series_sha256(self.patches, declared))
+
+    def test_declared_digest_changes_when_series_options_change(self) -> None:
+        declared = ("a.patch",)
+        self.write_state(declared, declared)
+        first = patch_series_sha256(self.patches, declared)
+        (self.patches / "series.merged").write_text(
+            "a.patch -p1\n", encoding="utf-8"
+        )
+        self.assertNotEqual(first, patch_series_sha256(self.patches, declared))
 
     def test_stale_patch_directory_provenance_is_rejected(self) -> None:
         self.write_state(("a.patch",), ("a.patch",))

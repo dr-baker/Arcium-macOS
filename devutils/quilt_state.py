@@ -47,6 +47,51 @@ def patch_list_sha256(patches: tuple[str, ...]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def patch_series_sha256(
+    patches_dir: Path,
+    patches: tuple[str, ...],
+    *,
+    series_name: str = "series.merged",
+) -> str:
+    """Hash the exact series syntax and bytes of every declared patch.
+
+    Quilt's ``applied-patches`` file is provenance metadata, not source
+    identity.  A receipt must therefore change when a patch is edited even if
+    its filename and series position remain unchanged.
+    """
+    digest = hashlib.sha256()
+    patches_dir = patches_dir.resolve()
+    series_path = patches_dir / series_name
+    try:
+        series_bytes = series_path.read_bytes()
+    except OSError as error:
+        raise QuiltStateError(f"could not read Quilt list: {series_path}") from error
+    digest.update(b"series\0")
+    digest.update(str(len(series_bytes)).encode("ascii"))
+    digest.update(b":")
+    digest.update(series_bytes)
+    digest.update(b"\npatches\0")
+    for name in patches:
+        path = (patches_dir / name).resolve()
+        try:
+            path.relative_to(patches_dir)
+            content = path.read_bytes()
+        except (OSError, ValueError) as error:
+            raise QuiltStateError(f"could not read declared patch: {name}") from error
+        if not path.is_file():
+            raise QuiltStateError(f"declared patch is not a regular file: {name}")
+        name_bytes = name.encode("utf-8")
+        digest.update(str(len(name_bytes)).encode("ascii"))
+        digest.update(b":")
+        digest.update(name_bytes)
+        digest.update(b"\n")
+        digest.update(str(len(content)).encode("ascii"))
+        digest.update(b":")
+        digest.update(content)
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
 def _require_unique(patches: tuple[str, ...], *, description: str) -> None:
     seen: set[str] = set()
     duplicates: list[str] = []
@@ -194,6 +239,8 @@ def inspect_quilt_state(
         patches_dir=patches_dir,
         series_name=series_name,
         comparison=comparison,
-        declared_sha256=patch_list_sha256(declared),
+        declared_sha256=patch_series_sha256(
+            patches_dir, declared, series_name=series_name
+        ),
         applied_sha256=patch_list_sha256(applied),
     )

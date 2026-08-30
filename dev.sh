@@ -77,19 +77,19 @@ ___helium_setup_siso() {
         return 1
     fi
 
-    mkdir -p "$_siso_dir"
+    mkdir -p "$_siso_dir" || return
     printf '%s\n' "$siso_package $siso_version" |
         "$_depot_tools_dir/cipd" ensure --root "$_siso_dir" --ensure-file -
 }
 
 ___helium_setup_gn() {
     local OUT_FILE="$_out_dir/args.gn"
-    cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$OUT_FILE"
+    cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$OUT_FILE" || return
 
     if command -v sccache 2>&1 >/dev/null; then
-        echo 'cc_wrapper="sccache"' >> "$OUT_FILE"
+        echo 'cc_wrapper="sccache"' >> "$OUT_FILE" || return
     elif command -v ccache 2>&1 >/dev/null; then
-        echo 'cc_wrapper="env CCACHE_COMPILERCHECK=content CCACHE_SLOPPINESS=time_macros ccache"' >> "$OUT_FILE"
+        echo 'cc_wrapper="env CCACHE_COMPILERCHECK=content CCACHE_SLOPPINESS=time_macros ccache"' >> "$OUT_FILE" || return
     else
         echo 'warn: sccache or ccache is not available' >&2
     fi
@@ -99,43 +99,52 @@ ___helium_setup_gn() {
         TARGET_CPU="x64"
     fi
 
-    echo 'target_cpu = "'"$TARGET_CPU"'"' >> "$OUT_FILE"
-    echo 'devtools_skip_typecheck = false' >> "$OUT_FILE"
-    echo 'use_siso = true' >> "$OUT_FILE"
+    echo 'target_cpu = "'"$TARGET_CPU"'"' >> "$OUT_FILE" || return
+    echo 'devtools_skip_typecheck = false' >> "$OUT_FILE" || return
+    echo 'use_siso = true' >> "$OUT_FILE" || return
 
-    sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE"
+    sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE" || return
 }
 
 ___helium_info_pull() {
     # fall back to git clone if tarball is unavailable
     "$_root_dir/retrieve_and_unpack_resource.sh" -d -g || \
-      "$_root_dir/retrieve_and_unpack_resource.sh" -g
+      "$_root_dir/retrieve_and_unpack_resource.sh" -g || return
 
-    mkdir -p "$_out_dir"
-    cd "$_src_dir"
+    mkdir -p "$_out_dir" || return
+    cd "$_src_dir" || return
+}
+
+___helium_configure_inner() {
+    ___helium_setup_python || return
+
+    cd "$_src_dir" || return
+    ___helium_setup_siso || return
+    "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch" || return
+    python3 ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles || return
+    "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands || return
 }
 
 ___helium_configure() {
     ___helium_lane_preflight 15 || return
-    ___helium_setup_python
-
-    cd "$_src_dir"
-    ___helium_setup_siso
-    "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch"
-    python3 ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles
-    "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands
+    ___helium_lane_transaction configure
 }
 
 ___helium_toolchain() {
     "$_root_dir/retrieve_and_unpack_resource.sh" -t
 }
 
-___helium_resources() {
-    ___helium_setup_python
+___helium_resources_inner() {
+    ___helium_setup_python || return
 
-    python3 "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources"
-    python3 "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir"
-    python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir"
+    python3 "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources" || return
+    python3 "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir" || return
+    python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir" || return
+}
+
+___helium_resources() {
+    ___helium_lane_preflight 15 || return
+    ___helium_lane_transaction resources
 }
 
 ___helium_version() {
@@ -147,113 +156,144 @@ ___helium_version() {
         return 0
     fi
 
-    ___helium_setup_python
+    ___helium_setup_python || return
     python3 "$_main_repo/utils/helium_version.py" \
         --tree "$_main_repo" \
         --platform-tree "$_root_dir" \
-        --chromium-tree "$_src_dir"
+        --chromium-tree "$_src_dir" || return
 }
 
-___helium_setup_presetup() {
+___helium_setup_presetup_inner() {
     if [ -d "$_src_dir/out" ]; then
         ___helium_lane_preflight 15 || return
     else
         ___helium_lane_preflight 80 || return
     fi
-    ___helium_setup_python
+    ___helium_setup_python || return
 
     if [ -d "$_src_dir/out" ]; then
         echo "$_src_dir/out already exists" >&2
-        ___helium_version
+        ___helium_version || return
         return
     fi
 
-    rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir"
+    rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir" || return
 
-    ___helium_info_pull
-    python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
-    ___helium_toolchain
-    ___helium_resources
-    ___helium_setup_gn
+    ___helium_info_pull || return
+    python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list" || return
+    ___helium_toolchain || return
+    ___helium_resources_inner || return
+    ___helium_setup_gn || return
 
-    ___helium_version
+    ___helium_version || return
+}
+
+___helium_setup_presetup() {
+    ___helium_lane_transaction presetup
+}
+
+___helium_setup_inner() {
+    ___helium_setup_presetup_inner || return
+
+    "$_root_dir/devutils/update_patches.sh" merge || return
+
+    ___helium_quilt_push_inner || return
+
+    # A complete applied ledger is not replay proof. Rebuild the stack once
+    # from its clean preimages before setup is allowed to configure or build.
+    ___helium_replay || return
+
+    ___helium_configure_inner || return
 }
 
 ___helium_setup() {
-    ___helium_setup_presetup
-
-    "$_root_dir/devutils/update_patches.sh" merge
-
-    ___helium_quilt_push
-
-    ___helium_configure
+    ___helium_lane_transaction setup
 }
 
-___helium_reset() {
+___helium_reset_inner() {
     if [ "$1" != "--warm-output" ] || [ "$2" != "--approved" ] || [ -n "$3" ]; then
         echo "reset preserves the warm build by default." >&2
         echo "use 'he reset --warm-output --approved' to remove it deliberately." >&2
         return 2
     fi
-    "$_root_dir/devutils/update_patches.sh" unmerge || true
+    "$_root_dir/devutils/update_patches.sh" unmerge || return
     rm "$_subs_cache" || true
     rm "$_namesubs_cache" || true
-    if mv "$_src_dir" "${_src_dir}x"; then
-        rm -rf "${_src_dir}x" &
-    fi
+    mv "$_src_dir" "${_src_dir}x" || return
+    rm -rf "${_src_dir}x" || return
 }
 
-___helium_name_substitution() {
+___helium_reset() {
+    ___helium_lane_transaction reset "$@"
+}
+
+___helium_name_substitution_inner() {
     if [ "$1" = "nameunsub" ]; then
         python3 "$_main_repo/utils/name_substitution.py" --unsub \
-            -t "$_src_dir" --backup-path "$_namesubs_cache"
+            -t "$_src_dir" --backup-path "$_namesubs_cache" || return
     elif [ "$1" = "namesub" ]; then
         if [ -f "$_namesubs_cache" ]; then
             echo "$_namesubs_cache exists, are you sure you want to do this?" >&2
             echo "if yes, then delete the $_namesubs_cache file" >&2
-            return
+            return 2
         fi
 
         python3 "$_main_repo/utils/name_substitution.py" --sub \
-            -t "$_src_dir" --backup-path "$_namesubs_cache"
+            -t "$_src_dir" --backup-path "$_namesubs_cache" || return
     else
         echo "unknown action: $1" >&2
-        return
+        return 2
     fi
 }
 
-___helium_apply_translations() {
+___helium_name_substitution() {
+    ___helium_lane_transaction name-substitution "$@"
+}
+
+___helium_apply_translations_inner() {
     python3 "$_main_repo/utils/i18n_apply.py" -t "$_src_dir"
 }
 
-___helium_generate_translations() {
+___helium_apply_translations() {
+    ___helium_lane_transaction translate
+}
+
+___helium_generate_translations_inner() {
     python3 "$_main_repo/devutils/i18n.py" generate
 }
 
-___helium_substitution() {
+___helium_generate_translations() {
+    ___helium_lane_transaction transgen
+}
+
+___helium_substitution_inner() {
     if [ "$1" = "unsub" ]; then
         python3 "$_main_repo/utils/domain_substitution.py" revert \
-            -c "$_subs_cache" "$_src_dir"
+            -c "$_subs_cache" "$_src_dir" || return
 
-        ___helium_name_substitution nameunsub
+        ___helium_name_substitution_inner nameunsub || return
     elif [ "$1" = "sub" ]; then
         if [ -f "$_subs_cache" ]; then
             echo "$_subs_cache exists, are you sure you want to do this?" >&2
             echo "if yes, then delete the $_subs_cache file" >&2
-            return
+            return 2
         fi
 
-        ___helium_name_substitution namesub
+        ___helium_name_substitution_inner namesub || return
 
         python3 "$_main_repo/utils/domain_substitution.py" apply \
             -r "$_main_repo/domain_regex.list" \
             -f "$_main_repo/domain_substitution.list" \
             -c "$_subs_cache" \
-            "$_src_dir"
+            "$_src_dir" || return
     else
         echo "unknown action: $1" >&2
-        return
+        return 2
     fi
+}
+
+___helium_substitution() {
+    ___helium_lane_transaction substitution "$@"
 }
 
 ___helium_build() {
@@ -265,6 +305,22 @@ ___helium_build() {
 ___helium_harness() {
     python3 "$_helium_harness_root/devutils/helium_dev.py" \
         --root "$_root_dir" --build-root "$_build_dir" "$@"
+}
+
+___helium_lane_transaction() {
+    local _action="$1"
+    shift
+    local _uuid_args=()
+    if [ "$_dev_lane" = "heavy" ]; then
+        _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
+    fi
+    python3 "$_helium_harness_root/devutils/lane_transaction.py" \
+        --worktree "$_root_dir" \
+        --build-root "$_build_dir" \
+        --lane "$_dev_lane" \
+        --script "$_helium_harness_root/dev.sh" \
+        "${_uuid_args[@]}" \
+        "$_action" -- "$@"
 }
 
 ___helium_lane_preflight() {
@@ -307,12 +363,17 @@ ___helium_run() {
 
 ___helium_dev_bundle() {
     ___helium_lane_preflight 5 || return
-    ___helium_harness dev-bundle "$@" || return
-    python3 "$_helium_harness_root/devutils/build_receipt_cli.py" \
-        --worktree "$_root_dir" \
-        --build-root "$_build_dir" \
-        --lane "$_dev_lane" \
-        packaged-build
+    ___helium_harness dev-bundle "$@"
+}
+
+___helium_require_replay_proof() {
+    python3 "$_helium_harness_root/devutils/replay_contract.py" check \
+        --worktree "$_root_dir" --source "$_src_dir"
+}
+
+___helium_replay() {
+    ___helium_lane_preflight 15 || return
+    ___helium_harness replay
 }
 
 ___helium_status() {
@@ -363,17 +424,11 @@ ___helium_check() {
         return 0
     fi
 
-    ___helium_quilt_push || return
     python3 "$_helium_harness_root/devutils/quilt_state_cli.py" \
         --source "$_src_dir" \
         --patches "$_root_dir/patches" \
         --series series.merged \
         --complete || return
-    python3 "$_helium_harness_root/devutils/build_receipt_cli.py" \
-        --worktree "$_root_dir" \
-        --build-root "$_build_dir" \
-        --lane "$_dev_lane" \
-        source || return
     if find "$_src_dir" -name '*.rej' -print -quit | grep -q .; then
         echo "check: patch rejects remain in the development source" >&2
         return 1
@@ -382,7 +437,7 @@ ___helium_check() {
     echo "check: active patch stack passed"
 }
 
-___helium_bootstrap() {
+___helium_bootstrap_inner() {
     if [ "$1" != "--approved" ] || [ -n "$2" ]; then
         echo "bootstrap performs the rare cold browser build." >&2
         echo "use 'he bootstrap --approved' after reviewing the cost." >&2
@@ -395,21 +450,30 @@ ___helium_bootstrap() {
 
     ___helium_lane_preflight 80 || return
 
-    ___helium_setup || return
+    ___helium_setup_inner || return
     echo "bootstrap: starting the approved cold Arcium browser build" >&2
     ___helium_build_full --approved --edge-budget 100000 || return
-    ___helium_dev_bundle
+    ___helium_dev_bundle || return
 }
 
-___helium_dev() {
+___helium_bootstrap() {
+    ___helium_lane_transaction bootstrap "$@"
+}
+
+___helium_dev_inner() {
     ___helium_check || return
-    ___helium_configure || return
+    ___helium_require_replay_proof || return
+    ___helium_configure_inner || return
     ___helium_relink --resources || return
     ___helium_dev_bundle || return
     ___helium_run "$@"
 }
 
-___helium_arcium() {
+___helium_dev() {
+    ___helium_lane_transaction dev "$@"
+}
+
+___helium_arcium_inner() {
     if [ -n "$1" ]; then
         echo "he arcium takes no options" >&2
         return 2
@@ -417,47 +481,68 @@ ___helium_arcium() {
     python3 "$_helium_harness_root/devutils/arcium_app.py" \
         --root "$_root_dir" --build-root "$_build_dir" preflight || return
     ___helium_check || return
-    ___helium_configure || return
+    ___helium_configure_inner || return
     ___helium_relink --resources || return
     python3 "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" --build-root "$_build_dir" update
+        --root "$_root_dir" --build-root "$_build_dir" update || return
 }
 
-___helium_pull() {
+___helium_arcium() {
+    ___helium_lane_transaction arcium "$@"
+}
+
+___helium_pull_inner() {
     if [ -f "$_subs_cache" ]; then
         echo "source files are substituted, please run 'he unsub' first" >&2
         return 1
     fi
 
-    cd "$_src_dir" && quilt pop -a || true
-    "$_root_dir/devutils/update_patches.sh" unmerge || true
+    ___helium_quilt_pop_inner || return
+    "$_root_dir/devutils/update_patches.sh" unmerge || return
 
     for dir in "$_root_dir" "$_main_repo"; do
-        git -C "$dir" stash \
-        && git -C "$dir" fetch \
-        && git -C "$dir" rebase origin/main \
-        && git -C "$dir" stash pop \
-        || true
+        git -C "$dir" fetch || return
+        git -C "$dir" rebase --autostash origin/main || return
     done
 
+    "$_root_dir/devutils/update_patches.sh" merge || return
+    ___helium_quilt_push_inner || return
+}
+
+___helium_pull() {
+    ___helium_lane_transaction pull
+}
+
+___helium_patches_merge_inner() {
     "$_root_dir/devutils/update_patches.sh" merge
-    ___helium_quilt_push
 }
 
 ___helium_patches_merge() {
-    "$_root_dir/devutils/update_patches.sh" merge
+    ___helium_lane_transaction merge
 }
 
-___helium_patches_unmerge() {
+___helium_patches_unmerge_inner() {
     "$_root_dir/devutils/update_patches.sh" unmerge
 }
 
-___helium_quilt_push() {
+___helium_patches_unmerge() {
+    ___helium_lane_transaction unmerge
+}
+
+___helium_quilt_push_inner() {
     cd "$_src_dir" && QUILT_PATCH_OPTS="$QUILT_PATCH_OPTS --fuzz=0" quilt push -a
 }
 
-___helium_quilt_pop() {
+___helium_quilt_push() {
+    ___helium_lane_transaction push
+}
+
+___helium_quilt_pop_inner() {
     cd "$_src_dir" && quilt pop -a
+}
+
+___helium_quilt_pop() {
+    ___helium_lane_transaction pop
 }
 
 ___helium_validate() {
@@ -486,10 +571,14 @@ ___helium_validate() {
     fi
 }
 
-___helium_format() {
-    cd "$_src_dir"
+___helium_format_inner() {
+    cd "$_src_dir" || return
     quilt diff | "$_src_dir/third_party/clang-format/script/clang-format-diff.py" \
     -p1 -i -style=file
+}
+
+___helium_format() {
+    ___helium_lane_transaction format
 }
 
 ___helium_find_tidy_diff() {
@@ -520,7 +609,7 @@ ___helium_strip_compile_commands() {
     gsed -Ei 's/^(\s*"command": ").*?\s(\S+bin\/clang)/\1\2/g' "$_ccmd_path"
 }
 
-___helium_tidy() {
+___helium_tidy_inner() {
     ___helium_find_tidy_diff || return;
     ___helium_strip_compile_commands;
     quilt diff | "$_tidy_diff_script" \
@@ -532,9 +621,17 @@ ___helium_tidy() {
         -j$(nproc)
 }
 
+___helium_tidy() {
+    ___helium_lane_transaction tidy
+}
+
+___helium_lint_inner() {
+    ___helium_format_inner || return
+    ___helium_tidy_inner || return
+}
+
 ___helium_lint() {
-    ___helium_format;
-    ___helium_tidy;
+    ___helium_lane_transaction lint
 }
 
 __helium_menu() {
@@ -559,6 +656,7 @@ __helium_menu() {
         unmerge) ___helium_patches_unmerge;;
         push) ___helium_quilt_push;;
         pop) ___helium_quilt_pop;;
+        replay) ___helium_replay;;
         pull) ___helium_pull;;
 
         validate) ___helium_validate "$2";;
@@ -582,7 +680,8 @@ __helium_menu() {
             echo "usage: he <command>" >&2
             echo "\tarcium - update, install, and launch the stable personal browser" >&2
             echo "\tbootstrap --approved - one-time cold browser build" >&2
-            echo "\tcheck - validate and strictly apply the active patch stack" >&2
+            echo "\tcheck - validate the active patch catalog and applied state" >&2
+            echo "\treplay - pop and strictly replay the complete patch stack" >&2
             echo "\tdev [profile options] - incrementally rebuild, package, and run Dev" >&2
             echo "\tlane - show the selected build lane and storage preflight" >&2
             echo "\tstatus|stop [profile options] - inspect or stop the exact Dev app" >&2
@@ -611,6 +710,7 @@ __helium_menu() {
             echo "\tunmerge - unmerges all patches" >&2
             echo "\tpush - applies all patches" >&2
             echo "\tpop - undoes all patches" >&2
+            echo "\treplay - pops and strictly reapplies all patches, then records proof" >&2
             echo "\tpull - undoes all patches, pulls from git, redoes all patches" >&2
 
             echo "\n" >&2

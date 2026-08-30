@@ -209,9 +209,36 @@ def inspect_lane(
     return diagnose_lane(spec, volume_probe(spec.root))
 
 
+def _verified_inherited_lock(lock_path: Path) -> int | None:
+    value = os.environ.get("HELIUM_DEV_LANE_LOCK_FD")
+    if value is None:
+        return None
+    try:
+        descriptor = int(value)
+        descriptor_stat = os.fstat(descriptor)
+        path_stat = lock_path.stat()
+    except (OSError, ValueError) as error:
+        raise LaneError("inherited lane lock descriptor is invalid") from error
+    if descriptor < 0 or (
+        descriptor_stat.st_dev,
+        descriptor_stat.st_ino,
+    ) != (path_stat.st_dev, path_stat.st_ino):
+        raise LaneError("inherited lane lock does not match the selected lane")
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        raise LaneError("inherited lane lock is not owned by this transaction") from error
+    return descriptor
+
+
 @contextmanager
-def acquire_lane_lock(lock_path: Path, owner: dict[str, object]) -> Iterator[None]:
+def acquire_lane_lock(lock_path: Path, owner: dict[str, object]) -> Iterator[int]:
     """Hold one nonblocking lane lock and publish privacy-safe owner metadata."""
+    lock_path = lock_path.expanduser().resolve()
+    inherited = _verified_inherited_lock(lock_path)
+    if inherited is not None:
+        yield inherited
+        return
     lock_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
@@ -225,7 +252,7 @@ def acquire_lane_lock(lock_path: Path, owner: dict[str, object]) -> Iterator[Non
         os.ftruncate(descriptor, 0)
         os.write(descriptor, encoded)
         os.fsync(descriptor)
-        yield
+        yield descriptor
     finally:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_UN)

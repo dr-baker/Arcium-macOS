@@ -23,13 +23,24 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from build_lane import LaneError, acquire_lane_lock
+from build_execution import ExecutionError, invalidate_execution, record_execution
+from build_receipt import ReceiptError
+from build_receipt_cli import (
+    _publish_packaged_build,
+    require_current_packaged_build,
+)
 from helium_dev_build import (
     DEFAULT_EDGE_BUDGET,
     ArtifactStatus,
     BuildPaths,
     HeliumDevBuilder,
 )
-from helium_dev_bundle import BundleError, package_dev_bundle
+from helium_dev_bundle import (
+    BundleError,
+    _package_dev_bundle_locked,
+    resolve_bundle_paths,
+)
+from replay_contract import ReplayError, replay as replay_quilt, require_current_replay_proof
 from helium_dev_runtime import (
     MANIFEST_FIELDS,
     LockBusyError,
@@ -415,7 +426,7 @@ def _stop_locked(
     return manifest
 
 
-def runtime_action(
+def _runtime_action_locked(
     action: str,
     root: str,
     arguments: Sequence[str],
@@ -424,7 +435,7 @@ def runtime_action(
     home: str | os.PathLike[str] | None = None,
     registry_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
-    """Perform one scoped runtime action and persist its privacy-safe result."""
+    """Perform one runtime action after any required lane lock is held."""
 
     preflight = sum(argument == "--preflight" for argument in arguments)
     if preflight > 1:
@@ -433,6 +444,17 @@ def runtime_action(
         raise RuntimeInputError("--preflight is only valid with run")
     runtime_arguments = tuple(argument for argument in arguments if argument != "--preflight")
     profile, passthrough = _runtime_profile(runtime_arguments, home=home)
+    if action in {"run", "restart"}:
+        selected_build_root = (
+            Path(build_root).expanduser().resolve()
+            if build_root is not None
+            else Path(root).expanduser().resolve() / "build"
+        )
+        require_current_packaged_build(
+            Path(root).expanduser().resolve(),
+            selected_build_root,
+            os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        )
     paths = resolve_worktree_paths(root, build_root)
     if preflight:
         if not paths.component_path.is_file():
@@ -534,6 +556,50 @@ def runtime_action(
         lock.release()
 
 
+def runtime_action(
+    action: str,
+    root: str,
+    arguments: Sequence[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+    home: str | os.PathLike[str] | None = None,
+    registry_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
+    """Perform one scoped runtime action and persist its privacy-safe result."""
+
+    if action not in {"run", "restart"}:
+        return _runtime_action_locked(
+            action,
+            root,
+            arguments,
+            build_root=build_root,
+            home=home,
+            registry_root=registry_root,
+        )
+    worktree = Path(root).expanduser().resolve()
+    selected_build_root = (
+        Path(build_root).expanduser().resolve()
+        if build_root is not None
+        else worktree / "build"
+    )
+    owner = {
+        "action": action,
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(worktree),
+    }
+    with acquire_lane_lock(
+        selected_build_root / ".arcium" / "lane.lock", owner
+    ):
+        return _runtime_action_locked(
+            action,
+            root,
+            arguments,
+            build_root=build_root,
+            home=home,
+            registry_root=registry_root,
+        )
+
+
 def build_action(
     action: str,
     root: str,
@@ -581,16 +647,41 @@ def build_action(
         elif action == "relink":
             if namespace.targets:
                 raise RuntimeInputError("relink takes no graph targets")
+            if namespace.resources:
+                require_current_replay_proof(worktree, source_dir)
+                invalidate_execution(build_dir)
             result = builder.relink(
                 resources=namespace.resources,
                 artifact_status_probe=lambda: _artifact_status_for_root(
                     worktree, build_root
                 ),
             )
+            if result.ok and namespace.resources:
+                record_execution(
+                    worktree,
+                    build_dir,
+                    lane=str(owner["lane"]),
+                    action="relink-resources",
+                    targets=result.targets,
+                )
         elif action == "build-full":
             if namespace.targets:
                 raise RuntimeInputError("build-full takes no graph targets")
+            # Approval is checked first so an accidental broad build remains
+            # a cheap, deterministic refusal.  An approved build additionally
+            # requires a fresh full Quilt replay.
+            if namespace.approved:
+                require_current_replay_proof(worktree, source_dir)
+                invalidate_execution(build_dir)
             result = builder.build_full(approved=namespace.approved)
+            if result.ok and namespace.approved:
+                record_execution(
+                    worktree,
+                    build_dir,
+                    lane=str(owner["lane"]),
+                    action="build-full",
+                    targets=result.targets,
+                )
         else:
             raise HarnessError(f"unknown build action: {action}")
     return result.as_dict()
@@ -606,7 +697,56 @@ def dev_bundle_action(
 
     if arguments:
         raise RuntimeInputError("dev-bundle takes no arguments")
-    return package_dev_bundle(root, build_root=build_root)
+    worktree = Path(root).expanduser().resolve()
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    lane = os.environ.get("HELIUM_DEV_LANE", "worktree")
+    lock_path = build_dir / ".arcium" / "lane.lock"
+    owner = {"action": "dev-bundle", "lane": lane, "worktree": str(worktree)}
+    with acquire_lane_lock(lock_path, owner):
+        document = _package_dev_bundle_locked(
+            resolve_bundle_paths(root, build_root)
+        )
+        receipt = _publish_packaged_build(
+            worktree,
+            build_dir,
+            lane,
+            expected_package_sha256=str(document["package_tree_sha256"]),
+        )
+        document["build_receipt"] = receipt.receipt_id
+        return document
+
+
+def replay_action(
+    root: str,
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
+    """Pop and strictly replay the complete stack under the lane lock."""
+    worktree = Path(root).expanduser().resolve()
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
+    lock_path = build_dir / ".arcium" / "lane.lock"
+    owner = {
+        "action": "replay",
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(worktree),
+    }
+    with acquire_lane_lock(lock_path, owner):
+        receipt = replay_quilt(worktree, source_dir)
+    return {
+        "ok": True,
+        "action": "replay",
+        "receipt_id": receipt.receipt_id,
+        "proof_gates": ("popped", "replayed", "series-verified", "receipt-published"),
+    }
 
 
 def _edge_budget_from_environment() -> int:
@@ -691,6 +831,9 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
         if document.get("action") == "run-preflight":
             print(f"run preflight: {state} · proof {gates}")
             return
+        if document.get("action") == "replay":
+            print(f"replay: {state} · proof {gates}")
+            return
         edges = document.get("edge_count")
         artifact = document.get("artifact_state")
         print(f"{document['action']}: {state} · {edges if edges is not None else '-'} edges · {artifact} · proof {gates}")
@@ -704,7 +847,7 @@ def _usage() -> str:
     return (
         "usage: helium_dev.py --root WORKTREE [--build-root PATH] "
         "<run|status|activate|stop|restart|"
-        "build-plan|compile|relink|build-full|dev-bundle> [options]\n"
+        "build-plan|compile|relink|build-full|dev-bundle|replay> [options]\n"
         "runtime profiles: --isolated NAME | --fresh NAME; run --preflight; --json\n"
         "build: --edge-budget N; relink --resources; build-full --approved; "
         "dev-bundle: clone and sign Helium Dev.app"
@@ -743,13 +886,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 normalized_arguments,
                 build_root=namespace.build_root,
             )
+        elif action == "replay":
+            if normalized_arguments:
+                raise RuntimeInputError("replay takes no arguments")
+            document = replay_action(
+                namespace.root,
+                build_root=namespace.build_root,
+            )
         else:
             raise RuntimeInputError(f"unknown he command: {action}")
     except (
         BundleError,
+        ExecutionError,
         HarnessError,
         LaneError,
         LockBusyError,
+        ReplayError,
+        ReceiptError,
         RuntimeInputError,
         OSError,
         subprocess.SubprocessError,
