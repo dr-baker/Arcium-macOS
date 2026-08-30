@@ -26,7 +26,7 @@ from build_receipt import (
     require_expected_chromium_version,
     write_receipt_atomic,
 )
-from quilt_state import QuiltStateError, inspect_quilt_state
+from quilt_state import QuiltStateError, inspect_quilt_state, read_patch_list
 
 
 class ReplayError(RuntimeError):
@@ -144,6 +144,85 @@ def current_source_receipt(worktree: Path, source_dir: Path) -> tuple[SourceRece
     report = inspect_quilt_state(source_dir, worktree / "patches")
     report.comparison.require_complete()
     return source, report.applied_sha256
+
+
+def _require_core_patch_copies(worktree: Path) -> None:
+    """Require the generated outer patch prefix to match Arcium core.
+
+    The outer repository's merged patch directory is generated from the
+    nested core repository.  A Quilt applied ledger can still look valid when
+    those generated copies are stale, so check this boundary before changing
+    Quilt state.  The guard is deliberately read-only: the remediation is to
+    update the generated copies through the normal merge flow, then replay.
+    """
+    core_dir = worktree / "helium-chromium"
+    core_series = core_dir / "patches" / "series"
+    merged_series = worktree / "patches" / "series.merged"
+    if not core_series.is_file():
+        # Small test fixtures and non-Arcium trees may not have a core catalog.
+        return
+    if not merged_series.is_file():
+        raise ReplayError(
+            "generated patch catalog is missing; run he patches merge, then he replay"
+        )
+
+    try:
+        authored = read_patch_list(core_series)
+        generated = read_patch_list(merged_series)
+    except QuiltStateError as error:
+        raise ReplayError(f"could not compare core and generated patch catalogs: {error}") from error
+
+    if generated[: len(authored)] != authored:
+        first = next(
+            (
+                index
+                for index in range(min(len(authored), len(generated)))
+                if authored[index] != generated[index]
+            ),
+            min(len(authored), len(generated)),
+        )
+        expected = authored[first] if first < len(authored) else "<end of core catalog>"
+        actual = generated[first] if first < len(generated) else "<end of generated catalog>"
+        raise ReplayError(
+            "generated patch catalog is stale or reordered at position "
+            f"{first + 1}: core has {expected}, generated has {actual}; "
+            "run he patches merge, then he replay"
+        )
+
+    core_patches = core_dir / "patches"
+    generated_patches = worktree / "patches"
+    for name in authored:
+        core_path = core_patches / name
+        generated_path = generated_patches / name
+        try:
+            core_bytes = core_path.read_bytes()
+            generated_bytes = generated_path.read_bytes()
+        except FileNotFoundError as error:
+            raise ReplayError(
+                f"generated patch copy is missing for {name}; "
+                "run he patches merge, then he replay"
+            ) from error
+        except OSError as error:
+            raise ReplayError(f"could not compare generated patch copy {name}") from error
+        if core_bytes != generated_bytes:
+            raise ReplayError(
+                f"generated patch copy is stale for {name}; core is authoritative; "
+                "run he patches merge, then he replay"
+            )
+
+    prepend_series = worktree / "patches" / "series.prepend"
+    if prepend_series.is_file():
+        try:
+            prepended = read_patch_list(prepend_series)
+        except QuiltStateError as error:
+            raise ReplayError(
+                f"could not compare generated core catalog: {error}"
+            ) from error
+        if prepended != authored:
+            raise ReplayError(
+                "generated core catalog (series.prepend) differs from "
+                "helium-chromium/patches/series; run he patches merge, then he replay"
+            )
 
 
 def _patched_tree_sha256(worktree: Path, source_dir: Path) -> str:
@@ -303,6 +382,7 @@ def _run_quilt(
 
 def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     """Pop and strictly replay the complete stack, then atomically publish proof."""
+    _require_core_patch_copies(worktree)
     before = current_source_identity(worktree, source_dir)
     path = receipt_path(source_dir.parent)
     invalidate_downstream_receipts(source_dir.parent)
