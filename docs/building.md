@@ -8,6 +8,7 @@
   - [Prepare a cold build](#prepare-a-cold-build)
   - [Build and run normal changes](#build-and-run-normal-changes)
   - [Use guarded build commands](#use-guarded-build-commands)
+  - [Synchronize generated core patches](#synchronize-generated-core-patches)
   - [Use an exact development profile](#use-an-exact-development-profile)
   - [Run a scenario contract](#run-a-scenario-contract)
   - [Report proof gates](#report-proof-gates)
@@ -185,6 +186,22 @@ Changing one of those inputs makes the receipt stale. Unrelated uncommitted
 files do not. Run `he replay` again before `he dev`,
 `he build-full --approved`, or packaging. `he check` remains a read-only patch
 catalog and applied-state check and does not create replay proof.
+
+### Synchronize generated core patches
+
+Arcium core owns the patches under `helium-chromium/patches`. The outer
+`patches/` copies are generated build state. If replay reports that a generated
+core patch is stale, first pop the complete Quilt stack and run:
+
+```sh
+he sync-patches
+he replay
+```
+
+`he sync-patches` refuses to run while any patch is applied. It refreshes only
+the generated core copies and merged catalogs, preserves the outer platform
+patches and `series.orig`, and never writes into `helium-chromium/patches`.
+After replay succeeds, continue with the focused build or `he dev`.
 
 The later receipts form one chain:
 

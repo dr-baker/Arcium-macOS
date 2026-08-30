@@ -27,6 +27,7 @@ _FUNCTIONS = {
     "push": "___helium_quilt_push_inner",
     "reset": "___helium_reset_inner",
     "resources": "___helium_resources_inner",
+    "sync-patches": "___helium_sync_patches_inner",
     "setup": "___helium_setup_inner",
     "substitution": "___helium_substitution_inner",
     "tidy": "___helium_tidy_inner",

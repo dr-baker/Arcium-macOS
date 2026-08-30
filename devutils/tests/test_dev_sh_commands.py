@@ -44,6 +44,7 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertIn("bootstrap --approved - one-time cold browser build", result.stderr)
         self.assertIn("arcium - update, install, and launch", result.stderr)
         self.assertIn("check - validate the active patch catalog", result.stderr)
+        self.assertIn("sync-patches - refresh generated core copies", result.stderr)
         self.assertIn("replay - pop and strictly replay", result.stderr)
         self.assertIn("dev [profile options] - incrementally rebuild", result.stderr)
         self.assertNotIn("presetup", result.stderr)
@@ -51,11 +52,21 @@ class DevShellCommandsTests(unittest.TestCase):
         advanced = run_zsh("he help --advanced")
         self.assertEqual(advanced.returncode, 0)
         self.assertIn("presetup", advanced.stderr)
+        self.assertIn("sync-patches - refreshes generated core copies", advanced.stderr)
 
     def test_reset_refuses_without_explicit_warm_output_approval(self) -> None:
         result = run_zsh("he reset")
         self.assertEqual(result.returncode, 2)
         self.assertIn("reset preserves the warm build", result.stderr)
+
+    def test_sync_patches_uses_the_guarded_lane_transaction(self) -> None:
+        result = run_zsh(
+            "___helium_lane_preflight(){ return 0; }; "
+            "___helium_lane_transaction(){ echo action:$1; }; "
+            "he sync-patches"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["action:sync-patches"])
 
     def test_dev_runs_check_configure_relink_bundle_and_launch(self) -> None:
         result = run_zsh(

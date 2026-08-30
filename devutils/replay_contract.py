@@ -163,7 +163,8 @@ def _require_core_patch_copies(worktree: Path) -> None:
         return
     if not merged_series.is_file():
         raise ReplayError(
-            "generated patch catalog is missing; run he patches merge, then he replay"
+            "generated patch catalog is missing; run he merge with Quilt fully popped, "
+            "then he replay"
         )
 
     try:
@@ -186,7 +187,7 @@ def _require_core_patch_copies(worktree: Path) -> None:
         raise ReplayError(
             "generated patch catalog is stale or reordered at position "
             f"{first + 1}: core has {expected}, generated has {actual}; "
-            "run he patches merge, then he replay"
+            "run he sync-patches while Quilt is fully popped, then he replay"
         )
 
     core_patches = core_dir / "patches"
@@ -199,15 +200,15 @@ def _require_core_patch_copies(worktree: Path) -> None:
             generated_bytes = generated_path.read_bytes()
         except FileNotFoundError as error:
             raise ReplayError(
-                f"generated patch copy is missing for {name}; "
-                "run he patches merge, then he replay"
+                f"generated patch copy is missing for {name}; run he sync-patches "
+                "while Quilt is fully popped, then he replay"
             ) from error
         except OSError as error:
             raise ReplayError(f"could not compare generated patch copy {name}") from error
         if core_bytes != generated_bytes:
             raise ReplayError(
                 f"generated patch copy is stale for {name}; core is authoritative; "
-                "run he patches merge, then he replay"
+                "run he sync-patches while Quilt is fully popped, then he replay"
             )
 
     prepend_series = worktree / "patches" / "series.prepend"
@@ -221,7 +222,8 @@ def _require_core_patch_copies(worktree: Path) -> None:
         if prepended != authored:
             raise ReplayError(
                 "generated core catalog (series.prepend) differs from "
-                "helium-chromium/patches/series; run he patches merge, then he replay"
+                "helium-chromium/patches/series; run he sync-patches while Quilt is "
+                "fully popped, then he replay"
             )
 
 

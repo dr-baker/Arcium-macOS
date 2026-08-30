@@ -534,6 +534,16 @@ ___helium_patches_merge() {
     ___helium_lane_transaction merge
 }
 
+___helium_sync_patches_inner() {
+    python3 "$_helium_harness_root/devutils/sync_patches.py" \
+        --worktree "$_root_dir" --source "$_src_dir"
+}
+
+___helium_sync_patches() {
+    ___helium_lane_preflight 15 || return
+    ___helium_lane_transaction sync-patches
+}
+
 ___helium_patches_unmerge_inner() {
     "$_root_dir/devutils/update_patches.sh" unmerge
 }
@@ -666,6 +676,7 @@ __helium_menu() {
         transgen) ___helium_generate_translations;;
 
         merge) ___helium_patches_merge;;
+        sync-patches) ___helium_sync_patches;;
         unmerge) ___helium_patches_unmerge;;
         push) ___helium_quilt_push;;
         pop) ___helium_quilt_pop;;
@@ -694,6 +705,7 @@ __helium_menu() {
             echo "\tarcium - update, install, and launch the stable personal browser" >&2
             echo "\tbootstrap --approved - one-time cold browser build" >&2
             echo "\tcheck - validate the active patch catalog and applied state" >&2
+            echo "\tsync-patches - refresh generated core copies while Quilt is fully popped" >&2
             echo "\treplay - pop and strictly replay the complete patch stack" >&2
             echo "\tdev [profile options] - incrementally rebuild, package, and run Dev" >&2
             echo "\tlane - show the selected build lane and storage preflight" >&2
@@ -720,6 +732,7 @@ __helium_menu() {
 
             echo "\n" >&2
             echo "\tmerge - merges all patches" >&2
+            echo "\tsync-patches - refreshes generated core copies while Quilt is fully popped" >&2
             echo "\tunmerge - unmerges all patches" >&2
             echo "\tpush - applies all patches" >&2
             echo "\tpop - undoes all patches" >&2
