@@ -1,11 +1,18 @@
 # Building and developing Arcium-macOS
 
-### Navigation
+## Navigation
+
 - [Official (non-development) build](#official-non-development-build)
 - [Development build and environment](#development-build-and-environment)
-    - [Basics](#basics)
-    - [Creating a new patch](#creating-a-new-patch)
-    - [Updating for a new Chromium release](#updating-for-a-new-chromium-release)
+  - [Select a build lane](#select-a-build-lane)
+  - [Prepare a cold build](#prepare-a-cold-build)
+  - [Build and run normal changes](#build-and-run-normal-changes)
+  - [Use guarded build commands](#use-guarded-build-commands)
+  - [Use an exact development profile](#use-an-exact-development-profile)
+  - [Run a scenario contract](#run-a-scenario-contract)
+  - [Report proof gates](#report-proof-gates)
+  - [Create or update a patch](#create-or-update-a-patch)
+  - [Update for a new Chromium release](#update-for-a-new-chromium-release)
 
 ### Software requirements
 
@@ -17,9 +24,10 @@
 ### Build dependencies
 
 1. Install Python 3 via Homebrew: `brew install python@3.13`
-1. The development and build scripts create a worktree-local Python environment at
-   `build/python-env` on first use and install the pinned dependencies from
-   `requirements-dev.txt`. No global `pip3` install is required.
+1. The development and build scripts create a lane-local Python environment at
+   `$HELIUM_DEV_BUILD_ROOT/python-env` on first use. They install the pinned
+   dependencies from `requirements-dev.txt`. No global `pip3` install is
+   required.
 1. Install Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
 1. Install Ninja via Homebrew: `brew install ninja`
 1. Install wget via Homebrew: `brew install wget`
@@ -72,105 +80,291 @@ Once it's complete, a `.dmg` should appear in `build/`.
 Make sure your system meets the [requirements](#software-requirements)
 and that you've installed all [dependencies](#build-dependencies).
 
-On top of basic dependencies, you'll need quilt to create/update patches:
+Install Quilt before you create or update patches:
+
 ```sh
 brew install quilt
 ```
 
-### Basics
+### Select a build lane
 
-1. Load the dev util script:
-    ```sh
-    source dev.sh
-    ```
+A build lane is a stable directory that owns the downloaded Chromium source,
+the applied Quilt tree, the generated Siso graph, and `out/Default`. Select the
+lane before you source `dev.sh`:
 
-2. Setup the dev environment fully for the first time:
-    ```sh
-    he setup
-    ```
+```sh
+HELIUM_DEV_LANE=local source dev.sh
+```
 
-3. Build your first development binary:
-    ```sh
-    he build
-    ```
+Use one of these values:
 
-4. Run the development build with a dedicated data dir:
-    ```sh
-    he run
-    ```
+| Value | Build root | Use |
+| --- | --- | --- |
+| `local` | `/Users/daniel/Developer/Helium/helium-macos/build` | Normal development and work away from the external SSD. |
+| `heavy` | `/Volumes/T9/ArciumBuild/build` | Cold downloads and broad builds on the T9 SSD. |
+| `worktree` | `<source-worktree>/build` | An intentionally isolated or temporary lane. |
 
-5. Done! You have your own home-grown Helium ready for tinkering.
+`local` is the default. To change lanes in the same terminal, set
+`HELIUM_DEV_LANE` and source `dev.sh` again.
 
-### Creating a new patch
+Check the selected path, volume identity, file system, ownership status, and
+free space before a build:
 
-1. Go to the build dir:
-    ```sh
-    cd build/src
-    ```
+```sh
+he lane
+```
 
-2. Create a new patch with quilt:
-    ```sh
-    quilt new <path_to_patch>
-    ```
+For the heavy lane, `he lane` also checks that `/Volumes/T9` has the expected
+volume UUID. A different device mounted at that path fails the check.
 
-3. Add files to this patch:
-    ```sh
-    quilt add <path_to_file1> <path_to_file2>
-    ```
-    * Note: path here is relative to `build/src`
+The old `build` symlink in the active `arcium-patch-refactor` worktree points at
+`arcium-installed-browser`. Treat that link as stale. Do not use its source,
+profile, Siso state, or output for new proof.
 
-4. Modify files, test them by building and running Helium.
+Keep each lane intact. Do not copy or symlink `build/src`, `out/Default`, the
+Siso state, or generated build files between lanes. Absolute paths are part of
+the generated graph. A local lane and a heavy lane warm independently.
 
-5. When you're done, refresh the patch:
-    ```sh
-    quilt refresh
-    ```
+### Prepare a cold build
 
-6. Unmerge the patch series:
-    ```sh
-    he unmerge
-    ```
+Use the heavy lane when the internal disk cannot hold a cold Chromium build:
 
-7. Commit the patch & series change to a new branch and make a PR!
+```sh
+HELIUM_DEV_LANE=heavy source dev.sh
+he lane
+he bootstrap --approved
+```
 
-#### Dev util help menu
-To see all commands available in `dev.sh`, just run `he`.
+`he bootstrap --approved` downloads and prepares Chromium, applies the complete
+patch stack with zero fuzz, generates the build graph, runs the broad browser
+build, and creates `Helium Dev.app`. The command requires at least 80 GiB free
+before cold setup. The `--approved` argument prevents an agent or a mistyped
+command from starting the expensive build silently.
 
-#### quilt manual
-Confused about quilt? Run ```man quilt``` to read more about its functionality.
+Run `he bootstrap --approved` once per cold lane. If a runnable warm output
+already exists, the command stops and directs you to `he dev`.
 
-### Updating for a new Chromium release
-1. Load the dev util script:
-    ```sh
-    source dev.sh
-    ```
+### Build and run normal changes
 
-1. Download sources, set up GN, and prepare third-party dependencies:
-    ```sh
-    he presetup
-    ```
+From the source worktree whose core commit and patches you want to test, select
+the warm lane and run:
 
-1. Switch to src directory
-    ```sh
-    cd build/src
-    ```
+```sh
+HELIUM_DEV_LANE=heavy source dev.sh
+he lane
+he dev
+```
 
-1. Use `quilt` to refresh all patches: `quilt push -a --refresh`
-   * If an error occurs, go to the next step. Otherwise, skip to Step 7.
+`he dev` checks patch files, strictly applies the complete stack, regenerates
+the build configuration, relinks the component build with current resources,
+creates `Helium Dev.app`, and launches the persistent development profile.
 
-1. Use `quilt` to fix the broken patch:
-    1. Run `quilt push -f`
-    2. Edit the broken files as necessary by adding (`quilt edit ...` or `quilt add ...`) or removing (`quilt remove ...`) files as necessary
-        * When removing large chunks of code, remove each line instead of using language features to hide or remove the code. This makes the patches less susceptible to breakages when using quilt's refresh command (e.g. quilt refresh updates the line numbers based on the patch context, so it's possible for new but desirable code in the middle of the block comment to be excluded.). It also helps with readability when someone wants to see the changes made based on the patch alone.
-    3. Refresh the patch: `quilt refresh`
-    4. Go back to Step 5.
+Pass profile options through `he dev` when the change needs isolated state:
 
-1. After all patches are fixed, run `he version && he configure` to finish build env setup.
-1. Build and run Helium to verify that everything functions as intended: `he build && he run`
-1. Run `he validate config` and resolve the error if it occurs.
-1. Run `he pop` to pop all applied patches.
-1. Validate that patches are applied correctly: `he validate config`
-1. Unmerge main and platform patches: `he unmerge`
-1. Ensure that patches and series are formatted correctly, e.g. no blank lines.
-1. Check the consistency of the series file: `he validate series`
-1. Use git to add changes and commit. Refer to recent commit history for an appropriate commit comment.
+```sh
+he dev --isolated pins-drag-return-home \
+  --enable-features=HeliumFavoritesAndPins
+```
+
+### Use guarded build commands
+
+Use the smallest command that proves the change:
+
+```sh
+he build-plan helium_persistent_item_model_tests
+he compile helium_persistent_item_model_tests
+he relink
+he relink --resources
+he build-full --approved
+```
+
+`he build-plan` validates explicit generated targets against the graph and runs
+a Siso dry run. `he compile` builds only explicit focused output targets after
+the same plan check. It refuses GN labels and component aliases because they
+can hide broad fan-out. `he relink` rebuilds the runnable component library. Add
+`--resources` when strings, icons, generated resources, or the app bundle may
+have changed.
+
+`he build-full --approved` is the explicit broad-build path. It still runs a
+dry run and enforces the pending-edge budget. If the plan exceeds the budget,
+inspect it before you pass a larger `--edge-budget N` value.
+
+`he build` always refuses because an unqualified build can start hours of work.
+
+### Use an exact development profile
+
+Run only `Helium Dev.app` for development proof. The development commands own
+the executable path, profile path, `--use-mock-keychain`, `--no-first-run`, and
+session-crash flags. Do not pass a release profile or a manual
+`--user-data-dir` override.
+
+Use the persistent development profile for ongoing Spaces and Pins work:
+
+```sh
+he run
+```
+
+Use a named isolated profile when a test must survive quit and restart:
+
+```sh
+he run --isolated pins-drag-return-home
+he status --isolated pins-drag-return-home
+he restart --isolated pins-drag-return-home
+he stop --isolated pins-drag-return-home
+```
+
+Use `--fresh NAME` only when the test requires blank state. A fresh name is
+create-only, so it is unsuitable for persistence checks.
+
+The executable inside `Helium Dev.app` is still named `Helium`. `he status`
+matches both its full bundle path and its exact development data directory.
+
+### Run a scenario contract
+
+Scenario contracts live in `devutils/scenarios/`. Each JSON file records:
+
+- the exact profile policy and safe profile name;
+- the required feature flags and focused GN test labels;
+- the setup, user steps, and visible observables;
+- whether the test includes persistence and teardown proof.
+
+Parse a contract before you use it:
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+from devutils.scenario_contract import load_scenario
+
+scenario = load_scenario(Path("devutils/scenarios/pins-drag-return-home.json"))
+print(scenario.scenario_id)
+PY
+```
+
+For the Pins drag and return-home contract, build and run the focused test
+executable before the UI steps:
+
+```sh
+he build-plan helium_persistent_item_model_tests
+he compile helium_persistent_item_model_tests
+"$HELIUM_DEV_BUILD_ROOT/src/out/Default/helium_persistent_item_model_tests" \
+  --gtest_filter='SidebarNativeTabDragSessionTest.CommitsSameWindowSameSpacePinDrop:PersistentItemClosePolicyTest.LegacyAnchorStaysLiveAtHome'
+```
+
+Then launch the selected Dev profile and follow the recorded steps. A passing
+unit test does not replace the visible behavior, persistence, or teardown
+checks.
+
+### Report proof gates
+
+Report these gates separately:
+
+- **Inspected:** You read the selected source, patch ownership, and current lane.
+- **Packaged:** The intended patches recreate the source with zero fuzz and pass
+  whitespace checks.
+- **Compiled:** Name each focused target, relink, or full browser target that
+  completed.
+- **Launched:** Name the exact Dev bundle, lane, and profile that ran.
+- **Behavior-tested:** State the user interaction and visible result.
+- **Persistence-tested:** State what survived a normal quit and restart with the
+  same profile.
+- **Teardown-tested:** State that close and quit completed without a new crash.
+- **Manual-only:** Name any remaining interaction that automation could not
+  perform or observe.
+
+Source inspection, a clean patch replay, compilation, and a successful launch
+prove different things. Do not report them as one "tested" result.
+
+### Create or update a patch
+
+Select the source worktree and lane before you edit generated Chromium source.
+The applied source lives at `$HELIUM_DEV_BUILD_ROOT/src`.
+
+Before you edit an earlier patch, pop every later patch. Make the change at the
+intended series position, refresh that patch, and replay the complete series
+with zero fuzz.
+
+1. Change to the applied source tree:
+
+   ```sh
+   cd "$HELIUM_DEV_BUILD_ROOT/src"
+   ```
+
+2. Create a patch and add its files, or select the existing owning patch:
+
+   ```sh
+   quilt new personal/<feature>.patch
+   quilt add <path-to-file>
+   ```
+
+3. Edit the source and build focused targets.
+
+4. Format the owning patch, refresh it, and check the complete stack:
+
+   ```sh
+   quilt refresh
+   he check
+   ```
+
+5. Commit shared Chromium patches in `helium-chromium` first. Then advance the
+   outer gitlink and verify the combined macOS product.
+
+`patches/series.merged` in Arcium-macOS is generated build state. Do not commit
+it as the source of a shared Chromium feature.
+
+#### Development command reference
+
+Run `he` for the common commands. Run `he help --advanced` for patch and build
+maintenance commands.
+
+For Quilt details, run `man quilt`.
+
+### Update for a new Chromium release
+
+Use a cold lane for a version update. Expect a broad rebuild.
+
+1. Select the lane and prepare the source:
+
+   ```sh
+   HELIUM_DEV_LANE=heavy source dev.sh
+   he presetup
+   ```
+
+2. Change to the generated source tree:
+
+   ```sh
+   cd "$HELIUM_DEV_BUILD_ROOT/src"
+   ```
+
+3. Apply and refresh the patch stack:
+
+   ```sh
+   quilt push -a --refresh
+   ```
+
+4. If a patch fails, force only that patch, repair its owned files, and refresh
+   it. Continue until the complete series applies with zero fuzz.
+
+5. Regenerate the version and build configuration:
+
+   ```sh
+   he version
+   he configure
+   ```
+
+6. Run patch checks and inspect the broad build plan:
+
+   ```sh
+   he check
+   he build-plan chrome
+   ```
+
+7. After you review the plan, build and launch the Dev product:
+
+   ```sh
+   he build-full --approved
+   he dev-bundle
+   he run --isolated chromium-update
+   ```
+
+8. Validate the configuration and series. Pop and replay the complete stack
+   once more before you commit the owning patches.
