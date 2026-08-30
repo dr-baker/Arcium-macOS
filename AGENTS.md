@@ -22,6 +22,8 @@ change, regardless of which tools helped create it.
 
 - Start macOS feature branches and COW worktrees in this repository.
 - Keep `helium-chromium/` at the commit recorded by the outer gitlink.
+- Before replay or build, require a clean core checkout whose `HEAD` matches the
+  gitlink, and generated outer patch copies that match the committed core series.
 - Put shared browser behavior in Arcium core. Keep only macOS-specific changes
   here.
 - Keep generated Chromium source, Siso state, and build output in one stable

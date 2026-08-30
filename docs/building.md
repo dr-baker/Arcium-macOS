@@ -124,9 +124,8 @@ volume is nearly full: putting `out/Default` on T9 alone does not move the
 default macOS temporary directory. Keep several GiB free internally for macOS
 and swap even though build traffic belongs to T9.
 
-The old `build` symlink in the active `arcium-patch-refactor` worktree points at
-`arcium-installed-browser`. Treat that link as stale. Do not use its source,
-profile, Siso state, or output for new proof.
+Do not use a worktree-local `build` symlink as runtime or build proof. Select a
+named lane, confirm its absolute path with `he lane`, and report that path.
 
 Keep each lane intact. Do not copy or symlink `build/src`, `out/Default`, the
 Siso state, or generated build files between lanes. Absolute paths are part of
@@ -148,10 +147,11 @@ build, and creates `Helium Dev.app`. The command requires at least 80 GiB free
 before cold setup. The `--approved` argument prevents an agent or a mistyped
 command from starting the expensive build silently.
 
-Broad builds report live action progress on standard error, for example
-`build progress: 60.0% (33,867/56,437 actions)`. The percentage is an action
-count, not a wall-clock estimate; linking and packaging near the end can take
-longer than an average compile action.
+Broad builds report estimated action progress on standard error, for example
+`estimated build progress: 60.0% (33,867/56,437 actions)`. The denominator is
+the current dry-run plan, not elapsed time. Linking and packaging near the end
+can take longer than an average compile action. The display stays below 100%,
+and may say `finishing`, until the build command succeeds.
 
 Run `he bootstrap --approved` once per cold lane. If a runnable warm output
 already exists, the command stops and directs you to `he dev`.
@@ -180,10 +180,11 @@ he replay
 It invalidates any previous proof, pops every patch, reapplies the complete
 `series.merged` with fuzz disabled, and publishes a new replay receipt only
 after the complete state has been verified. The receipt binds the selected
-outer and core commits, the core gitlink, the Chromium version, the exact
-merged-series syntax and patch bytes, and every patch-owned source path.
-Changing one of those inputs makes the receipt stale. Unrelated uncommitted
-files do not. Run `he replay` again before `he dev`,
+core commit and gitlink, the Chromium version, the exact merged-series syntax
+and patch bytes, and every patch-owned source path. Material build and package
+inputs are tracked by later receipts. Changing one of those inputs makes its
+receipt stale; commits that change only `AGENTS.md`, documentation, development
+tooling, or tooling tests do not. Run `he replay` again before `he dev`,
 `he build-full --approved`, or packaging. `he check` remains a read-only patch
 catalog and applied-state check and does not create replay proof.
 
@@ -214,9 +215,9 @@ The later receipts form one chain:
    artifact is missing or stale.
 
 Replay attempts, builds, complete Dev workflows, setup, configuration, and
-stable Arcium updates share one lane transaction lock. A second worktree must
-wait instead of changing Quilt state, resources, or the generated graph during
-an active build.
+stable Arcium updates share one nonblocking lane transaction lock. If another
+process owns the lane, the command stops without changing state. Retry after
+the active transaction finishes.
 
 Pass profile options through `he dev` when the change needs isolated state:
 
@@ -340,8 +341,9 @@ Select the source worktree and lane before you edit generated Chromium source.
 The applied source lives at `$HELIUM_DEV_BUILD_ROOT/src`.
 
 Before you edit an earlier patch, pop every later patch. Make the change at the
-intended series position, refresh that patch, and replay the complete series
-with zero fuzz.
+intended series position, and ensure every newly changed generated source file
+belongs to that active Quilt patch before you refresh it. Then replay the
+complete series with zero fuzz.
 
 1. Change to the applied source tree:
 
@@ -356,7 +358,9 @@ with zero fuzz.
    quilt add <path-to-file>
    ```
 
-3. Edit the source and build focused targets.
+3. Edit the source and build focused targets. When a header contract changes,
+   include representative consumer translation units instead of compiling only
+   the file that defines the changed type.
 
 4. Format the owning patch, refresh it, and check the complete stack:
 
