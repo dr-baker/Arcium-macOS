@@ -230,7 +230,15 @@ def inspect_quilt_state(
             f"expected {series_name}"
         )
     declared = read_patch_list(patches_dir / series_name)
-    applied = read_patch_list(pc_dir / "applied-patches")
+    applied_path = pc_dir / "applied-patches"
+    # Quilt removes this ledger when ``quilt pop -a`` reaches the bottom.  The
+    # already-validated .pc pointers make that state an unambiguous empty
+    # ledger; an existing ledger must still parse successfully.
+    applied = (
+        read_patch_list(applied_path)
+        if applied_path.exists() or applied_path.is_symlink()
+        else ()
+    )
     _require_unique(declared, description=series_name)
     _require_unique(applied, description="applied-patches")
     comparison = compare_patch_lists(declared, applied)

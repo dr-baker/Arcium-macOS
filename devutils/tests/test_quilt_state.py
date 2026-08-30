@@ -98,6 +98,16 @@ class QuiltStateTest(unittest.TestCase):
             patch_list_sha256(("b.patch", "a.patch")),
         )
 
+    def test_missing_applied_ledger_is_a_fully_popped_state(self) -> None:
+        self.write_state(("a.patch", "b.patch"), ("a.patch", "b.patch"))
+        (self.source / ".pc" / "applied-patches").unlink()
+
+        report = inspect_quilt_state(self.source, self.patches)
+
+        self.assertEqual(report.comparison.applied, ())
+        self.assertTrue(report.comparison.valid_prefix)
+        self.assertFalse(report.comparison.complete)
+
     def test_declared_digest_changes_when_patch_content_changes(self) -> None:
         declared = ("a.patch", "b.patch")
         self.write_state(declared, declared)

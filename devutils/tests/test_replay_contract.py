@@ -173,10 +173,10 @@ class ReplayContractTests(unittest.TestCase):
 
         run.assert_not_called()
 
-    def test_replay_recovers_from_partial_exact_prefix(self) -> None:
+    def test_replay_recovers_from_fully_popped_missing_ledger(self) -> None:
         outer, source = self.fixture()
         applied = source / ".pc" / "applied-patches"
-        applied.write_text("", encoding="utf-8")
+        applied.unlink()
 
         def run_quilt(
             _source: Path, _environment: dict[str, str], *arguments: str
