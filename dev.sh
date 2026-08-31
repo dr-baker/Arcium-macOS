@@ -239,7 +239,11 @@ ___helium_setup_presetup_inner() {
     rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir" || return
 
     ___helium_info_pull || return
-    ___helium_python "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list" || return
+    if [ "$_source_mode" = "full" ]; then
+        echo "preserving full Chromium source and test data"
+    else
+        ___helium_python "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list" || return
+    fi
     ___helium_toolchain || return
     ___helium_resources_inner || return
     ___helium_setup_gn || return

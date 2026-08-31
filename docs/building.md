@@ -290,7 +290,9 @@ he bootstrap --approved --full-source
 
 After source retrieval succeeds, the lane records `full` in
 `.arcium/source-mode`. Later `source dev.sh` calls read that marker when
-`HELIUM_DEV_SOURCE_MODE` is unset. Build and package receipts remain separate.
+`HELIUM_DEV_SOURCE_MODE` is unset. Full-source setup preserves Chromium's
+tracked test data instead of applying the product-only binary pruning list.
+Build and package receipts remain separate.
 
 `he build-full --approved` is the explicit broad-build path. It still runs a
 dry run, requires a current replay receipt, and enforces the pending-edge

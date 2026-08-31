@@ -318,6 +318,36 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["python", "pull"])
 
+    def test_full_source_setup_skips_product_pruning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "src"
+            result = run_zsh(
+                f"_src_dir={source!s}; _download_cache={root / 'downloads'!s}; "
+                f"_out_dir={source / 'out/Default'!s}; _source_mode=full; "
+                "___helium_lane_preflight(){ :; }; "
+                "___helium_setup_python(){ :; }; "
+                "___helium_info_pull(){ mkdir -p \"$_src_dir\"; }; "
+                "___helium_python(){ echo unexpected-python:$*; return 9; }; "
+                "___helium_toolchain(){ echo toolchain; }; "
+                "___helium_resources_inner(){ echo resources; }; "
+                "___helium_setup_gn(){ echo gn; }; "
+                "___helium_version(){ echo version; }; "
+                "___helium_setup_presetup_inner"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn("unexpected-python", result.stdout)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    "preserving full Chromium source and test data",
+                    "toolchain",
+                    "resources",
+                    "gn",
+                    "version",
+                ],
+            )
+
     def test_configure_stops_after_failed_siso_setup(self) -> None:
         result = run_zsh(
             "_src_dir=$(mktemp -d); _out_dir=${_src_dir}/out/Default; "
