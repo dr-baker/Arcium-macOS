@@ -47,21 +47,21 @@ if $retrieve_generic; then
     if $clone; then
         if [[ $_target_cpu == "arm64" ]]; then
             # For arm64 (Apple Silicon)
-            python3 "$_main_repo/utils/clone.py" -p mac-arm -o "$_src_dir"
+            ___helium_python "$_main_repo/utils/clone.py" -p mac-arm -o "$_src_dir"
         else
             # For amd64 (Intel)
-            python3 "$_main_repo/utils/clone.py" -p mac -o "$_src_dir"
+            ___helium_python "$_main_repo/utils/clone.py" -p mac -o "$_src_dir"
         fi
     else
-        python3 "$_main_repo/utils/downloads.py" retrieve -i "$_main_repo/downloads.ini" -c "$_download_cache"
-        python3 "$_main_repo/utils/downloads.py" unpack -i "$_main_repo/downloads.ini" -c "$_download_cache" "$_src_dir"
+        ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "$_main_repo/downloads.ini" -c "$_download_cache"
+        ___helium_python "$_main_repo/utils/downloads.py" unpack -i "$_main_repo/downloads.ini" -c "$_download_cache" "$_src_dir"
     fi
 
     # Retrieve and unpack general resources
-    python3 "$_main_repo/utils/downloads.py" retrieve -i "$_root_dir/downloads.ini" -c "$_download_cache"
-    python3 "$_main_repo/utils/downloads.py" retrieve -i "$_main_repo/deps.ini" -c "$_download_cache"
-    python3 "$_main_repo/utils/downloads.py" unpack -i "$_root_dir/downloads.ini" -c "$_download_cache" "$_src_dir"
-    python3 "$_main_repo/utils/downloads.py" unpack -i "$_main_repo/deps.ini" -c "$_download_cache" "$_src_dir"
+    ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "$_root_dir/downloads.ini" -c "$_download_cache"
+    ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "$_main_repo/deps.ini" -c "$_download_cache"
+    ___helium_python "$_main_repo/utils/downloads.py" unpack -i "$_root_dir/downloads.ini" -c "$_download_cache" "$_src_dir"
+    ___helium_python "$_main_repo/utils/downloads.py" unpack -i "$_main_repo/deps.ini" -c "$_download_cache" "$_src_dir"
 fi
 
 if $retrieve_toolchain; then

@@ -278,6 +278,20 @@ that lane. `he build-plan` reports the exact missing input. Use an explicitly
 prepared full-source heavy lane for those tests; do not hydrate a lite lane with
 ad hoc files and treat it as reproducible proof.
 
+Prepare a separate full-source T9 lane without changing the proven default
+lane:
+
+```sh
+HELIUM_DEV_LANE=heavy \
+HELIUM_DEV_BUILD_ROOT=/Volumes/T9/ArciumBuild/full-source \
+source dev.sh
+he bootstrap --approved --full-source
+```
+
+After source retrieval succeeds, the lane records `full` in
+`.arcium/source-mode`. Later `source dev.sh` calls read that marker when
+`HELIUM_DEV_SOURCE_MODE` is unset. Build and package receipts remain separate.
+
 `he build-full --approved` is the explicit broad-build path. It still runs a
 dry run, requires a current replay receipt, and enforces the pending-edge
 budget. If the plan exceeds the budget, inspect it before you pass a larger

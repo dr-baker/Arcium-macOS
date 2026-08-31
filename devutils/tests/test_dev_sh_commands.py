@@ -96,7 +96,7 @@ class DevShellCommandsTests(unittest.TestCase):
         result = run_zsh("he")
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "bootstrap --approved [--allow-internal] - one-time cold browser build",
+            "bootstrap --approved [--full-source] [--allow-internal] - one-time cold browser build",
             result.stderr,
         )
         self.assertIn("arcium - update, install, and launch", result.stderr)
@@ -346,6 +346,39 @@ class DevShellCommandsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 9, result.stderr)
             self.assertEqual(calls.read_text(encoding="utf-8").splitlines(), ["-d -g", "-g"])
             self.assertFalse((root / "src" / "out").exists())
+
+    def test_full_source_retrieval_uses_clone_and_records_the_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            retriever = root / "retrieve_and_unpack_resource.sh"
+            retriever.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$RETRIEVE_CALLS\"\n",
+                encoding="utf-8",
+            )
+            retriever.chmod(0o755)
+            calls = root / "calls"
+            marker = root / "build/.arcium/source-mode"
+            result = run_zsh(
+                f"_root_dir={root!s}; _src_dir={root / 'build/src'!s}; "
+                f"_out_dir={root / 'build/src/out/Default'!s}; "
+                f"_source_mode_marker={marker!s}; _source_mode=full; "
+                f"RETRIEVE_CALLS={calls!s}; export RETRIEVE_CALLS; ___helium_info_pull"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls.read_text(encoding="utf-8").splitlines(), ["-g"])
+            self.assertEqual(marker.read_text(encoding="utf-8"), "full\n")
+
+    def test_full_source_bootstrap_reaches_the_lane_transaction(self) -> None:
+        result = run_zsh(
+            "_dev_lane=heavy; "
+            "___helium_lane_transaction(){ printf '%s\\n' \"$*\" \"$HELIUM_DEV_SOURCE_MODE\"; }; "
+            "___helium_bootstrap --approved --full-source"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["bootstrap --approved --full-source", "full"],
+        )
 
     def test_substitution_stops_before_later_stage_after_failure(self) -> None:
         reverted = run_zsh(

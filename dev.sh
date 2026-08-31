@@ -53,9 +53,23 @@ case "$_dev_lane" in
         ;;
 esac
 _build_dir="${HELIUM_DEV_BUILD_ROOT:-$_default_build_dir}"
+_source_mode_marker="$_build_dir/.arcium/source-mode"
+_source_mode="${HELIUM_DEV_SOURCE_MODE:-}"
+if [ -z "$_source_mode" ] && [ -f "$_source_mode_marker" ]; then
+    _source_mode="$(head -1 "$_source_mode_marker")"
+fi
+_source_mode="${_source_mode:-lite}"
+case "$_source_mode" in
+    lite|full) ;;
+    *)
+        echo "error: HELIUM_DEV_SOURCE_MODE must be lite or full" >&2
+        return 2 2>/dev/null || exit 2
+        ;;
+esac
 _heavy_volume_uuid="${HELIUM_DEV_HEAVY_VOLUME_UUID:-75279EDB-CF1D-4EBF-8C7C-FD7249DCBCAF}"
 export HELIUM_DEV_LANE="$_dev_lane"
 export HELIUM_DEV_BUILD_ROOT="$_build_dir"
+export HELIUM_DEV_SOURCE_MODE="$_source_mode"
 if [ "$_lane_was_explicit" = 0 ]; then
     export HELIUM_DEV_AUTO_SELECTED=1 HELIUM_DEV_AUTO_LANE="$_dev_lane" HELIUM_DEV_AUTO_BUILD_ROOT="$_build_dir"
 else
@@ -139,9 +153,22 @@ ___helium_setup_gn() {
 }
 
 ___helium_info_pull() {
-    # fall back to git clone if tarball is unavailable
-    "$_root_dir/retrieve_and_unpack_resource.sh" -d -g || \
-      "$_root_dir/retrieve_and_unpack_resource.sh" -g || return
+    local _resolved_source_mode
+    if [ "$_source_mode" = "full" ]; then
+        "$_root_dir/retrieve_and_unpack_resource.sh" -g || return
+        _resolved_source_mode=full
+    elif "$_root_dir/retrieve_and_unpack_resource.sh" -d -g; then
+        _resolved_source_mode=lite
+    else
+        "$_root_dir/retrieve_and_unpack_resource.sh" -g || return
+        _resolved_source_mode=full
+    fi
+
+    mkdir -p "$(dirname "$_source_mode_marker")" || return
+    printf '%s\n' "$_resolved_source_mode" > "${_source_mode_marker}.tmp.$$" || return
+    mv "${_source_mode_marker}.tmp.$$" "$_source_mode_marker" || return
+    _source_mode="$_resolved_source_mode"
+    export HELIUM_DEV_SOURCE_MODE="$_source_mode"
 
     mkdir -p "$_out_dir" || return
     cd "$_src_dir" || return
@@ -540,6 +567,9 @@ ___helium_bootstrap_inner() {
     for _argument in "$@"; do
         if [ "$_argument" = "--allow-internal" ]; then
             _allow_internal=1
+        elif [ "$_argument" = "--full-source" ]; then
+            _source_mode=full
+            export HELIUM_DEV_SOURCE_MODE=full
         else
             _bootstrap_args+=("$_argument")
         fi
@@ -570,13 +600,13 @@ ___helium_bootstrap_inner() {
 
 ___helium_bootstrap() {
     local _allow_internal=0
-    local _bootstrap_args=()
     local _argument
     for _argument in "$@"; do
         if [ "$_argument" = "--allow-internal" ]; then
             _allow_internal=1
-        else
-            _bootstrap_args+=("$_argument")
+        elif [ "$_argument" = "--full-source" ]; then
+            _source_mode=full
+            export HELIUM_DEV_SOURCE_MODE=full
         fi
     done
     if [ "$_dev_lane" = "local" ] && [ "$_allow_internal" != 1 ]; then
@@ -853,7 +883,7 @@ __helium_menu() {
         *)
             echo "usage: he <command>" >&2
             echo "\tarcium - update, install, and launch the stable personal browser" >&2
-            echo "\tbootstrap --approved [--allow-internal] - one-time cold browser build" >&2
+            echo "\tbootstrap --approved [--full-source] [--allow-internal] - one-time cold browser build" >&2
             echo "\tcheck - validate the active patch catalog and applied state" >&2
             echo "\tcontext [--json] - show source, lane, proof, bundle, and limitations" >&2
             echo "\treplay - pop and strictly replay the complete patch stack" >&2
