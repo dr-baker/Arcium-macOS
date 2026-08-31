@@ -106,26 +106,32 @@ export QUILT_SERIES_ARGS="--color=auto"
 export QUILT_PATCHES_ARGS="--color=auto"
 
 ___helium_setup_siso() {
-    if [ -x "$_siso_path" ]; then
-        return
+    if [ ! -x "$_siso_path" ]; then
+        local siso_arch="mac-arm64"
+        if [[ $_arch == "x86_64" ]]; then
+            siso_arch="mac-amd64"
+        fi
+
+        local siso_package="build/siso/$siso_arch"
+
+        local siso_version=$(sed -n "s/.*'siso_version': '\([^']*\)'.*/\1/p" "$_src_dir/DEPS" | head -1)
+        if [ -z "$siso_version" ]; then
+            echo "error: couldn't find siso_version in DEPS" >&2
+            return 1
+        fi
+
+        mkdir -p "$_siso_dir" || return
+        printf '%s\n' "$siso_package $siso_version" |
+            "$_depot_tools_dir/cipd" ensure --root "$_siso_dir" --ensure-file - || return
     fi
 
-    local siso_arch="mac-arm64"
-    if [[ $_arch == "x86_64" ]]; then
-        siso_arch="mac-amd64"
+    local siso_env="$_src_dir/build/config/siso/.sisoenv"
+    if [ ! -f "$siso_env" ]; then
+        # Full-source acquisition intentionally skips gclient hooks. Recreate
+        # the pinned Chromium checkout's normal developer Siso configuration.
+        ___helium_python "$_src_dir/build/config/siso/configure_siso.py" \
+            --rbe_instance projects/rbe-chrome-untrusted/instances/default_instance || return
     fi
-
-    local siso_package="build/siso/$siso_arch"
-
-    local siso_version=$(sed -n "s/.*'siso_version': '\([^']*\)'.*/\1/p" "$_src_dir/DEPS" | head -1)
-    if [ -z "$siso_version" ]; then
-        echo "error: couldn't find siso_version in DEPS" >&2
-        return 1
-    fi
-
-    mkdir -p "$_siso_dir" || return
-    printf '%s\n' "$siso_package $siso_version" |
-        "$_depot_tools_dir/cipd" ensure --root "$_siso_dir" --ensure-file -
 }
 
 ___helium_setup_gn() {

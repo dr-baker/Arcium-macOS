@@ -358,6 +358,30 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 8, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["python", "siso"])
 
+    def test_siso_setup_recreates_marker_omitted_by_full_source_clone(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "src"
+            configure = source / "build/config/siso/configure_siso.py"
+            configure.parent.mkdir(parents=True)
+            configure.write_text("pass\n", encoding="utf-8")
+            siso = source / "third_party/siso/cipd/siso"
+            siso.parent.mkdir(parents=True)
+            siso.write_text("#!/bin/sh\n", encoding="utf-8")
+            siso.chmod(0o755)
+            result = run_zsh(
+                f"_src_dir={shlex.quote(str(source))}; "
+                f"_siso_path={shlex.quote(str(siso))}; "
+                "___helium_python(){ printf '%s\\n' \"$*\"; }; "
+                "___helium_setup_siso"
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                f"{configure} --rbe_instance "
+                "projects/rbe-chrome-untrusted/instances/default_instance",
+            )
+
     def test_source_retrieval_stops_when_archive_and_git_fallback_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
