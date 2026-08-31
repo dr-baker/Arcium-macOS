@@ -153,7 +153,7 @@ ___helium_configure_inner() {
     cd "$_src_dir" || return
     ___helium_setup_siso || return
     "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch" || return
-    python3 ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles || return
+    ___helium_python ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles || return
     "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands || return
 }
 
@@ -169,9 +169,9 @@ ___helium_toolchain() {
 ___helium_resources_inner() {
     ___helium_setup_python || return
 
-    python3 "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources" || return
-    python3 "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir" || return
-    python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir" || return
+    ___helium_python "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources" || return
+    ___helium_python "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir" || return
+    ___helium_python "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir" || return
 }
 
 ___helium_resources() {
@@ -189,7 +189,7 @@ ___helium_version() {
     fi
 
     ___helium_setup_python || return
-    python3 "$_main_repo/utils/helium_version.py" \
+    ___helium_python "$_main_repo/utils/helium_version.py" \
         --tree "$_main_repo" \
         --platform-tree "$_root_dir" \
         --chromium-tree "$_src_dir" || return
@@ -212,7 +212,7 @@ ___helium_setup_presetup_inner() {
     rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir" || return
 
     ___helium_info_pull || return
-    python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list" || return
+    ___helium_python "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list" || return
     ___helium_toolchain || return
     ___helium_resources_inner || return
     ___helium_setup_gn || return
@@ -260,7 +260,7 @@ ___helium_reset() {
 
 ___helium_name_substitution_inner() {
     if [ "$1" = "nameunsub" ]; then
-        python3 "$_main_repo/utils/name_substitution.py" --unsub \
+        ___helium_python "$_main_repo/utils/name_substitution.py" --unsub \
             -t "$_src_dir" --backup-path "$_namesubs_cache" || return
     elif [ "$1" = "namesub" ]; then
         if [ -f "$_namesubs_cache" ]; then
@@ -269,7 +269,7 @@ ___helium_name_substitution_inner() {
             return 2
         fi
 
-        python3 "$_main_repo/utils/name_substitution.py" --sub \
+        ___helium_python "$_main_repo/utils/name_substitution.py" --sub \
             -t "$_src_dir" --backup-path "$_namesubs_cache" || return
     else
         echo "unknown action: $1" >&2
@@ -282,7 +282,7 @@ ___helium_name_substitution() {
 }
 
 ___helium_apply_translations_inner() {
-    python3 "$_main_repo/utils/i18n_apply.py" -t "$_src_dir"
+    ___helium_python "$_main_repo/utils/i18n_apply.py" -t "$_src_dir"
 }
 
 ___helium_apply_translations() {
@@ -290,7 +290,7 @@ ___helium_apply_translations() {
 }
 
 ___helium_generate_translations_inner() {
-    python3 "$_main_repo/devutils/i18n.py" generate
+    ___helium_python "$_main_repo/devutils/i18n.py" generate
 }
 
 ___helium_generate_translations() {
@@ -299,7 +299,7 @@ ___helium_generate_translations() {
 
 ___helium_substitution_inner() {
     if [ "$1" = "unsub" ]; then
-        python3 "$_main_repo/utils/domain_substitution.py" revert \
+        ___helium_python "$_main_repo/utils/domain_substitution.py" revert \
             -c "$_subs_cache" "$_src_dir" || return
 
         ___helium_name_substitution_inner nameunsub || return
@@ -312,7 +312,7 @@ ___helium_substitution_inner() {
 
         ___helium_name_substitution_inner namesub || return
 
-        python3 "$_main_repo/utils/domain_substitution.py" apply \
+        ___helium_python "$_main_repo/utils/domain_substitution.py" apply \
             -r "$_main_repo/domain_regex.list" \
             -f "$_main_repo/domain_substitution.list" \
             -c "$_subs_cache" \
@@ -334,7 +334,7 @@ ___helium_build() {
 }
 
 ___helium_harness() {
-    python3 "$_helium_harness_root/devutils/helium_dev.py" \
+    ___helium_python "$_helium_harness_root/devutils/helium_dev.py" \
         --root "$_root_dir" --build-root "$_build_dir" "$@"
 }
 
@@ -345,7 +345,7 @@ ___helium_lane_transaction() {
     if [ "$_dev_lane" = "heavy" ]; then
         _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
     fi
-    python3 "$_helium_harness_root/devutils/lane_transaction.py" \
+    ___helium_python "$_helium_harness_root/devutils/lane_transaction.py" \
         --worktree "$_root_dir" \
         --build-root "$_build_dir" \
         --lane "$_dev_lane" \
@@ -371,7 +371,7 @@ ___helium_lane_preflight() {
     if [ "$_dev_lane" = "heavy" ]; then
         _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
     fi
-    python3 "$_helium_harness_root/devutils/build_lane_cli.py" \
+    ___helium_python "$_helium_harness_root/devutils/build_lane_cli.py" \
         --name "$_dev_lane" \
         --root "$_build_dir" \
         --minimum-free-gib "$_minimum_free_gib" \
@@ -399,7 +399,7 @@ ___helium_lane() {
     if [ "$_dev_lane" = "heavy" ]; then
         _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
     fi
-    python3 "$_helium_harness_root/devutils/build_lane_cli.py" \
+    ___helium_python "$_helium_harness_root/devutils/build_lane_cli.py" \
         --name "$_dev_lane" \
         --root "$_build_dir" \
         --minimum-free-gib 0 \
@@ -412,7 +412,7 @@ ___helium_context() {
     if [ "$_dev_lane" = "heavy" ]; then
         _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
     fi
-    python3 "$_helium_harness_root/devutils/development_context.py" \
+    ___helium_python "$_helium_harness_root/devutils/development_context.py" \
         --worktree "$_root_dir" \
         --build-root "$_build_dir" \
         --lane "$_dev_lane" \
@@ -431,18 +431,18 @@ ___helium_dev_bundle() {
 }
 
 ___helium_require_replay_proof() {
-    python3 "$_helium_harness_root/devutils/replay_contract.py" check \
+    ___helium_python "$_helium_harness_root/devutils/replay_contract.py" check \
         --worktree "$_root_dir" --source "$_src_dir"
 }
 
 ___helium_check_source() {
-    python3 "$_helium_harness_root/devutils/check_source.py" \
+    ___helium_python "$_helium_harness_root/devutils/check_source.py" \
         --source "$_src_dir"
 }
 
 ___helium_replay() {
     ___helium_lane_preflight 15 || return
-    python3 "$_helium_harness_root/devutils/patch_workspace.py" \
+    ___helium_python "$_helium_harness_root/devutils/patch_workspace.py" \
         --worktree "$_root_dir" --build-root "$_build_dir" validate || return
     ___helium_harness replay
 }
@@ -507,9 +507,9 @@ ___helium_build_full() {
 }
 
 ___helium_check() {
-    python3 "$_root_dir/devutils/check_patch_files.py" \
+    ___helium_python "$_root_dir/devutils/check_patch_files.py" \
         --patches "$_main_repo/patches" || return
-    python3 "$_root_dir/devutils/check_patch_files.py" \
+    ___helium_python "$_root_dir/devutils/check_patch_files.py" \
         --patches "$_root_dir/patches" || return
 
     if [ ! -d "$_src_dir" ] || [ ! -f "$_patches_dir/series.merged" ]; then
@@ -517,10 +517,10 @@ ___helium_check() {
         return 0
     fi
 
-    python3 "$_helium_harness_root/devutils/patch_workspace.py" \
+    ___helium_python "$_helium_harness_root/devutils/patch_workspace.py" \
         --worktree "$_root_dir" --build-root "$_build_dir" validate || return
 
-    python3 "$_helium_harness_root/devutils/quilt_state_cli.py" \
+    ___helium_python "$_helium_harness_root/devutils/quilt_state_cli.py" \
         --source "$_src_dir" \
         --patches "$_patches_dir" \
         --series series.merged \
@@ -605,12 +605,12 @@ ___helium_arcium_inner() {
         echo "he arcium takes no options" >&2
         return 2
     fi
-    python3 "$_helium_harness_root/devutils/arcium_app.py" \
+    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
         --root "$_root_dir" --build-root "$_build_dir" preflight || return
     ___helium_check || return
     ___helium_configure_inner || return
     ___helium_relink --resources || return
-    python3 "$_helium_harness_root/devutils/arcium_app.py" \
+    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
         --root "$_root_dir" --build-root "$_build_dir" update || return
 }
 
@@ -640,7 +640,7 @@ ___helium_pull() {
 }
 
 ___helium_prepare_patches_inner() {
-    python3 "$_helium_harness_root/devutils/patch_workspace.py" \
+    ___helium_python "$_helium_harness_root/devutils/patch_workspace.py" \
         --worktree "$_root_dir" \
         --build-root "$_build_dir" \
         --source "$_src_dir" \
@@ -696,7 +696,7 @@ ___helium_quilt_pop() {
 }
 
 ___helium_save_patch_inner() {
-    python3 "$_helium_harness_root/devutils/patch_workspace.py" \
+    ___helium_python "$_helium_harness_root/devutils/patch_workspace.py" \
         --worktree "$_root_dir" \
         --build-root "$_build_dir" \
         --source "$_src_dir" \
@@ -711,7 +711,7 @@ ___helium_save_patch() {
 
 ___helium_validate() {
     if [ "$1" = "config" ]; then
-        python3 "$_main_repo/devutils/validate_config.py"
+        ___helium_python "$_main_repo/devutils/validate_config.py"
     elif [ "$1" = "patches" ]; then
         local _series_path
         if [ -f "$_patches_dir/series" ] && [ -f "$_patches_dir/series.merged" ]; then
@@ -725,16 +725,16 @@ ___helium_validate() {
             echo "neither patches/series nor patches/series.merged exists" >&2
             return 1
         fi
-        python3 "$_main_repo/devutils/validate_patches.py" \
+        ___helium_python "$_main_repo/devutils/validate_patches.py" \
             -l "$_src_dir" \
             -s "$_series_path"
     elif [ "$1" = "series" ]; then
-        python3 "$_root_dir/devutils/check_patch_files.py" \
+        ___helium_python "$_root_dir/devutils/check_patch_files.py" \
             --patches "$_main_repo/patches" || return
-        python3 "$_root_dir/devutils/check_patch_files.py" \
+        ___helium_python "$_root_dir/devutils/check_patch_files.py" \
             --patches "$_root_dir/patches" || return
         if [ -f "$_patches_dir/series.merged" ]; then
-            python3 "$_helium_harness_root/devutils/patch_workspace.py" \
+            ___helium_python "$_helium_harness_root/devutils/patch_workspace.py" \
                 --worktree "$_root_dir" --build-root "$_build_dir" validate
         fi
     else

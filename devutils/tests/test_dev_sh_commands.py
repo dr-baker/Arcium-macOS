@@ -23,6 +23,18 @@ def run_zsh(script: str) -> subprocess.CompletedProcess[str]:
 
 
 class DevShellCommandsTests(unittest.TestCase):
+    def test_he_python_does_not_write_bytecode_into_the_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "probe.py").write_text("VALUE = 1\n", encoding="utf-8")
+            result = run_zsh(
+                f"cd {shlex.quote(str(root))}; "
+                "___helium_python -c 'import probe; assert probe.VALUE == 1'"
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse((root / "__pycache__").exists())
+
     def test_source_prefers_a_structurally_warm_heavy_lane(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             heavy = Path(temporary) / "heavy"

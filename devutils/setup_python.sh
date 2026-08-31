@@ -9,6 +9,10 @@ _python_env_dir="${HELIUM_DEV_PYTHON_ENV:-${HELIUM_DEV_BUILD_ROOT:-$_root_dir/bu
 _python_env_bin="$_python_env_dir/bin/python3"
 _python_requirements="$_root_dir/requirements-dev.txt"
 
+___helium_python() {
+    PYTHONDONTWRITEBYTECODE=1 python3 "$@"
+}
+
 if [ -x "$_python_env_bin" ]; then
     case ":${PATH}:" in
         *":$_python_env_dir/bin:"*) ;;
