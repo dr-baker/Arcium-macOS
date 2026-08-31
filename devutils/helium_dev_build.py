@@ -53,6 +53,13 @@ _NO_WORK_PATTERN = re.compile(r"(?:ninja|siso):?\s*(?:no work to do|no build ste
 _EDGE_PARSER_TAIL = 512
 _SISO_LOCALEXEC_POLL_SECONDS = 0.25
 _SISO_LOCALEXEC_HEAD_BYTES = 4096
+_FAILURE_MARKERS = (
+    " error:",
+    "error:",
+    "failed:",
+    "missing and no known rule",
+    "could not find",
+)
 
 
 class BuildError(RuntimeError):
@@ -69,6 +76,16 @@ class BuildGraphError(BuildError):
 
 class BuildBudgetError(BuildError):
     """A dry run exceeded (or could not establish) its edge budget."""
+
+
+def _command_failure(result: "CommandResult", fallback: str) -> str:
+    """Return one bounded actionable line from a failed build command."""
+    lines = [line.strip() for line in result.output.splitlines() if line.strip()]
+    for line in reversed(lines):
+        lowered = line.lower()
+        if any(marker in lowered for marker in _FAILURE_MARKERS):
+            return f"{fallback}: {line[-800:]}"
+    return fallback
 
 
 @dataclass(frozen=True)
@@ -463,13 +480,21 @@ def subprocess_runner(
                 if progress_finishing_reported:
                     return
                 progress_finishing_reported = True
-                suffix = "estimated " if estimated else ""
-                print(
-                    f"build progress: {suffix}finishing "
-                    f"({completed:,}/{progress_total:,} actions)",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                if estimated:
+                    print(
+                        "build progress: estimated 99.0% "
+                        f"({completed:,}/{progress_total:,} observed actions; "
+                        "awaiting command completion)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"build progress: finishing "
+                        f"({completed:,}/{progress_total:,} actions)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 return
             percent = min(99.0, 100.0 * completed / progress_total)
             bucket = int(percent)
@@ -699,7 +724,9 @@ class HeliumDevBuilder:
         }
         result = self._run(self._autoninja_command(targets, dry_run=True))
         if result.returncode != 0:
-            raise BuildGraphError("autoninja dry-run failed; refusing to build")
+            raise BuildGraphError(
+                _command_failure(result, "autoninja dry-run failed; refusing to build")
+            )
         if result.streamed_edge_count_ambiguous:
             raise BuildBudgetError("dry-run reported conflicting edge totals; refusing to build")
         if (
@@ -766,6 +793,8 @@ class HeliumDevBuilder:
             detail = "autoninja build failed"
             if result.timed_out:
                 detail = "autoninja build timed out"
+            else:
+                detail = _command_failure(result, detail)
             return self._result(
                 ok=False,
                 action=action,

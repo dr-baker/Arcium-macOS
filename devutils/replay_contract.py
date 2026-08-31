@@ -33,6 +33,19 @@ class ReplayError(RuntimeError):
     """The replay proof is missing, stale, or could not be established."""
 
 
+def _patch_root(worktree: Path) -> Path:
+    """Resolve the selected lane catalog, with a narrow fixture fallback."""
+    configured = os.environ.get("HELIUM_DEV_GENERATED_PATCH_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    fixture = worktree / "patches"
+    if (fixture / "series.merged").is_file() and not (fixture / "series").is_file():
+        return fixture
+    raise ReplayError(
+        "generated patch root is not configured; source dev.sh before replay"
+    )
+
+
 @dataclass(frozen=True)
 class ReplayReceipt:
     source: SourceReceipt
@@ -136,7 +149,8 @@ def _require_core_patch_copies(worktree: Path) -> None:
     """
     core_dir = worktree / "helium-chromium"
     core_series = core_dir / "patches" / "series"
-    merged_series = worktree / "patches" / "series.merged"
+    patches = _patch_root(worktree)
+    merged_series = patches / "series.merged"
     if not core_series.is_file():
         # Small test fixtures and non-Arcium trees may not have a core catalog.
         return
@@ -170,7 +184,7 @@ def _require_core_patch_copies(worktree: Path) -> None:
         )
 
     core_patches = core_dir / "patches"
-    generated_patches = worktree / "patches"
+    generated_patches = patches
     for name in authored:
         core_path = core_patches / name
         generated_path = generated_patches / name
@@ -190,7 +204,7 @@ def _require_core_patch_copies(worktree: Path) -> None:
                 "run he sync-patches while Quilt is fully popped, then he replay"
             )
 
-    prepend_series = worktree / "patches" / "series.prepend"
+    prepend_series = patches / "series.prepend"
     if prepend_series.is_file():
         try:
             prepended = read_patch_list(prepend_series)
@@ -332,7 +346,7 @@ def _write_proof(worktree: Path, source_dir: Path) -> ReplayReceipt:
 
 def _record_replay_proof(worktree: Path, source_dir: Path) -> ReplayReceipt:
     """Record proof immediately after this module completes strict replay."""
-    report = inspect_quilt_state(source_dir, worktree / "patches")
+    report = inspect_quilt_state(source_dir, _patch_root(worktree))
     report.comparison.require_complete()
     if any(source_dir.rglob("*.rej")):
         raise ReplayError("patch rejects remain in the development source")
@@ -341,7 +355,7 @@ def _record_replay_proof(worktree: Path, source_dir: Path) -> ReplayReceipt:
 
 def _quilt_environment(worktree: Path) -> dict[str, str]:
     environment = os.environ.copy()
-    environment["QUILT_PATCHES"] = str(worktree / "patches")
+    environment["QUILT_PATCHES"] = str(_patch_root(worktree))
     environment["QUILT_SERIES"] = "series.merged"
     environment["QUILT_PATCH_OPTS"] = (
         "--unified --reject-format=unified --fuzz=0"
@@ -364,7 +378,7 @@ def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     """Pop and strictly replay the complete stack, then atomically publish proof."""
     _require_core_patch_copies(worktree)
     try:
-        state = inspect_quilt_state(source_dir, worktree / "patches")
+        state = inspect_quilt_state(source_dir, _patch_root(worktree))
         state.comparison.require_valid_prefix()
     except QuiltStateError as error:
         raise ReplayError(f"could not inspect Quilt state before replay: {error}") from error

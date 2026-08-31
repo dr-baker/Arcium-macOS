@@ -48,10 +48,13 @@ MATERIAL_BUILD_INPUTS = (
     "devutils/build_lane.py",
     "devutils/build_receipt.py",
     "devutils/build_receipt_cli.py",
+    "devutils/check_source.py",
+    "devutils/gclient_identity.py",
     "devutils/helium_dev.py",
     "devutils/helium_dev_build.py",
     "devutils/helium_dev_bundle.py",
     "devutils/lane_transaction.py",
+    "devutils/patch_workspace.py",
     "devutils/quilt_state.py",
     "devutils/replay_contract.py",
     "devutils/set_quilt_vars.sh",
@@ -256,7 +259,19 @@ def current_source_receipt(
     fields = _git(worktree, "ls-tree", "HEAD", "helium-chromium").split()
     if len(fields) < 3 or fields[1] != "commit":
         raise ReceiptError("outer repository has no helium-chromium gitlink")
-    report = inspect_quilt_state(source_dir, worktree / "patches")
+    configured_root = os.environ.get("HELIUM_DEV_GENERATED_PATCH_ROOT")
+    fixture_root = worktree / "patches"
+    if configured_root:
+        generated_root = Path(configured_root).expanduser().resolve()
+    elif (fixture_root / "series.merged").is_file() and not (
+        fixture_root / "series"
+    ).is_file():
+        generated_root = fixture_root
+    else:
+        raise ReceiptError(
+            "generated patch root is not configured; source dev.sh before building"
+        )
+    report = inspect_quilt_state(source_dir, generated_root)
     if require_complete:
         report.comparison.require_complete()
     else:

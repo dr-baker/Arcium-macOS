@@ -40,6 +40,7 @@ from helium_dev_bundle import (
     _package_dev_bundle_locked,
     resolve_bundle_paths,
 )
+from gclient_identity import GClientIdentityError, ensure_gclient_identity
 from replay_contract import ReplayError, replay as replay_quilt, require_current_replay_proof
 from helium_dev_runtime import (
     MANIFEST_FIELDS,
@@ -641,8 +642,10 @@ def build_action(
     }
     with acquire_lane_lock(lock_path, owner):
         if action == "build-plan":
+            ensure_gclient_identity(build_dir)
             result = builder.build_plan(namespace.targets)
         elif action == "compile":
+            ensure_gclient_identity(build_dir)
             result = builder.compile(namespace.targets)
         elif action == "relink":
             if namespace.targets:
@@ -650,6 +653,7 @@ def build_action(
             if namespace.resources:
                 require_current_replay_proof(worktree, source_dir)
                 invalidate_execution(build_dir)
+            ensure_gclient_identity(build_dir)
             result = builder.relink(
                 resources=namespace.resources,
                 artifact_status_probe=lambda: _artifact_status_for_root(
@@ -673,6 +677,7 @@ def build_action(
             if namespace.approved:
                 require_current_replay_proof(worktree, source_dir)
                 invalidate_execution(build_dir)
+                ensure_gclient_identity(build_dir)
             result = builder.build_full(approved=namespace.approved)
             if result.ok and namespace.approved:
                 record_execution(
@@ -898,6 +903,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (
         BundleError,
         ExecutionError,
+        GClientIdentityError,
         HarnessError,
         LaneError,
         LockBusyError,

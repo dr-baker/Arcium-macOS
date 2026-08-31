@@ -37,6 +37,7 @@ class FakeRunner:
         self.streamed_edge_count_ambiguous = streamed_edge_count_ambiguous
         self.write_explain = True
         self.explain_text = ""
+        self.dry_run_error: str | None = None
         self.calls: list[tuple[str, ...]] = []
         self.progress_totals: list[int | None] = []
 
@@ -52,6 +53,12 @@ class FakeRunner:
                 output = "command = python3 linker_driver.py -o current-target\n"
             return CommandResult(args=argv, returncode=0, stdout=output)
         if "-n" in argv:
+            if self.dry_run_error is not None:
+                return CommandResult(
+                    args=argv,
+                    returncode=1,
+                    stderr=self.dry_run_error,
+                )
             if self.write_explain:
                 (Path(argv[argv.index("-C") + 1]) / "siso_explain").write_text(self.explain_text)
             output = "ninja: no work to do.\n" if self.edge_count == 0 else f"[1/{self.edge_count}] CXX obj/example.o\n"
@@ -131,6 +138,19 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("above configured budget", result.error)
         self.assertTrue(all("-n" in call or "query" in call for call in self.runner.calls))
+
+    def test_failed_dry_run_reports_the_actionable_build_error(self) -> None:
+        self.runner.dry_run_error = (
+            'shutdown diagnostics\n'
+            '"../../chrome/test/data/example.json", needed by "generated", '
+            'missing and no known rule to make it\n'
+        )
+
+        result = self.builder.build_plan(("obj/chrome/foo.o",))
+
+        self.assertFalse(result.ok)
+        self.assertIn("chrome/test/data/example.json", result.error)
+        self.assertIn("missing and no known rule", result.error)
 
     def test_missing_edge_count_fails_closed(self) -> None:
         self.runner.missing_edge_count = True
@@ -298,7 +318,11 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         output = progress.getvalue()
         self.assertIn("build progress: estimated 25.0% (1/4 actions)", output)
-        self.assertIn("build progress: estimated finishing (4/4 actions)", output)
+        self.assertIn(
+            "build progress: estimated 99.0% "
+            "(4/4 observed actions; awaiting command completion)",
+            output,
+        )
         self.assertNotIn("estimated 100.0%", output)
         self.assertIn("build progress: 100.0% (4/4 actions)", output)
 
@@ -320,7 +344,10 @@ class HeliumDevBuildTest(unittest.TestCase):
             )
         self.assertEqual(result.returncode, 0)
         output = progress.getvalue()
-        self.assertIn("estimated finishing (1/1 actions)", output)
+        self.assertIn(
+            "estimated 99.0% (1/1 observed actions; awaiting command completion)",
+            output,
+        )
         self.assertNotIn("2/1 actions", output)
 
     def test_subprocess_runner_never_claims_completion_for_failed_build(self) -> None:
