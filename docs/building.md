@@ -1,11 +1,19 @@
 # Building and developing Arcium-macOS
 
-### Navigation
+## Navigation
+
 - [Official (non-development) build](#official-non-development-build)
 - [Development build and environment](#development-build-and-environment)
-    - [Basics](#basics)
-    - [Creating a new patch](#creating-a-new-patch)
-    - [Updating for a new Chromium release](#updating-for-a-new-chromium-release)
+  - [Select a build lane](#select-a-build-lane)
+  - [Prepare a cold build](#prepare-a-cold-build)
+  - [Build and run normal changes](#build-and-run-normal-changes)
+  - [Use guarded build commands](#use-guarded-build-commands)
+  - [Synchronize generated core patches](#synchronize-generated-core-patches)
+  - [Use an exact development profile](#use-an-exact-development-profile)
+  - [Run a scenario contract](#run-a-scenario-contract)
+  - [Report proof gates](#report-proof-gates)
+  - [Create or update a patch](#create-or-update-a-patch)
+  - [Update for a new Chromium release](#update-for-a-new-chromium-release)
 
 ### Software requirements
 
@@ -17,9 +25,10 @@
 ### Build dependencies
 
 1. Install Python 3 via Homebrew: `brew install python@3.13`
-1. The development and build scripts create a worktree-local Python environment at
-   `build/python-env` on first use and install the pinned dependencies from
-   `requirements-dev.txt`. No global `pip3` install is required.
+1. The development and build scripts create a lane-local Python environment at
+   `$HELIUM_DEV_BUILD_ROOT/python-env` on first use. They install the pinned
+   dependencies from `requirements-dev.txt`. No global `pip3` install is
+   required.
 1. Install Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
 1. Install Ninja via Homebrew: `brew install ninja`
 1. Install wget via Homebrew: `brew install wget`
@@ -72,105 +81,405 @@ Once it's complete, a `.dmg` should appear in `build/`.
 Make sure your system meets the [requirements](#software-requirements)
 and that you've installed all [dependencies](#build-dependencies).
 
-On top of basic dependencies, you'll need quilt to create/update patches:
+Install Quilt before you create or update patches:
+
 ```sh
 brew install quilt
 ```
 
-### Basics
+### Select a build lane
 
-1. Load the dev util script:
-    ```sh
-    source dev.sh
-    ```
+A build lane is a stable directory that owns the downloaded Chromium source,
+the applied Quilt tree, the generated Siso graph, and `out/Default`. For normal
+work use canonical `helium-macos/main` and source `dev.sh` without lane ceremony:
 
-2. Setup the dev environment fully for the first time:
-    ```sh
-    he setup
-    ```
+```sh
+source dev.sh
+```
 
-3. Build your first development binary:
-    ```sh
-    he build
-    ```
+Use one of these values:
 
-4. Run the development build with a dedicated data dir:
-    ```sh
-    he run
-    ```
+| Value | Build root | Use |
+| --- | --- | --- |
+| `local` | `/Users/daniel/Developer/Helium/helium-macos/build` | Warm fallback and explicitly approved internal-disk work. |
+| `heavy` | `/Volumes/T9/ArciumBuild/build` | Cold downloads and broad builds on the T9 SSD. |
+| `worktree` | `<source-worktree>/build` | An intentionally isolated or temporary lane. |
 
-5. Done! You have your own home-grown Helium ready for tinkering.
+Without an explicit lane, `he dev` prefers a structurally warm T9 lane, then a
+structurally warm local lane. It never creates cold state or silently redirects
+cold/broad work to internal storage. Choose `local` explicitly for cold or
+broad work and grant the separate capability below; use a worktree lane only
+for intentional isolation.
 
-### Creating a new patch
+Selecting `local` does not authorize a broad internal-disk build. After checking
+free space, approve internal storage on that command only:
 
-1. Go to the build dir:
-    ```sh
-    cd build/src
-    ```
+```sh
+HELIUM_DEV_LANE=local source dev.sh
+he build-full --approved --allow-internal
+```
 
-2. Create a new patch with quilt:
-    ```sh
-    quilt new <path_to_patch>
-    ```
+To ask for automatic selection again after explicitly selecting a lane in the
+same shell, clear both selections before sourcing the script:
 
-3. Add files to this patch:
-    ```sh
-    quilt add <path_to_file1> <path_to_file2>
-    ```
-    * Note: path here is relative to `build/src`
+```sh
+unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT
+source dev.sh
+```
 
-4. Modify files, test them by building and running Helium.
+Check the selected path, volume identity, file system, ownership status, and
+free space before a build:
 
-5. When you're done, refresh the patch:
-    ```sh
-    quilt refresh
-    ```
+```sh
+he lane
+```
 
-6. Unmerge the patch series:
-    ```sh
-    he unmerge
-    ```
+`he context` is an optional diagnostic view and supports `--json`; it is not a
+required step before `he dev`.
 
-7. Commit the patch & series change to a new branch and make a PR!
+For the heavy lane, `he lane` also checks that `/Volumes/T9` has the expected
+volume UUID. A different device mounted at that path fails the check.
 
-#### Dev util help menu
-To see all commands available in `dev.sh`, just run `he`.
+Heavy-lane transactions route temporary files and Siso logs to
+`/Volumes/T9/ArciumBuild/build/.arcium/tmp`. This matters when the internal
+volume is nearly full: putting `out/Default` on T9 alone does not move the
+default macOS temporary directory. Keep several GiB free internally for macOS
+and swap even though build traffic belongs to T9.
 
-#### quilt manual
-Confused about quilt? Run ```man quilt``` to read more about its functionality.
+Do not use a worktree-local `build` symlink as runtime or build proof. Select a
+named lane, confirm its absolute path with `he lane`, and report that path.
 
-### Updating for a new Chromium release
-1. Load the dev util script:
-    ```sh
-    source dev.sh
-    ```
+Keep each lane intact. Do not copy or symlink `build/src`, `out/Default`, the
+Siso state, or generated build files between lanes. Absolute paths are part of
+the generated graph. A local lane and a heavy lane warm independently.
 
-1. Download sources, set up GN, and prepare third-party dependencies:
-    ```sh
-    he presetup
-    ```
+### Prepare a cold build
 
-1. Switch to src directory
-    ```sh
-    cd build/src
-    ```
+Use the heavy lane when the internal disk cannot hold a cold Chromium build:
 
-1. Use `quilt` to refresh all patches: `quilt push -a --refresh`
-   * If an error occurs, go to the next step. Otherwise, skip to Step 7.
+```sh
+HELIUM_DEV_LANE=heavy source dev.sh
+he lane
+he bootstrap --approved
+```
 
-1. Use `quilt` to fix the broken patch:
-    1. Run `quilt push -f`
-    2. Edit the broken files as necessary by adding (`quilt edit ...` or `quilt add ...`) or removing (`quilt remove ...`) files as necessary
-        * When removing large chunks of code, remove each line instead of using language features to hide or remove the code. This makes the patches less susceptible to breakages when using quilt's refresh command (e.g. quilt refresh updates the line numbers based on the patch context, so it's possible for new but desirable code in the middle of the block comment to be excluded.). It also helps with readability when someone wants to see the changes made based on the patch alone.
-    3. Refresh the patch: `quilt refresh`
-    4. Go back to Step 5.
+`he bootstrap --approved` downloads and prepares Chromium, applies the complete
+patch stack with zero fuzz, generates the build graph, runs the broad browser
+build, and creates `Helium Dev.app`. The command requires at least 80 GiB free
+before cold setup. The `--approved` argument prevents an agent or a mistyped
+command from starting the expensive build silently.
 
-1. After all patches are fixed, run `he version && he configure` to finish build env setup.
-1. Build and run Helium to verify that everything functions as intended: `he build && he run`
-1. Run `he validate config` and resolve the error if it occurs.
-1. Run `he pop` to pop all applied patches.
-1. Validate that patches are applied correctly: `he validate config`
-1. Unmerge main and platform patches: `he unmerge`
-1. Ensure that patches and series are formatted correctly, e.g. no blank lines.
-1. Check the consistency of the series file: `he validate series`
-1. Use git to add changes and commit. Refer to recent commit history for an appropriate commit comment.
+Broad builds report estimated action progress on standard error, for example
+`build progress: estimated 60.0% (33,867/56,437 actions)`. The denominator is
+the current dry-run plan, not elapsed time. Linking and packaging near the end
+can take longer than an average compile action. The display stays below 100%,
+and may say `finishing`, until the build command succeeds.
+
+Run `he bootstrap --approved` once per cold lane. If a runnable warm output
+already exists, the command stops and directs you to `he dev`.
+
+### Build and run normal changes
+
+From the canonical checkout, run the one normal development command:
+
+```sh
+source dev.sh
+he dev
+```
+
+`he dev` checks patch files, requires a current full replay proof, regenerates
+the build configuration, relinks the component build with current resources,
+creates `Helium Dev.app`, and launches the persistent development profile.
+
+The expensive replay is explicit and serialized with every other build action:
+
+```sh
+he replay
+```
+
+It invalidates any previous proof, pops every patch, reapplies the complete
+`series.merged` with fuzz disabled, and publishes a new replay receipt only
+after the complete state has been verified. The receipt binds the selected
+core commit and gitlink, the Chromium version, the exact merged-series syntax
+and patch bytes, and every patch-owned source path. Material build and package
+inputs are tracked by later receipts. Changing one of those inputs makes its
+receipt stale. Changes limited to `AGENTS.md`, documentation, or tooling tests
+do not; build-affecting development tools such as `dev.sh`, patch handling, and
+receipt code do. Run `he replay` again before `he dev`, `he build-full
+--approved`, or packaging. `he check` remains a read-only patch catalog and
+applied-state check and does not create replay proof.
+
+### Manage the lane-local patch catalog
+
+Arcium core owns shared patches under `helium-chromium/patches`. Arcium-macOS
+owns its macOS-only patches under `patches/`. The selected build lane combines
+copies of both catalogs under `build-root/.arcium/patches`; Git never tracks
+that merged view.
+
+After changing an authoritative catalog, fully pop Quilt and regenerate the
+lane view:
+
+```sh
+he prepare-patches
+he replay
+```
+
+`he prepare-patches` refuses to replace a catalog while patches are applied.
+`he sync-patches` is an alias. When editing the applied source of an existing
+patch, `he save-patch` refreshes the top patch and exports only that patch to
+its authoritative repository. It refuses if the authoritative patch changed
+after the lane was prepared. Then `he replay` proves the complete stack again.
+
+The later receipts form one chain:
+
+1. `he replay` records the source and complete zero-fuzz replay.
+2. `he relink --resources` or `he build-full --approved` records the exact
+   runnable artifacts produced from that replay.
+3. `he dev-bundle` copies and signs those artifacts, then records the exact
+   `Helium Dev.app` it published.
+4. `he run` and `he restart` refuse to launch when any earlier receipt or
+   artifact is missing or stale.
+
+Replay attempts, builds, complete Dev workflows, setup, configuration, and
+stable Arcium updates share one nonblocking lane transaction lock. If another
+process owns the lane, the command stops without changing state. Retry after
+the active transaction finishes.
+
+Pass profile options through `he dev` when the change needs isolated state:
+
+```sh
+he dev --isolated pins-drag-return-home \
+  --enable-features=HeliumFavoritesAndPins
+```
+
+### Use guarded build commands
+
+Use the smallest command that proves the change:
+
+```sh
+he build-plan helium_persistent_item_model_tests
+he compile helium_persistent_item_model_tests
+he relink
+he relink --resources
+he build-full --approved
+```
+
+`he build-plan` validates explicit generated targets against the graph and runs
+a Siso dry run. `he compile` builds only explicit focused output targets after
+the same plan check. It refuses GN labels and component aliases because they
+can hide broad fan-out. `he relink` rebuilds the runnable component library. Add
+`--resources` when strings, icons, generated resources, or the app bundle may
+have changed.
+
+The default downloaded Chromium lane uses the official `chromium-lite` source
+archive. It is sufficient for product builds but omits parts of
+`chrome/test/data`, so some `browser_tests` targets cannot be compiled or run in
+that lane. `he build-plan` reports the exact missing input. Use an explicitly
+prepared full-source heavy lane for those tests; do not hydrate a lite lane with
+ad hoc files and treat it as reproducible proof.
+
+`he build-full --approved` is the explicit broad-build path. It still runs a
+dry run, requires a current replay receipt, and enforces the pending-edge
+budget. If the plan exceeds the budget, inspect it before you pass a larger
+`--edge-budget N` value.
+
+Use `he dev` for normal changes. Broad builds require the explicit
+`he build-full --approved` path.
+
+### Use an exact development profile
+
+Run only `Helium Dev.app` for development proof. The development commands own
+the executable path, profile path, `--use-mock-keychain`, `--no-first-run`, and
+session-crash flags. Do not pass a release profile or a manual
+`--user-data-dir` override.
+
+Use the persistent development profile for ongoing Spaces and Pins work:
+
+```sh
+he run
+```
+
+Use a named isolated profile when a test must survive quit and restart:
+
+```sh
+he run --isolated pins-drag-return-home
+he status --isolated pins-drag-return-home
+he restart --isolated pins-drag-return-home
+he stop --isolated pins-drag-return-home
+```
+
+Use `--fresh NAME` only when the test requires blank state. A fresh name is
+create-only, so it is unsuitable for persistence checks.
+
+The executable inside `Helium Dev.app` is still named `Helium`. `he status`
+matches both its full bundle path and its exact development data directory.
+
+### Run a scenario contract
+
+Scenario contracts live in `devutils/scenarios/`. Each JSON file records:
+
+- the exact profile policy and safe profile name;
+- the required feature flags and focused GN test labels;
+- the setup, user steps, and visible observables;
+- whether the test includes persistence and teardown proof.
+
+Parse a contract before you use it:
+
+```sh
+python3 - <<'PY'
+from pathlib import Path
+from devutils.scenario_contract import load_scenario
+
+scenario = load_scenario(Path("devutils/scenarios/pins-drag-return-home.json"))
+print(scenario.scenario_id)
+PY
+```
+
+For the Pins drag and return-home contract, build and run the focused test
+executable before the UI steps:
+
+```sh
+he build-plan helium_persistent_item_model_tests
+he compile helium_persistent_item_model_tests
+"$HELIUM_DEV_BUILD_ROOT/src/out/Default/helium_persistent_item_model_tests" \
+  --gtest_filter='SidebarNativeTabDragSessionTest.CommitsSameWindowSameSpacePinDrop:PersistentItemClosePolicyTest.LegacyAnchorStaysLiveAtHome'
+```
+
+Then launch the selected Dev profile and follow the recorded steps. A passing
+unit test does not replace the visible behavior, persistence, or teardown
+checks.
+
+### Report proof gates
+
+Report these gates separately:
+
+- **Inspected:** You read the selected source, patch ownership, and current lane.
+- **Packaged:** The intended patches recreate the source with zero fuzz and pass
+  whitespace checks.
+- **Compiled:** Name each focused target, relink, or full browser target that
+  completed.
+- **Launched:** Name the exact Dev bundle, lane, and profile that ran.
+- **Behavior-tested:** State the user interaction and visible result.
+- **Persistence-tested:** State what survived a normal quit and restart with the
+  same profile.
+- **Teardown-tested:** State that close and quit completed without a new crash.
+- **Manual-only:** Name any remaining interaction that automation could not
+  perform or observe.
+
+Source inspection, a clean patch replay, compilation, and a successful launch
+prove different things. Do not report them as one "tested" result.
+
+### Update an existing patch
+
+Select the source worktree and lane before you edit generated Chromium source.
+The applied source lives at `$HELIUM_DEV_BUILD_ROOT/src`.
+
+Before you edit an earlier patch, pop every later patch. Make the change at the
+intended series position, and ensure every newly changed generated source file
+belongs to that active Quilt patch before you refresh it. Then replay the
+complete series with zero fuzz.
+
+1. Pop through the owning patch. This keeps that patch applied and removes every
+   later patch:
+
+   ```sh
+   he pop personal/<feature>.patch
+   ```
+
+2. Change to the applied source tree and add any newly owned files to the active
+   patch before editing them:
+
+   ```sh
+   cd "$HELIUM_DEV_BUILD_ROOT/src"
+   quilt add <path-to-file>
+   ```
+
+3. Edit the source and build focused targets. When a header contract changes,
+   include representative consumer translation units instead of compiling only
+   the file that defines the changed type.
+
+4. Format the owning patch, export it through the guarded boundary, and check
+   the complete stack:
+
+   ```sh
+   he save-patch
+   he check
+   he replay
+   ```
+
+   `he save-patch` handles existing catalog entries and preserves the patch's
+   established diff style. It refuses concurrent authoritative edits rather
+   than overwriting them.
+
+5. Commit shared Chromium patches in `helium-chromium` first. Then advance the
+   outer gitlink and verify the combined macOS product.
+
+`$HELIUM_DEV_BUILD_ROOT/.arcium/patches/series.merged` is generated build
+state. Do not commit it as the source of a shared Chromium feature.
+
+#### Add a new patch
+
+`he save-patch` deliberately captures existing catalog entries only. New patch
+creation remains an advanced manual boundary because choosing the owning
+repository and dependency position changes the product graph. Establish both
+in the authoritative core or outer catalog with a reviewed Quilt workflow,
+then fully pop and run `he prepare-patches` and `he replay`. Never leave the new
+patch only in the lane-local merged series.
+
+#### Development command reference
+
+Run `he` for the common commands. Run `he help --advanced` for patch and build
+maintenance commands.
+
+For Quilt details, run `man quilt`.
+
+### Update for a new Chromium release
+
+Use a cold lane for a version update. Expect a broad rebuild.
+
+1. Select the lane and prepare the source:
+
+   ```sh
+   HELIUM_DEV_LANE=heavy source dev.sh
+   he presetup
+   ```
+
+2. Change to the generated source tree:
+
+   ```sh
+   cd "$HELIUM_DEV_BUILD_ROOT/src"
+   ```
+
+3. Apply and refresh the patch stack:
+
+   ```sh
+   quilt push -a --refresh
+   ```
+
+4. If a patch fails, force only that patch, repair its owned files, and refresh
+   it. Continue until the complete series applies with zero fuzz.
+
+5. Regenerate the version and build configuration:
+
+   ```sh
+   he version
+   he configure
+   ```
+
+6. Run patch checks and inspect the broad build plan:
+
+   ```sh
+   he check
+   he build-plan chrome
+   ```
+
+7. After you review the plan, build and launch the Dev product:
+
+   ```sh
+   he build-full --approved
+   he dev-bundle
+   he run --isolated chromium-update
+   ```
+
+8. Validate the configuration and series. Pop and replay the complete stack
+   once more before you commit the owning patches.

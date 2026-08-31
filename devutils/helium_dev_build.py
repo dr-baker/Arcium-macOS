@@ -11,13 +11,14 @@ command.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import hashlib
 import os
 from pathlib import Path
 import re
 import signal
 import subprocess
 import sys
-from threading import Thread
+from threading import Event, Lock, Thread
 from typing import Callable, Mapping, Protocol, Sequence
 
 
@@ -44,9 +45,21 @@ _EXPLICITLY_BROAD_TARGETS = frozenset(
 )
 _EDGE_SUMMARY_PATTERN = re.compile(r"\b([0-9][0-9,]*)\s+(?:edges|actions|commands|steps)\b", re.I)
 _EDGE_PROGRESS_PATTERN = re.compile(r"\[\s*[0-9][0-9,]*\s*/\s*([0-9][0-9,]*)\s*\]")
+_ACTION_PROGRESS_PATTERN = re.compile(
+    r"\[\s*([0-9][0-9,]*)\s*/\s*([0-9][0-9,]*)\s*\]"
+)
 _EDGE_PATTERNS = (_EDGE_SUMMARY_PATTERN, _EDGE_PROGRESS_PATTERN)
 _NO_WORK_PATTERN = re.compile(r"(?:ninja|siso):?\s*(?:no work to do|no build steps)\.?", re.I)
 _EDGE_PARSER_TAIL = 512
+_SISO_LOCALEXEC_POLL_SECONDS = 0.25
+_SISO_LOCALEXEC_HEAD_BYTES = 4096
+_FAILURE_MARKERS = (
+    " error:",
+    "error:",
+    "failed:",
+    "missing and no known rule",
+    "could not find",
+)
 
 
 class BuildError(RuntimeError):
@@ -63,6 +76,16 @@ class BuildGraphError(BuildError):
 
 class BuildBudgetError(BuildError):
     """A dry run exceeded (or could not establish) its edge budget."""
+
+
+def _command_failure(result: "CommandResult", fallback: str) -> str:
+    """Return one bounded actionable line from a failed build command."""
+    lines = [line.strip() for line in result.output.splitlines() if line.strip()]
+    for line in reversed(lines):
+        lowered = line.lower()
+        if any(marker in lowered for marker in _FAILURE_MARKERS):
+            return f"{fallback}: {line[-800:]}"
+    return fallback
 
 
 @dataclass(frozen=True)
@@ -160,6 +183,7 @@ class CommandRunner(Protocol):
         *,
         cwd: Path,
         env: Mapping[str, str],
+        progress_total: int | None = None,
     ) -> CommandResult:
         """Run one argv command without a shell."""
 
@@ -320,6 +344,93 @@ def parse_siso_query_commands(output: str) -> tuple[str, ...]:
     return tuple(commands)
 
 
+class _SisoLocalexecProgress:
+    """Count newly appended Siso action records without trusting old logs.
+
+    ``siso_localexec`` is a persistent per-output log.  A build may append to
+    it, truncate it, or replace it during startup.  The identity, size, and a
+    small head fingerprint let the monitor distinguish those cases from an
+    ordinary append, so stale actions never become this build's progress.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._identity: tuple[int, int] | None = None
+        self._offset = 0
+        self._head_digest: bytes | None = None
+        self._tail = ""
+        self._count = 0
+        self._capture_baseline()
+
+    @staticmethod
+    def _digest_head(path: Path) -> bytes | None:
+        try:
+            with path.open("rb") as handle:
+                return hashlib.sha256(handle.read(_SISO_LOCALEXEC_HEAD_BYTES)).digest()
+        except OSError:
+            return None
+
+    def _capture_baseline(self) -> None:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return
+        self._identity = (stat.st_dev, stat.st_ino)
+        self._offset = stat.st_size
+        self._head_digest = self._digest_head(self.path)
+
+    def _reset(self, stat: os.stat_result) -> None:
+        self._identity = (stat.st_dev, stat.st_ino)
+        self._offset = 0
+        self._head_digest = self._digest_head(self.path)
+        self._tail = ""
+        self._count = 0
+
+    def poll(self) -> int:
+        try:
+            stat = self.path.stat()
+        except OSError:
+            return self._count
+
+        identity = (stat.st_dev, stat.st_ino)
+        if self._identity is None:
+            self._reset(stat)
+        elif identity != self._identity or stat.st_size < self._offset:
+            self._reset(stat)
+        elif self._head_digest is not None and self._digest_head(self.path) != self._head_digest:
+            # A truncate-and-rewrite can grow beyond the old offset before a
+            # polling tick.  The head fingerprint catches that race.
+            self._reset(stat)
+
+        try:
+            with self.path.open("r", encoding="utf-8", errors="replace") as handle:
+                handle.seek(self._offset)
+                chunk = handle.read()
+                self._offset = handle.tell()
+        except (OSError, UnicodeError):
+            return self._count
+
+        if not chunk:
+            return self._count
+        lines = (self._tail + chunk).splitlines(keepends=True)
+        self._tail = ""
+        if lines and not lines[-1].endswith(("\n", "\r")):
+            self._tail = lines.pop()
+        self._count += sum(1 for line in lines if line.lstrip().startswith("action:"))
+        return self._count
+
+
+def _siso_localexec_path(args: Sequence[str]) -> Path | None:
+    """Resolve the Siso action log from an autoninja argv, if it is explicit."""
+
+    try:
+        output_index = tuple(args).index("-C") + 1
+        output_dir = Path(args[output_index])
+    except (ValueError, IndexError):
+        return None
+    return output_dir / "siso_localexec"
+
+
 def subprocess_runner(
     args: Sequence[str],
     *,
@@ -327,6 +438,7 @@ def subprocess_runner(
     env: Mapping[str, str],
     timeout_seconds: float | None = None,
     max_output_bytes: int = 64 * 1024,
+    progress_total: int | None = None,
 ) -> CommandResult:
     """Run safely while draining pipes and retaining only bounded diagnostics."""
 
@@ -343,14 +455,94 @@ def subprocess_runner(
     retained: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
     truncated = {"stdout": False, "stderr": False}
     parsers = {"stdout": _EdgeCountParser(), "stderr": _EdgeCountParser()}
+    progress_lock = Lock()
+    progress_completed = 0
+    progress_bucket = -1
+    progress_finishing_reported = False
+    progress_monitor_stop = Event()
+    localexec_monitor = (
+        _SisoLocalexecProgress(localexec_path)
+        if progress_total is not None
+        and progress_total > 0
+        and (localexec_path := _siso_localexec_path(argv)) is not None
+        else None
+    )
+
+    def report_completed(completed: int, *, estimated: bool) -> None:
+        nonlocal progress_completed, progress_bucket, progress_finishing_reported
+        if progress_total is None or progress_total <= 0:
+            return
+        with progress_lock:
+            if completed <= progress_completed:
+                return
+            progress_completed = completed
+            if completed >= progress_total:
+                if progress_finishing_reported:
+                    return
+                progress_finishing_reported = True
+                if estimated:
+                    print(
+                        "build progress: estimated 99.0% "
+                        f"({completed:,}/{progress_total:,} observed actions; "
+                        "awaiting command completion)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"build progress: finishing "
+                        f"({completed:,}/{progress_total:,} actions)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                return
+            percent = min(99.0, 100.0 * completed / progress_total)
+            bucket = int(percent)
+            if bucket <= progress_bucket:
+                return
+            progress_bucket = bucket
+            suffix = "estimated " if estimated else ""
+            print(
+                f"build progress: {suffix}{percent:.1f}% "
+                f"({completed:,}/{progress_total:,} actions)",
+                file=sys.stderr,
+                flush=True,
+            )
+
+    def report_progress(text: str) -> None:
+        if progress_total is None or progress_total <= 0:
+            return
+        matches = tuple(_ACTION_PROGRESS_PATTERN.finditer(text))
+        if not matches:
+            return
+        for match in matches:
+            completed = int(match.group(1).replace(",", ""))
+            reported_total = int(match.group(2).replace(",", ""))
+            if reported_total == progress_total:
+                report_completed(completed, estimated=False)
+
+    def monitor_localexec() -> None:
+        if localexec_monitor is None:
+            return
+        while not progress_monitor_stop.wait(_SISO_LOCALEXEC_POLL_SECONDS):
+            report_completed(localexec_monitor.poll(), estimated=True)
+        # Capture the final records after the child exits but before the
+        # result is returned.  This can advance to ``finishing`` without
+        # falsely claiming 100 percent for a failed process.
+        report_completed(localexec_monitor.poll(), estimated=True)
 
     def drain(name: str, pipe: object) -> None:
         assert hasattr(pipe, "read")
+        progress_tail = ""
         while True:
             chunk = pipe.read(8192)  # type: ignore[union-attr]
             if not chunk:
                 return
-            parsers[name].feed(chunk.decode("utf-8", errors="replace"))
+            decoded = chunk.decode("utf-8", errors="replace")
+            parsers[name].feed(decoded)
+            progress_text = progress_tail + decoded
+            report_progress(progress_text)
+            progress_tail = progress_text[-_EDGE_PARSER_TAIL:]
             remaining = max_output_bytes - len(retained[name])
             if remaining > 0:
                 retained[name].extend(chunk[:remaining])
@@ -359,8 +551,10 @@ def subprocess_runner(
 
     stdout_thread = Thread(target=drain, args=("stdout", proc.stdout), daemon=True)
     stderr_thread = Thread(target=drain, args=("stderr", proc.stderr), daemon=True)
+    progress_thread = Thread(target=monitor_localexec, daemon=True)
     stdout_thread.start()
     stderr_thread.start()
+    progress_thread.start()
 
     timed_out = False
     try:
@@ -375,12 +569,22 @@ def subprocess_runner(
             returncode = proc.wait()
     stdout_thread.join()
     stderr_thread.join()
+    progress_monitor_stop.set()
+    progress_thread.join()
     # Thread readers reached EOF; close the Python wrappers promptly so test
     # suites and long-lived facades do not retain descriptor warnings.
     assert proc.stdout is not None
     assert proc.stderr is not None
     proc.stdout.close()
     proc.stderr.close()
+    if progress_total is not None and progress_total > 0 and returncode == 0:
+        with progress_lock:
+            print(
+                f"build progress: 100.0% "
+                f"({progress_total:,}/{progress_total:,} actions)",
+                file=sys.stderr,
+                flush=True,
+            )
     observations = tuple(parsers[name].observe() for name in ("stdout", "stderr"))
     observed_counts = tuple(observation.count for observation in observations if observation.count is not None)
     streamed_edge_count = max(observed_counts) if observed_counts else None
@@ -418,10 +622,20 @@ class HeliumDevBuilder:
     def _reset_commands(self) -> None:
         self._commands.clear()
 
-    def _run(self, args: Sequence[str]) -> CommandResult:
+    def _run(
+        self,
+        args: Sequence[str],
+        *,
+        progress_total: int | None = None,
+    ) -> CommandResult:
         argv = tuple(str(arg) for arg in args)
         self._commands.append(argv)
-        return self.runner(argv, cwd=self.paths.source_dir, env=self._environment())
+        return self.runner(
+            argv,
+            cwd=self.paths.source_dir,
+            env=self._environment(),
+            progress_total=progress_total,
+        )
 
     def _result(
         self,
@@ -510,7 +724,9 @@ class HeliumDevBuilder:
         }
         result = self._run(self._autoninja_command(targets, dry_run=True))
         if result.returncode != 0:
-            raise BuildGraphError("autoninja dry-run failed; refusing to build")
+            raise BuildGraphError(
+                _command_failure(result, "autoninja dry-run failed; refusing to build")
+            )
         if result.streamed_edge_count_ambiguous:
             raise BuildBudgetError("dry-run reported conflicting edge totals; refusing to build")
         if (
@@ -569,11 +785,16 @@ class HeliumDevBuilder:
                 proof_gates=tuple(plan.proof_gates) + ("no-work-plan",),
                 warnings=("dry-run reported no work; build was not executed",),
             )
-        result = self._run(self._autoninja_command(plan.targets, dry_run=False))
+        result = self._run(
+            self._autoninja_command(plan.targets, dry_run=False),
+            progress_total=plan.edge_count,
+        )
         if result.returncode != 0:
             detail = "autoninja build failed"
             if result.timed_out:
                 detail = "autoninja build timed out"
+            else:
+                detail = _command_failure(result, detail)
             return self._result(
                 ok=False,
                 action=action,

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 DEVUTILS = Path(__file__).resolve().parents[1]
@@ -45,13 +46,14 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
             home, registry = root / "home", root / "registry"
             pid: int | None = None
             try:
-                launched = helium_dev.runtime_action(
-                    "run",
-                    str(root),
-                    ["--isolated", "live-fixture"],
-                    home=home,
-                    registry_root=registry,
-                )
+                with patch("helium_dev.require_current_packaged_build"):
+                    launched = helium_dev.runtime_action(
+                        "run",
+                        str(root),
+                        ["--isolated", "live-fixture"],
+                        home=home,
+                        registry_root=registry,
+                    )
                 pid = launched["main_pid"]
                 self.assertTrue(launched["ok"])
                 self.assertIsInstance(pid, int)

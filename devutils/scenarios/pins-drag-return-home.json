@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "id": "pins-drag-return-home",
+  "description": "Accept a native tab drop into the active Space's Pins section, then verify return-home behavior, persistence, and teardown.",
+  "profile": {
+    "policy": "isolated",
+    "name": "pins-drag-return-home"
+  },
+  "feature_flags": [
+    "HeliumFavoritesAndPins"
+  ],
+  "tests": [
+    {
+      "target": "//chrome/browser/ui:helium_persistent_item_model_tests",
+      "filters": [
+        "SidebarNativeTabDragSessionTest.CommitsSameWindowSameSpacePinDrop",
+        "PersistentItemClosePolicyTest.LegacyAnchorStaysLiveAtHome"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Build and launch the exact Helium Dev.app from the selected lane with the isolated pins-drag-return-home profile",
+    "Keep one browser window open in one active Space with the vertical sidebar visible",
+    "Remove every existing Pin from the active Space before the first step"
+  ],
+  "steps": [
+    "Open https://example.com/ in an ordinary tab and use its context menu Pin command to create the first Pin",
+    "Open https://example.org/ in a second ordinary tab",
+    "Drag the full second tab row into the Pins section below the first Pin and release it on the visible drop indicator",
+    "Activate the second Pin, type https://www.iana.org/domains/reserved in the omnibox, and commit the navigation",
+    "Click the second Pin's favicon return control after its row changes to the Return to home title",
+    "Quit Helium Dev normally, relaunch the same isolated profile, and inspect the Pins section before opening another tab",
+    "Stop the isolated profile after the restored Pin order and home page have been checked"
+  ],
+  "observables": [
+    "The drag preview stays in the active Space's Pins section and shows the insertion point below the first Pin",
+    "After the drop, the ordinary tab row disappears and one durable second Pin appears below the first Pin",
+    "After the typed navigation, the second Pin remains in place and its row exposes the Return to home title and favicon control",
+    "The favicon return control navigates the existing Pin back to https://example.org/ without adding a duplicate Pin or ordinary tab",
+    "After normal quit and relaunch, both Pins return in the same order and the second Pin still uses https://example.org/ as its home",
+    "Stopping the profile leaves no matching Helium Dev process and no newly timestamped crash report"
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

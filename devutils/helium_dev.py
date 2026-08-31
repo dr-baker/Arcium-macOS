@@ -22,13 +22,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+from build_lane import LaneError, acquire_lane_lock
+from build_execution import ExecutionError, invalidate_execution, record_execution
+from build_receipt import ReceiptError
+from build_receipt_cli import (
+    _publish_packaged_build,
+    require_current_packaged_build,
+)
 from helium_dev_build import (
     DEFAULT_EDGE_BUDGET,
     ArtifactStatus,
     BuildPaths,
     HeliumDevBuilder,
 )
-from helium_dev_bundle import BundleError, package_dev_bundle
+from helium_dev_bundle import (
+    BundleError,
+    _package_dev_bundle_locked,
+    resolve_bundle_paths,
+)
+from gclient_identity import GClientIdentityError, ensure_gclient_identity
+from replay_contract import ReplayError, replay as replay_quilt, require_current_replay_proof
 from helium_dev_runtime import (
     MANIFEST_FIELDS,
     LockBusyError,
@@ -76,11 +89,19 @@ class WorktreePaths:
     autoninja_path: Path
 
 
-def resolve_worktree_paths(root: str | os.PathLike[str]) -> WorktreePaths:
+def resolve_worktree_paths(
+    root: str | os.PathLike[str],
+    build_root: str | os.PathLike[str] | None = None,
+) -> WorktreePaths:
     """Resolve only the active worktree's branded development artifact."""
 
     worktree = Path(root).expanduser().resolve()
-    source_dir = worktree / "build" / "src"
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
     app_path = out_dir / "Helium Dev.app"
     plist_path = app_path / "Contents" / "Info.plist"
@@ -406,15 +427,16 @@ def _stop_locked(
     return manifest
 
 
-def runtime_action(
+def _runtime_action_locked(
     action: str,
     root: str,
     arguments: Sequence[str],
     *,
+    build_root: str | os.PathLike[str] | None = None,
     home: str | os.PathLike[str] | None = None,
     registry_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, object]:
-    """Perform one scoped runtime action and persist its privacy-safe result."""
+    """Perform one runtime action after any required lane lock is held."""
 
     preflight = sum(argument == "--preflight" for argument in arguments)
     if preflight > 1:
@@ -423,7 +445,18 @@ def runtime_action(
         raise RuntimeInputError("--preflight is only valid with run")
     runtime_arguments = tuple(argument for argument in arguments if argument != "--preflight")
     profile, passthrough = _runtime_profile(runtime_arguments, home=home)
-    paths = resolve_worktree_paths(root)
+    if action in {"run", "restart"}:
+        selected_build_root = (
+            Path(build_root).expanduser().resolve()
+            if build_root is not None
+            else Path(root).expanduser().resolve() / "build"
+        )
+        require_current_packaged_build(
+            Path(root).expanduser().resolve(),
+            selected_build_root,
+            os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        )
+    paths = resolve_worktree_paths(root, build_root)
     if preflight:
         if not paths.component_path.is_file():
             raise HarnessError(f"Helium Dev component is missing: {paths.component_path}")
@@ -524,7 +557,57 @@ def runtime_action(
         lock.release()
 
 
-def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, object]:
+def runtime_action(
+    action: str,
+    root: str,
+    arguments: Sequence[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+    home: str | os.PathLike[str] | None = None,
+    registry_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
+    """Perform one scoped runtime action and persist its privacy-safe result."""
+
+    if action not in {"run", "restart"}:
+        return _runtime_action_locked(
+            action,
+            root,
+            arguments,
+            build_root=build_root,
+            home=home,
+            registry_root=registry_root,
+        )
+    worktree = Path(root).expanduser().resolve()
+    selected_build_root = (
+        Path(build_root).expanduser().resolve()
+        if build_root is not None
+        else worktree / "build"
+    )
+    owner = {
+        "action": action,
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(worktree),
+    }
+    with acquire_lane_lock(
+        selected_build_root / ".arcium" / "lane.lock", owner
+    ):
+        return _runtime_action_locked(
+            action,
+            root,
+            arguments,
+            build_root=build_root,
+            home=home,
+            registry_root=registry_root,
+        )
+
+
+def build_action(
+    action: str,
+    root: str,
+    arguments: Sequence[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
     """Run a guarded build operation using the active worktree's graph only."""
 
     parser = HarnessArgumentParser(prog=f"he {action}", add_help=False)
@@ -535,7 +618,12 @@ def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, 
     parser.add_argument("targets", nargs="*")
     namespace = parser.parse_args(list(arguments))
     worktree = Path(root).expanduser().resolve()
-    source_dir = worktree / "build" / "src"
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
     builder = HeliumDevBuilder(
         BuildPaths(
@@ -546,32 +634,124 @@ def build_action(action: str, root: str, arguments: Sequence[str]) -> dict[str, 
         ),
         edge_budget=namespace.edge_budget,
     )
-    if action == "build-plan":
-        result = builder.build_plan(namespace.targets)
-    elif action == "compile":
-        result = builder.compile(namespace.targets)
-    elif action == "relink":
-        if namespace.targets:
-            raise RuntimeInputError("relink takes no graph targets")
-        result = builder.relink(
-            resources=namespace.resources,
-            artifact_status_probe=lambda: _artifact_status_for_root(worktree),
-        )
-    elif action == "build-full":
-        if namespace.targets:
-            raise RuntimeInputError("build-full takes no graph targets")
-        result = builder.build_full(approved=namespace.approved)
-    else:
-        raise HarnessError(f"unknown build action: {action}")
+    lock_path = build_dir / ".arcium" / "lane.lock"
+    owner = {
+        "action": action,
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(worktree),
+    }
+    with acquire_lane_lock(lock_path, owner):
+        if action == "build-plan":
+            ensure_gclient_identity(build_dir)
+            result = builder.build_plan(namespace.targets)
+        elif action == "compile":
+            ensure_gclient_identity(build_dir)
+            result = builder.compile(namespace.targets)
+        elif action == "relink":
+            if namespace.targets:
+                raise RuntimeInputError("relink takes no graph targets")
+            if namespace.resources:
+                require_current_replay_proof(worktree, source_dir)
+                invalidate_execution(build_dir)
+            ensure_gclient_identity(build_dir)
+            result = builder.relink(
+                resources=namespace.resources,
+                artifact_status_probe=lambda: _artifact_status_for_root(
+                    worktree, build_root
+                ),
+            )
+            if result.ok and namespace.resources:
+                record_execution(
+                    worktree,
+                    build_dir,
+                    lane=str(owner["lane"]),
+                    action="relink-resources",
+                    targets=result.targets,
+                )
+        elif action == "build-full":
+            if namespace.targets:
+                raise RuntimeInputError("build-full takes no graph targets")
+            # Approval is checked first so an accidental broad build remains
+            # a cheap, deterministic refusal.  An approved build additionally
+            # requires a fresh full Quilt replay.
+            if namespace.approved:
+                require_current_replay_proof(worktree, source_dir)
+                invalidate_execution(build_dir)
+                ensure_gclient_identity(build_dir)
+            result = builder.build_full(approved=namespace.approved)
+            if result.ok and namespace.approved:
+                record_execution(
+                    worktree,
+                    build_dir,
+                    lane=str(owner["lane"]),
+                    action="build-full",
+                    targets=result.targets,
+                )
+        else:
+            raise HarnessError(f"unknown build action: {action}")
     return result.as_dict()
 
 
-def dev_bundle_action(root: str, arguments: Sequence[str]) -> dict[str, object]:
+def dev_bundle_action(
+    root: str,
+    arguments: Sequence[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
     """Create the active worktree's independently identifiable Dev bundle."""
 
     if arguments:
         raise RuntimeInputError("dev-bundle takes no arguments")
-    return package_dev_bundle(root)
+    worktree = Path(root).expanduser().resolve()
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    lane = os.environ.get("HELIUM_DEV_LANE", "worktree")
+    lock_path = build_dir / ".arcium" / "lane.lock"
+    owner = {"action": "dev-bundle", "lane": lane, "worktree": str(worktree)}
+    with acquire_lane_lock(lock_path, owner):
+        document = _package_dev_bundle_locked(
+            resolve_bundle_paths(root, build_root)
+        )
+        receipt = _publish_packaged_build(
+            worktree,
+            build_dir,
+            lane,
+            expected_package_sha256=str(document["package_tree_sha256"]),
+        )
+        document["build_receipt"] = receipt.receipt_id
+        return document
+
+
+def replay_action(
+    root: str,
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+) -> dict[str, object]:
+    """Pop and strictly replay the complete stack under the lane lock."""
+    worktree = Path(root).expanduser().resolve()
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
+    lock_path = build_dir / ".arcium" / "lane.lock"
+    owner = {
+        "action": "replay",
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(worktree),
+    }
+    with acquire_lane_lock(lock_path, owner):
+        receipt = replay_quilt(worktree, source_dir)
+    return {
+        "ok": True,
+        "action": "replay",
+        "receipt_id": receipt.receipt_id,
+        "proof_gates": ("popped", "replayed", "series-verified", "receipt-published"),
+    }
 
 
 def _edge_budget_from_environment() -> int:
@@ -617,9 +797,12 @@ def _artifact_status(paths: WorktreePaths) -> ArtifactStatus:
     return ArtifactStatus(state, state == "process-predates-artifact", ())
 
 
-def _artifact_status_for_root(root: Path) -> ArtifactStatus:
+def _artifact_status_for_root(
+    root: Path,
+    build_root: str | os.PathLike[str] | None = None,
+) -> ArtifactStatus:
     try:
-        return _artifact_status(resolve_worktree_paths(root))
+        return _artifact_status(resolve_worktree_paths(root, build_root))
     except HarnessError as error:
         return ArtifactStatus("unverified", None, (f"artifact freshness is unavailable: {error}",))
 
@@ -653,6 +836,9 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
         if document.get("action") == "run-preflight":
             print(f"run preflight: {state} · proof {gates}")
             return
+        if document.get("action") == "replay":
+            print(f"replay: {state} · proof {gates}")
+            return
         edges = document.get("edge_count")
         artifact = document.get("artifact_state")
         print(f"{document['action']}: {state} · {edges if edges is not None else '-'} edges · {artifact} · proof {gates}")
@@ -664,8 +850,9 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
 
 def _usage() -> str:
     return (
-        "usage: helium_dev.py --root WORKTREE <run|status|activate|stop|restart|"
-        "build-plan|compile|relink|build-full|dev-bundle> [options]\n"
+        "usage: helium_dev.py --root WORKTREE [--build-root PATH] "
+        "<run|status|activate|stop|restart|"
+        "build-plan|compile|relink|build-full|dev-bundle|replay> [options]\n"
         "runtime profiles: --isolated NAME | --fresh NAME; run --preflight; --json\n"
         "build: --edge-budget N; relink --resources; build-full --approved; "
         "dev-bundle: clone and sign Helium Dev.app"
@@ -676,6 +863,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     parser = HarnessArgumentParser(add_help=False)
     parser.add_argument("--root", required=True)
+    parser.add_argument("--build-root")
     namespace, remaining = parser.parse_known_args(values)
     if not remaining:
         print(_usage(), file=sys.stderr)
@@ -684,14 +872,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         json_mode, normalized_arguments = _split_json(action_arguments)
         if action in {"run", "status", "activate", "stop", "restart"}:
-            document = runtime_action(action, namespace.root, normalized_arguments)
+            document = runtime_action(
+                action,
+                namespace.root,
+                normalized_arguments,
+                build_root=namespace.build_root,
+            )
         elif action in {"build-plan", "compile", "relink", "build-full"}:
-            document = build_action(action, namespace.root, normalized_arguments)
+            document = build_action(
+                action,
+                namespace.root,
+                normalized_arguments,
+                build_root=namespace.build_root,
+            )
         elif action == "dev-bundle":
-            document = dev_bundle_action(namespace.root, normalized_arguments)
+            document = dev_bundle_action(
+                namespace.root,
+                normalized_arguments,
+                build_root=namespace.build_root,
+            )
+        elif action == "replay":
+            if normalized_arguments:
+                raise RuntimeInputError("replay takes no arguments")
+            document = replay_action(
+                namespace.root,
+                build_root=namespace.build_root,
+            )
         else:
             raise RuntimeInputError(f"unknown he command: {action}")
-    except (BundleError, HarnessError, LockBusyError, RuntimeInputError, OSError, subprocess.SubprocessError) as error:
+    except (
+        BundleError,
+        ExecutionError,
+        GClientIdentityError,
+        HarnessError,
+        LaneError,
+        LockBusyError,
+        ReplayError,
+        ReceiptError,
+        RuntimeInputError,
+        OSError,
+        subprocess.SubprocessError,
+    ) as error:
         document = structured_result(ok=False, action=action, error=str(error))
         print(str(error), file=sys.stderr)
         _emit(document, json_mode="--json" in action_arguments)

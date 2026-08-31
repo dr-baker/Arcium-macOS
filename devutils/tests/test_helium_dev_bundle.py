@@ -18,9 +18,18 @@ DEVUTILS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEVUTILS))
 import helium_dev  # noqa: E402
 from helium_dev_bundle import BundleError, package_dev_bundle  # noqa: E402
+from build_execution import ExecutionError  # noqa: E402
 
 
 class HeliumDevBundleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        replay = patch("helium_dev_bundle.require_current_execution")
+        self.addCleanup(replay.stop)
+        self.replay_proof = replay.start()
+        packaged = patch("helium_dev.require_current_packaged_build")
+        self.addCleanup(packaged.stop)
+        packaged.start()
+
     def _fixture(self) -> tuple[Path, Path, Path, dict[str, bytes]]:
         temporary = Path(tempfile.mkdtemp(prefix="helium-dev-bundle-test-"))
         self.addCleanup(lambda: shutil.rmtree(temporary, ignore_errors=True))
@@ -101,6 +110,7 @@ class HeliumDevBundleTests(unittest.TestCase):
         self.assertTrue(signer_calls[0].parent.name.startswith(".helium-dev-bundle-"))
         self.assertTrue(destination.is_dir())
         self.assertTrue((destination / "Contents" / "MacOS" / "Helium").is_file())
+        self.assertEqual(len(str(result["package_tree_sha256"])), 64)
 
         copied_ids: list[str] = []
         copied_executables: dict[str, str] = {}
@@ -126,6 +136,35 @@ class HeliumDevBundleTests(unittest.TestCase):
         for relative_path, content in source_bytes.items():
             self.assertEqual((source_app / relative_path).read_bytes(), content)
 
+    def test_package_can_use_a_build_root_outside_the_worktree(self) -> None:
+        root, _source_app, output, _source_bytes = self._fixture()
+        external_build = root.parent / "external-build"
+        shutil.move(str(root / "build"), external_build)
+
+        result = package_dev_bundle(
+            root,
+            build_root=external_build,
+            signer=lambda _path: None,
+        )
+
+        self.assertEqual(
+            Path(result["app_path"]),
+            external_build.resolve() / "src" / "out" / "Default" / "Helium Dev.app",
+        )
+        self.assertTrue((external_build / "src" / "out" / "Default" / "Helium Dev.app").is_dir())
+
+    def test_package_atomically_replaces_an_owned_dev_bundle(self) -> None:
+        root, _source_app, output, _source_bytes = self._fixture()
+        def signer(_path: Path) -> None:
+            return None
+
+        package_dev_bundle(root, signer=signer)
+
+        result = package_dev_bundle(root, signer=signer)
+
+        self.assertEqual(Path(result["app_path"]), output.resolve() / "Helium Dev.app")
+        self.assertEqual(list(output.glob(".Helium Dev.app.previous-*")), [])
+
     def test_stale_source_and_existing_destination_fail_closed(self) -> None:
         root, _source_app, output, _source_bytes = self._fixture()
         graph = output / "build.ninja"
@@ -137,7 +176,7 @@ class HeliumDevBundleTests(unittest.TestCase):
 
         root, _source_app, output, _source_bytes = self._fixture()
         (output / "Helium Dev.app").mkdir()
-        with self.assertRaisesRegex(BundleError, "refusing to overwrite"):
+        with self.assertRaisesRegex(BundleError, "refusing to replace unowned"):
             package_dev_bundle(root, signer=lambda _path: None)
 
     def test_failed_signing_cleans_owned_staging_directory(self) -> None:
@@ -150,6 +189,17 @@ class HeliumDevBundleTests(unittest.TestCase):
             package_dev_bundle(root, signer=signer)
         self.assertFalse((output / "Helium Dev.app").exists())
         self.assertEqual(list(output.glob(".helium-dev-bundle-*")), [])
+
+    def test_direct_packaging_requires_replay_proof(self) -> None:
+        root, _source_app, output, _source_bytes = self._fixture()
+        self.replay_proof.side_effect = ExecutionError(
+            "no current runnable build proof; run he replay, then rebuild"
+        )
+
+        with self.assertRaisesRegex(BundleError, "run he replay"):
+            package_dev_bundle(root, signer=lambda _path: None)
+
+        self.assertFalse((output / "Helium Dev.app").exists())
 
     def test_run_preflight_does_not_launch_or_create_profile(self) -> None:
         root = Path(tempfile.mkdtemp(prefix="helium-preflight-test-"))

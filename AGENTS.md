@@ -15,16 +15,34 @@ change, regardless of which tools helped create it.
 - `patches/` - macOS-only Quilt patches.
 - `docs/building.md` - build and development procedure.
 - `dev.sh` - development build and launch commands.
+- `devutils/scenarios/` - deterministic behavior-test contracts.
 - `resources/` - macOS application resources.
 
 ## Ground rules
 
-- Start macOS feature branches and COW worktrees in this repository.
+- Normal work uses the canonical `helium-macos/main` checkout. Use a branch or
+  isolated worktree only for genuinely parallel or risky work.
 - Keep `helium-chromium/` at the commit recorded by the outer gitlink.
+- Source `dev.sh` and run `he dev` for normal development; lane selection is
+  automatic and requires a structurally warm lane.
 - Put shared browser behavior in Arcium core. Keep only macOS-specific changes
   here.
+- Keep generated Chromium source, Siso state, and build output in one stable
+  lane. Generated merged catalogs live under `build-root/.arcium/patches`.
+  Never copy or symlink generated state between lanes.
+- Select the source worktree and the build lane separately. Record both when
+  reporting build or runtime proof.
+- Treat `he check` as a fast state check. Run `he replay` to establish the
+  from-zero, zero-fuzz receipt required by broad builds and Dev packaging.
+- Use `he prepare-patches`, `he save-patch`, and `he replay` for patch work;
+  authoritative patches live in the core and outer repositories.
+- Treat setup, configuration, build, packaging, and launch as one selected-lane
+  transaction. Never bypass the lane lock to change generated source or graph state.
+- Keep heavy-lane temporary files and build logs on the heavy volume. Internal
+  free space is still required for macOS and swap.
 - Understand and inspect all generated or AI-assisted output before submission.
-- Test the affected behavior and state each completed proof gate accurately.
+- Use the exact Dev bundle and a development profile for behavior tests. State
+  each completed proof gate accurately.
 - Disclose uncertainty, missing tests, and tool-generated work that needs extra
   review.
 - Do not send duplicate, automated, or unreviewed contributions.
@@ -34,7 +52,13 @@ change, regardless of which tools helped create it.
 
 - **Arcium core** - the shared browser product pinned by this repository.
 - **Arcium-macOS** - this macOS build, package, and platform repository.
-- **Dev build** - `out/Default/Helium Dev.app` from the active worktree. This is
-  the current artifact name until the application branding changes.
+- **Source worktree** - the outer Git worktree and pinned Arcium core commit
+  whose patches populate a build lane.
+- **Build lane** - one stable directory that owns generated Chromium source,
+  Siso state, build output, and receipts.
+- **Dev build** - `out/Default/Helium Dev.app` from the selected build lane.
+  This is the current artifact name until the application branding changes.
+- **Scenario contract** - a checked JSON description of one repeatable behavior
+  test, including its profile, steps, observables, and persistence gates.
 - **Proof gate** - one verified stage, such as patch replay, compilation, launch,
   visible behavior, persistence, or teardown.

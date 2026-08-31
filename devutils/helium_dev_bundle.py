@@ -16,9 +16,13 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from build_lane import LaneError, acquire_lane_lock
+from build_execution import ExecutionError, require_current_execution, tree_sha256
 
 
 class BundleError(RuntimeError):
@@ -38,9 +42,17 @@ CopyRunner = Callable[..., object]
 Signer = Callable[[Path], None]
 
 
-def resolve_bundle_paths(root: str | os.PathLike[str]) -> BundlePaths:
+def resolve_bundle_paths(
+    root: str | os.PathLike[str],
+    build_root: str | os.PathLike[str] | None = None,
+) -> BundlePaths:
     worktree = Path(root).expanduser().resolve()
-    source_dir = worktree / "build" / "src"
+    build_dir = (
+        worktree / "build"
+        if build_root is None
+        else Path(build_root).expanduser().resolve()
+    )
+    source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
     return BundlePaths(
         worktree=worktree,
@@ -70,8 +82,12 @@ def _safe_executable_name(value: object) -> str:
     return value
 
 
-def _require_fresh_source(paths: BundlePaths) -> dict[str, object]:
-    if paths.dev_app.exists() or paths.dev_app.is_symlink():
+def _require_fresh_source(
+    paths: BundlePaths, *, require_dev_destination_absent: bool = True
+) -> dict[str, object]:
+    if require_dev_destination_absent and (
+        paths.dev_app.exists() or paths.dev_app.is_symlink()
+    ):
         raise BundleError(f"refusing to overwrite existing Dev bundle: {paths.dev_app}")
     if paths.source_app.is_symlink() or not paths.source_app.is_dir():
         raise BundleError(f"Helium.app is missing from {paths.out_dir}")
@@ -138,6 +154,40 @@ def _copy_source(source: Path, destination: Path, runner: CopyRunner | None) -> 
     except OSError as error:
         raise BundleError("could not clone or copy Helium.app") from error
     return "fallback-copy"
+
+
+def _require_owned_dev_destination(paths: BundlePaths) -> None:
+    if not paths.dev_app.exists() and not paths.dev_app.is_symlink():
+        return
+    if paths.dev_app.is_symlink() or not paths.dev_app.is_dir():
+        raise BundleError(f"refusing to replace non-directory Dev bundle: {paths.dev_app}")
+    try:
+        info = _read_plist(paths.dev_app / "Contents" / "Info.plist")
+    except BundleError as error:
+        raise BundleError(
+            f"refusing to replace unowned Dev bundle: {paths.dev_app}"
+        ) from error
+    if (
+        info.get("CFBundleIdentifier") != "net.imput.helium.dev"
+        or info.get("CFBundleDisplayName") != "Helium Dev"
+    ):
+        raise BundleError(f"refusing to replace unowned Dev bundle: {paths.dev_app}")
+
+
+def _publish_dev_bundle(candidate: Path, destination: Path) -> None:
+    previous = destination.parent / f".{destination.name}.previous-{uuid.uuid4().hex}"
+    moved_previous = False
+    try:
+        if destination.exists():
+            os.replace(destination, previous)
+            moved_previous = True
+        os.replace(candidate, destination)
+    except Exception:
+        if moved_previous and not destination.exists() and previous.exists():
+            os.replace(previous, destination)
+        raise
+    if previous.exists():
+        shutil.rmtree(previous)
 
 
 def _dev_suffix(value: str, suffix: str) -> str:
@@ -233,16 +283,23 @@ def sign_and_verify_ad_hoc(app_path: Path) -> None:
         raise BundleError("ad-hoc signing or verification failed") from error
 
 
-def package_dev_bundle(
-    root: str | os.PathLike[str],
+def _package_dev_bundle_locked(
+    paths: BundlePaths,
     *,
     copy_runner: CopyRunner | None = None,
     signer: Signer | None = None,
 ) -> dict[str, object]:
-    """Package and atomically publish ``Helium Dev.app`` for one worktree."""
-
-    paths = resolve_bundle_paths(root)
-    source = _require_fresh_source(paths)
+    """Package while a verified parent owns the generated lane."""
+    try:
+        require_current_execution(
+            paths.worktree,
+            paths.source_dir.parent,
+            lane=os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        )
+    except ExecutionError as error:
+        raise BundleError(str(error)) from error
+    source = _require_fresh_source(paths, require_dev_destination_absent=False)
+    _require_owned_dev_destination(paths)
     staging_root = Path(tempfile.mkdtemp(prefix=".helium-dev-bundle-", dir=paths.out_dir))
     staging_app = staging_root / paths.dev_app.name
     try:
@@ -252,9 +309,7 @@ def package_dev_bundle(
             sign_and_verify_ad_hoc(staging_app)
         else:
             signer(staging_app)
-        if paths.dev_app.exists() or paths.dev_app.is_symlink():
-            raise BundleError(f"refusing to overwrite existing Dev bundle: {paths.dev_app}")
-        os.replace(staging_app, paths.dev_app)
+        _publish_dev_bundle(staging_app, paths.dev_app)
         staging_root.rmdir()
     except BundleError:
         shutil.rmtree(staging_root, ignore_errors=True)
@@ -283,6 +338,7 @@ def package_dev_bundle(
         },
         "copy_method": copy_method,
         "plist_count": plist_count,
+        "package_tree_sha256": tree_sha256(paths.dev_app),
         "signature": "ad-hoc",
         "proof_gates": (
             "source-present",
@@ -292,3 +348,29 @@ def package_dev_bundle(
             "atomic-publish",
         ),
     }
+
+
+def package_dev_bundle(
+    root: str | os.PathLike[str],
+    *,
+    build_root: str | os.PathLike[str] | None = None,
+    copy_runner: CopyRunner | None = None,
+    signer: Signer | None = None,
+) -> dict[str, object]:
+    """Package and atomically publish ``Helium Dev.app`` under the lane lock."""
+
+    paths = resolve_bundle_paths(root, build_root)
+    owner = {
+        "action": "dev-bundle",
+        "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
+        "worktree": str(paths.worktree),
+    }
+    try:
+        with acquire_lane_lock(
+            paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ):
+            return _package_dev_bundle_locked(
+                paths, copy_runner=copy_runner, signer=signer
+            )
+    except LaneError as error:
+        raise BundleError(str(error)) from error

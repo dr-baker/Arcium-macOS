@@ -1,64 +1,123 @@
 # Private patch validation
 
-This ledger records the selected Arcium core, patch ownership, and completed
-proof gates for the Thursday recovery. It separates source recovery from build
-and runtime evidence.
+This ledger records the selected Arcium patch stack and its proof gates. Source
+replay, compilation, packaging, and runtime behavior are separate gates.
 
 ## Repository ownership
 
 - Arcium core owns shared browser behavior in `helium-chromium/patches/`.
-- Arcium-macOS owns packaging and the macOS-only Dock integration in
-  `patches/personal/helium-space-macos.patch`.
-- Arcium-macOS pins one exact core commit through the `helium-chromium` gitlink.
-- The merged outer patch series is generated build state. Do not commit shared
-  patch copies to Arcium-macOS.
+- Arcium-macOS owns packaging and macOS-only integration in
+  `patches/personal/arcium-spaces-macos.patch`.
+- Arcium-macOS selects one core commit through the `helium-chromium` gitlink.
+- The merged patch copies in Arcium-macOS are generated build state.
 
-## Recovered active behavior
+## Patch graph
 
-The core series retains the imported Favorites and Pins foundation and the Arc
-sidebar importer. Daniel-owned additions remain in separate personal patches:
+```text
+arcium-spaces
+├── arcium-arc-import
+│   └── arcium-arc-pin-import (also requires arcium-pins)
+├── arcium-pins
+│   └── arcium-omnibox
+├── arcium-little-arc
+└── arcium-spaces-macos
 
-- `centered-address-bar-personal-label.patch`
-- `arc-auto-picture-in-picture-experimental.patch`
-- `mru-tab-cycling-regression-tests.patch`
-- `little-arc-peek.patch`
-- `helium-spaces-model.patch`
-- `helium-spaces-sidebar.patch`
-- `little-arc-hardening.patch`
-- `arc-spaces-normalized-import.patch`
-- `persistent-items-architecture.patch`
+arcium-mru-tab-switcher                     independent
+arcium-auto-picture-in-picture-experimental independent
+```
 
-The two imported MRU implementation patches remain active. The later standalone
-MRU overlay and the simplified consolidated Spaces patch remain excluded.
+`arcium-spaces` owns Space identity, persistence, provenance, and neutral
+extension seams. `arcium-pins` owns lightweight Pins, Favorites, folders, live
+tab associations, and boundary drag behavior. `arcium-arc-import` always works
+without Pins by importing tabs and tab groups. `arcium-arc-pin-import` adds the
+optional dormant-Pins destination.
 
-## Completed proof gates
+`arcium-little-arc` installs an optional navigation handler and does not own Pin
+policy. `arcium-spaces-macos` owns Dock and window integration only.
 
-- The normalized Arc import and persistent-item patches replay with zero fuzz.
-- All 50 normalized-import paths and all 76 persistent-item paths match the
-  authoritative Thursday stages.
-- `he validate series` passes for the combined core and macOS catalogs.
-- Focused compilation passed for the Space model, service, importer, persistent
-  item model, vertical sidebar, startup, settings, and required relink paths.
-- `helium_persistent_item_model_tests` passed 10 tests.
-- `helium_space_model_tests` passed 7 tests.
-- `arc_sidebar_snapshot_tests` passed 3 tests.
-- The packaged `Helium Dev.app` used the `personal-production` feature bundle
-  and the isolated Thursday recovery profile.
-- Runtime checks showed six Spaces, persistent Pins and folders across three
-  Spaces, close-to-dormant behavior, Pin rematerialization, normal restart
-  persistence, the centered address-bar toggle, and MRU ordering.
+## Source gates
 
-## Remaining runtime checks
+- Replay the complete selected series with `QUILT_PATCH_OPTS='--fuzz=0'`.
+- Run `he validate series` and `he validate patches`.
+- Run source and patch whitespace checks.
+- Verify the generated patch copies match the committed core patches.
 
-- Trigger automatic picture-in-picture with safe media.
-- Trigger Little Arc from an external application.
-- Inspect the macOS Dock Space menu when Computer Use can access the Dock.
-- Repeat a real Arc import on a disposable copy if import idempotence needs UI
-  proof. The current six-Space profile already contains normalized data.
+The current refactor replayed all 330 selected core and macOS patches with fuzz
+disabled on 2026-08-29. After correcting the Arc importer browser test for the
+current TabGroup API, the stack replayed again to
+`patches/personal/arcium-spaces-macos.patch` with zero fuzz. The 312 active core
+patch copies were byte-identical to their committed core owners before that
+two-line correction; the corrected `arcium-arc-import.patch` was then verified
+byte-identical directly.
 
-The full Arc importer unit-test target remains blocked by missing upstream test
-fixtures in the partial checkout. The production importer objects and focused
-snapshot tests compile and pass.
+`he validate patches` is not an acceptance gate in the partial Chromium
+checkout: it traverses inactive generated catalogs and upstream test inputs
+that are intentionally absent. The authoritative replay gate is Quilt applying
+the selected series from base with `--fuzz=0`, followed by source whitespace,
+GN, build-graph, and focused compile checks.
+
+## Compile and test gates
+
+The required focused coverage is:
+
+- `arcium_optional_navigation_tests`
+- `helium_persistent_item_model_tests`
+- `arc_sidebar_snapshot_tests`
+- `ArciumArcImportBrowserTest.*`
+- `HeliumSpaceServiceTest.LivePin*RestoresAtomically`
+- Little Arc context-menu and navigation-throttle tests
+- existing Pin projection, drag-transaction, and persistent-row tests
+
+Build and package the exact fully replayed source before runtime acceptance.
+Compiler-cache hits are valid because Siso still evaluates the generated build
+graph and orders every stale edge.
+
+The 2026-08-29 acceptance build regenerated GN's normal configuration and made
+31,342 targets from 4,765 files. A full `chrome` build completed 22,100 actions,
+then the final replay/API correction completed another 2,502 incremental
+actions. A second generated-graph build was a zero-action no-op.
+
+Focused results from the final replayed source:
+
+- `arcium_optional_navigation_tests`: 3/3 passed;
+- `helium_persistent_item_model_tests`: 55/55 passed;
+- `arc_sidebar_snapshot_tests`: 3/3 passed;
+- `arcium_arc_import_browsertest.cc`: compiled with its generated command;
+- `helium_space_service_unittest.cc`: compiled with its generated command.
+
+The broad `browser_tests` and `unit_tests` binaries cannot link in this partial
+checkout because Chromium's test graph requires the absent upstream fixture
+`chrome/test/data/extensions/extension_api_unittest/api_features.json`. Do not
+replace it with a placeholder. Restore the real upstream test-data input before
+claiming those cases executed.
+
+## Runtime gates
+
+Use the exact `Helium Dev.app` from the replayed source. Record its bundle path,
+process path, profile, core commit, and enabled feature flags.
+
+The manual-acceptance candidate is outer commit `84e621b`, selecting core
+`579a0b99`. It runs from the acceptance worktree's
+`out/Default/Helium Dev.app`, profile
+`/Users/daniel/Library/Application Support/net.imput.helium.dev`, with
+`HeliumFavoritesAndPins` enabled. Its replay top is
+`patches/personal/arcium-spaces-macos.patch`; runtime behavior remains a manual
+gate until the matrix below is completed.
+
+The runtime matrix covers:
+
+- nested and collapsed Pin folders;
+- dormant and live Pin activation, close-to-dormant, and return-home behavior;
+- tab-to-Pin and Pin-to-tab drag, cancellation, reordering, and one-tab detach;
+- Pin and Favorite context actions;
+- same-site and cross-site anchored navigation, explicit new-tab actions, and
+  Little Arc promotion;
+- omnibox ranking and activation in the active and other Spaces;
+- tabs-mode and dormant-Pins Arc import on disposable profiles;
+- import replacement, per-Space isolation, normal quit, and restart;
+- Space selection and Dock window creation;
+- MRU preview quality and ordering;
+- experimental automatic picture-in-picture.
 
 ## Recovery anchors
 
@@ -67,5 +126,5 @@ snapshot tests compile and pass.
 - Pre-landing core snapshot: `recovery/pre-thursday-main-core-2026-08-22`
 - Pre-landing product snapshot: `recovery/pre-thursday-main-product-2026-08-22`
 
-Keep these remote branches until the recovered product passes canonical-profile
+Keep these branches until the refactored product passes canonical-profile
 acceptance after landing.
