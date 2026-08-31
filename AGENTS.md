@@ -20,18 +20,22 @@ change, regardless of which tools helped create it.
 
 ## Ground rules
 
-- Start macOS feature branches and COW worktrees in this repository.
+- Normal work uses the canonical `helium-macos/main` checkout. Use a branch or
+  isolated worktree only for genuinely parallel or risky work.
 - Keep `helium-chromium/` at the commit recorded by the outer gitlink.
-- Before replay or build, require a clean core checkout whose `HEAD` matches the
-  gitlink, and generated outer patch copies that match the committed core series.
+- Source `dev.sh` and run `he dev` for normal development; lane selection is
+  automatic and requires a structurally warm lane.
 - Put shared browser behavior in Arcium core. Keep only macOS-specific changes
   here.
 - Keep generated Chromium source, Siso state, and build output in one stable
-  build lane. Never copy or symlink generated state between lanes.
+  lane. Generated merged catalogs live under `build-root/.arcium/patches`.
+  Never copy or symlink generated state between lanes.
 - Select the source worktree and the build lane separately. Record both when
   reporting build or runtime proof.
 - Treat `he check` as a fast state check. Run `he replay` to establish the
   from-zero, zero-fuzz receipt required by broad builds and Dev packaging.
+- Use `he prepare-patches`, `he save-patch`, and `he replay` for patch work;
+  authoritative patches live in the core and outer repositories.
 - Treat setup, configuration, build, packaging, and launch as one selected-lane
   transaction. Never bypass the lane lock to change generated source or graph state.
 - Keep heavy-lane temporary files and build logs on the heavy volume. Internal
