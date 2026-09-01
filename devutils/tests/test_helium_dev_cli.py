@@ -10,7 +10,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 
 WORKTREE = Path(__file__).resolve().parents[2]
@@ -115,6 +115,86 @@ class HeliumDevCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(helium_dev.ReceiptError, "stale"):
                 helium_dev.runtime_action("run", temporary, ())
+
+    def test_missing_named_profile_seeds_from_installed_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            source = (
+                home / "Library" / "Application Support" / "net.imput.helium"
+            )
+            source.mkdir(parents=True)
+            (source / "Local State").write_text("installed", encoding="utf-8")
+            profile = helium_dev.resolve_profile(
+                "isolated", "peek", home=home
+            )
+            with patch("helium_dev._ps_snapshot", return_value=""):
+                helium_dev._prepare_selected_profile(
+                    profile, "installed", action="run", home=home
+                )
+            self.assertEqual(
+                (profile.user_data_dir / "Local State").read_text(encoding="utf-8"),
+                "installed",
+            )
+
+            (profile.user_data_dir / "Local State").write_text(
+                "special build", encoding="utf-8"
+            )
+            with patch(
+                "helium_dev._ps_snapshot",
+                return_value="123 /Applications/Helium.app/Contents/MacOS/Helium",
+            ):
+                helium_dev._prepare_selected_profile(
+                    profile, "installed", action="run", home=home
+                )
+            self.assertEqual(
+                (profile.user_data_dir / "Local State").read_text(encoding="utf-8"),
+                "special build",
+            )
+
+    def test_profile_seed_refuses_a_running_source_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            source = (
+                home / "Library" / "Application Support" / "net.imput.helium"
+            )
+            source.mkdir(parents=True)
+            profile = helium_dev.resolve_profile("isolated", "peek", home=home)
+            ps_text = "123 /Applications/Helium.app/Contents/MacOS/Helium"
+            with patch("helium_dev._ps_snapshot", return_value=ps_text):
+                with self.assertRaisesRegex(helium_dev.HarnessError, "matching PIDs: 123"):
+                    helium_dev._validate_profile_seed(
+                        profile, "installed", home=home
+                    )
+            self.assertFalse(profile.user_data_dir.exists())
+
+    def test_relink_artifact_probe_uses_the_named_bundle_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "helium_dev.HeliumDevBuilder"
+        ) as builder, patch(
+            "helium_dev.ensure_gclient_identity"
+        ), patch(
+            "helium_dev.require_current_replay_proof"
+        ), patch(
+            "helium_dev.invalidate_execution"
+        ), patch(
+            "helium_dev.resolve_dev_identity", wraps=helium_dev.resolve_dev_identity
+        ) as resolve_identity, patch(
+            "helium_dev._artifact_status_for_root"
+        ) as artifact_status:
+            result = MagicMock(ok=False)
+            builder.return_value.relink.side_effect = lambda **kwargs: (
+                kwargs["artifact_status_probe"](), result
+            )[1]
+            helium_dev.build_action(
+                "relink",
+                temporary,
+                ("--resources", "--isolated", "peek"),
+            )
+
+        identity = resolve_identity("isolated", "peek")
+        artifact_status.assert_called_once_with(
+            Path(temporary).resolve(), None, identity=identity
+        )
 
     def test_lock_contention_and_bad_build_argument_keep_json_stdout_clean(self) -> None:
         stdout, stderr = io.StringIO(), io.StringIO()

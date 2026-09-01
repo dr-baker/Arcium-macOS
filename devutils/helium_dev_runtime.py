@@ -107,6 +107,7 @@ class RuntimeArguments:
     profile_mode: str
     profile_name: str | None
     profile_directory: str
+    seed_from: str | None
     passthrough: tuple[str, ...]
 
 
@@ -202,6 +203,21 @@ def resolve_profile(
     return ProfileSpec(mode, name, user_data_dir, profile_directory)
 
 
+def profile_seed_source(
+    seed_from: str, *, home: str | os.PathLike[str] | None = None
+) -> Path | None:
+    """Resolve one explicit profile seed without selecting arbitrary paths."""
+
+    support = _application_support(home)
+    if seed_from == "installed":
+        return support / "net.imput.helium"
+    if seed_from == "dev":
+        return support / "net.imput.helium.dev"
+    if seed_from == "empty":
+        return None
+    raise RuntimeInputError("--seed-from must be installed, dev, or empty")
+
+
 def prepare_profile(spec: ProfileSpec, *, allow_existing_fresh: bool = False) -> ProfileSpec:
     """Create a profile without ever following a selected profile symlink."""
 
@@ -243,6 +259,7 @@ def parse_runtime_arguments(argv: Sequence[str]) -> RuntimeArguments:
     """
 
     modes: list[tuple[str, str]] = []
+    seed_sources: list[str] = []
     user_data_dirs = 0
     profile_directories = 0
     passthrough: list[str] = []
@@ -259,6 +276,11 @@ def parse_runtime_arguments(argv: Sequence[str]) -> RuntimeArguments:
                 break
         if matched:
             index += 1
+            continue
+        value = _option_value(argv, index, "--seed-from")
+        if value is not None:
+            seed_sources.append(value[0])
+            index = value[1] + 1
             continue
         value = _option_value(argv, index, "--user-data-dir")
         if value is not None:
@@ -278,11 +300,20 @@ def parse_runtime_arguments(argv: Sequence[str]) -> RuntimeArguments:
         )
     if len(modes) > 1:
         raise RuntimeInputError("choose exactly one profile mode")
+    if len(seed_sources) > 1:
+        raise RuntimeInputError("--seed-from may be supplied only once")
     if profile_directories:
         raise RuntimeInputError("--profile-directory is owned by he and fixed to Default")
     mode, name = modes[0] if modes else ("normal", None)
+    if mode == "normal" and seed_sources:
+        raise RuntimeInputError("--seed-from requires --isolated or --fresh")
+    seed_from = seed_sources[0] if seed_sources else ("installed" if name else None)
+    if seed_from is not None:
+        profile_seed_source(seed_from)
     profile_directory = DEFAULT_PROFILE_DIRECTORY
-    return RuntimeArguments(mode, name, profile_directory, tuple(passthrough))
+    return RuntimeArguments(
+        mode, name, profile_directory, seed_from, tuple(passthrough)
+    )
 
 
 def _normalize_feature_name(name: str, *, allow_unsafe: bool = False) -> str:

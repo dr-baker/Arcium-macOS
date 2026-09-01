@@ -103,7 +103,7 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertIn("check - validate the active patch catalog", result.stderr)
         self.assertIn("context [--json] - show source, lane, proof", result.stderr)
         self.assertIn("replay - pop and strictly replay", result.stderr)
-        self.assertIn("dev [profile options] - incrementally rebuild", result.stderr)
+        self.assertIn("dev [profile options] - rebuild and run a labeled Dev app", result.stderr)
         self.assertNotIn("presetup", result.stderr)
 
         advanced = run_zsh("he help --advanced")
@@ -111,6 +111,13 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertIn("presetup", advanced.stderr)
         self.assertIn("prepare-patches - rebuilds the selected lane's generated patch catalog", advanced.stderr)
         self.assertIn("save-patch - refreshes and exports only the active top patch", advanced.stderr)
+
+    def test_dev_passes_only_profile_identity_to_relink(self) -> None:
+        script = DEV_SH.read_text(encoding="utf-8")
+        self.assertIn(
+            '___helium_relink --resources "${_profile_args[@]}"', script
+        )
+        self.assertIn('[[ "$_argument" = --isolated=* ]]', script)
 
     def test_reset_refuses_without_explicit_warm_output_approval(self) -> None:
         result = run_zsh(
@@ -202,7 +209,14 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.splitlines(),
-            ["check", "replay-proof", "configure", "relink:--resources", "bundle", "run:--isolated smoke"],
+            [
+                "check",
+                "replay-proof",
+                "configure",
+                "relink:--resources --isolated smoke",
+                "bundle",
+                "run:--isolated smoke",
+            ],
         )
 
     def test_bootstrap_requires_approval_before_setup(self) -> None:

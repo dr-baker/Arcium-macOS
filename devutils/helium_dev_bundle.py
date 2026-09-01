@@ -10,8 +10,10 @@ before publishing it atomically.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -30,6 +32,17 @@ class BundleError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class DevBundleIdentity:
+    mode: str
+    name: str | None
+    app_name: str
+    display_name: str
+    bundle_identifier: str
+    bundle_suffix: str
+    receipt_name: str
+
+
+@dataclass(frozen=True)
 class BundlePaths:
     worktree: Path
     source_dir: Path
@@ -42,10 +55,55 @@ CopyRunner = Callable[..., object]
 Signer = Callable[[Path], None]
 
 
+_SAFE_PROFILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+
+
+def resolve_dev_identity(
+    mode: str = "normal", name: str | None = None
+) -> DevBundleIdentity:
+    """Map one runtime profile to a stable, independently identifiable app."""
+
+    if mode == "normal":
+        if name is not None:
+            raise BundleError("normal Dev identity does not accept a name")
+        return DevBundleIdentity(
+            mode="normal",
+            name=None,
+            app_name="Helium Dev.app",
+            display_name="Helium Dev",
+            bundle_identifier="net.imput.helium.dev",
+            bundle_suffix=".dev",
+            receipt_name="build.json",
+        )
+    if mode not in {"isolated", "fresh"}:
+        raise BundleError(f"unknown Dev identity mode: {mode}")
+    if not isinstance(name, str) or not _SAFE_PROFILE_NAME.fullmatch(name):
+        raise BundleError("named Dev identity requires a safe profile name")
+    readable_token = re.sub(r"[^a-z0-9.-]+", "-", name.lower()).strip(".-")
+    identity_digest = hashlib.sha256(f"{mode}:{name}".encode("utf-8")).hexdigest()[:8]
+    token = f"{readable_token}-{identity_digest}"
+    qualifier = f"{mode}.{token}"
+    display_name = f"Helium Dev - {name}"
+    if mode == "fresh":
+        display_name += " Fresh"
+    return DevBundleIdentity(
+        mode=mode,
+        name=name,
+        app_name=f"{display_name}.app",
+        display_name=display_name,
+        bundle_identifier=f"net.imput.helium.dev.{qualifier}",
+        bundle_suffix=f".dev.{qualifier}",
+        receipt_name=f"build--{mode}--{name}.json",
+    )
+
+
 def resolve_bundle_paths(
     root: str | os.PathLike[str],
     build_root: str | os.PathLike[str] | None = None,
+    *,
+    identity: DevBundleIdentity | None = None,
 ) -> BundlePaths:
+    selected_identity = resolve_dev_identity() if identity is None else identity
     worktree = Path(root).expanduser().resolve()
     build_dir = (
         worktree / "build"
@@ -59,7 +117,7 @@ def resolve_bundle_paths(
         source_dir=source_dir,
         out_dir=out_dir,
         source_app=out_dir / "Helium.app",
-        dev_app=out_dir / "Helium Dev.app",
+        dev_app=out_dir / selected_identity.app_name,
     )
 
 
@@ -156,7 +214,9 @@ def _copy_source(source: Path, destination: Path, runner: CopyRunner | None) -> 
     return "fallback-copy"
 
 
-def _require_owned_dev_destination(paths: BundlePaths) -> None:
+def _require_owned_dev_destination(
+    paths: BundlePaths, identity: DevBundleIdentity
+) -> None:
     if not paths.dev_app.exists() and not paths.dev_app.is_symlink():
         return
     if paths.dev_app.is_symlink() or not paths.dev_app.is_dir():
@@ -168,8 +228,8 @@ def _require_owned_dev_destination(paths: BundlePaths) -> None:
             f"refusing to replace unowned Dev bundle: {paths.dev_app}"
         ) from error
     if (
-        info.get("CFBundleIdentifier") != "net.imput.helium.dev"
-        or info.get("CFBundleDisplayName") != "Helium Dev"
+        info.get("CFBundleIdentifier") != identity.bundle_identifier
+        or info.get("CFBundleDisplayName") != identity.display_name
     ):
         raise BundleError(f"refusing to replace unowned Dev bundle: {paths.dev_app}")
 
@@ -213,13 +273,16 @@ def _write_plist(path: Path, info: dict[str, object], original: bytes) -> None:
             temporary.unlink()
 
 
-def rewrite_dev_metadata(app_path: Path) -> int:
+def rewrite_dev_metadata(
+    app_path: Path, identity: DevBundleIdentity | None = None
+) -> int:
     """Give every copied local bundle a distinct Dev identity.
 
     Executable names remain byte-for-byte unchanged because Chromium's helper
     launch and framework lookup code expects those names.
     """
 
+    selected_identity = resolve_dev_identity() if identity is None else identity
     plist_paths = sorted(app_path.rglob("Info.plist"))
     if not plist_paths:
         raise BundleError("copied Dev bundle has no Info.plist files")
@@ -238,17 +301,17 @@ def rewrite_dev_metadata(app_path: Path) -> int:
             _safe_executable_name(executable)
         bundle_id = info.get("CFBundleIdentifier")
         if isinstance(bundle_id, str) and bundle_id:
-            info["CFBundleIdentifier"] = _dev_suffix(bundle_id, ".dev")
+            info["CFBundleIdentifier"] = _dev_suffix(
+                bundle_id, selected_identity.bundle_suffix
+            )
         for key in ("CFBundleDisplayName", "CFBundleName"):
             value = info.get(key)
             if isinstance(value, str) and value:
                 info[key] = _dev_name(value)
         if path == root_plist:
-            info["CFBundleIdentifier"] = _dev_suffix(
-                str(info.get("CFBundleIdentifier") or "net.imput.helium"), ".dev"
-            )
-            info["CFBundleDisplayName"] = "Helium Dev"
-            info["CFBundleName"] = "Helium Dev"
+            info["CFBundleIdentifier"] = selected_identity.bundle_identifier
+            info["CFBundleDisplayName"] = selected_identity.display_name
+            info["CFBundleName"] = selected_identity.display_name
         _write_plist(path, info, original)
         changed += 1
     return changed
@@ -286,6 +349,7 @@ def sign_and_verify_ad_hoc(app_path: Path) -> None:
 def _package_dev_bundle_locked(
     paths: BundlePaths,
     *,
+    identity: DevBundleIdentity | None = None,
     copy_runner: CopyRunner | None = None,
     signer: Signer | None = None,
 ) -> dict[str, object]:
@@ -298,13 +362,14 @@ def _package_dev_bundle_locked(
         )
     except ExecutionError as error:
         raise BundleError(str(error)) from error
+    selected_identity = resolve_dev_identity() if identity is None else identity
     source = _require_fresh_source(paths, require_dev_destination_absent=False)
-    _require_owned_dev_destination(paths)
+    _require_owned_dev_destination(paths, selected_identity)
     staging_root = Path(tempfile.mkdtemp(prefix=".helium-dev-bundle-", dir=paths.out_dir))
     staging_app = staging_root / paths.dev_app.name
     try:
         copy_method = _copy_source(paths.source_app, staging_app, copy_runner)
-        plist_count = rewrite_dev_metadata(staging_app)
+        plist_count = rewrite_dev_metadata(staging_app, selected_identity)
         if signer is None:
             sign_and_verify_ad_hoc(staging_app)
         else:
@@ -354,12 +419,14 @@ def package_dev_bundle(
     root: str | os.PathLike[str],
     *,
     build_root: str | os.PathLike[str] | None = None,
+    identity: DevBundleIdentity | None = None,
     copy_runner: CopyRunner | None = None,
     signer: Signer | None = None,
 ) -> dict[str, object]:
     """Package and atomically publish ``Helium Dev.app`` under the lane lock."""
 
-    paths = resolve_bundle_paths(root, build_root)
+    selected_identity = resolve_dev_identity() if identity is None else identity
+    paths = resolve_bundle_paths(root, build_root, identity=selected_identity)
     owner = {
         "action": "dev-bundle",
         "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
@@ -370,7 +437,10 @@ def package_dev_bundle(
             paths.source_dir.parent / ".arcium" / "lane.lock", owner
         ):
             return _package_dev_bundle_locked(
-                paths, copy_runner=copy_runner, signer=signer
+                paths,
+                identity=selected_identity,
+                copy_runner=copy_runner,
+                signer=signer,
             )
     except LaneError as error:
         raise BundleError(str(error)) from error

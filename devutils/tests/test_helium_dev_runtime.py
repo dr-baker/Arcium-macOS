@@ -90,6 +90,31 @@ class RuntimeTestCase(unittest.TestCase):
         self.assertIn("--incognito", launch)
         self.assertEqual(sum(item.startswith("--user-data-dir=") for item in launch), 1)
 
+    def test_named_profiles_seed_from_installed_by_default(self) -> None:
+        parsed = runtime.parse_runtime_arguments(["--isolated", "peek"])
+        self.assertEqual(parsed.seed_from, "installed")
+        self.assertEqual(
+            runtime.profile_seed_source(parsed.seed_from, home=self.home),
+            self.home / "Library/Application Support/net.imput.helium",
+        )
+
+        parsed = runtime.parse_runtime_arguments(
+            ["--fresh=peek", "--seed-from", "dev"]
+        )
+        self.assertEqual(parsed.seed_from, "dev")
+        self.assertNotIn("--seed-from", parsed.passthrough)
+        self.assertEqual(
+            runtime.profile_seed_source(parsed.seed_from, home=self.home),
+            self.home / "Library/Application Support/net.imput.helium.dev",
+        )
+
+        with self.assertRaisesRegex(runtime.RuntimeInputError, "requires"):
+            runtime.parse_runtime_arguments(["--seed-from=installed"])
+        with self.assertRaisesRegex(runtime.RuntimeInputError, "installed, dev, or empty"):
+            runtime.parse_runtime_arguments(
+                ["--isolated", "peek", "--seed-from=unknown"]
+            )
+
     def test_production_feature_bundle_is_enabled_once_by_default(self) -> None:
         spec = self.profile()
         launch = runtime.launch_arguments(spec)

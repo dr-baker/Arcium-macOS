@@ -16,6 +16,7 @@ CLI = ROOT / "devutils" / "build_receipt_cli.py"
 sys.path.insert(0, str(ROOT / "devutils"))
 from build_receipt import ReceiptError  # noqa: E402
 from build_receipt_cli import _publish_packaged_build  # noqa: E402
+from helium_dev_bundle import resolve_dev_identity  # noqa: E402
 
 
 def git(repo: Path, *arguments: str) -> str:
@@ -43,6 +44,30 @@ class BuildReceiptCliTests(unittest.TestCase):
                     expected_package_sha256="b" * 64,
                 )
         write.assert_not_called()
+
+    def test_named_bundle_uses_its_own_receipt_and_artifact_key(self) -> None:
+        identity = resolve_dev_identity("isolated", "peek")
+        receipt = MagicMock()
+        receipt.artifacts = {identity.app_name: "a" * 64}
+        with patch(
+            "build_receipt_cli._current_packaged_receipt", return_value=receipt
+        ) as current, patch("build_receipt_cli.write_receipt_atomic") as write:
+            result = _publish_packaged_build(
+                Path("/worktree"),
+                Path("/build"),
+                "heavy",
+                expected_package_sha256="a" * 64,
+                identity=identity,
+            )
+
+        self.assertIs(result, receipt)
+        current.assert_called_once_with(
+            Path("/worktree"), Path("/build"), "heavy", identity
+        )
+        self.assertEqual(
+            write.call_args.args[0],
+            Path("/build/.arcium/receipts") / identity.receipt_name,
+        )
 
     def test_source_receipt_records_matching_core_and_quilt_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

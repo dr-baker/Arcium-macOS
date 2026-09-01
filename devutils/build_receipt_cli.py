@@ -18,6 +18,7 @@ from build_receipt import (
     write_receipt_atomic,
 )
 from build_execution import ExecutionError, require_current_execution, tree_sha256
+from helium_dev_bundle import DevBundleIdentity, resolve_dev_identity
 from quilt_state import QuiltStateError
 from replay_contract import ReplayError, require_current_replay_proof
 
@@ -36,17 +37,21 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _current_packaged_receipt(
-    worktree: Path, build_root: Path, lane: str
+    worktree: Path,
+    build_root: Path,
+    lane: str,
+    identity: DevBundleIdentity | None = None,
 ) -> BuildReceipt:
+    selected_identity = resolve_dev_identity() if identity is None else identity
     source_dir = build_root / "src"
     source, applied_sha256 = _source_receipt(worktree, source_dir)
     replay = require_current_replay_proof(worktree, source_dir)
     execution = require_current_execution(worktree, build_root, lane=lane)
     out_dir = source_dir / "out" / "Default"
-    app = out_dir / "Helium Dev.app"
+    app = out_dir / selected_identity.app_name
     artifacts = {
-        "Helium Dev.app": tree_sha256(app),
-        "Helium Dev.app/Contents/MacOS/Helium": sha256_file(
+        selected_identity.app_name: tree_sha256(app),
+        f"{selected_identity.app_name}/Contents/MacOS/Helium": sha256_file(
             app / "Contents" / "MacOS" / "Helium"
         ),
         "libchrome_dll.dylib": sha256_file(out_dir / "libchrome_dll.dylib"),
@@ -76,26 +81,37 @@ def _publish_packaged_build(
     lane: str,
     *,
     expected_package_sha256: str,
+    identity: DevBundleIdentity | None = None,
 ) -> BuildReceipt:
     """Publish only from the lane-locked package transaction."""
-    receipt = _current_packaged_receipt(worktree, build_root, lane)
-    if receipt.artifacts.get("Helium Dev.app") != expected_package_sha256:
+    selected_identity = resolve_dev_identity() if identity is None else identity
+    receipt = _current_packaged_receipt(
+        worktree, build_root, lane, selected_identity
+    )
+    if receipt.artifacts.get(selected_identity.app_name) != expected_package_sha256:
         raise ReceiptError("packaged bundle changed before receipt publication")
     write_receipt_atomic(
-        build_root / ".arcium" / "receipts" / "build.json", receipt
+        build_root / ".arcium" / "receipts" / selected_identity.receipt_name,
+        receipt,
     )
     return receipt
 
 
 def require_current_packaged_build(
-    worktree: Path, build_root: Path, lane: str
+    worktree: Path,
+    build_root: Path,
+    lane: str,
+    identity: DevBundleIdentity | None = None,
 ) -> BuildReceipt:
-    path = build_root / ".arcium" / "receipts" / "build.json"
+    selected_identity = resolve_dev_identity() if identity is None else identity
+    path = build_root / ".arcium" / "receipts" / selected_identity.receipt_name
     try:
         stored = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ReceiptError("no current packaged build proof; run he dev-bundle") from error
-    current = _current_packaged_receipt(worktree, build_root, lane)
+    current = _current_packaged_receipt(
+        worktree, build_root, lane, selected_identity
+    )
     if stored != current.to_dict():
         raise ReceiptError("packaged build proof is stale; run he dev-bundle")
     return current

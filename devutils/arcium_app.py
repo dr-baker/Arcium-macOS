@@ -29,6 +29,7 @@ from helium_dev_bundle import (
     _write_plist,
     resolve_bundle_paths,
 )
+from profile_clone import ProfileCloneError, clone_profile_once
 
 
 ARCIUM_BUNDLE_ID = "net.imput.arcium"
@@ -339,46 +340,10 @@ def initialize_profile(
     *,
     copy_runner: CommandRunner | None = None,
 ) -> str:
-    if destination.exists() or destination.is_symlink():
-        if destination.is_symlink() or not destination.is_dir():
-            raise ArciumError(f"Arcium profile is not a safe directory: {destination}")
-        return "existing"
-    if source.is_symlink() or not source.is_dir():
-        raise ArciumError(f"Helium profile is missing: {source}")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    staging = destination.parent / f".{destination.name}.migration-{uuid.uuid4().hex}"
     try:
-        before = _profile_snapshot(source)
-        method = _copy_source(source, staging, copy_runner)
-        for name in ("SingletonCookie", "SingletonLock", "SingletonSocket"):
-            path = staging / name
-            if path.is_dir() and not path.is_symlink():
-                shutil.rmtree(path)
-            elif path.exists() or path.is_symlink():
-                path.unlink()
-        unsafe_links = tuple(path for path in staging.rglob("*") if path.is_symlink())
-        if unsafe_links:
-            raise ArciumError(
-                "Helium profile contains symlinks that cannot be migrated safely"
-            )
-        if _profile_snapshot(source) != before:
-            raise ArciumError("Helium profile changed during migration; quit Helium and retry")
-        os.replace(staging, destination)
-    except Exception:
-        if staging.exists():
-            shutil.rmtree(staging, ignore_errors=True)
-        raise
-    return method
-
-
-def _profile_snapshot(root: Path) -> tuple[tuple[str, int, int, str | None], ...]:
-    records: list[tuple[str, int, int, str | None]] = []
-    for path in sorted(root.rglob("*")):
-        relative = str(path.relative_to(root))
-        metadata = path.lstat()
-        link_target = os.readlink(path) if path.is_symlink() else None
-        records.append((relative, metadata.st_size, metadata.st_mtime_ns, link_target))
-    return tuple(records)
+        return clone_profile_once(source, destination, copy_runner=copy_runner)
+    except ProfileCloneError as error:
+        raise ArciumError(str(error)) from error
 
 
 def install_arcium(candidate: Path, destination: Path) -> str:

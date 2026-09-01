@@ -628,11 +628,27 @@ ___helium_bootstrap() {
 }
 
 ___helium_dev_inner() {
+    local _profile_args=()
+    local _arguments=("$@")
+    local _index=1
+    while [ "$_index" -le "${#_arguments[@]}" ]; do
+        local _argument="${_arguments[$_index]}"
+        if [ "$_argument" = "--isolated" ] || [ "$_argument" = "--fresh" ]; then
+            _profile_args+=("$_argument")
+            _index=$((_index + 1))
+            if [ "$_index" -le "${#_arguments[@]}" ]; then
+                _profile_args+=("${_arguments[$_index]}")
+            fi
+        elif [[ "$_argument" = --isolated=* ]] || [[ "$_argument" = --fresh=* ]]; then
+            _profile_args+=("$_argument")
+        fi
+        _index=$((_index + 1))
+    done
     ___helium_check || return
     ___helium_require_replay_proof || return
     ___helium_configure_inner || return
-    ___helium_relink --resources || return
-    ___helium_dev_bundle || return
+    ___helium_relink --resources "${_profile_args[@]}" || return
+    ___helium_dev_bundle "$@" || return
     ___helium_run "$@"
 }
 
@@ -897,7 +913,7 @@ __helium_menu() {
             echo "\tcheck - validate the active patch catalog and applied state" >&2
             echo "\tcontext [--json] - show source, lane, proof, bundle, and limitations" >&2
             echo "\treplay - pop and strictly replay the complete patch stack" >&2
-            echo "\tdev [profile options] - incrementally rebuild, package, and run Dev" >&2
+            echo "\tdev [profile options] - rebuild and run a labeled Dev app; named profiles seed from installed Helium" >&2
             echo "\tlane - show the selected build lane and storage preflight" >&2
             echo "\tstatus|stop [profile options] - inspect or stop the exact Dev app" >&2
             echo "\thelp --advanced - show low-level maintenance commands" >&2
@@ -938,8 +954,8 @@ __helium_menu() {
             echo "\tlint - he format + he tidy" >&2
 
             echo "\n" >&2
-            echo "\trun [--isolated NAME|--fresh NAME] [--preflight] [--json] [browser flags...] - runs or checks the exact Dev bundle" >&2
-            echo "\tdev-bundle [--json] - clones the fresh Helium.app into a signed Helium Dev.app" >&2
+            echo "\trun [--isolated NAME|--fresh NAME] [--seed-from installed|dev|empty] [--preflight] [--json] [browser flags...] - runs or checks the exact labeled Dev bundle" >&2
+            echo "\tdev-bundle [profile options] [--json] - clones Helium.app into the selected signed Dev app" >&2
             echo "\tstatus|activate|stop|restart [profile options] [--json] - manage one exact Dev profile" >&2
             echo "\tbuild-plan TARGET... - graph-validate and dry-run explicit targets" >&2
             echo "\tcompile TARGET... - compile explicit focused targets within the edge budget" >&2

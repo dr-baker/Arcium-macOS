@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -17,7 +18,11 @@ from unittest.mock import patch
 DEVUTILS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEVUTILS))
 import helium_dev  # noqa: E402
-from helium_dev_bundle import BundleError, package_dev_bundle  # noqa: E402
+from helium_dev_bundle import (  # noqa: E402
+    BundleError,
+    package_dev_bundle,
+    resolve_dev_identity,
+)
 from build_execution import ExecutionError  # noqa: E402
 
 
@@ -153,6 +158,48 @@ class HeliumDevBundleTests(unittest.TestCase):
         )
         self.assertTrue((external_build / "src" / "out" / "Default" / "Helium Dev.app").is_dir())
 
+    def test_named_profile_packages_a_labeled_independent_bundle(self) -> None:
+        root, _source_app, output, _source_bytes = self._fixture()
+        identity = resolve_dev_identity("isolated", "peek")
+
+        result = package_dev_bundle(
+            root,
+            identity=identity,
+            signer=lambda _path: None,
+        )
+
+        destination = output / "Helium Dev - peek.app"
+        self.assertEqual(Path(result["app_path"]), destination.resolve())
+        self.assertEqual(result["display_name"], "Helium Dev - peek")
+        self.assertRegex(
+            result["bundle_identifier"],
+            r"^net\.imput\.helium\.dev\.isolated\.peek-[0-9a-f]{8}$",
+        )
+        copied_ids = []
+        for path in destination.rglob("Info.plist"):
+            with path.open("rb") as handle:
+                copied_ids.append(plistlib.load(handle)["CFBundleIdentifier"])
+        self.assertTrue(
+            all(
+                re.search(r"\.dev\.isolated\.peek-[0-9a-f]{8}$", value)
+                for value in copied_ids
+            )
+        )
+
+    def test_fresh_and_isolated_names_resolve_to_different_apps(self) -> None:
+        isolated = resolve_dev_identity("isolated", "same")
+        fresh = resolve_dev_identity("fresh", "same")
+
+        self.assertNotEqual(isolated.app_name, fresh.app_name)
+        self.assertNotEqual(isolated.bundle_identifier, fresh.bundle_identifier)
+        self.assertNotEqual(isolated.receipt_name, fresh.receipt_name)
+
+    def test_similar_names_cannot_share_a_bundle_identifier(self) -> None:
+        underscored = resolve_dev_identity("isolated", "a_b")
+        hyphenated = resolve_dev_identity("isolated", "a-b")
+
+        self.assertNotEqual(underscored.bundle_identifier, hyphenated.bundle_identifier)
+
     def test_package_atomically_replaces_an_owned_dev_bundle(self) -> None:
         root, _source_app, output, _source_bytes = self._fixture()
         def signer(_path: Path) -> None:
@@ -231,6 +278,8 @@ class HeliumDevBundleTests(unittest.TestCase):
                     "--preflight",
                     "--fresh",
                     "preflight",
+                    "--seed-from",
+                    "empty",
                     "--enable-features=CustomFeature",
                 ],
                 home=root / "home",

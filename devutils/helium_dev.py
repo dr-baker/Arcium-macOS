@@ -37,8 +37,10 @@ from helium_dev_build import (
 )
 from helium_dev_bundle import (
     BundleError,
+    DevBundleIdentity,
     _package_dev_bundle_locked,
     resolve_bundle_paths,
+    resolve_dev_identity,
 )
 from gclient_identity import GClientIdentityError, ensure_gclient_identity
 from replay_contract import ReplayError, replay as replay_quilt, require_current_replay_proof
@@ -58,11 +60,13 @@ from helium_dev_runtime import (
     manifest_path_for,
     parse_runtime_arguments,
     prepare_profile,
+    profile_seed_source,
     read_manifest,
     resolve_profile,
     structured_result,
     write_manifest_atomic,
 )
+from profile_clone import ProfileCloneError, clone_profile_once
 
 
 class HarnessError(RuntimeError):
@@ -92,9 +96,12 @@ class WorktreePaths:
 def resolve_worktree_paths(
     root: str | os.PathLike[str],
     build_root: str | os.PathLike[str] | None = None,
+    *,
+    identity: DevBundleIdentity | None = None,
 ) -> WorktreePaths:
     """Resolve only the active worktree's branded development artifact."""
 
+    selected_identity = resolve_dev_identity() if identity is None else identity
     worktree = Path(root).expanduser().resolve()
     build_dir = (
         worktree / "build"
@@ -103,10 +110,10 @@ def resolve_worktree_paths(
     )
     source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
-    app_path = out_dir / "Helium Dev.app"
+    app_path = out_dir / selected_identity.app_name
     plist_path = app_path / "Contents" / "Info.plist"
     if not plist_path.is_file():
-        raise HarnessError(f"Helium Dev.app is missing from {out_dir}")
+        raise HarnessError(f"{selected_identity.app_name} is missing from {out_dir}")
     try:
         with plist_path.open("rb") as handle:
             info = plistlib.load(handle)
@@ -115,9 +122,13 @@ def resolve_worktree_paths(
     executable_name = info.get("CFBundleExecutable")
     bundle_identifier = info.get("CFBundleIdentifier")
     if not isinstance(executable_name, str) or not executable_name or "/" in executable_name:
-        raise HarnessError("Helium Dev.app has no safe CFBundleExecutable")
+        raise HarnessError(f"{selected_identity.app_name} has no safe CFBundleExecutable")
     if not isinstance(bundle_identifier, str) or not bundle_identifier:
-        raise HarnessError("Helium Dev.app has no CFBundleIdentifier")
+        raise HarnessError(f"{selected_identity.app_name} has no CFBundleIdentifier")
+    if bundle_identifier != selected_identity.bundle_identifier:
+        raise HarnessError(
+            f"{selected_identity.app_name} has the wrong bundle identifier"
+        )
     executable_path = app_path / "Contents" / "MacOS" / executable_name
     if not executable_path.is_file() or not os.access(executable_path, os.X_OK):
         raise HarnessError(f"Helium Dev executable is missing or not executable: {executable_path}")
@@ -269,7 +280,7 @@ def _manifest_for(
 
 def _runtime_profile(
     arguments: Sequence[str], *, home: str | os.PathLike[str] | None = None
-) -> tuple[ProfileSpec, tuple[str, ...]]:
+) -> tuple[ProfileSpec, tuple[str, ...], str | None]:
     parsed = parse_runtime_arguments(arguments)
     profile = resolve_profile(
         parsed.profile_mode,
@@ -277,7 +288,7 @@ def _runtime_profile(
         home=home,
         profile_directory=parsed.profile_directory,
     )
-    return profile, parsed.passthrough
+    return profile, parsed.passthrough, parsed.seed_from
 
 
 def _read_prior_started_at(path: Path) -> str | None:
@@ -286,12 +297,83 @@ def _read_prior_started_at(path: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _profile_seed_conflicts(
+    ps_text: str, source: Path, seed_from: str
+) -> tuple[str, ...]:
+    conflicts: list[str] = []
+    source_switch = f"--user-data-dir={source}"
+    for line in ps_text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        pid, separator, command = stripped.partition(" ")
+        if (
+            not separator
+            or not pid.isdigit()
+            or " --type=" in command
+            or " --type " in command
+        ):
+            continue
+        installed_main = (
+            seed_from == "installed"
+            and "/Applications/Helium.app/Contents/MacOS/Helium" in command
+        )
+        if installed_main or source_switch in command:
+            conflicts.append(pid)
+    return tuple(dict.fromkeys(conflicts))
+
+
+def _validate_profile_seed(
+    profile: ProfileSpec,
+    seed_from: str | None,
+    *,
+    home: str | os.PathLike[str] | None,
+) -> Path | None:
+    destination = profile.user_data_dir
+    if destination.exists() or destination.is_symlink() or seed_from in {None, "empty"}:
+        return None
+    source = profile_seed_source(seed_from, home=home)
+    if source is None:
+        return None
+    if source.is_symlink() or not source.is_dir():
+        raise HarnessError(f"profile seed is missing: {source}")
+    conflicts = _profile_seed_conflicts(_ps_snapshot(), source, seed_from)
+    if conflicts:
+        raise HarnessError(
+            "quit the source Helium profile before seeding "
+            f"{profile.key} (matching PIDs: {', '.join(conflicts)})"
+        )
+    return source
+
+
+def _prepare_selected_profile(
+    profile: ProfileSpec,
+    seed_from: str | None,
+    *,
+    action: str,
+    home: str | os.PathLike[str] | None,
+) -> None:
+    if profile.user_data_dir.exists() or profile.user_data_dir.is_symlink():
+        prepare_profile(profile, allow_existing_fresh=(action == "restart"))
+        return
+    source = _validate_profile_seed(profile, seed_from, home=home)
+    if source is None:
+        prepare_profile(profile, allow_existing_fresh=(action == "restart"))
+        return
+    try:
+        clone_profile_once(source, profile.user_data_dir)
+    except ProfileCloneError as error:
+        raise HarnessError(str(error)) from error
+
+
 def _run_locked(
     paths: WorktreePaths,
     profile: ProfileSpec,
     passthrough: Sequence[str],
     *,
     action: str,
+    seed_from: str | None = None,
+    home: str | os.PathLike[str] | None = None,
     registry_root: Path | None = None,
 ) -> dict[str, object]:
     manifest_path = manifest_path_for(profile, registry_root)
@@ -300,7 +382,9 @@ def _run_locked(
     )
     if existing.records:
         raise HarnessError("an exact Helium Dev process is already running for this profile")
-    prepare_profile(profile, allow_existing_fresh=(action == "restart"))
+    _prepare_selected_profile(
+        profile, seed_from, action=action, home=home
+    )
     command = (str(paths.executable_path), *launch_arguments(profile, passthrough))
     process = subprocess.Popen(command, cwd=paths.source_dir, start_new_session=True)
     deadline = time.monotonic() + 8.0
@@ -444,7 +528,10 @@ def _runtime_action_locked(
     if preflight and action != "run":
         raise RuntimeInputError("--preflight is only valid with run")
     runtime_arguments = tuple(argument for argument in arguments if argument != "--preflight")
-    profile, passthrough = _runtime_profile(runtime_arguments, home=home)
+    profile, passthrough, seed_from = _runtime_profile(
+        runtime_arguments, home=home
+    )
+    identity = resolve_dev_identity(profile.mode, profile.name)
     if action in {"run", "restart"}:
         selected_build_root = (
             Path(build_root).expanduser().resolve()
@@ -455,8 +542,9 @@ def _runtime_action_locked(
             Path(root).expanduser().resolve(),
             selected_build_root,
             os.environ.get("HELIUM_DEV_LANE", "worktree"),
+            identity,
         )
-    paths = resolve_worktree_paths(root, build_root)
+    paths = resolve_worktree_paths(root, build_root, identity=identity)
     if preflight:
         if not paths.component_path.is_file():
             raise HarnessError(f"Helium Dev component is missing: {paths.component_path}")
@@ -465,6 +553,7 @@ def _runtime_action_locked(
         )
         if cohort.records:
             raise HarnessError("an exact Helium Dev process is already running for this profile")
+        _validate_profile_seed(profile, seed_from, home=home)
         feature_selection = effective_feature_selection(passthrough)
         return {
             "ok": True,
@@ -493,7 +582,15 @@ def _runtime_action_locked(
     lock = acquire_profile_lock(profile, root=registry)
     try:
         if action == "run":
-            return _run_locked(paths, profile, passthrough, action="run", registry_root=registry)
+            return _run_locked(
+                paths,
+                profile,
+                passthrough,
+                action="run",
+                seed_from=seed_from,
+                home=home,
+                registry_root=registry,
+            )
         if action == "status":
             if passthrough:
                 raise RuntimeInputError("status does not accept Chromium launch arguments")
@@ -551,7 +648,15 @@ def _runtime_action_locked(
             stopped = _stop_locked(paths, profile, action="restart", registry_root=registry)
             if not stopped["ok"]:
                 return stopped
-            return _run_locked(paths, profile, (), action="restart", registry_root=registry)
+            return _run_locked(
+                paths,
+                profile,
+                (),
+                action="restart",
+                seed_from=seed_from,
+                home=home,
+                registry_root=registry,
+            )
         raise HarnessError(f"unknown runtime action: {action}")
     finally:
         lock.release()
@@ -615,8 +720,20 @@ def build_action(
     parser.add_argument("--edge-budget", type=int, default=_edge_budget_from_environment())
     parser.add_argument("--approved", action="store_true")
     parser.add_argument("--resources", action="store_true")
+    profile_group = parser.add_mutually_exclusive_group()
+    profile_group.add_argument("--isolated")
+    profile_group.add_argument("--fresh")
     parser.add_argument("targets", nargs="*")
     namespace = parser.parse_args(list(arguments))
+    profile_mode = "normal"
+    profile_name = None
+    if namespace.isolated is not None:
+        profile_mode, profile_name = "isolated", namespace.isolated
+    elif namespace.fresh is not None:
+        profile_mode, profile_name = "fresh", namespace.fresh
+    if action != "relink" and profile_name is not None:
+        raise RuntimeInputError(f"--{profile_mode} is only valid with relink")
+    artifact_identity = resolve_dev_identity(profile_mode, profile_name)
     worktree = Path(root).expanduser().resolve()
     build_dir = (
         worktree / "build"
@@ -657,7 +774,7 @@ def build_action(
             result = builder.relink(
                 resources=namespace.resources,
                 artifact_status_probe=lambda: _artifact_status_for_root(
-                    worktree, build_root
+                    worktree, build_root, identity=artifact_identity
                 ),
             )
             if result.ok and namespace.resources:
@@ -700,8 +817,9 @@ def dev_bundle_action(
 ) -> dict[str, object]:
     """Create the active worktree's independently identifiable Dev bundle."""
 
-    if arguments:
-        raise RuntimeInputError("dev-bundle takes no arguments")
+    parsed = parse_runtime_arguments(arguments)
+    profile = resolve_profile(parsed.profile_mode, parsed.profile_name)
+    identity = resolve_dev_identity(profile.mode, profile.name)
     worktree = Path(root).expanduser().resolve()
     build_dir = (
         worktree / "build"
@@ -713,13 +831,15 @@ def dev_bundle_action(
     owner = {"action": "dev-bundle", "lane": lane, "worktree": str(worktree)}
     with acquire_lane_lock(lock_path, owner):
         document = _package_dev_bundle_locked(
-            resolve_bundle_paths(root, build_root)
+            resolve_bundle_paths(root, build_root, identity=identity),
+            identity=identity,
         )
         receipt = _publish_packaged_build(
             worktree,
             build_dir,
             lane,
             expected_package_sha256=str(document["package_tree_sha256"]),
+            identity=identity,
         )
         document["build_receipt"] = receipt.receipt_id
         return document
@@ -800,9 +920,13 @@ def _artifact_status(paths: WorktreePaths) -> ArtifactStatus:
 def _artifact_status_for_root(
     root: Path,
     build_root: str | os.PathLike[str] | None = None,
+    *,
+    identity: DevBundleIdentity | None = None,
 ) -> ArtifactStatus:
     try:
-        return _artifact_status(resolve_worktree_paths(root, build_root))
+        return _artifact_status(
+            resolve_worktree_paths(root, build_root, identity=identity)
+        )
     except HarnessError as error:
         return ArtifactStatus("unverified", None, (f"artifact freshness is unavailable: {error}",))
 
@@ -853,9 +977,10 @@ def _usage() -> str:
         "usage: helium_dev.py --root WORKTREE [--build-root PATH] "
         "<run|status|activate|stop|restart|"
         "build-plan|compile|relink|build-full|dev-bundle|replay> [options]\n"
-        "runtime profiles: --isolated NAME | --fresh NAME; run --preflight; --json\n"
+        "runtime profiles: --isolated NAME | --fresh NAME; "
+        "--seed-from installed|dev|empty; run --preflight; --json\n"
         "build: --edge-budget N; relink --resources; build-full --approved; "
-        "dev-bundle: clone and sign Helium Dev.app"
+        "dev-bundle: clone and sign the selected labeled Dev app"
     )
 
 

@@ -55,6 +55,7 @@ MATERIAL_BUILD_INPUTS = (
     "devutils/helium_dev_bundle.py",
     "devutils/lane_transaction.py",
     "devutils/patch_workspace.py",
+    "devutils/profile_clone.py",
     "devutils/quilt_state.py",
     "devutils/replay_contract.py",
     "devutils/set_quilt_vars.sh",

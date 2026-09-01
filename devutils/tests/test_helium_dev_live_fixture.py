@@ -27,12 +27,16 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="helium dev fixture ") as temporary:
             root = Path(temporary)
             source = root / "build" / "src"
-            app = source / "out" / "Default" / "Helium Dev.app"
+            identity = helium_dev.resolve_dev_identity("isolated", "live-fixture")
+            app = source / "out" / "Default" / identity.app_name
             executable = app / "Contents" / "MacOS" / "Helium"
             executable.parent.mkdir(parents=True)
             with (app / "Contents" / "Info.plist").open("wb") as handle:
                 plistlib.dump(
-                    {"CFBundleExecutable": "Helium", "CFBundleIdentifier": "local.test.helium"},
+                    {
+                        "CFBundleExecutable": "Helium",
+                        "CFBundleIdentifier": identity.bundle_identifier,
+                    },
                     handle,
                 )
             subprocess.run(
@@ -50,7 +54,7 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
                     launched = helium_dev.runtime_action(
                         "run",
                         str(root),
-                        ["--isolated", "live-fixture"],
+                        ["--isolated", "live-fixture", "--seed-from", "empty"],
                         home=home,
                         registry_root=registry,
                     )
