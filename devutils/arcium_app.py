@@ -157,24 +157,66 @@ def resolve_signing_identity(
     )
 
 
+def _signing_targets(app_path: Path) -> list[Path]:
+    """Visit real code inside versioned frameworks, without following aliases."""
+
+    targets = [app_path]
+    macho_headers = {
+        b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+        b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+        b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+        b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+    }
+    for directory, subdirs, filenames in os.walk(app_path, followlinks=False):
+        parent = Path(directory)
+        subdirs[:] = [name for name in subdirs if not (parent / name).is_symlink()]
+        targets.extend(
+            parent / name
+            for name in subdirs
+            if Path(name).suffix in {".app", ".framework", ".xpc", ".appex"}
+        )
+        for name in filenames:
+            path = parent / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            with path.open("rb") as handle:
+                if handle.read(4) in macho_headers:
+                    targets.append(path)
+    return sorted(targets, key=lambda path: (-len(path.parts), str(path)))
+
+
+def _signing_entitlements(target: Path, app_path: Path) -> Path | None:
+    # Match the existing release signing policy. JIT belongs only to the
+    # renderer and GPU helpers, never to every binary in the application.
+    name = None
+    if target == app_path:
+        name = "app-entitlements.plist"
+    elif target.name.endswith(" Helper (Renderer).app"):
+        name = "helper-renderer-entitlements.plist"
+    elif target.name.endswith(" Helper (GPU).app"):
+        name = "helper-gpu-entitlements.plist"
+    elif target.name.endswith(" Helper.app") or target.name == "Helium Framework.framework":
+        name = "helper-entitlements.plist"
+    return Path(__file__).resolve().parents[1] / "entitlements" / name if name else None
+
+
 def sign_and_verify(app_path: Path, identity: str) -> None:
     try:
-        subprocess.run(
-            [
+        for target in _signing_targets(app_path):
+            command = [
                 "/usr/bin/codesign",
                 "--force",
-                "--deep",
                 "--timestamp",
                 "--options",
                 "runtime",
                 "--sign",
                 identity,
-                str(app_path),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+            ]
+            entitlements = _signing_entitlements(target, app_path)
+            if entitlements is not None:
+                command.extend(["--entitlements", str(entitlements)])
+            command.append(str(target))
+            subprocess.run(command, check=True, capture_output=True, text=True)
         subprocess.run(
             ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app_path)],
             check=True,
@@ -204,6 +246,29 @@ def _replace_directory(candidate: Path, destination: Path) -> None:
         shutil.rmtree(previous)
 
 
+def copy_component_libraries(out_dir: Path, app_path: Path) -> int:
+    """Make a component-build application self-contained before signing it."""
+
+    args_path = out_dir / "args.gn"
+    if not args_path.is_file():
+        raise ArciumError("Chromium build arguments are missing")
+    args = args_path.read_text(encoding="utf-8")
+    if not re.search(r"(?m)^\s*is_component_build\s*=\s*true\s*$", args):
+        return 0
+
+    frameworks = app_path / "Contents" / "Frameworks"
+    if not frameworks.is_dir():
+        raise ArciumError("copied Arcium bundle has no Frameworks directory")
+    libraries = sorted(out_dir.glob("*.dylib"))
+    if not libraries:
+        raise ArciumError("component build has no runtime libraries")
+    for source in libraries:
+        if not source.is_file() or source.is_symlink():
+            raise ArciumError(f"unsafe component runtime library: {source}")
+        shutil.copy2(source, frameworks / source.name)
+    return len(libraries)
+
+
 def _package_arcium_locked(
     paths: BundlePaths,
     *,
@@ -225,6 +290,7 @@ def _package_arcium_locked(
     output_app = paths.out_dir / "Arcium.app"
     try:
         copy_method = _copy_source(paths.source_app, staging_app, copy_runner)
+        component_library_count = copy_component_libraries(paths.out_dir, staging_app)
         plist_count = rewrite_arcium_metadata(staging_app)
         signer(staging_app, identity)
         _replace_directory(staging_app, output_app)
@@ -236,6 +302,7 @@ def _package_arcium_locked(
         "app_path": str(output_app),
         "bundle_identifier": ARCIUM_BUNDLE_ID,
         "copy_method": copy_method,
+        "component_library_count": component_library_count,
         "display_name": ARCIUM_NAME,
         "executable_name": source["executable_name"],
         "plist_count": plist_count,

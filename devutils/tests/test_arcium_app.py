@@ -87,6 +87,35 @@ class ArciumAppTests(unittest.TestCase):
         self.assertEqual(helper["CFBundleIdentifier"], "net.imput.arcium.helper")
         self.assertEqual(helper["CFBundleExecutable"], "Helium Helper")
 
+    def test_component_libraries_are_bundled_for_stable_launch(self) -> None:
+        app = self._app("Arcium.app")
+        out_dir = self.temporary / "out"
+        out_dir.mkdir()
+        (out_dir / "args.gn").write_text(
+            "is_component_build = true\n", encoding="utf-8"
+        )
+        (out_dir / "libc++_chrome.dylib").write_bytes(b"runtime")
+        (out_dir / "libbase.dylib").write_bytes(b"base")
+
+        count = arcium_app.copy_component_libraries(out_dir, app)
+
+        self.assertEqual(count, 2)
+        frameworks = app / "Contents" / "Frameworks"
+        self.assertEqual((frameworks / "libc++_chrome.dylib").read_bytes(), b"runtime")
+        self.assertEqual((frameworks / "libbase.dylib").read_bytes(), b"base")
+
+    def test_non_component_build_does_not_bundle_loose_libraries(self) -> None:
+        app = self._app("Arcium.app")
+        out_dir = self.temporary / "out"
+        out_dir.mkdir()
+        (out_dir / "args.gn").write_text(
+            "is_component_build = false\n", encoding="utf-8"
+        )
+        (out_dir / "libbase.dylib").write_bytes(b"base")
+
+        self.assertEqual(arcium_app.copy_component_libraries(out_dir, app), 0)
+        self.assertFalse((app / "Contents" / "Frameworks" / "libbase.dylib").exists())
+
     def test_signing_identity_requires_one_stable_developer_id(self) -> None:
         output = (
             '  1) AAAA "Apple Development: Example"\n'
@@ -103,6 +132,93 @@ class ArciumAppTests(unittest.TestCase):
             arcium_app.resolve_signing_identity(
                 {}, lambda *_args, **_kwargs: Completed('1) AAAA "Apple Development: X"\n')
             )
+
+    def test_signing_visits_nested_code_inside_out_with_helper_entitlements(self) -> None:
+        app = self._app("Arcium.app")
+        frameworks = app / "Contents" / "Frameworks"
+        framework = frameworks / "Helium Framework.framework"
+        version = framework / "Versions" / "151.0"
+        libraries = version / "Libraries"
+        libraries.mkdir(parents=True)
+        (framework / "Versions" / "Current").symlink_to("151.0")
+        (framework / "Libraries").symlink_to("Versions/Current/Libraries")
+        binary_paths = [
+            app / "Contents" / "MacOS" / "Helium",
+            version / "Helium Framework",
+            libraries / "libEGL.dylib",
+            libraries / "libGLESv2.dylib",
+            frameworks / "libbase.dylib",
+            version / "Helpers" / "chrome_crashpad_handler",
+        ]
+        helpers = {}
+        for suffix in ("", " (Renderer)", " (GPU)", " (Alerts)"):
+            helper = version / "Helpers" / f"Helium Helper{suffix}.app"
+            helpers[suffix] = helper
+            binary_paths.append(helper / "Contents" / "MacOS" / f"Helium Helper{suffix}")
+        for binary in binary_paths:
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            binary.write_bytes(b"\xcf\xfa\xed\xfe" + b"fixture")
+        resource = version / "Resources" / "data.bin"
+        resource.parent.mkdir()
+        resource.write_bytes(b"resource")
+
+        with patch("arcium_app.subprocess.run") as run:
+            arcium_app.sign_and_verify(app, "Developer ID Application: Test")
+
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(
+            commands[-1],
+            ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)],
+        )
+        signing = commands[:-1]
+        targets = [Path(command[-1]) for command in signing]
+        self.assertEqual(targets[-1], app)
+        self.assertEqual(len(targets), len(set(targets)))
+        self.assertNotIn(resource, targets)
+        for binary in binary_paths:
+            self.assertIn(binary, targets)
+        self.assertIn(framework, targets)
+        for target in targets:
+            for ancestor in target.parents:
+                if ancestor in targets:
+                    self.assertLess(targets.index(target), targets.index(ancestor))
+        self.assertFalse(any("Current" in target.parts for target in targets))
+        self.assertNotIn(framework / "Libraries" / "libEGL.dylib", targets)
+
+        expected = {
+            app: "app-entitlements.plist",
+            framework: "helper-entitlements.plist",
+            frameworks / "Helium Helper.app": "helper-entitlements.plist",
+            helpers[""]: "helper-entitlements.plist",
+            helpers[" (Renderer)"]: "helper-renderer-entitlements.plist",
+            helpers[" (GPU)"]: "helper-gpu-entitlements.plist",
+        }
+        jit_targets = []
+        for command, target in zip(signing, targets):
+            self.assertNotIn("--deep", command)
+            self.assertEqual(command[command.index("--sign") + 1], "Developer ID Application: Test")
+            self.assertEqual(command[command.index("--options") + 1], "runtime")
+            if target in expected:
+                entitlement_path = Path(command[command.index("--entitlements") + 1])
+                self.assertEqual(entitlement_path, DEVUTILS.parent / "entitlements" / expected[target])
+                with entitlement_path.open("rb") as handle:
+                    entitlements = plistlib.load(handle)
+                if entitlements.get("com.apple.security.cs.allow-jit"):
+                    jit_targets.append(target)
+            else:
+                self.assertNotIn("--entitlements", command)
+        self.assertCountEqual(jit_targets, [helpers[" (Renderer)"], helpers[" (GPU)"]])
+
+    def test_signing_failure_stops_before_verification(self) -> None:
+        app = self._app("Arcium.app")
+        with patch(
+            "arcium_app.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, "codesign"),
+        ) as run:
+            with self.assertRaisesRegex(arcium_app.ArciumError, "signing or verification failed"):
+                arcium_app.sign_and_verify(app, "Developer ID Application: Test")
+        self.assertEqual(run.call_count, 1)
+        self.assertNotIn("--verify", run.call_args.args[0])
 
     def test_profile_migration_is_one_time_and_leaves_source_unchanged(self) -> None:
         source = self.temporary / "net.imput.helium"

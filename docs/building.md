@@ -332,6 +332,9 @@ matches both its full bundle path and its exact development data directory.
 
 ### Run a scenario contract
 
+For MRU preview latency and custom glass cost, follow
+[Compare MRU preview and glass performance](feature-performance.md).
+
 Scenario contracts live in `devutils/scenarios/`. Each JSON file records:
 
 - the exact profile policy and safe profile name;
