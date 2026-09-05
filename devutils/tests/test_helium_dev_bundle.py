@@ -212,15 +212,16 @@ class HeliumDevBundleTests(unittest.TestCase):
         self.assertEqual(Path(result["app_path"]), output.resolve() / "Helium Dev.app")
         self.assertEqual(list(output.glob(".Helium Dev.app.previous-*")), [])
 
-    def test_stale_source_and_existing_destination_fail_closed(self) -> None:
+    def test_newer_build_graph_does_not_override_current_execution_proof(self) -> None:
         root, _source_app, output, _source_bytes = self._fixture()
         graph = output / "build.ninja"
         newer = 1_800_000_000_000_000_000
         os.utime(graph, ns=(newer, newer))
-        with self.assertRaisesRegex(BundleError, "older than build.ninja"):
-            package_dev_bundle(root, signer=lambda _path: None)
-        self.assertFalse((output / "Helium Dev.app").exists())
+        result = package_dev_bundle(root, signer=lambda _path: None)
 
+        self.assertEqual(Path(result["app_path"]), output.resolve() / "Helium Dev.app")
+
+    def test_existing_destination_fails_closed(self) -> None:
         root, _source_app, output, _source_bytes = self._fixture()
         (output / "Helium Dev.app").mkdir()
         with self.assertRaisesRegex(BundleError, "refusing to replace unowned"):

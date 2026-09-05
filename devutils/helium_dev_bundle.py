@@ -169,15 +169,10 @@ def _require_fresh_source(
     if not os.access(executable_path, os.X_OK):
         raise BundleError(f"Helium executable is not executable: {executable_path}")
 
-    graph_mtime = build_graph.stat().st_mtime_ns
-    stale_inputs = [
-        path
-        for path in (executable_path, component_path)
-        if path.stat().st_mtime_ns < graph_mtime
-    ]
-    if stale_inputs:
-        names = ", ".join(path.name for path in stale_inputs)
-        raise BundleError(f"build artifacts are older than build.ninja: {names}")
+    # Callers verify the current execution receipt before reaching this point.
+    # That receipt binds the replay, GN args, material inputs, and artifact
+    # digests. File mtimes are weaker evidence: GN may rewrite build.ninja
+    # while Ninja correctly reports that no compiled output needs rebuilding.
     return {
         "root_info": executable_info,
         "executable_name": executable_name,
