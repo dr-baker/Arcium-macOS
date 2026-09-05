@@ -57,6 +57,7 @@ from helium_dev_runtime import (
     discover_chromium_processes,
     effective_feature_selection,
     launch_arguments,
+    live_singleton_owner,
     manifest_path_for,
     parse_runtime_arguments,
     prepare_profile,
@@ -382,6 +383,11 @@ def _run_locked(
     )
     if existing.records:
         raise HarnessError("an exact Helium Dev process is already running for this profile")
+    singleton_owner = live_singleton_owner(profile)
+    if singleton_owner is not None:
+        raise HarnessError(
+            f"profile is already owned by browser process {singleton_owner}; quit it first"
+        )
     _prepare_selected_profile(
         profile, seed_from, action=action, home=home
     )
@@ -553,6 +559,11 @@ def _runtime_action_locked(
         )
         if cohort.records:
             raise HarnessError("an exact Helium Dev process is already running for this profile")
+        singleton_owner = live_singleton_owner(profile)
+        if singleton_owner is not None:
+            raise HarnessError(
+                f"profile is already owned by browser process {singleton_owner}; quit it first"
+            )
         _validate_profile_seed(profile, seed_from, home=home)
         feature_selection = effective_feature_selection(passthrough)
         return {

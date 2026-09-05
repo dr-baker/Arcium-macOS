@@ -8,6 +8,7 @@ import stat
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 
@@ -57,6 +58,18 @@ class RuntimeTestCase(unittest.TestCase):
             self.home / "Library/Application Support/net.imput.helium.dev",
         )
         self.assertEqual(spec.profile_directory, "Default")
+
+    def test_live_singleton_owner_ignores_stale_profile_locks(self) -> None:
+        spec = runtime.resolve_profile(home=self.home)
+        spec.user_data_dir.mkdir(parents=True)
+        (spec.user_data_dir / "SingletonLock").symlink_to("mac.lan-123")
+        with unittest.mock.patch("helium_dev_runtime.os.kill") as kill:
+            self.assertEqual(runtime.live_singleton_owner(spec), 123)
+            kill.assert_called_once_with(123, 0)
+        with unittest.mock.patch(
+            "helium_dev_runtime.os.kill", side_effect=ProcessLookupError
+        ):
+            self.assertIsNone(runtime.live_singleton_owner(spec))
 
     def test_named_profiles_are_safe_and_fresh_is_create_only(self) -> None:
         isolated = self.profile("isolated", "one.two")

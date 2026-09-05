@@ -203,6 +203,27 @@ def resolve_profile(
     return ProfileSpec(mode, name, user_data_dir, profile_directory)
 
 
+def live_singleton_owner(spec: ProfileSpec) -> int | None:
+    """Return the PID named by a live Chromium profile lock, if present."""
+
+    singleton_lock = spec.user_data_dir / "SingletonLock"
+    try:
+        target = os.readlink(singleton_lock)
+    except (FileNotFoundError, OSError):
+        return None
+    match = re.search(r"-(\d+)\Z", target)
+    if match is None:
+        return None
+    pid = int(match.group(1))
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return None
+    except PermissionError:
+        return pid
+    return pid
+
+
 def profile_seed_source(
     seed_from: str, *, home: str | os.PathLike[str] | None = None
 ) -> Path | None:
