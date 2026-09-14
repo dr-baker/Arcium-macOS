@@ -160,6 +160,9 @@ class BuildReceiptTest(unittest.TestCase):
             before = material_inputs_sha256(root)
             (root / "resources" / "icon.txt").write_text("changed\n", encoding="utf-8")
             self.assertNotEqual(before, material_inputs_sha256(root))
+            before = material_inputs_sha256(root)
+            (root / "devutils/replay_timestamps.py").write_text("changed helper\n")
+            self.assertNotEqual(before, material_inputs_sha256(root))
 
 
 if __name__ == "__main__":

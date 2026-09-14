@@ -39,6 +39,9 @@ class ReplayContractTests(unittest.TestCase):
         )
         self.addCleanup(patched_tree.stop)
         patched_tree.start()
+        owned_paths = patch("replay_contract._patch_owned_paths", return_value=[])
+        self.addCleanup(owned_paths.stop)
+        owned_paths.start()
 
     def fixture(self) -> tuple[Path, Path]:
         temporary = Path(tempfile.mkdtemp(prefix="replay-contract-test-"))

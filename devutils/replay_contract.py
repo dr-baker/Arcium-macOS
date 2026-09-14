@@ -26,6 +26,8 @@ from build_receipt import (
     current_source_receipt as build_current_source_receipt,
     write_receipt_atomic,
 )
+from build_lane import LaneError, acquire_lane_lock
+from replay_timestamps import snapshot_timestamps, restore_timestamps
 from quilt_state import QuiltStateError, inspect_quilt_state, read_patch_list
 
 
@@ -220,8 +222,8 @@ def _require_core_patch_copies(worktree: Path) -> None:
             )
 
 
-def _patched_tree_sha256(worktree: Path, source_dir: Path) -> str:
-    """Hash every path owned by the complete applied Quilt stack."""
+def _patch_owned_paths(worktree: Path, source_dir: Path) -> list[str]:
+    """Enumerate paths owned by the currently applied Quilt stack."""
     result = subprocess.run(
         ["quilt", "--quiltrc", "-", "files", "-a"],
         cwd=source_dir,
@@ -232,7 +234,12 @@ def _patched_tree_sha256(worktree: Path, source_dir: Path) -> str:
     )
     if result.returncode:
         raise ReplayError("could not enumerate patch-owned source paths")
-    paths = sorted(dict.fromkeys(line.strip() for line in result.stdout.splitlines() if line.strip()))
+    return sorted(dict.fromkeys(line.strip() for line in result.stdout.splitlines() if line.strip()))
+
+
+def _patched_tree_sha256(worktree: Path, source_dir: Path) -> str:
+    """Hash every path owned by the complete applied Quilt stack."""
+    paths = _patch_owned_paths(worktree, source_dir)
     digest = hashlib.sha256()
     root = source_dir.resolve()
     for relative in paths:
@@ -344,13 +351,11 @@ def _write_proof(worktree: Path, source_dir: Path) -> ReplayReceipt:
     return receipt
 
 
-def _record_replay_proof(worktree: Path, source_dir: Path) -> ReplayReceipt:
-    """Record proof immediately after this module completes strict replay."""
+def _validate_replayed_state(worktree: Path, source_dir: Path) -> None:
     report = inspect_quilt_state(source_dir, _patch_root(worktree))
     report.comparison.require_complete()
     if any(source_dir.rglob("*.rej")):
         raise ReplayError("patch rejects remain in the development source")
-    return _write_proof(worktree, source_dir)
 
 
 def _quilt_environment(worktree: Path) -> dict[str, str]:
@@ -375,7 +380,7 @@ def _run_quilt(
 
 
 def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
-    """Pop and strictly replay the complete stack, then atomically publish proof."""
+    """Replay and publish proof. The caller must hold the selected lane lock."""
     _require_core_patch_copies(worktree)
     try:
         state = inspect_quilt_state(source_dir, _patch_root(worktree))
@@ -385,6 +390,9 @@ def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     before = current_source_identity(worktree, source_dir)
     path = receipt_path(source_dir.parent)
     invalidate_downstream_receipts(source_dir.parent)
+    timestamps = snapshot_timestamps(
+        source_dir, _patch_owned_paths(worktree, source_dir)
+    ) if state.comparison.applied else {}
     environment = _quilt_environment(worktree)
     commands = (("push", "-a"),) if not state.comparison.applied else (
         ("pop", "-a"),
@@ -394,7 +402,11 @@ def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
         result = _run_quilt(source_dir, environment, *arguments)
         if result.returncode:
             raise ReplayError(f"Quilt {' '.join(arguments)} failed; replay proof was not written")
-    receipt = _record_replay_proof(worktree, source_dir)
+    _validate_replayed_state(worktree, source_dir)
+    if current_source_identity(worktree, source_dir) != before:
+        raise ReplayError("source or patch identity changed during replay; run he replay again")
+    restore_timestamps(source_dir, timestamps)
+    receipt = _write_proof(worktree, source_dir)
     if receipt.source != before:
         path.unlink(missing_ok=True)
         raise ReplayError("source or patch identity changed during replay; run he replay again")
@@ -415,12 +427,16 @@ def main(argv: list[str] | None = None) -> int:
     source_dir = arguments.source.expanduser().resolve()
     try:
         if arguments.action == "replay":
-            result = replay(worktree, source_dir)
+            with acquire_lane_lock(
+                source_dir.parent / ".arcium" / "lane.lock",
+                {"action": "replay", "worktree": str(worktree)},
+            ):
+                result = replay(worktree, source_dir)
         else:
             result = require_current_replay_proof(worktree, source_dir)
         print(f"replay proof: {result.receipt_id}")
         return 0
-    except (OSError, QuiltStateError, ReplayError, ReceiptError) as error:
+    except (OSError, LaneError, QuiltStateError, ReplayError, ReceiptError) as error:
         print(str(error), file=sys.stderr)
         return 2
 

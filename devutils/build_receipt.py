@@ -58,6 +58,7 @@ MATERIAL_BUILD_INPUTS = (
     "devutils/profile_clone.py",
     "devutils/quilt_state.py",
     "devutils/replay_contract.py",
+    "devutils/replay_timestamps.py",
     "devutils/set_quilt_vars.sh",
     "devutils/setup_dawn_go.sh",
     "devutils/setup_python.sh",

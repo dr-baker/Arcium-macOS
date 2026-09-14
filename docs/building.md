@@ -209,6 +209,23 @@ receipt code do. Run `he replay` again before `he dev`, `he build-full
 --approved`, or packaging. `he check` remains a read-only patch catalog and
 applied-state check and does not create replay proof.
 
+Replay preserves access and modification timestamps for unchanged, patch-owned
+regular source files so Quilt does not make unchanged headers look newer than
+compiled outputs. It snapshots the currently applied stack under the lane lock,
+performs the full zero-fuzz replay, verifies the complete stack and source
+identity, then restores timestamps only where content and permissions still
+match. The snapshot stays in memory and is discarded when the command ends.
+Replay publishes its proof after restoration. The proof continues to hash paths,
+file types, permissions, and contents, independently of timestamps.
+
+Changed files, new files, deleted files, unreadable or unstable files, symlinks,
+and hard links receive no timestamp restoration. Generated roots `out`, `gen`,
+and `obj`, plus Git, Quilt, and lane metadata, are excluded. A partial stack
+preserves only its already-applied paths; a fully popped stack has no timestamp
+snapshot. A failed pop, push, or replay validation does not restore timestamps.
+This optimization does not retain old build or execution receipts, bypass a
+build check, or change packaging and signing requirements.
+
 ### Manage the lane-local patch catalog
 
 Arcium core owns shared patches under `helium-chromium/patches`. Arcium-macOS
