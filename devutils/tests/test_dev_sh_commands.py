@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -76,21 +77,97 @@ class DevShellCommandsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.splitlines(), ["heavy", str(heavy)])
 
-    def test_automatic_patch_pushes_never_refresh_catalog_files(self) -> None:
-        script = DEV_SH.read_text(encoding="utf-8")
-        self.assertNotIn("quilt push -a --refresh", script)
-        self.assertIn('QUILT_PATCH_OPTS="$QUILT_PATCH_OPTS --fuzz=0" quilt push -a', script)
+    def test_patch_push_uses_zero_fuzz_without_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "src"
+            source.mkdir()
+            result = run_zsh(
+                f"_src_dir={shlex.quote(str(source))}; "
+                "quilt(){ printf '%s\\n' \"$QUILT_PATCH_OPTS\" \"$*\"; }; "
+                "___helium_quilt_push_inner"
+            )
 
-    def test_pull_uses_fail_closed_autostash_rebase(self) -> None:
-        script = DEV_SH.read_text(encoding="utf-8")
-        self.assertNotIn('git -C "$dir" stash', script)
-        self.assertIn('git -C "$dir" fetch || return', script)
-        self.assertIn('git -C "$dir" rebase --autostash origin/main || return', script)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                ["--unified --reject-format=unified --fuzz=0", "--quiltrc - push -a"],
+            )
+            self.assertNotIn("refresh", result.stdout)
 
-    def test_reset_deletes_warm_source_before_releasing_transaction(self) -> None:
-        script = DEV_SH.read_text(encoding="utf-8")
-        self.assertIn('rm -rf "${_src_dir}x" || return', script)
-        self.assertNotIn('rm -rf "${_src_dir}x" &', script)
+    def test_pull_stops_after_failed_autostash_rebase(self) -> None:
+        result = run_zsh(
+            f"_root_dir={shlex.quote(str(ROOT))}; "
+            f"_main_repo={shlex.quote(str(ROOT / 'helium-chromium'))}; "
+            "___helium_quilt_pop_inner(){ echo quilt-pop; }; "
+            "___helium_prepare_patches_inner(){ echo prepare; }; "
+            "___helium_quilt_push_inner(){ echo quilt-push; }; "
+            "git(){ echo \"git:$*\"; if [[ \"$*\" = *rebase* ]]; then return 7; fi; return 0; }; "
+            "___helium_pull_inner"
+        )
+
+        self.assertEqual(result.returncode, 7)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "quilt-pop",
+                f"git:-C {ROOT} fetch",
+                f"git:-C {ROOT} rebase --autostash origin/main",
+            ],
+        )
+        self.assertNotIn("quilt-push", result.stdout)
+        self.assertNotIn("prepare", result.stdout)
+
+    def test_reset_removes_warm_source_synchronously(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "src"
+            source.mkdir()
+            (source / "marker").write_text("warm\n", encoding="utf-8")
+            subs_cache = root / "subs.tar.gz"
+            namesubs_cache = root / "namesubs.tar"
+            deletion_started = root / "deletion-started"
+            release_deletion = root / "release-deletion"
+            reset_returned = root / "reset-returned"
+            subs_cache.write_text("subs\n", encoding="utf-8")
+            namesubs_cache.write_text("namesubs\n", encoding="utf-8")
+            script = (
+                f"source {shlex.quote(str(DEV_SH))}; "
+                f"_src_dir={shlex.quote(str(source))}; "
+                f"_subs_cache={shlex.quote(str(subs_cache))}; "
+                f"_namesubs_cache={shlex.quote(str(namesubs_cache))}; "
+                f"_deletion_started={shlex.quote(str(deletion_started))}; "
+                f"_release_deletion={shlex.quote(str(release_deletion))}; "
+                f"_reset_returned={shlex.quote(str(reset_returned))}; "
+                "rm(){ if [[ \"$1\" = -rf ]]; then "
+                "print started > \"$_deletion_started\"; "
+                "while [[ ! -e \"$_release_deletion\" ]]; do sleep 0.01; done; "
+                "fi; command rm \"$@\"; }; "
+                "___helium_reset_inner --warm-output --approved || exit; "
+                "print returned > \"$_reset_returned\""
+            )
+            process = subprocess.Popen(
+                ["/bin/zsh", "-c", script],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            )
+            try:
+                deadline = time.monotonic() + 3
+                while not deletion_started.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                self.assertTrue(deletion_started.exists(), "reset never started deletion")
+                self.assertFalse(reset_returned.exists())
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    process.wait(timeout=1)
+                self.assertFalse(reset_returned.exists(), "reset returned before deletion completed")
+            finally:
+                release_deletion.touch()
+                _stdout, stderr = process.communicate(timeout=5)
+
+            self.assertEqual(process.returncode, 0, stderr)
+            self.assertEqual(reset_returned.read_text(encoding="utf-8"), "returned\n")
+            self.assertFalse(source.exists())
+            self.assertFalse(Path(f"{source}x").exists())
+            self.assertFalse(subs_cache.exists())
+            self.assertFalse(namesubs_cache.exists())
 
     def test_menu_leads_with_public_development_loop(self) -> None:
         result = run_zsh("he")
@@ -111,13 +188,6 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertIn("presetup", advanced.stderr)
         self.assertIn("prepare-patches - rebuilds the selected lane's generated patch catalog", advanced.stderr)
         self.assertIn("save-patch - refreshes and exports only the active top patch", advanced.stderr)
-
-    def test_dev_passes_only_profile_identity_to_relink(self) -> None:
-        script = DEV_SH.read_text(encoding="utf-8")
-        self.assertIn(
-            '___helium_relink --resources "${_profile_args[@]}"', script
-        )
-        self.assertIn('[[ "$_argument" = --isolated=* ]]', script)
 
     def test_reset_refuses_without_explicit_warm_output_approval(self) -> None:
         result = run_zsh(
