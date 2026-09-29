@@ -111,11 +111,9 @@ def rewrite_arcium_metadata(app_path: Path) -> int:
     return changed
 
 
-def available_signing_identities(
-    runner: CommandRunner = subprocess.run,
-) -> tuple[str, ...]:
+def available_signing_identities() -> tuple[str, ...]:
     try:
-        result = runner(
+        result = subprocess.run(
             ["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"],
             check=True,
             capture_output=True,
@@ -130,13 +128,9 @@ def available_signing_identities(
     )
 
 
-def resolve_signing_identity(
-    environ: dict[str, str] | os._Environ[str] | None = None,
-    runner: CommandRunner = subprocess.run,
-) -> str:
-    values = os.environ if environ is None else environ
-    requested = values.get(SIGNING_IDENTITY_ENV, "").strip()
-    identities = available_signing_identities(runner)
+def resolve_signing_identity() -> str:
+    requested = os.environ.get(SIGNING_IDENTITY_ENV, "").strip()
+    identities = available_signing_identities()
     if requested:
         if requested not in identities:
             raise ArciumError(
@@ -445,8 +439,6 @@ def verify_installed_arcium(destination: Path) -> None:
 def launch_arcium(
     install_path: Path,
     profile: Path,
-    *,
-    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
 ) -> int:
     info = _read_plist(install_path / "Contents" / "Info.plist")
     if info.get("CFBundleIdentifier") != ARCIUM_BUNDLE_ID:
@@ -455,7 +447,7 @@ def launch_arcium(
     executable = install_path / "Contents" / "MacOS" / executable_name
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise ArciumError("installed Arcium executable is missing")
-    process = popen(
+    process = subprocess.Popen(
         [
             str(executable),
             f"--user-data-dir={profile}",

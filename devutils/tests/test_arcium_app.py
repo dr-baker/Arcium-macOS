@@ -19,11 +19,6 @@ sys.path.insert(0, str(DEVUTILS))
 import arcium_app  # noqa: E402
 
 
-class Completed:
-    def __init__(self, stdout: str = "") -> None:
-        self.stdout = stdout
-
-
 class FakeProcess:
     pid = 4242
 
@@ -121,17 +116,38 @@ class ArciumAppTests(unittest.TestCase):
             '  1) AAAA "Apple Development: Example"\n'
             '  2) BBBB "Developer ID Application: Daniel Example (TEAM)"\n'
         )
-
-        def runner(*_args: object, **_kwargs: object) -> Completed:
-            return Completed(output)
-
-        identity = arcium_app.resolve_signing_identity({}, runner)  # type: ignore[arg-type]
-        self.assertEqual(identity, "Developer ID Application: Daniel Example (TEAM)")
-
-        with self.assertRaisesRegex(arcium_app.ArciumError, "stable Developer ID"):
-            arcium_app.resolve_signing_identity(
-                {}, lambda *_args, **_kwargs: Completed('1) AAAA "Apple Development: X"\n')
+        with patch.dict(os.environ, {arcium_app.SIGNING_IDENTITY_ENV: ""}), \
+             patch("arcium_app.subprocess.run") as run:
+            run.return_value.stdout = output
+            self.assertEqual(
+                arcium_app.resolve_signing_identity(),
+                "Developer ID Application: Daniel Example (TEAM)",
             )
+            run.assert_called_with(
+                ["/usr/bin/security", "find-identity", "-v", "-p", "codesigning"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            run.return_value.stdout = '1) AAAA "Apple Development: X"\n'
+            with self.assertRaisesRegex(arcium_app.ArciumError, "stable Developer ID"):
+                arcium_app.resolve_signing_identity()
+
+    def test_signing_identity_respects_explicit_choice(self) -> None:
+        identities = (
+            '1) AAAA "Developer ID Application: First (TEAM)"\n'
+            '2) BBBB "Developer ID Application: Second (TEAM)"\n'
+        )
+        with patch("arcium_app.subprocess.run") as run:
+            run.return_value.stdout = identities
+            with patch.dict(os.environ, {arcium_app.SIGNING_IDENTITY_ENV: "Developer ID Application: Second (TEAM)"}):
+                self.assertEqual(
+                    arcium_app.resolve_signing_identity(),
+                    "Developer ID Application: Second (TEAM)",
+                )
+            with patch.dict(os.environ, {arcium_app.SIGNING_IDENTITY_ENV: "missing"}):
+                with self.assertRaisesRegex(arcium_app.ArciumError, "available signing identity"):
+                    arcium_app.resolve_signing_identity()
 
     def test_signing_visits_nested_code_inside_out_with_helper_entitlements(self) -> None:
         app = self._app("Arcium.app")
@@ -286,17 +302,13 @@ class ArciumAppTests(unittest.TestCase):
     def test_launch_uses_real_keychain_path_without_mock_switch(self) -> None:
         app = self._app("Arcium.app")
         arcium_app.rewrite_arcium_metadata(app)
-        calls: list[list[str]] = []
-
-        def popen(argv: list[str], **_kwargs: object) -> FakeProcess:
-            calls.append(argv)
-            return FakeProcess()
-
-        pid = arcium_app.launch_arcium(app, Path("/profiles/arcium"), popen=popen)  # type: ignore[arg-type]
+        with patch("arcium_app.subprocess.Popen", return_value=FakeProcess()) as spawn:
+            pid = arcium_app.launch_arcium(app, Path("/profiles/arcium"))
         self.assertEqual(pid, 4242)
-        self.assertEqual(len(calls), 1)
-        self.assertIn("--user-data-dir=/profiles/arcium", calls[0])
-        self.assertFalse(any("mock-keychain" in value for value in calls[0]))
+        spawn.assert_called_once()
+        arguments = spawn.call_args.args[0]
+        self.assertIn("--user-data-dir=/profiles/arcium", arguments)
+        self.assertFalse(any("mock-keychain" in value for value in arguments))
 
     def test_update_requires_current_execution_before_profile_changes(self) -> None:
         with patch(
