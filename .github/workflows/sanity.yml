@@ -24,3 +24,19 @@ jobs:
     - uses: ./.github/actions/prepare-environment
     - name: Run substitution check
       run: ./sanity-check.sh sub
+  unittest:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.14'
+    - name: Install test dependencies
+      run: python3 -m pip install --disable-pip-version-check --requirement requirements-dev.txt
+    - name: Run devutils unit tests
+      run: |
+        python3 -m unittest discover --start-directory devutils/tests --pattern 'test*.py'
+        python3 -m unittest devutils.test_import_arc_spaces
