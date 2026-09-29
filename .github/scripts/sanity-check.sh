@@ -11,10 +11,7 @@ pip3.14 install httplib2==0.22.0 requests Pillow --break
 
 source dev.sh
 
-export QUILT_PATCHES="$PWD/patches"
-export QUILT_SERIES="series.merged"
-
-he reset
+# CI starts with an empty build lane. Keep dev.sh's lane-local Quilt catalog.
 he setup | tee setup.log
 
 if [ "$1" = "sub" ]; then
