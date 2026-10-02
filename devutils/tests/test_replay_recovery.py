@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 from types import SimpleNamespace
@@ -207,6 +208,125 @@ class RecoveryTests(unittest.TestCase):
         os.utime(outside / 'file', ns=(self.new, self.new))
         self.assertEqual(timestamps.restore_timestamps(self.source, records), 0)
         self.assertEqual((outside / 'file').stat().st_mtime_ns, self.new)
+
+
+@unittest.skipUnless(shutil.which('quilt') and shutil.which('ninja'), 'requires Quilt and Ninja')
+class ActualRecoverySmokeTests(unittest.TestCase):
+    """Run the actual replay/proof transaction without a compiler or real lane."""
+
+    def test_failed_actual_replay_recovers_journal_and_ninja_copy_edge(self):
+        with tempfile.TemporaryDirectory(prefix='replay-recovery-smoke-') as temporary:
+            root = Path(temporary)
+            outer = root / 'outer'
+            core = outer / 'helium-chromium'
+            core.mkdir(parents=True)
+
+            def git(repo, *arguments):
+                return subprocess.run(['git', '-C', str(repo), *arguments],
+                                      check=True, capture_output=True, text=True).stdout.strip()
+
+            git(core, 'init', '-q')
+            (core / 'chromium_version.txt').write_text('151.0.7922.71\n')
+            git(core, 'add', 'chromium_version.txt')
+            git(core, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '-qm', 'fixture core')
+            core_commit = git(core, 'rev-parse', 'HEAD')
+            git(outer, 'init', '-q')
+            catalog = outer / 'patches'
+            catalog.mkdir()
+            (catalog / 'series.merged').write_text('header.patch\nchanged.patch\n')
+            header_patch = '--- a/header.h\n+++ b/header.h\n@@ -1 +1 @@\n-base\n+patched\n'
+            changed_patch = '--- a/changed.h\n+++ b/changed.h\n@@ -1 +1 @@\n-base\n+patched\n'
+            (catalog / 'header.patch').write_text(header_patch)
+            (catalog / 'changed.patch').write_text(changed_patch)
+            git(outer, 'add', 'patches')
+            git(outer, 'update-index', '--add', '--cacheinfo',
+                f'160000,{core_commit},helium-chromium')
+            git(outer, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                'commit', '-qm', 'fixture product')
+
+            source = root / 'build/src'
+            (source / 'chrome').mkdir(parents=True)
+            (source / 'chrome/VERSION').write_text('MAJOR=151\nMINOR=0\nBUILD=7922\nPATCH=71\n')
+            header = source / 'header.h'
+            changed = source / 'changed.h'
+            header.write_bytes(b'base\n')
+            changed.write_bytes(b'base\n')
+            (source / 'build.ninja').write_text(
+                'rule copy\n  command = cp $in $out\nbuild output: copy header.h\n')
+
+            def ninja(*arguments):
+                return subprocess.run(['ninja', *arguments], cwd=source,
+                                      check=True, capture_output=True, text=True).stdout
+
+            def transaction():
+                with replay.acquire_lane_lock(source.parent / '.arcium/lane.lock',
+                                              {'action': 'disposable recovery smoke'}):
+                    return replay.replay(outer, source)
+
+            with patch.dict(os.environ, {'HELIUM_DEV_GENERATED_PATCH_ROOT': str(catalog)}):
+                subprocess.run(['quilt', '--quiltrc', '-', 'push', '-a'], cwd=source,
+                               env=replay._quilt_environment(outer), check=True, capture_output=True)
+                os.utime(header, ns=(1_000_000_000, 2_000_000_000))
+                os.utime(changed, ns=(3_000_000_000, 4_000_000_000))
+                initial_proof = transaction()
+                self.assertEqual(replay.require_current_replay_proof(outer, source), initial_proof)
+                ninja()
+                self.assertIn('no work to do', ninja('-n'))
+
+                receipts = replay.receipt_path(source.parent).parent
+                for name in ('execution.json', 'build.json'):
+                    (receipts / name).write_text('{"fixture":"old evidence"}\n')
+                actual_run = replay._run_quilt
+                def fail_after_actual_pop(source_dir, environment, *arguments):
+                    result = actual_run(source_dir, environment, *arguments)
+                    if arguments == ('pop', '-a') and not result.returncode:
+                        (catalog / 'header.patch').write_text(header_patch.replace('-base\n', '-absent\n'))
+                    return result
+                # Inject a catalog fault after a real successful pop. Both
+                # Quilt subprocesses and proof verification remain real.
+                with patch.object(replay, '_run_quilt', side_effect=fail_after_actual_pop):
+                    with self.assertRaisesRegex(replay.ReplayError, 'push -a failed'):
+                        transaction()
+                journal = source.parent / '.arcium/replay-timestamps.json'
+                original_journal = journal.read_bytes()
+                self.assertEqual(header.read_bytes(), b'base\n')
+                self.assertFalse(replay.receipt_path(source.parent).exists())
+                for name in ('execution.json', 'build.json'):
+                    self.assertFalse((receipts / name).exists())
+                with self.assertRaisesRegex(replay.ReplayError, 'recovery is pending'):
+                    replay.require_current_replay_proof(outer, source)
+                output_time = (source / 'output').stat().st_mtime_ns
+                os.utime(header, ns=(output_time + 2_000_000_000, output_time + 2_000_000_000))
+                self.assertIn('[1/1]', ninja('-n'))
+
+                # A second failed push starts with an empty ledger and must
+                # retain the first attempt's original timestamp baseline.
+                with self.assertRaisesRegex(replay.ReplayError, 'push -a failed'):
+                    transaction()
+                self.assertEqual(journal.read_bytes(), original_journal)
+                (catalog / 'header.patch').write_text(header_patch)
+                (catalog / 'changed.patch').write_text(changed_patch.replace('+patched\n', '+repaired\n'))
+                for rejected in source.rglob('*.rej'):
+                    rejected.unlink()
+                completed = transaction()
+                self.assertFalse(journal.exists())
+                self.assertEqual(header.read_bytes(), b'patched\n')
+                self.assertEqual(header.stat().st_mtime_ns, 2_000_000_000)
+                self.assertEqual(changed.read_bytes(), b'repaired\n')
+                self.assertGreater(changed.stat().st_mtime_ns, 4_000_000_000)
+                self.assertEqual(replay.require_current_replay_proof(outer, source), completed)
+                self.assertIn('no work to do', ninja('-n'))
+
+                # Timestamp-independent proof stays current while a consumed
+                # snapshot cannot erase a later Ninja input timestamp.
+                later = output_time + 4_000_000_000
+                os.utime(header, ns=(later, later))
+                self.assertEqual(replay.require_current_replay_proof(outer, source), completed)
+                transaction()
+                self.assertEqual(header.stat().st_mtime_ns, later)
+                self.assertFalse(journal.exists())
+                self.assertIn('[1/1]', ninja('-n'))
 
 
 if __name__ == '__main__':

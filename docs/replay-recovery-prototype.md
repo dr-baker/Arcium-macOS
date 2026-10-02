@@ -1,8 +1,8 @@
-# Replay recovery prototype
+# Replay recovery and build evidence
 
-This isolated tooling prototype preserves unchanged source timestamps across a
+This tooling preserves unchanged source timestamps across a
 failed replay and subsequent recovery. It also retains bounded evidence for
-each autoninja invocation. It has synthetic verification only.
+each autoninja invocation. Verification uses synthetic and disposable fixtures.
 
 ## Recovery behavior
 
@@ -52,7 +52,7 @@ Archive writes and evidence reads use pinned lane-relative directory
 descriptors. Symlinked state directories are refused, and replaced directories
 produce unavailable evidence rather than redirects. Parser recursion failures
 remain explicit on Python 3.13. The diagnostics module participates in the
-material-input digest.
+selected-source and actual-executor material-input digests.
 
 ## Verification and integration limits
 
@@ -62,8 +62,9 @@ failure, stale snapshot reuse, and unsafe paths. Build fixtures exercise actual
 JSONL-shaped metrics, stale metadata, truncation, command failures, and no-work
 plans. Additional fixtures exercise directory replacements, descriptor cleanup,
 nested JSON, unencodable recovery paths, and diagnostic-input changes. They use
-temporary directories. One Quilt/Ninja fixture executes a copy rule to check
-unchanged edges; other build runners are fake.
+temporary directories. Quilt/Ninja fixtures execute copy rules to check
+unchanged edges, including failed replay and recovery through the actual
+transaction and proof verifier; other build runners are fake.
 
 Run the focused checks from the worktree:
 
@@ -72,12 +73,17 @@ PYTHONDONTWRITEBYTECODE=1 python3.13 -m unittest devutils.tests.test_replay_reco
 git diff --check
 ```
 
-The combined run passed all 108 tests on Python 3.13. Independent review covered
-timestamp recovery, proof publication, focused-build guards, evidence
-attribution, and directory-descriptor handling.
+The integrated source starts from tooling commit
+`242f7f701253124918a602bd3b6dde299ff8c777` and pins core commit
+`452e4d37b31de8674ddc5430defa1ad9092e6a3f`. Diagnostics enter both material input
+lists in `build_receipt.py`. That receipt helper also participates in the
+preparation-producer digest, so this integration invalidates every
+non-acquisition preparation receipt. Follow
+[Refresh preparation proof](building.md#refresh-preparation-proof), including
+deliberate review of GN defaults and intended custom arguments.
 
-The worktree starts at `4306a4e32b3b1930ca19e435ea701cf65f76e584` and excludes
-uncommitted publication tooling. The active settings task owns overlapping
-tooling. Integration must reconcile that work before this prototype is used in
-a shared lane. No live lane replay, Chromium build, cache change, app install,
-or runtime verification was performed for this prototype.
+Synthetic checks cannot establish freshness of existing shared-lane outputs.
+The combined source needs actual source/base verification, strict replay,
+preparation and guarded build validation before runtime handoff. No shared-lane
+replay, Chromium build, cache change, app install or runtime verification is
+part of these fixtures.

@@ -8,6 +8,7 @@
   - [Prepare a cold build](#prepare-a-cold-build)
   - [Build and run normal changes](#build-and-run-normal-changes)
   - [Use guarded build commands](#use-guarded-build-commands)
+  - [Refresh preparation proof](#refresh-preparation-proof)
   - [Synchronize generated core patches](#synchronize-generated-core-patches)
   - [Use an exact development profile](#use-an-exact-development-profile)
   - [Run a scenario contract](#run-a-scenario-contract)
@@ -389,6 +390,43 @@ budget. If the plan exceeds the budget, inspect it before you pass a larger
 
 Use `he dev` for normal changes. Broad builds require the explicit
 `he build-full --approved` path.
+
+### Refresh preparation proof
+
+Preparation receipts bind the selected recipes, their producer code, and the
+outputs consumed by configuration and compilation. Resources, version stamping,
+GN defaults, the generated graph, and full-source test assets have separate
+receipts. Changes to `dev.sh`, `build_preparation.py`, or `build_receipt.py`
+invalidate every non-acquisition stage. Run the producer commands again instead
+of editing receipt hashes to adopt existing outputs.
+
+The acquisition receipt has separate inputs. It verifies recipe lineage and the
+architecture and source-mode markers. It does not hash the mutable Chromium tree
+or downloaded toolchain. Retain warm acquisition when its verifier passes, then
+verify actual source/base state and strict replay separately. A stale acquisition
+receipt requires a new unused lane; preserve the current lane.
+
+For stale resources, version stamping, or GN-default lineage, run:
+
+```sh
+he resources
+he version
+he configure --refresh-defaults
+```
+
+Review and save intended `args.gn` settings before the explicit refresh. The flag
+recreates defaults from the selected core and macOS flags and replaces `args.gn`.
+Reapply any intended adjustments after reviewing the new defaults, then run
+`he configure` again. Plain configuration preserves `args.gn` but requires current
+default-fragment lineage. Full-source configuration also regenerates stale
+test-asset proof. Later build and package commands require fresh evidence tied
+to the resulting arguments, graph, replay, inputs, and artifacts.
+
+Build evidence appears under `.arcium/build-evidence/<invocation-id>/` for each
+autoninja plan and build. It retains bounded output, starting arguments and
+available Siso metrics. Missing, stale, malformed or truncated data remains
+explicit. Diagnostics participate in both selected-source and actual-executor
+material hashes; collecting evidence does not preserve an old build receipt.
 
 ### Use an exact development profile
 

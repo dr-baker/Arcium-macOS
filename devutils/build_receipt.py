@@ -81,6 +81,7 @@ EXECUTOR_BUILD_INPUTS = (
     "entitlements/helper-gpu-entitlements.plist",
     "entitlements/helper-renderer-entitlements.plist",
     "devutils/arcium_app.py",
+    "devutils/build_diagnostics.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
     "devutils/build_preparation.py",

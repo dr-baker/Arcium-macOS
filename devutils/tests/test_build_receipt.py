@@ -187,11 +187,11 @@ class BuildReceiptTest(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(relative + "\n")
             with patch("devutils.build_receipt.__file__", str(executor / "devutils/build_receipt.py")):
-                for relative in entitlements:
-                    with self.subTest(entitlement=relative):
+                for relative in (*entitlements, "devutils/build_diagnostics.py"):
+                    with self.subTest(executor_input=relative):
                         before = material_inputs_sha256(root)
                         path = executor / relative
-                        path.write_text(path.read_text() + "changed entitlement\n")
+                        path.write_text(path.read_text() + "changed executor input\n")
                         self.assertNotEqual(before, material_inputs_sha256(root))
 
 
