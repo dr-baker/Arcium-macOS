@@ -93,7 +93,19 @@ def component_runtime_libraries(out_dir: Path) -> tuple[Path, ...]:
     """Select the loose runtime libraries copied into component-build bundles."""
     try:
         args = (out_dir / "args.gn").read_text(encoding="utf-8")
-        if not re.search(r"(?m)^\s*is_component_build\s*=\s*true\s*$", args):
+        declarations = [
+            content.strip()
+            for line in args.splitlines()
+            if re.search(r"\bis_component_build\s*=", content := line.partition("#")[0])
+        ]
+        if not declarations:
+            return ()
+        if len(declarations) != 1:
+            raise ExecutionError("ambiguous component build declarations")
+        declaration = re.fullmatch(r"is_component_build\s*=\s*(true|false)", declarations[0])
+        if declaration is None:
+            raise ExecutionError("unsupported component build expression; use a literal true or false")
+        if declaration[1] == "false":
             return ()
         libraries = tuple(sorted(out_dir.glob("*.dylib")))
         if not libraries:

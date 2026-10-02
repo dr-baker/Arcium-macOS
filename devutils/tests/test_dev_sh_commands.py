@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import os
+import platform
 import shlex
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -12,14 +16,94 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEV_SH = ROOT / "dev.sh"
+sys.path.insert(0, str(ROOT))
+
+from devutils.tests.test_build_receipt import material_fixture  # noqa: E402
 
 
-def run_zsh(script: str) -> subprocess.CompletedProcess[str]:
+class ShellFixture:
+    """Keep every selected shell path in a disposable worktree and lane."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root.resolve()
+        self.worktree = self.root / "worktree"
+        self.build_root = self.root / "build"
+        self.heavy_root = self.root / "heavy"
+        self.python_env = self.root / "python-env"
+        self.temp = self.root / "tmp"
+        (self.worktree / "devutils").mkdir(parents=True)
+        self.temp.mkdir()
+        shutil.copy2(
+            ROOT / "devutils/setup_python.sh",
+            self.worktree / "devutils/setup_python.sh",
+        )
+        (self.worktree / "requirements-dev.txt").write_text(
+            "# No fixture dependencies.\n", encoding="utf-8"
+        )
+        (self.python_env / "bin").mkdir(parents=True)
+        (self.python_env / "bin/python3").symlink_to(sys.executable)
+        subprocess.run(
+            [
+                "/usr/bin/git", "-c", "init.templateDir=", "-c",
+                "init.defaultBranch=main", "init", "--quiet", str(self.worktree),
+            ],
+            cwd=self.worktree,
+            env=self.environment(),
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+    def environment(self) -> dict[str, str]:
+        environment = {
+            key: value for key, value in os.environ.items()
+            if not key.startswith(("HELIUM_DEV_", "QUILT_", "GIT_"))
+            and key not in {"PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV"}
+        }
+        environment.update({
+            "HELIUM_DEV_WORKTREE": str(self.worktree),
+            "HELIUM_DEV_LANE": "worktree",
+            "HELIUM_DEV_BUILD_ROOT": str(self.build_root),
+            "HELIUM_DEV_HEAVY_ROOT": str(self.heavy_root),
+            "HELIUM_DEV_DOWNLOAD_CACHE": str(self.build_root / "downloads"),
+            "HELIUM_DEV_PYTHON_ENV": str(self.python_env),
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "PATH": str(self.python_env / "bin") + os.pathsep + os.defpath,
+            "TMPDIR": str(self.temp),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        })
+        return environment
+
+    def command(self, script: str, *, before_source: str = "") -> list[str]:
+        prefix = before_source + "; " if before_source else ""
+        return [
+            "/bin/zsh", "-f", "-c",
+            f"{prefix}source {shlex.quote(str(DEV_SH))} || exit $?; {script}",
+        ]
+
+    def material_inputs(self) -> None:
+        material_fixture(self.worktree)
+
+
+def run_zsh(
+    script: str, *, fixture: ShellFixture | None = None, before_source: str = "",
+) -> subprocess.CompletedProcess[str]:
+    if fixture is None:
+        with tempfile.TemporaryDirectory(prefix="arcium-shell-test-") as temporary:
+            return run_zsh(
+                script, fixture=ShellFixture(Path(temporary)),
+                before_source=before_source,
+            )
     return subprocess.run(
-        ["/bin/zsh", "-c", f"source {DEV_SH!s}; {script}"],
+        fixture.command(script, before_source=before_source),
+        cwd=fixture.worktree,
+        env=fixture.environment(),
         check=False,
         capture_output=True,
         text=True,
+        timeout=20,
     )
 
 
@@ -38,23 +122,16 @@ class DevShellCommandsTests(unittest.TestCase):
 
     def test_source_prefers_a_structurally_warm_heavy_lane(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            heavy = Path(temporary) / "heavy"
+            fixture = ShellFixture(Path(temporary))
+            heavy = fixture.heavy_root
             (heavy / "src/out/Default").mkdir(parents=True)
             (heavy / "src/out/Default/build.ninja").write_text(
                 "warm\n", encoding="utf-8"
             )
-            command = (
-                f"unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT; "
-                f"HELIUM_DEV_HEAVY_ROOT={shlex.quote(str(heavy))}; "
-                "export HELIUM_DEV_HEAVY_ROOT; "
-                f"source {shlex.quote(str(DEV_SH))}; "
-                "printf '%s\\n' \"$HELIUM_DEV_LANE\" \"$HELIUM_DEV_BUILD_ROOT\""
-            )
-            result = subprocess.run(
-                ["/bin/zsh", "-c", command],
-                check=False,
-                capture_output=True,
-                text=True,
+            result = run_zsh(
+                "printf '%s\\n' \"$HELIUM_DEV_LANE\" \"$HELIUM_DEV_BUILD_ROOT\"",
+                fixture=fixture,
+                before_source="unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT",
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -62,18 +139,18 @@ class DevShellCommandsTests(unittest.TestCase):
 
     def test_resourcing_auto_lane_does_not_become_explicit_approval(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            heavy = Path(temporary) / "heavy"
+            fixture = ShellFixture(Path(temporary))
+            heavy = fixture.heavy_root
             command = (
-                "unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT HELIUM_DEV_AUTO_SELECTED; "
-                f"HELIUM_DEV_HEAVY_ROOT={shlex.quote(str(heavy))}; export HELIUM_DEV_HEAVY_ROOT; "
-                f"HELIUM_DEV_WORKTREE={shlex.quote(str(ROOT))}; export HELIUM_DEV_WORKTREE; "
-                f"source {shlex.quote(str(DEV_SH))}; "
                 f"mkdir -p {shlex.quote(str(heavy / 'src/out/Default'))}; "
                 f"touch {shlex.quote(str(heavy / 'src/out/Default/build.ninja'))}; "
-                f"source {shlex.quote(str(DEV_SH))}; "
+                f"source {shlex.quote(str(DEV_SH))} || exit $?; "
                 "printf '%s\\n' \"$HELIUM_DEV_LANE\" \"$HELIUM_DEV_BUILD_ROOT\""
             )
-            result = subprocess.run(["/bin/zsh", "-c", command], check=False, capture_output=True, text=True)
+            result = run_zsh(
+                command, fixture=fixture,
+                before_source="unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT",
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.splitlines(), ["heavy", str(heavy)])
 
@@ -95,46 +172,57 @@ class DevShellCommandsTests(unittest.TestCase):
             self.assertNotIn("refresh", result.stdout)
 
     def test_pull_stops_after_failed_autostash_rebase(self) -> None:
-        result = run_zsh(
-            f"_root_dir={shlex.quote(str(ROOT))}; "
-            f"_main_repo={shlex.quote(str(ROOT / 'helium-chromium'))}; "
-            "___helium_quilt_pop_inner(){ echo quilt-pop; }; "
-            "___helium_prepare_patches_inner(){ echo prepare; }; "
-            "___helium_quilt_push_inner(){ echo quilt-push; }; "
-            "git(){ echo \"git:$*\"; if [[ \"$*\" = *rebase* ]]; then return 7; fi; return 0; }; "
-            "___helium_pull_inner"
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ShellFixture(Path(temporary))
+            result = run_zsh(
+                "___helium_quilt_pop_inner(){ echo quilt-pop; }; "
+                "___helium_prepare_patches_inner(){ echo prepare; }; "
+                "___helium_quilt_push_inner(){ echo quilt-push; }; "
+                "git(){ echo \"git:$*\"; if [[ \"$*\" = *rebase* ]]; then return 7; fi; return 0; }; "
+                "___helium_pull_inner",
+                fixture=fixture,
+            )
 
-        self.assertEqual(result.returncode, 7)
-        self.assertEqual(
-            result.stdout.splitlines(),
-            [
-                "quilt-pop",
-                f"git:-C {ROOT} fetch",
-                f"git:-C {ROOT} rebase --autostash origin/main",
-            ],
-        )
-        self.assertNotIn("quilt-push", result.stdout)
-        self.assertNotIn("prepare", result.stdout)
+            self.assertEqual(result.returncode, 7)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    "quilt-pop",
+                    f"git:-C {fixture.worktree} fetch",
+                    f"git:-C {fixture.worktree} rebase --autostash origin/main",
+                ],
+            )
+            self.assertNotIn("quilt-push", result.stdout)
+            self.assertNotIn("prepare", result.stdout)
 
     def test_reset_removes_warm_source_synchronously(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "src"
-            source.mkdir()
+            fixture = ShellFixture(root)
+            fixture.material_inputs()
+            source = fixture.build_root / "src"
+            source.mkdir(parents=True)
             (source / "marker").write_text("warm\n", encoding="utf-8")
-            subs_cache = root / "subs.tar.gz"
-            namesubs_cache = root / "namesubs.tar"
+            subs_cache = fixture.build_root / "subs.tar.gz"
+            namesubs_cache = fixture.build_root / "namesubs.tar"
             deletion_started = root / "deletion-started"
             release_deletion = root / "release-deletion"
             reset_returned = root / "reset-returned"
             subs_cache.write_text("subs\n", encoding="utf-8")
             namesubs_cache.write_text("namesubs\n", encoding="utf-8")
+            metadata = fixture.build_root / ".arcium"
+            (metadata / "receipts").mkdir(parents=True)
+            stale_proof = [
+                metadata / "source-mode",
+                metadata / "acquisition-target",
+                metadata / "receipts/prepared-acquisition.json",
+                metadata / "receipts/replay.json",
+                metadata / "receipts/execution.json",
+                metadata / "receipts/build.json",
+            ]
+            for path in stale_proof:
+                path.write_text("lite\n", encoding="utf-8")
             script = (
-                f"source {shlex.quote(str(DEV_SH))}; "
-                f"_src_dir={shlex.quote(str(source))}; "
-                f"_subs_cache={shlex.quote(str(subs_cache))}; "
-                f"_namesubs_cache={shlex.quote(str(namesubs_cache))}; "
                 f"_deletion_started={shlex.quote(str(deletion_started))}; "
                 f"_release_deletion={shlex.quote(str(release_deletion))}; "
                 f"_reset_returned={shlex.quote(str(reset_returned))}; "
@@ -146,7 +234,8 @@ class DevShellCommandsTests(unittest.TestCase):
                 "print returned > \"$_reset_returned\""
             )
             process = subprocess.Popen(
-                ["/bin/zsh", "-c", script],
+                fixture.command(script),
+                cwd=fixture.worktree, env=fixture.environment(),
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
             try:
@@ -168,6 +257,7 @@ class DevShellCommandsTests(unittest.TestCase):
             self.assertFalse(Path(f"{source}x").exists())
             self.assertFalse(subs_cache.exists())
             self.assertFalse(namesubs_cache.exists())
+            self.assertTrue(all(not path.exists() for path in stale_proof))
 
     def test_menu_leads_with_public_development_loop(self) -> None:
         result = run_zsh("he")
@@ -349,7 +439,7 @@ class DevShellCommandsTests(unittest.TestCase):
 
     def test_local_bootstrap_forwards_internal_capability_to_full_build(self) -> None:
         result = run_zsh(
-            "_dev_lane=local; _out_dir=$(mktemp -d); "
+            "_dev_lane=local; "
             "___helium_lane_transaction(){ shift; ___helium_bootstrap_inner \"$@\"; }; "
             "___helium_lane_preflight(){ :; }; "
             "___helium_setup_inner(){ :; }; "
@@ -388,37 +478,46 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertIn("use he arcium", refused.stderr)
 
     def test_setup_stops_at_first_failed_stage(self) -> None:
-        result = run_zsh(
-            "_src_dir=$(mktemp -d)/src; _download_cache=${_src_dir}/downloads; "
-            "_out_dir=${_src_dir}/out/Default; "
-            "___helium_lane_preflight(){ return 0; }; "
-            "___helium_setup_python(){ echo python; }; "
-            "___helium_info_pull(){ echo pull; return 7; }; "
-            "___helium_toolchain(){ echo toolchain; }; "
-            "___helium_resources(){ echo resources; }; "
-            "___helium_setup_gn(){ echo gn; }; "
-            "___helium_version(){ echo version; }; "
-            "___helium_setup_presetup_inner"
-        )
-        self.assertEqual(result.returncode, 7, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["python", "pull"])
-
-    def test_full_source_setup_skips_product_pruning(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = root / "src"
+            fixture = ShellFixture(Path(temporary))
+            fixture.material_inputs()
             result = run_zsh(
-                f"_src_dir={source!s}; _download_cache={root / 'downloads'!s}; "
-                f"_out_dir={source / 'out/Default'!s}; _source_mode=full; "
-                "___helium_lane_preflight(){ :; }; "
-                "___helium_setup_python(){ :; }; "
-                "___helium_info_pull(){ mkdir -p \"$_src_dir\"; }; "
-                "___helium_python(){ echo unexpected-python:$*; return 9; }; "
+                "___helium_lane_preflight(){ return 0; }; "
+                "___helium_setup_python(){ echo python; }; "
+                "___helium_info_pull(){ echo pull; return 7; }; "
                 "___helium_toolchain(){ echo toolchain; }; "
                 "___helium_resources_inner(){ echo resources; }; "
                 "___helium_setup_gn(){ echo gn; }; "
-                "___helium_version(){ echo version; }; "
-                "___helium_setup_presetup_inner"
+                "___helium_version_inner(){ echo version; }; "
+                "___helium_setup_presetup_inner",
+                fixture=fixture,
+            )
+            self.assertEqual(result.returncode, 7, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ["python", "pull"])
+            self.assertFalse(
+                (fixture.build_root / ".arcium/receipts/prepared-acquisition.json").exists()
+            )
+
+    def test_full_source_setup_skips_product_pruning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ShellFixture(Path(temporary))
+            fixture.material_inputs()
+            result = run_zsh(
+                "_source_mode=full; export HELIUM_DEV_SOURCE_MODE=full; "
+                "___helium_lane_preflight(){ :; }; "
+                "___helium_setup_python(){ :; }; "
+                "___helium_info_pull(){ "
+                "mkdir -p \"$_out_dir\" \"$_build_dir/.arcium\"; "
+                "print full > \"$_source_mode_marker\"; }; "
+                "python3(){ "
+                "if [[ \"$1\" = \"$_main_repo/utils/prune_binaries.py\" ]]; then "
+                "echo unexpected-python:$*; return 9; fi; command python3 \"$@\"; }; "
+                "___helium_toolchain(){ echo toolchain; }; "
+                "___helium_resources_inner(){ echo resources; }; "
+                "___helium_setup_gn(){ echo gn; }; "
+                "___helium_version_inner(){ echo version; }; "
+                "___helium_setup_presetup_inner",
+                fixture=fixture,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("unexpected-python", result.stdout)
@@ -432,16 +531,79 @@ class DevShellCommandsTests(unittest.TestCase):
                     "version",
                 ],
             )
+            self.assertTrue(
+                (fixture.build_root / ".arcium/receipts/prepared-acquisition.json").exists()
+            )
+
+    def test_pending_recovery_blocks_configuration_before_lane_mutation(self) -> None:
+        for option in ("", "--refresh-defaults"):
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as temporary:
+                fixture = ShellFixture(Path(temporary))
+                fixture.material_inputs()
+                out = fixture.build_root / "src/out/Default"
+                out.mkdir(parents=True)
+                journal = fixture.build_root / ".arcium/replay-timestamps.json"
+                journal.parent.mkdir(parents=True)
+                journal.write_bytes(b"pending fixture recovery\n")
+                bootstrap_marker = fixture.root / "bootstrap-invoked"
+                bootstrap = fixture.build_root / "src/tools/gn/bootstrap/bootstrap.py"
+                bootstrap.parent.mkdir(parents=True)
+                bootstrap.write_text(
+                    "from pathlib import Path\nimport sys\n"
+                    f"Path({str(bootstrap_marker)!r}).write_text('invoked\\n')\n"
+                    "Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'fixture gn')\n"
+                    "print('bootstrap')\n",
+                    encoding="utf-8",
+                )
+                dawn = fixture.worktree / "devutils/setup_dawn_go.sh"
+                dawn.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                dawn.chmod(0o755)
+                result = run_zsh(
+                    "___helium_setup_python(){ :; }; "
+                    "print lite > \"$_source_mode_marker\"; "
+                    "print \"$HELIUM_DEV_ACQUISITION_TARGET\" > \"$_build_dir/.arcium/acquisition-target\"; "
+                    "print 'is_component_build = true' > \"$_out_dir/args.gn\"; "
+                    "for stage in acquisition gn-defaults; do "
+                    "entry=\"$(___helium_preparation begin \"$stage\")\" || exit $?; "
+                    "___helium_preparation finish \"$stage\" \"$entry\" || exit $?; done; "
+                    "python3(){ "
+                    "if [[ \"$1\" = \"$_helium_harness_root/devutils/prepare_test_assets.py\" ]]; then "
+                    "echo test-assets; return 0; fi; command python3 \"$@\"; }; "
+                    "___helium_setup_gn(){ echo unexpected-default-refresh; return 9; }; "
+                    "___helium_setup_siso(){ echo siso; }; "
+                    f"___helium_configure_inner {option}",
+                    fixture=fixture,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("timestamp recovery is pending", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(bootstrap_marker.exists())
+                self.assertEqual((out / "args.gn").read_text(), "is_component_build = true\n")
+                self.assertEqual(journal.read_bytes(), b"pending fixture recovery\n")
 
     def test_configure_stops_after_failed_siso_setup(self) -> None:
-        result = run_zsh(
-            "_src_dir=$(mktemp -d); _out_dir=${_src_dir}/out/Default; "
-            "___helium_setup_python(){ echo python; }; "
-            "___helium_setup_siso(){ echo siso; return 8; }; "
-            "___helium_configure_inner"
-        )
-        self.assertEqual(result.returncode, 8, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["python", "siso"])
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ShellFixture(Path(temporary))
+            fixture.material_inputs()
+            result = run_zsh(
+                "mkdir -p \"$_out_dir\" \"$_build_dir/.arcium\"; "
+                "print lite > \"$_source_mode_marker\"; "
+                "print \"$HELIUM_DEV_ACQUISITION_TARGET\" > \"$_build_dir/.arcium/acquisition-target\"; "
+                "print 'is_component_build = true' > \"$_out_dir/args.gn\"; "
+                "for stage in acquisition gn-defaults; do "
+                "entry=\"$(___helium_preparation begin \"$stage\")\" || exit $?; "
+                "___helium_preparation finish \"$stage\" \"$entry\" || exit $?; done; "
+                "___helium_setup_python(){ echo python; }; "
+                "python3(){ "
+                "if [[ \"$1\" = \"$_helium_harness_root/devutils/prepare_test_assets.py\" ]]; then "
+                "echo test-assets; return 0; fi; command python3 \"$@\"; }; "
+                "___helium_setup_siso(){ echo siso; return 8; }; "
+                "___helium_require_replay_proof(){ :; }; "
+                "___helium_configure_inner",
+                fixture=fixture,
+            )
+            self.assertEqual(result.returncode, 8, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ["python", "test-assets", "siso"])
 
     def test_siso_setup_recreates_marker_omitted_by_full_source_clone(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -470,7 +632,8 @@ class DevShellCommandsTests(unittest.TestCase):
     def test_source_retrieval_stops_when_archive_and_git_fallback_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            retriever = root / "retrieve_and_unpack_resource.sh"
+            fixture = ShellFixture(root)
+            retriever = fixture.worktree / "retrieve_and_unpack_resource.sh"
             retriever.write_text(
                 "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$RETRIEVE_CALLS\"\nexit 9\n",
                 encoding="utf-8",
@@ -478,33 +641,40 @@ class DevShellCommandsTests(unittest.TestCase):
             retriever.chmod(0o755)
             calls = root / "calls"
             result = run_zsh(
-                f"_root_dir={root!s}; _src_dir={root / 'src'!s}; "
-                f"_out_dir={root / 'src/out/Default'!s}; "
-                f"RETRIEVE_CALLS={calls!s}; export RETRIEVE_CALLS; ___helium_info_pull"
+                f"RETRIEVE_CALLS={shlex.quote(str(calls))}; "
+                "export RETRIEVE_CALLS; ___helium_info_pull",
+                fixture=fixture,
             )
             self.assertEqual(result.returncode, 9, result.stderr)
-            self.assertEqual(calls.read_text(encoding="utf-8").splitlines(), ["-d -g", "-g"])
-            self.assertFalse((root / "src" / "out").exists())
+            self.assertEqual(
+                calls.read_text(encoding="utf-8").splitlines(),
+                [f"-d -g {platform.machine()}", f"-g {platform.machine()}"],
+            )
+            self.assertFalse((fixture.build_root / "src/out").exists())
 
     def test_full_source_retrieval_uses_clone_and_records_the_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            retriever = root / "retrieve_and_unpack_resource.sh"
+            fixture = ShellFixture(root)
+            retriever = fixture.worktree / "retrieve_and_unpack_resource.sh"
             retriever.write_text(
                 "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$RETRIEVE_CALLS\"\n",
                 encoding="utf-8",
             )
             retriever.chmod(0o755)
             calls = root / "calls"
-            marker = root / "build/.arcium/source-mode"
+            marker = fixture.build_root / ".arcium/source-mode"
             result = run_zsh(
-                f"_root_dir={root!s}; _src_dir={root / 'build/src'!s}; "
-                f"_out_dir={root / 'build/src/out/Default'!s}; "
-                f"_source_mode_marker={marker!s}; _source_mode=full; "
-                f"RETRIEVE_CALLS={calls!s}; export RETRIEVE_CALLS; ___helium_info_pull"
+                "_source_mode=full; export HELIUM_DEV_SOURCE_MODE=full; "
+                f"RETRIEVE_CALLS={shlex.quote(str(calls))}; "
+                "export RETRIEVE_CALLS; ___helium_info_pull",
+                fixture=fixture,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(calls.read_text(encoding="utf-8").splitlines(), ["-g"])
+            self.assertEqual(
+                calls.read_text(encoding="utf-8").splitlines(),
+                [f"-g {platform.machine()}"],
+            )
             self.assertEqual(marker.read_text(encoding="utf-8"), "full\n")
 
     def test_full_source_bootstrap_reaches_the_lane_transaction(self) -> None:
@@ -529,7 +699,6 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertEqual(reverted.stdout.splitlines(), ["domain"])
 
         applied = run_zsh(
-            "_subs_cache=/nonexistent/arcium-subs; "
             "python3(){ echo domain; }; "
             "___helium_name_substitution_inner(){ echo name; return 7; }; "
             "___helium_substitution_inner sub"

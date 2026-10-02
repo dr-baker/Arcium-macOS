@@ -5,10 +5,12 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from devutils.build_receipt import (
     BuildReceipt,
     CORE_PREPARATION_INPUTS,
+    EXECUTOR_BUILD_INPUTS,
     MATERIAL_BUILD_INPUTS,
     ReceiptError,
     SourceReceipt,
@@ -169,6 +171,28 @@ class BuildReceiptTest(unittest.TestCase):
             before = material_inputs_sha256(root)
             (root / "devutils/replay_timestamps.py").write_text("changed helper\n")
             self.assertNotEqual(before, material_inputs_sha256(root))
+            before = material_inputs_sha256(root)
+            (root / "devutils/build_diagnostics.py").write_text("changed diagnostics\n")
+            self.assertNotEqual(before, material_inputs_sha256(root))
+
+            executor = root / "executor"
+            entitlements = (
+                "entitlements/app-entitlements.plist",
+                "entitlements/helper-entitlements.plist",
+                "entitlements/helper-gpu-entitlements.plist",
+                "entitlements/helper-renderer-entitlements.plist",
+            )
+            for relative in (*EXECUTOR_BUILD_INPUTS, *entitlements):
+                path = executor / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(relative + "\n")
+            with patch("devutils.build_receipt.__file__", str(executor / "devutils/build_receipt.py")):
+                for relative in (*entitlements, "devutils/build_diagnostics.py"):
+                    with self.subTest(executor_input=relative):
+                        before = material_inputs_sha256(root)
+                        path = executor / relative
+                        path.write_text(path.read_text() + "changed executor input\n")
+                        self.assertNotEqual(before, material_inputs_sha256(root))
 
 
 if __name__ == "__main__":

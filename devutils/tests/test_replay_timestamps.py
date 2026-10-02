@@ -162,8 +162,8 @@ class TimestampTests(unittest.TestCase):
 
 
 class ReplayTransactionTests(unittest.TestCase):
-    def test_success_and_failures_restore_only_after_validation_before_proof(self):
-        for failure in [None, 'pop', 'push', 'validation', 'identity']:
+    def test_success_and_failures_restore_only_after_validation_and_proof(self):
+        for failure in [None, 'pop', 'push', 'validation', 'identity', 'proof', 'proof_identity']:
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 source = root / 'src'
@@ -171,7 +171,8 @@ class ReplayTransactionTests(unittest.TestCase):
                 (root / 'patches').mkdir()
                 (root / 'patches/series.merged').write_text('a.patch\n')
                 events = []
-                identity = object()
+                identity = SimpleNamespace(receipt_id='a' * 64, core_commit='b' * 40,
+                                           gitlink_commit='b' * 40, chromium_version='1')
                 comparison = SimpleNamespace(applied=['a.patch'], require_valid_prefix=lambda: None)
                 def run(_source, env, *args):
                     self.assertIn('--fuzz=0', env['QUILT_PATCH_OPTS'])
@@ -181,25 +182,32 @@ class ReplayTransactionTests(unittest.TestCase):
                     events.append('validate')
                     if failure == 'validation':
                         raise replay.ReplayError('invalid replay')
-                receipt = SimpleNamespace(source=identity)
+                receipt = SimpleNamespace(source=object() if failure == 'proof_identity' else identity)
+                def proof(*args):
+                    events.append('proof')
+                    if failure == 'proof':
+                        raise replay.ReplayError('proof publication failed')
+                    return receipt
                 with patch.object(replay, '_require_core_patch_copies'), \
                      patch.object(replay, 'inspect_quilt_state', return_value=SimpleNamespace(comparison=comparison)), \
                      patch.object(replay, 'current_source_identity', side_effect=[identity, object() if failure == 'identity' else identity]), \
                      patch.object(replay, 'invalidate_downstream_receipts', side_effect=lambda *_: events.append('invalidate')), \
                      patch.object(replay, '_patch_owned_paths', return_value=['file']), \
-                     patch.object(replay, 'snapshot_timestamps', side_effect=lambda *_: events.append('snapshot') or {}), \
+                     patch.object(replay, 'recovery_timestamps', side_effect=lambda *a, **kw: events.append('snapshot') or {}), \
                      patch.object(replay, '_run_quilt', side_effect=run), \
                      patch.object(replay, '_validate_replayed_state', side_effect=validate), \
+                     patch.object(replay, 'consume_recovery_timestamps'), \
                      patch.object(replay, 'restore_timestamps', side_effect=lambda *_: events.append('restore')), \
-                     patch.object(replay, '_write_proof', side_effect=lambda *_: events.append('proof') or receipt):
+                     patch.object(replay, '_write_proof', side_effect=proof):
                     if failure:
                         with self.assertRaises(replay.ReplayError):
                             replay.replay(root, source)
                         self.assertNotIn('restore', events)
-                        self.assertNotIn('proof', events)
+                        if failure not in {'proof', 'proof_identity'}:
+                            self.assertNotIn('proof', events)
                     else:
                         self.assertIs(replay.replay(root, source), receipt)
-                        self.assertEqual(events, ['invalidate', 'snapshot', 'pop', 'push', 'validate', 'restore', 'proof'])
+                        self.assertEqual(events, ['invalidate', 'snapshot', 'pop', 'push', 'validate', 'proof', 'restore'])
 
     def test_busy_lane_prevents_direct_replay(self):
         from build_lane import acquire_lane_lock

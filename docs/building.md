@@ -8,6 +8,7 @@
   - [Prepare a cold build](#prepare-a-cold-build)
   - [Build and run normal changes](#build-and-run-normal-changes)
   - [Use guarded build commands](#use-guarded-build-commands)
+  - [Refresh preparation proof](#refresh-preparation-proof)
   - [Synchronize generated core patches](#synchronize-generated-core-patches)
   - [Use an exact development profile](#use-an-exact-development-profile)
   - [Run a scenario contract](#run-a-scenario-contract)
@@ -205,8 +206,9 @@ Inspect the installed app without building, restarting, or requiring the T9 lane
 he arcium status --json
 ```
 
-The report includes the bundle, user-data root, main PID, profile-lock owner,
-and mock Keychain flag. A mismatch returns a failure status. The user-data root
+The report includes the bundle, user-data root, expected main PID, all installed
+main PIDs, profile-lock owner, and PIDs using a mock Keychain. A mismatch or
+ambiguous ownership returns a failure status. The user-data root
 contains several browser profiles; this report does not claim which profile
 window is frontmost. `chrome://version` shows that window's profile path.
 
@@ -233,15 +235,17 @@ no longer depend on the original Helium profile being closed. If a dialog preven
 quitting, the command stops without replacing the app. It never forces a quit.
 Close the dialog and retry. The command reports preparation and handoff times.
 
-Both commands verify the staged and installed bundles. A failed replacement
-or installed signature check restores the previous bundle. They also check
-that the launched PID uses the installed executable and owns the persistent
-profile lock for at least one second.
-If launch fails, the error reports a retained previous bundle path. The command
-does not automatically downgrade an app that may already have changed profile
-data. The browser may remain closed after a failed handoff; resolve the error
-and rerun the command. Profile data is never rolled back. A successful launch
-check does not prove session restoration or the changed UI behavior.
+Both commands verify the staged and installed bundles. Failure or interruption
+before publishing the replacement restores the previous installation. After
+publication at the installed path, a failed or interrupted signature or launch
+check preserves the replacement and reports any retained previous bundle path.
+A browser could open the replacement and change profile data during verification,
+so the command never automatically downgrades a published installation. Profile
+data is never rolled back. The browser may remain closed after a failed handoff;
+resolve the error and rerun the command. Launch checks require the launched PID
+to use the installed executable and own the persistent profile lock for at least
+one second. A successful check does not prove session restoration or the changed
+UI behavior.
 
 The expensive replay is explicit and serialized with every other build action:
 
@@ -266,15 +270,21 @@ regular source files so Quilt does not make unchanged headers look newer than
 compiled outputs. It snapshots the currently applied stack under the lane lock,
 performs the full zero-fuzz replay, verifies the complete stack and source
 identity, then restores timestamps only where content and permissions still
-match. The snapshot stays in memory and is discarded when the command ends.
-Replay publishes its proof after restoration. The proof continues to hash paths,
-file types, permissions, and contents, independently of timestamps.
+match. The snapshot persists in the lane's `.arcium/replay-timestamps.json`.
+Failed attempts retain the original snapshot for recovery, including when the
+applied stack is empty. Replay publishes verified proof, retires the snapshot,
+then restores timestamps. Pending recovery prevents proof acceptance and
+compilation. The proof continues to hash paths, file types, permissions, and
+contents, independently of timestamps.
 
 Changed files, new files, deleted files, unreadable or unstable files, symlinks,
 and hard links receive no timestamp restoration. Generated roots `out`, `gen`,
 and `obj`, plus Git, Quilt, and lane metadata, are excluded. A partial stack
 preserves only its already-applied paths; a fully popped stack has no timestamp
-snapshot. A failed pop, push, or replay validation does not restore timestamps.
+records unless it is recovering from a failed attempt. A failed pop, push, or
+replay validation does not restore timestamps. A corrupt snapshot or a changed
+recovery context blocks replay until the lane state is inspected and the
+snapshot is deliberately removed.
 This optimization does not retain old build or execution receipts, bypass a
 build check, or change packaging and signing requirements.
 
@@ -380,6 +390,47 @@ budget. If the plan exceeds the budget, inspect it before you pass a larger
 
 Use `he dev` for normal changes. Broad builds require the explicit
 `he build-full --approved` path.
+
+### Refresh preparation proof
+
+Preparation receipts bind the selected recipes, their producer code, and the
+outputs consumed by configuration and compilation. Resources, version stamping,
+GN defaults, the generated graph, and full-source test assets have separate
+receipts. Changes to `dev.sh`, `build_preparation.py`, or `build_receipt.py`
+invalidate every non-acquisition stage. Run the producer commands again instead
+of editing receipt hashes to adopt existing outputs.
+
+The acquisition receipt has separate inputs. It verifies recipe lineage and the
+architecture and source-mode markers. It does not hash the mutable Chromium tree
+or downloaded toolchain. Retain warm acquisition when its verifier passes, then
+verify actual source/base state and strict replay separately. A stale acquisition
+receipt requires a new unused lane; preserve the current lane.
+
+For stale resources, version stamping, or GN-default lineage, run:
+
+```sh
+he resources
+he version
+he configure --refresh-defaults
+```
+
+Finish pending recovery with `he replay` before configuring. Configuration checks
+current replay proof before changing defaults, preparing assets or bootstrapping
+GN, which itself compiles a tool.
+
+Review and save intended `args.gn` settings before the explicit refresh. The flag
+recreates defaults from the selected core and macOS flags and replaces `args.gn`.
+Reapply any intended adjustments after reviewing the new defaults, then run
+`he configure` again. Plain configuration preserves `args.gn` but requires current
+default-fragment lineage. Full-source configuration also regenerates stale
+test-asset proof. Later build and package commands require fresh evidence tied
+to the resulting arguments, graph, replay, inputs, and artifacts.
+
+Build evidence appears under `.arcium/build-evidence/<invocation-id>/` for each
+autoninja plan and build. It retains bounded output, starting arguments and
+available Siso metrics. Missing, stale, malformed or truncated data remains
+explicit. Diagnostics participate in both selected-source and actual-executor
+material hashes; collecting evidence does not preserve an old build receipt.
 
 ### Use an exact development profile
 

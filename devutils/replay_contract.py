@@ -27,7 +27,10 @@ from build_receipt import (
     write_receipt_atomic,
 )
 from build_lane import LaneError, acquire_lane_lock
-from replay_timestamps import snapshot_timestamps, restore_timestamps
+from replay_timestamps import (
+    TimestampRecoveryError, recovery_timestamps, restore_timestamps,
+    consume_recovery_timestamps, has_pending_recovery,
+)
 from quilt_state import QuiltStateError, inspect_quilt_state, read_patch_list
 
 
@@ -319,6 +322,10 @@ def require_current_replay_proof(
     source_dir: Path,
 ) -> ReplayReceipt:
     """Fail closed unless the replay receipt exactly matches current inputs."""
+    # Publication precedes snapshot consumption. A crash in that window must
+    # not admit a build whose outputs could outlive the recovery baseline.
+    if has_pending_recovery(source_dir):
+        raise ReplayError("timestamp recovery is pending; finish he replay before building")
     path = receipt_path(source_dir.parent)
     if not path.is_file():
         raise ReplayError("no current Quilt replay proof; run he replay")
@@ -390,9 +397,20 @@ def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     before = current_source_identity(worktree, source_dir)
     path = receipt_path(source_dir.parent)
     invalidate_downstream_receipts(source_dir.parent)
-    timestamps = snapshot_timestamps(
-        source_dir, _patch_owned_paths(worktree, source_dir)
-    ) if state.comparison.applied else {}
+    try:
+        # The iterable is lazy: an existing snapshot must win over partial state.
+        def owned_paths():
+            if state.comparison.applied:
+                yield from _patch_owned_paths(worktree, source_dir)
+        timestamps = recovery_timestamps(
+            source_dir, worktree=worktree, patch_root=_patch_root(worktree),
+            source_receipt_id=before.receipt_id,
+            source_identity={
+                "chromium_version": before.chromium_version,
+            }, paths=owned_paths(),
+        )
+    except TimestampRecoveryError as error:
+        raise ReplayError(str(error)) from error
     environment = _quilt_environment(worktree)
     commands = (("push", "-a"),) if not state.comparison.applied else (
         ("pop", "-a"),
@@ -405,11 +423,16 @@ def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     _validate_replayed_state(worktree, source_dir)
     if current_source_identity(worktree, source_dir) != before:
         raise ReplayError("source or patch identity changed during replay; run he replay again")
-    restore_timestamps(source_dir, timestamps)
     receipt = _write_proof(worktree, source_dir)
     if receipt.source != before:
         path.unlink(missing_ok=True)
         raise ReplayError("source or patch identity changed during replay; run he replay again")
+    try:
+        consume_recovery_timestamps(source_dir)
+    except TimestampRecoveryError as error:
+        invalidate_downstream_receipts(source_dir.parent)
+        raise ReplayError(str(error)) from error
+    restore_timestamps(source_dir, timestamps)
     return receipt
 
 

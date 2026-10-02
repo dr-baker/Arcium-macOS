@@ -31,6 +31,9 @@ class ArciumAppTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = Path(tempfile.mkdtemp(prefix="arcium-app-test-"))
         self.addCleanup(lambda: shutil.rmtree(self.temporary, ignore_errors=True))
+        parent_snapshot = patch("arcium_app._ps_parent_snapshot", return_value={})
+        parent_snapshot.start()
+        self.addCleanup(parent_snapshot.stop)
 
     def _app(self, name: str = "Helium.app") -> Path:
         app = self.temporary / name
@@ -64,6 +67,18 @@ class ArciumAppTests(unittest.TestCase):
                 plistlib.dump(info, handle)
         return app
 
+    def _helper(self, app: Path, name: str = "Helium Helper") -> Path:
+        contents = app / "Contents/Frameworks" / (name + ".app") / "Contents"
+        executable = contents / "MacOS" / name
+        executable.parent.mkdir(parents=True, exist_ok=True)
+        executable.write_bytes(b"inert helper fixture")
+        executable.chmod(0o755)
+        (contents / "Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleIdentifier": arcium_app.ARCIUM_BUNDLE_ID + ".helper",
+            "CFBundleExecutable": name,
+        }))
+        return executable
+
     def test_metadata_uses_stable_identity_and_keeps_executables(self) -> None:
         app = self._app("Arcium.app")
         changed = arcium_app.rewrite_arcium_metadata(app)
@@ -92,7 +107,7 @@ class ArciumAppTests(unittest.TestCase):
         out_dir = self.temporary / "out"
         out_dir.mkdir()
         (out_dir / "args.gn").write_text(
-            "is_component_build = true\n", encoding="utf-8"
+            "  is_component_build = true  # component runtime\n", encoding="utf-8"
         )
         (out_dir / "libc++_chrome.dylib").write_bytes(b"runtime")
         (out_dir / "libbase.dylib").write_bytes(b"base")
@@ -356,6 +371,7 @@ class ArciumAppTests(unittest.TestCase):
         app = self._app("Arcium.app")
         arcium_app.rewrite_arcium_metadata(app)
         profile = self.temporary / "Arcium"
+        helper = self._helper(app)
         args = dict(source_profile=self.temporary / "source", target_profile=profile, install_path=app)
         snapshot = f"123 {app}/Contents/MacOS/Helium --flag-switches-begin --flag-switches-end"
         for owner in (123, 456, None):
@@ -371,6 +387,15 @@ class ArciumAppTests(unittest.TestCase):
             for suffix in (" --user-data-dir=/wrong", " --type=renderer", " --use-mock-keychain"):
                 with self.subTest(suffix=suffix), self.assertRaises(arcium_app.ArciumError):
                     arcium_app.restart_candidate(snapshot + suffix, **args)
+            owned_helper = f"456 {helper} --type=renderer"
+            self.assertEqual(arcium_app.restart_candidate(
+                snapshot + "\n" + owned_helper, parent_pids={456: 123}, **args,
+            ), 123)
+            for suffix, parents in (("", {}), (" --user-data-dir=/wrong", {456: 123}), (" --use-mock-keychain", {456: 123})):
+                with self.subTest(helper_suffix=suffix, parents=parents), self.assertRaises(arcium_app.ArciumError):
+                    arcium_app.restart_candidate(snapshot + "\n" + owned_helper + suffix, parent_pids=parents, **args)
+            with patch("arcium_app.live_singleton_owner", return_value=None), self.assertRaises(arcium_app.ArciumError):
+                arcium_app.require_closed(ps_text=owned_helper, **args)
             info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
             info["CrProductDirName"] = "net.imput.helium"
             (app / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
@@ -382,12 +407,14 @@ class ArciumAppTests(unittest.TestCase):
         arcium_app.rewrite_arcium_metadata(app)
         profile = self.temporary / "Arcium"
         command = f"123 {app}/Contents/MacOS/Helium"
-        for suffix, owner, state, ok in (
-            (None, None, "stopped", True),
-            ("", 123, "running", True),
-            (" --user-data-dir=/other", None, "profile-mismatch", False),
-            ("", 456, "profile-mismatch", False),
-            (" --use-mock-keychain", 123, "running", False),
+        for suffix, owner, state, ok, unexpected, mock_pids in (
+            (None, None, "stopped", True, [], []),
+            ("", 123, "running", True, [], []),
+            (" --user-data-dir=/other", None, "profile-mismatch", False, [123], []),
+            ("", 456, "profile-mismatch", False, [123], []),
+            (" --use-mock-keychain", 123, "running", False, [], [123]),
+            (f"\n456 {app}/Contents/MacOS/Helium --user-data-dir=/other", 123, "profile-mismatch", False, [456], []),
+            (f"\n456 {app}/Contents/MacOS/Helium --user-data-dir=/other --use-mock-keychain", 123, "profile-mismatch", False, [456], [456]),
         ):
             with self.subTest(suffix=suffix, owner=owner), \
                  patch("arcium_app.arcium_profile_path", return_value=profile), \
@@ -397,6 +424,9 @@ class ArciumAppTests(unittest.TestCase):
                 result = arcium_app.status_action(install_path=app)
                 self.assertEqual(result["state"], state)
                 self.assertEqual(result["ok"], ok)
+                self.assertEqual(result["unexpected_pids"], unexpected)
+                self.assertEqual(result["mock_keychain_pids"], mock_pids)
+                self.assertEqual(result["mock_keychain"], bool(mock_pids))
 
     def test_renamed_executable_is_recognized_by_status_and_restart(self) -> None:
         app = self._app("Arcium.app")
@@ -445,15 +475,47 @@ class ArciumAppTests(unittest.TestCase):
 
     def test_restart_rejects_other_profiles_and_ambiguous_main(self) -> None:
         args = self._profiles()
-        self.assertEqual(arcium_app.restart_candidate(self._running(), **args), 123)
-        for snapshot in (
-            self._running() + "\n" + self._running(456),
-            self._running().replace(str(args["target_profile"]), str(args["target_profile"]) + "-other"),
-            self._running() + "\n456 /Applications/Helium.app/Contents/MacOS/Helium",
-            self._running() + " --type=renderer",
+        owner_for = lambda spec: 123 if spec.user_data_dir == args["target_profile"] else None
+        with patch("arcium_app.live_singleton_owner", side_effect=owner_for):
+            self.assertEqual(arcium_app.restart_candidate(self._running(), **args), 123)
+        for snapshot, owner in (
+            (self._running(), None),
+            (self._running() + " other", None),
+            (self._running().replace(f"--user-data-dir={args['target_profile']}", f"--user-data-dir='{args['target_profile']} other'"), None),
+            (self._running() + "\n" + self._running(456), 123),
+            (self._running().replace(str(args["target_profile"]), str(args["target_profile"]) + "-other"), 123),
+            (self._running() + "\n456 /Applications/Helium.app/Contents/MacOS/Helium", 123),
+            (self._running() + " --type=renderer", 123),
         ):
-            with self.subTest(snapshot=snapshot), self.assertRaises(arcium_app.ArciumError):
+            with self.subTest(snapshot=snapshot, owner=owner), \
+                 patch("arcium_app.live_singleton_owner", side_effect=lambda spec: owner if spec.user_data_dir == args["target_profile"] else None), \
+                 self.assertRaises(arcium_app.ArciumError):
                 arcium_app.restart_candidate(snapshot, **args)
+        helper = self._helper(args["install_path"])
+        gpu = self._helper(args["install_path"], "Helium Helper (GPU)")
+        child = f"456 {helper} --type=renderer --user-data-dir={args['target_profile']}"
+        grandchild = f"789 {gpu} --type=gpu-process --user-data-dir={args['target_profile']}"
+        foreign = f"999 /Other.app/Contents/MacOS/Other --type=renderer --user-data-dir={args['target_profile']}"
+        for children, parents, allowed in (
+            (child, {456: 123}, True),
+            (child + "\n" + grandchild, {456: 123, 789: 456}, True),
+            (child, {}, False),
+            (child, {456: 999, 999: 123}, False),
+            (child + "\n" + grandchild, {456: 789, 789: 456}, False),
+            (child, {456: "123"}, False),
+            (child + "\n" + child, {456: 123}, False),
+            (child.replace(str(args["target_profile"]), "/other"), {456: 123}, False),
+            (child + " --use-mock-keychain", {456: 123}, False),
+            (child + "\n" + foreign, {456: 123, 999: 123}, False),
+        ):
+            with self.subTest(children=children, parents=parents), \
+                 patch("arcium_app.live_singleton_owner", side_effect=owner_for):
+                snapshot = self._running() + "\n" + children
+                if allowed:
+                    self.assertEqual(arcium_app.restart_candidate(snapshot, parent_pids=parents, **args), 123)
+                else:
+                    with self.assertRaises(arcium_app.ArciumError):
+                        arcium_app.restart_candidate(snapshot, parent_pids=parents, **args)
 
     def test_live_profile_lock_blocks_even_when_process_snapshot_is_empty(self) -> None:
         with patch("arcium_app.live_singleton_owner", return_value=987):
@@ -463,23 +525,30 @@ class ArciumAppTests(unittest.TestCase):
                 arcium_app.restart_candidate("", **self._profiles())
 
     def test_changed_pid_is_not_quit(self) -> None:
+        args = self._profiles()
         with patch("arcium_app._ps_snapshot", side_effect=[self._running(), self._running(456)]), \
+             patch("arcium_app.live_singleton_owner", side_effect=lambda spec: 123 if spec.user_data_dir == args["target_profile"] else None), \
              patch("arcium_app.request_graceful_quit") as request:
-            with self.assertRaisesRegex(arcium_app.ArciumError, "process changed"):
-                arcium_app.quit_for_restart(**self._profiles())
+            with self.assertRaises(arcium_app.ArciumError):
+                arcium_app.quit_for_restart(**args)
         request.assert_not_called()
 
     def test_quit_waits_for_exit_without_force(self) -> None:
+        args = self._profiles()
+        owner = [123]
         with patch("arcium_app._ps_snapshot", side_effect=[self._running(), self._running(), ""]), \
-             patch("arcium_app.request_graceful_quit") as request:
-            arcium_app.quit_for_restart(**self._profiles())
-        request.assert_called_once_with(123, self._profiles()["install_path"])
+             patch("arcium_app.live_singleton_owner", side_effect=lambda spec: owner[0] if spec.user_data_dir == args["target_profile"] else None), \
+             patch("arcium_app.request_graceful_quit", side_effect=lambda *arguments: owner.__setitem__(0, None)) as request:
+            arcium_app.quit_for_restart(**args)
+        request.assert_called_once_with(123, args["install_path"])
 
     def test_cancelled_quit_stops_handoff(self) -> None:
+        args = self._profiles()
         with patch("arcium_app._ps_snapshot", return_value=self._running()), \
+             patch("arcium_app.live_singleton_owner", side_effect=lambda spec: 123 if spec.user_data_dir == args["target_profile"] else None), \
              patch("arcium_app.request_graceful_quit"):
             with self.assertRaisesRegex(arcium_app.ArciumError, "not replaced"):
-                arcium_app.quit_for_restart(**self._profiles(), timeout=0)
+                arcium_app.quit_for_restart(**args, timeout=0)
 
     def test_launch_requires_expected_process_and_live_profile_ownership(self) -> None:
         args = self._profiles()
@@ -495,38 +564,72 @@ class ArciumAppTests(unittest.TestCase):
                     with self.assertRaisesRegex(arcium_app.ArciumError, "expected process"):
                         arcium_app.verify_arcium_launch(args["install_path"], args["target_profile"], 123)
 
-    def test_install_verification_failure_restores_previous_directory(self) -> None:
-        old = self.temporary / "installed"
-        old.mkdir()
-        (old / "version").write_text("old")
-        candidate = self.temporary / "candidate"
-        candidate.mkdir()
-        (candidate / "version").write_text("new")
+    def test_install_verification_failure_retains_bundles_and_profile_data(self) -> None:
+        for error in (arcium_app.ArciumError, KeyboardInterrupt):
+            with self.subTest(error=error):
+                old = self.temporary / error.__name__ / "installed"
+                old.mkdir(parents=True)
+                (old / "version").write_text("old")
+                candidate = old.parent / "candidate"
+                candidate.mkdir()
+                (candidate / "version").write_text("new")
+                profile_data = old.parent / "profile" / "new-data"
+                profile_data.parent.mkdir()
 
-        def fail(path: Path) -> None:
-            self.assertEqual((path / "version").read_text(), "new")
-            raise arcium_app.ArciumError("bad signature")
+                def fail(path: Path) -> None:
+                    self.assertEqual((path / "version").read_text(), "new")
+                    if path == old:
+                        profile_data.write_text("new profile schema")
+                        raise error("bad signature")
 
-        with self.assertRaisesRegex(arcium_app.ArciumError, "bad signature"):
-            arcium_app._replace_directory(candidate, old, verifier=fail)
-        self.assertEqual((old / "version").read_text(), "old")
+                with patch("arcium_app.verify_installed_arcium", side_effect=fail) as verify, \
+                     self.assertRaisesRegex(arcium_app.ArciumError, "Previous bundle retained") as caught:
+                    arcium_app.install_arcium(candidate, old)
+                previous, = old.parent.glob(".installed.previous-*")
+                self.assertEqual(verify.call_count, 2)
+                self.assertIn(str(old), str(caught.exception))
+                self.assertIn(str(previous), str(caught.exception))
+                self.assertEqual((old / "version").read_text(), "new")
+                self.assertEqual((previous / "version").read_text(), "old")
+                self.assertEqual(profile_data.read_text(), "new profile schema")
+                self.assertFalse(list(old.parent.glob(".installed.install-*")))
 
-    def test_failed_atomic_replace_restores_previous_directory(self) -> None:
-        old = self.temporary / "installed"
-        old.mkdir()
-        (old / "version").write_text("old")
-        candidate = self.temporary / "candidate"
-        candidate.mkdir()
+    def test_failed_atomic_replace_observes_publication_before_recovery(self) -> None:
         replace = os.replace
+        for preserve_published in (False, True):
+            for boundary, error in (("candidate-before", OSError), ("candidate-after", KeyboardInterrupt), ("previous-after", KeyboardInterrupt)):
+                with self.subTest(boundary=boundary, installed=preserve_published):
+                    old = self.temporary / str(preserve_published) / boundary / "installed"
+                    old.mkdir(parents=True)
+                    (old / "version").write_text("old")
+                    candidate = old.parent / "candidate"
+                    candidate.mkdir()
+                    (candidate / "version").write_text("new")
 
-        def fail(source: Path, target: Path) -> None:
-            if source == candidate:
-                raise OSError("rename failed")
-            replace(source, target)
+                    def fail(source: Path, target: Path) -> None:
+                        if source == candidate and boundary == "candidate-before":
+                            raise error("rename failed")
+                        replace(source, target)
+                        if (source == candidate and boundary == "candidate-after") or (source == old and boundary == "previous-after"):
+                            raise error("rename interrupted")
 
-        with patch("arcium_app.os.replace", side_effect=fail), self.assertRaises(OSError):
-            arcium_app._replace_directory(candidate, old)
-        self.assertEqual((old / "version").read_text(), "old")
+                    published = preserve_published and boundary == "candidate-after"
+                    expected_error = arcium_app.ArciumError if published else error
+                    with patch("arcium_app.os.replace", side_effect=fail), self.assertRaises(expected_error) as caught:
+                        arcium_app._replace_directory(candidate, old, preserve_published=preserve_published)
+                    if published:
+                        previous, = old.parent.glob(".installed.previous-*")
+                        self.assertEqual((old / "version").read_text(), "new")
+                        self.assertEqual((previous / "version").read_text(), "old")
+                        self.assertIn(str(previous), str(caught.exception))
+                        self.assertFalse(candidate.exists())
+                    else:
+                        self.assertEqual((old / "version").read_text(), "old")
+                        if boundary == "candidate-after":
+                            self.assertFalse(candidate.exists())
+                        else:
+                            self.assertEqual((candidate / "version").read_text(), "new")
+                        self.assertFalse(list(old.parent.glob(".installed.previous-*")))
 
     def _update_fixture(self, stack: ExitStack):
         material_fixture(self.temporary)
@@ -583,14 +686,34 @@ class ArciumAppTests(unittest.TestCase):
             self.assertEqual((destination / "version").read_text(), "new")
             self.assertFalse(list(destination.parent.glob(".installed.app.previous-*")))
 
-    def test_failed_launch_retains_previous_bundle_without_profile_rollback(self) -> None:
-        with ExitStack() as stack:
-            paths, home, destination, mocks = self._update_fixture(stack)
-            mocks["launch_arcium"].side_effect = OSError("launch failed")
-            with self.assertRaisesRegex(arcium_app.ArciumError, "Previous bundle retained"):
-                arcium_app._update_action_locked(paths, home=home, install_path=destination, restart=True)
-            previous, = destination.parent.glob(".installed.app.previous-*")
-            self.assertEqual((previous / "version").read_text(), "old")
+    def test_failed_handoff_retains_previous_bundle_without_profile_rollback(self) -> None:
+        for failure in ("verify_installed_arcium", "launch_arcium", "verify_arcium_launch"):
+            for error in (OSError, KeyboardInterrupt):
+                with self.subTest(failure=failure, error=error), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:
+                    original = self.temporary
+                    self.temporary = Path(temporary)
+                    try:
+                        paths, home, destination, mocks = self._update_fixture(stack)
+                        profile_data = arcium_app.arcium_profile_path(home) / "new-data"
+
+                        def fail(*arguments) -> None:
+                            if failure == "verify_installed_arcium" and arguments[0] != destination:
+                                return
+                            profile_data.write_text("new profile schema")
+                            raise error("handoff interrupted")
+
+                        mocks[failure].side_effect = fail
+                        with self.assertRaisesRegex(arcium_app.ArciumError, "Previous bundle retained") as caught:
+                            arcium_app._update_action_locked(paths, home=home, install_path=destination, restart=True)
+                        previous, = destination.parent.glob(".installed.app.previous-*")
+                        self.assertIn(str(previous), str(caught.exception))
+                        self.assertEqual((previous / "version").read_text(), "old")
+                        self.assertEqual((destination / "version").read_text(), "new")
+                        self.assertEqual(profile_data.read_text(), "new profile schema")
+                        if failure == "verify_installed_arcium":
+                            mocks["launch_arcium"].assert_not_called()
+                    finally:
+                        self.temporary = original
 
     def test_fresh_conflict_after_quit_prevents_install(self) -> None:
         with ExitStack() as stack:

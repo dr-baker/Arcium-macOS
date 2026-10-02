@@ -132,6 +132,31 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertIn("-n", self.runner.calls[-1])
         self.assertEqual(self.runner.calls[-1][-1], "obj/chrome/foo.o")
 
+    def test_pending_recovery_blocks_compile_and_relink_but_allows_plans(self) -> None:
+        snapshot = self.source.parent / ".arcium/replay-timestamps.json"
+        snapshot.parent.mkdir()
+        snapshot.write_text("pending recovery, including unreadable content")
+        operations = (
+            lambda: self.builder.compile(("obj/chrome/foo.o",)),
+            self.builder.relink,
+            lambda: self.builder.relink(resources=True),
+        )
+        for operation in operations:
+            with self.subTest(operation=operation):
+                self.runner.calls.clear()
+                result = operation()
+                self.assertFalse(result.ok)
+                self.assertIn("recovery is pending", result.error)
+                self.assertTrue(self.runner.calls)
+                self.assertTrue(all("-n" in call or "query" in call
+                                    for call in self.runner.calls))
+                self.assertNotIn("focused-compile", result.proof_gates)
+                self.assertNotIn("component-relinked", result.proof_gates)
+        plan = self.builder.build_plan(("obj/chrome/foo.o",))
+        self.assertTrue(plan.ok)
+        self.assertEqual(plan.edge_count, 2)
+        self.assertTrue(snapshot.exists())
+
     def test_edge_budget_refuses_before_compile(self) -> None:
         self.runner.edge_count = 501
         result = self.builder.compile(("obj/chrome/foo.o",))

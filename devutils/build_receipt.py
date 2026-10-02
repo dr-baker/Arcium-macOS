@@ -48,6 +48,7 @@ MATERIAL_BUILD_INPUTS = (
     "revision.txt",
     "resources",
     "devutils/arcium_app.py",
+    "devutils/build_diagnostics.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
     "devutils/build_preparation.py",
@@ -75,7 +76,12 @@ MATERIAL_BUILD_INPUTS = (
 
 EXECUTOR_BUILD_INPUTS = (
     "dev.sh",
+    "entitlements/app-entitlements.plist",
+    "entitlements/helper-entitlements.plist",
+    "entitlements/helper-gpu-entitlements.plist",
+    "entitlements/helper-renderer-entitlements.plist",
     "devutils/arcium_app.py",
+    "devutils/build_diagnostics.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
     "devutils/build_preparation.py",

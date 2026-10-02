@@ -16,7 +16,7 @@ import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Callable, Mapping, Sequence
 
 from build_execution import (
     ExecutionError,
@@ -241,28 +241,43 @@ def _replace_directory(
     *,
     verifier: Callable[[Path], None] | None = None,
     retain_previous: bool = False,
+    preserve_published: bool = False,
 ) -> Path | None:
+    """Restore pre-publication failures; installed apps retain published state."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     previous = destination.parent / f".{destination.name}.previous-{uuid.uuid4().hex}"
-    moved_previous = False
-    installed = False
+    candidate_identity = candidate.lstat()
+    published = False
     try:
         if destination.exists() or destination.is_symlink():
             if destination.is_symlink() or not destination.is_dir():
                 raise ArciumError(f"refusing to replace non-directory: {destination}")
             os.replace(destination, previous)
-            moved_previous = True
         os.replace(candidate, destination)
-        installed = True
+        published = True
         if verifier is not None:
             verifier(destination)
-    except Exception:
-        if installed:
+    except BaseException as error:
+        if not published:
+            try:
+                destination_identity = destination.lstat()
+                published = (destination_identity.st_dev, destination_identity.st_ino) == (
+                    candidate_identity.st_dev, candidate_identity.st_ino,
+                )
+            except FileNotFoundError:
+                pass
+        if published and preserve_published:
+            recovery = f" Previous bundle retained at {previous}." if previous.exists() else ""
+            raise ArciumError(
+                f"Arcium replacement failed after publication at {destination}.{recovery} "
+                f"Profile was not rolled back: {error}"
+            ) from error
+        if published and destination.exists():
             shutil.rmtree(destination)
-        if moved_previous and not destination.exists() and previous.exists():
+        if not destination.exists() and previous.exists():
             os.replace(previous, destination)
         raise
-    if retain_previous and moved_previous:
+    if retain_previous and previous.exists():
         return previous
     if previous.exists():
         shutil.rmtree(previous)
@@ -378,8 +393,13 @@ def process_conflicts(
         stripped = line.strip()
         if not stripped:
             continue
+        fields = stripped.split(maxsplit=1)
+        command = fields[1] if len(fields) == 2 else ""
         is_release = source_profile is not None and "/Helium.app/Contents/MacOS/Helium" in stripped
-        is_arcium = str(install_path / "Contents" / "MacOS") + "/" in stripped
+        is_arcium = command.startswith(str(install_path / "Contents" / "MacOS") + "/") or (
+            command.startswith(str(install_path / "Contents") + "/")
+            and re.search(r"\.app/Contents/MacOS/", command) is not None
+        )
         source_selected = source_profile is not None and f"--user-data-dir={source_profile}" in stripped
         target_selected = f"--user-data-dir={target_profile}" in stripped
         is_dev = "/Helium Dev.app/Contents/MacOS/Helium" in stripped
@@ -439,10 +459,47 @@ def installed_executable(install_path: Path) -> Path:
     return install_path / "Contents" / "MacOS" / _safe_executable_name(info.get("CFBundleExecutable"))
 
 
-def installed_processes(snapshot: str, install_path: Path, profile: Path) -> ProcessCohort:
+def _ps_parent_snapshot() -> dict[int, int]:
+    result = subprocess.run(
+        ["/bin/ps", "-axo", "pid=,ppid="], check=True, capture_output=True, text=True,
+    )
+    parents = {}
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        match = re.fullmatch(r"\s*(\d+)\s+(\d+)\s*", line)
+        if match is None or int(match[1]) in parents:
+            raise ArciumError("process ancestry is malformed or ambiguous")
+        parents[int(match[1])] = int(match[2])
+    return parents
+
+
+def _installed_helper_executables(install_path: Path) -> tuple[Path, ...]:
+    bundle = install_path.resolve()
+    helpers = []
+    for app in (install_path / "Contents/Frameworks").rglob("*.app"):
+        try:
+            info = _read_plist(app / "Contents/Info.plist")
+            identifier = info.get("CFBundleIdentifier")
+            if not isinstance(identifier, str) or not identifier.startswith(ARCIUM_BUNDLE_ID + "."):
+                continue
+            executable = app / "Contents/MacOS" / _safe_executable_name(info.get("CFBundleExecutable"))
+            executable.resolve().relative_to(bundle)
+            if executable.is_file() and os.access(executable, os.X_OK):
+                helpers.append(executable)
+        except (ArciumError, BundleError, OSError, ValueError):
+            continue
+    return tuple(helpers)
+
+
+def installed_processes(
+    snapshot: str, install_path: Path, profile: Path, *,
+    parent_pids: Mapping[int, int] | None = None,
+) -> ProcessCohort:
     """Recognize explicit launches and verified Dock/Finder launches alike."""
     if not install_path.exists():
         return ProcessCohort((), None)
+    verify_profile_identity(install_path)
     executable = installed_executable(install_path)
     explicit = discover_chromium_processes(
         snapshot, executable_path=executable, user_data_dir=profile,
@@ -469,14 +526,61 @@ def installed_processes(snapshot: str, install_path: Path, profile: Path) -> Pro
                 records.append(ProcessRecord(owner, command, (str(executable),)))
     mains = [record for record in records
              if not re.search(r"(?:^|\s)--type(?:=|\s|$)", record.command)]
-    return ProcessCohort(tuple(records), mains[0].pid if len(mains) == 1 else None)
+    if len(mains) != 1:
+        return ProcessCohort(tuple(mains), None)
+    main = mains[0]
+    records = [main]
+    if _profile_owner(profile) != main.pid:
+        return ProcessCohort(tuple(records), main.pid)
+    default_main = profile == arcium_profile_path() and not re.search(
+        r"(?:^|\s)--user-data-dir(?:=|\s|$)", main.command,
+    )
+    candidates = []
+    for helper in _installed_helper_executables(install_path):
+        explicit_helpers = discover_chromium_processes(
+            snapshot, executable_path=helper, user_data_dir=profile,
+        )
+        candidates.extend(record for record in explicit_helpers.records
+                          if re.search(r"(?:^|\s)--type(?:=|\s|$)", record.command))
+        if default_main:
+            for line in snapshot.splitlines():
+                match = re.fullmatch(r"\s*(\d+)\s+(.+?)\s*", line)
+                if match is None:
+                    continue
+                command = match[2]
+                if not command.startswith(str(helper) + " "):
+                    continue
+                if re.search(r"(?:^|\s)--user-data-dir(?:=|\s|$)", command):
+                    continue
+                if re.search(r"(?:^|\s)--type(?:=|\s|$)", command):
+                    candidates.append(ProcessRecord(int(match[1]), command, (str(helper),)))
+    if candidates:
+        parents = _ps_parent_snapshot() if parent_pids is None else parent_pids
+        unique = {record.pid: record for record in candidates
+                  if sum(other.pid == record.pid for other in candidates) == 1}
+
+        def owned_helper(pid: int) -> bool:
+            seen = set()
+            while pid != main.pid:
+                if pid in seen or pid not in unique:
+                    return False
+                seen.add(pid)
+                parent = parents.get(pid)
+                if type(parent) is not int or parent <= 0:
+                    return False
+                pid = parent
+            return True
+
+        records.extend(record for pid, record in unique.items() if owned_helper(pid))
+    return ProcessCohort(tuple(sorted(records, key=lambda record: record.pid)), main.pid)
 
 
 def restart_candidate(
-    snapshot: str, *, source_profile: Path | None, target_profile: Path, install_path: Path
+    snapshot: str, *, source_profile: Path | None, target_profile: Path, install_path: Path,
+    parent_pids: Mapping[int, int] | None = None,
 ) -> int | None:
     """Permit only one exact installed browser; other profile owners still block."""
-    cohort = installed_processes(snapshot, install_path, target_profile)
+    cohort = installed_processes(snapshot, install_path, target_profile, parent_pids=parent_pids)
     if any(re.search(r"(?:^|\s)--use-mock-keychain(?:=|\s|$)", record.command)
            for record in cohort.records):
         raise ArciumError("persistent Arcium is running with a mock Keychain; quit it before updating")
@@ -497,6 +601,8 @@ def restart_candidate(
             "restart requires one exact installed Arcium using its persistent profile; "
             "quit other Helium/Arcium profile owners first"
         )
+    if _profile_owner(target_profile) != cohort.main_pid:
+        raise ArciumError("restart requires the installed Arcium to own its persistent profile")
     return cohort.main_pid
 
 
@@ -577,7 +683,9 @@ def prepared_install(candidate: Path, destination: Path):
 
 def install_arcium(candidate: Path, destination: Path) -> str:
     with prepared_install(candidate, destination) as (staging, method):
-        _replace_directory(staging, destination, verifier=verify_installed_arcium)
+        _replace_directory(
+            staging, destination, verifier=verify_installed_arcium, preserve_published=True,
+        )
     return method
 
 
@@ -690,6 +798,7 @@ def _update_action_locked(
             verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
             previous = _replace_directory(
                 staging, install_path, verifier=verify_installed_arcium, retain_previous=True,
+                preserve_published=True,
             )
             try:
                 require_closed(**profile_arguments)
@@ -697,7 +806,7 @@ def _update_action_locked(
                 pid = launch_arcium(install_path, target_profile) if launch else None
                 if pid is not None:
                     verify_arcium_launch(install_path, target_profile, pid)
-            except Exception as error:
+            except BaseException as error:
                 recovery = f" Previous bundle retained at {previous}." if previous else ""
                 raise ArciumError(f"Arcium handoff failed.{recovery} Profile was not rolled back: {error}") from error
             if previous is not None:
@@ -795,16 +904,20 @@ def status_action(*, install_path: Path = DEFAULT_INSTALL_PATH) -> dict[str, obj
     snapshot = _ps_snapshot()
     cohort = installed_processes(snapshot, install_path, profile)
     executable = re.escape(str(installed_executable(install_path)))
-    installed_running = any(
-        re.match(rf"^\s*\d+\s+{executable}(?:\s|$)", line)
-        and not re.search(r"(?:^|\s)--type(?:=|\s|$)", line)
-        for line in snapshot.splitlines()
-    )
+    mains = []
+    for line in snapshot.splitlines():
+        match = re.match(rf"^\s*(\d+)\s+({executable}(?:\s.*)?$)", line)
+        if match is not None and not re.search(r"(?:^|\s)--type(?:=|\s|$)", match[2]):
+            mains.append(ProcessRecord(int(match[1]), match[2], ()))
     owner = _profile_owner(profile)
-    mock_keychain = any(re.search(r"(?:^|\s)--use-mock-keychain(?:=|\s|$)", record.command)
-                        for record in cohort.records)
-    running = cohort.main_pid is not None and owner == cohort.main_pid
-    stopped = not installed_running and owner is None
+    mock_keychain_pids = sorted({record.pid for record in mains
+                               if re.search(r"(?:^|\s)--use-mock-keychain(?:=|\s|$)", record.command)})
+    main_pids = sorted({record.pid for record in mains})
+    expected_pid = cohort.main_pid if owner == cohort.main_pid else None
+    unexpected_pids = [pid for pid in main_pids if pid != expected_pid]
+    running = expected_pid is not None and main_pids == [expected_pid]
+    stopped = not main_pids and owner is None
+    mock_keychain = bool(mock_keychain_pids)
     return {
         "ok": (running and not mock_keychain) or stopped,
         "action": "arcium-status",
@@ -813,6 +926,9 @@ def status_action(*, install_path: Path = DEFAULT_INSTALL_PATH) -> dict[str, obj
         "product_directory_name": DEFAULT_PROFILE_NAME,
         "profile": str(profile),
         "pid": cohort.main_pid,
+        "main_pids": main_pids,
+        "unexpected_pids": unexpected_pids,
+        "mock_keychain_pids": mock_keychain_pids,
         "profile_owner_pid": owner,
         "state": "running" if running else ("stopped" if stopped else "profile-mismatch"),
         "mock_keychain": mock_keychain,
@@ -824,6 +940,10 @@ def _emit(document: dict[str, object], json_mode: bool) -> None:
         print(json.dumps(document, sort_keys=True))
     elif document.get("action") == "arcium-status":
         print(f"arcium: {document['state']}, PID {document['pid']}, profile owner {document['profile_owner_pid']}")
+        if document["unexpected_pids"]:
+            print(f"arcium: unexpected installed main PIDs {document['unexpected_pids']}")
+        if document["mock_keychain_pids"]:
+            print(f"arcium: mock Keychain PIDs {document['mock_keychain_pids']}")
         print(f"arcium: bundle {document['app_path']}")
         print(f"arcium: profile root {document['profile']}")
         print(f"arcium: mock Keychain {document['mock_keychain']}")

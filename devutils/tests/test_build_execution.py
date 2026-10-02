@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import shutil
 import sys
 from unittest.mock import patch
 
@@ -13,11 +14,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from build_execution import (  # noqa: E402
     ExecutionError,
     ExecutionReceipt,
+    component_runtime_libraries,
     record_execution,
     require_current_execution,
     tree_sha256,
 )
-from build_receipt import SourceReceipt, material_inputs_sha256  # noqa: E402
+from build_receipt import EXECUTOR_BUILD_INPUTS, SourceReceipt, material_inputs_sha256  # noqa: E402
 from build_preparation import acquisition_target, input_digest, prepared_build_digest, record_stage
 from devutils.tests.test_build_receipt import material_fixture
 from replay_contract import ReplayReceipt  # noqa: E402
@@ -51,7 +53,7 @@ class BuildExecutionTests(unittest.TestCase):
         executable.write_bytes(b"browser")
         (out / "libchrome_dll.dylib").write_bytes(b"component")
         (out / "libtest_gpu.dylib").write_bytes(b"gpu component")
-        (out / "args.gn").write_text("is_component_build = true\n", encoding="utf-8")
+        (out / "args.gn").write_text("  is_component_build\t= true  # component fixture\n", encoding="utf-8")
 
     def test_receipt_is_deterministic_and_binds_replay_and_lane(self) -> None:
         replay = self.replay()
@@ -136,16 +138,31 @@ class BuildExecutionTests(unittest.TestCase):
                     require_current_execution(
                         Path(temporary) / "worktree", build_root, lane="local"
                     )
-                dev_script = Path(temporary) / "worktree" / "dev.sh"
-                original_script = dev_script.read_bytes()
-                dev_script.write_text("changed\n", encoding="utf-8")
-                with self.assertRaisesRegex(ExecutionError, "changed"):
-                    require_current_execution(
-                        Path(temporary) / "worktree", build_root, lane="heavy"
-                    )
-                # Restore the input so the next rejection must concern the
-                # runtime library, rather than the earlier source mutation.
-                dev_script.write_bytes(original_script)
+                for relative in ("dev.sh", "devutils/build_diagnostics.py"):
+                    with self.subTest(selected_input=relative):
+                        selected_input = worktree / relative
+                        original = selected_input.read_bytes()
+                        selected_input.write_bytes(original + b"changed selected input\n")
+                        with self.assertRaisesRegex(ExecutionError, "changed"):
+                            require_current_execution(worktree, build_root, lane="heavy")
+                        selected_input.write_bytes(original)
+                        self.assertIsNotNone(require_current_execution(worktree, build_root, lane="heavy"))
+
+                executor = Path(temporary) / "executor"
+                actual_executor = Path(__file__).resolve().parents[2]
+                for relative in EXECUTOR_BUILD_INPUTS:
+                    destination = executor / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(actual_executor / relative, destination)
+                with patch("build_receipt.__file__", str(executor / "devutils/build_receipt.py")):
+                    self.assertIsNotNone(require_current_execution(worktree, build_root, lane="heavy"))
+                    diagnostics = executor / "devutils/build_diagnostics.py"
+                    diagnostics.write_bytes(diagnostics.read_bytes() + b"changed actual executor\n")
+                    with self.assertRaisesRegex(ExecutionError, "changed"):
+                        require_current_execution(worktree, build_root, lane="heavy")
+
+                # Restored selected inputs and the real executor leave the next
+                # rejection specific to runtime library drift.
                 component = (
                     build_root / "src" / "out" / "Default" / "libtest_gpu.dylib"
                 )
@@ -154,6 +171,17 @@ class BuildExecutionTests(unittest.TestCase):
                     require_current_execution(
                         Path(temporary) / "worktree", build_root, lane="heavy"
                     )
+
+
+    def test_component_expression_cannot_omit_runtime_libraries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            out = Path(temporary)
+            (out / "libchrome_dll.dylib").write_bytes(b"runtime")
+            for expression in ("is_component_build = is_debug", "is_component_build = true\nis_component_build = false"):
+                with self.subTest(expression=expression):
+                    (out / "args.gn").write_text(expression + "\n")
+                    with self.assertRaises(ExecutionError):
+                        component_runtime_libraries(out)
 
 
 if __name__ == "__main__":

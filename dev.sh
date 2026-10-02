@@ -191,6 +191,8 @@ ___helium_configure_inner() {
         echo "usage: he configure [--refresh-defaults]" >&2
         return 2
     fi
+    # GN bootstrap compiles before the configured-stage receipt is recorded.
+    ___helium_require_replay_proof || return
     ___helium_setup_python || return
     if [ "${1:-}" = "--refresh-defaults" ]; then
         ___helium_setup_gn || return
