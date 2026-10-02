@@ -586,7 +586,10 @@ patch only in the lane-local merged series.
 #### Development command reference
 
 Run `he` for the common commands. Run `he help --advanced` for patch and build
-maintenance commands.
+maintenance commands, including `he version`, which stamps the selected Chromium
+source through the locked preparation transaction. `he help`, `he -h`, and
+`he --help` also show help and return success. Unknown commands or unsupported help
+arguments return exit status 2.
 
 For Quilt details, run `man quilt`.
 

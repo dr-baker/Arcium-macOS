@@ -943,6 +943,7 @@ __helium_menu() {
         presetup) ___helium_setup_presetup;;
         configure) shift; ___helium_configure "$@";;
         resources) ___helium_resources;;
+        version) ___helium_version;;
 
         sub|unsub) ___helium_substitution "$1";;
         namesub|nameunsub) ___helium_name_substitution "$1";;
@@ -975,7 +976,11 @@ __helium_menu() {
         relink) shift; ___helium_relink "$@";;
         build-full) shift; ___helium_build_full "$@";;
         reset) shift; ___helium_reset "$@";;
-        *)
+        ""|help|-h|--help)
+            if [ "$#" -gt 2 ] || { [ "$#" -eq 2 ] && [ "$2" != "--advanced" ]; }; then
+                echo "usage: he help [--advanced]" >&2
+                return 2
+            fi
             echo "usage: he <command>" >&2
             echo "\tarcium - update, install, and launch the stable personal browser" >&2
             echo "\tarcium status [--json] - inspect the installed app and persistent profile without a build lane" >&2
@@ -989,7 +994,7 @@ __helium_menu() {
             echo "\tstatus|stop [profile options] - inspect or stop the exact Dev app" >&2
             echo "\thelp --advanced - show low-level maintenance commands" >&2
 
-            if [ "$1" != "help" ] || [ "$2" != "--advanced" ]; then
+            if [ "${2:-}" != "--advanced" ]; then
                 return 0
             fi
 
@@ -998,6 +1003,7 @@ __helium_menu() {
             echo "\tpresetup - downloads sources, sets up GN, and prepares third-party dependencies" >&2
             echo "\tconfigure [--refresh-defaults] - generate graph; explicit flag rewrites default args" >&2
             echo "\tresources - generates and copies helium resources (such as icons)" >&2
+            echo "\tversion - stamp the selected Chromium source with the current Arcium version" >&2
 
             echo "\n" >&2
             echo "\tsub - apply google domain and name substitutions" >&2
@@ -1034,6 +1040,12 @@ __helium_menu() {
             echo "\tbuild-full --approved [--allow-internal] - explicitly permit a broad browser build" >&2
             echo "\tbuild - disabled; cannot accidentally start a broad Chromium build" >&2
             echo "\treset --warm-output --approved - deliberately remove prepared source and output" >&2
+            ;;
+        *)
+            printf 'error: unknown command: %s\n' "$1" >&2
+            echo "usage: he <command>; he help [--advanced]" >&2
+            return 2
+            ;;
     esac
 }
 
