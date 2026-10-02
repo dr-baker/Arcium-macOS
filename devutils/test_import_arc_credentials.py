@@ -16,7 +16,7 @@ import import_arc_credentials as m
 import import_arc_cookies as legacy_cookies
 
 
-def make_db(path, table, version=None):
+def make_db(path, table, version=None, *, id_definition="id INTEGER PRIMARY KEY"):
     cols = m.LOGIN_COLUMNS if table == "logins" else m.COOKIE_COLUMNS
     version = version or (43, 40) if table == "logins" else (24, 24)
     c = sqlite3.connect(path)
@@ -56,7 +56,7 @@ def make_db(path, table, version=None):
         )
         defs.append(f"{n} {typ}")
     if table == "logins":
-        defs[m.LOGIN_COLUMNS.index("id")] += " PRIMARY KEY"
+        defs[m.LOGIN_COLUMNS.index("id")] = id_definition
         defs.append(
             "UNIQUE(origin_url,username_element,username_value,password_element,signon_realm)"
         )
@@ -130,13 +130,35 @@ class Tests(unittest.TestCase):
 
     def migrate(self, root, **kw):
         process_check = kw.pop("process_check", lambda: ())
+        mapping = kw.pop("mapping", {"Profile 1": ["Profile 4"]})
         return m.run_migration(
             root / "Arc" / "User Data",
             root / "Arcium",
-            {"Profile 1": ["Profile 4"]},
+            mapping,
             process_check=process_check,
             backup=lambda p: p.parent / "backup",
             **kw,
+        )
+
+    def batch_fixture(self):
+        root, arc = self.fixture()
+        root = root.resolve()
+        arc = arc.resolve()
+        second = root / "Arcium/Profile 5"
+        second.mkdir()
+        make_db(second / "Login Data", "logins")
+        crypto = m.AES128CBC()
+        insert(
+            arc / "Login Data", "logins", m.LOGIN_COLUMNS,
+            login(m.encrypt_value(b"test password", m.chromium_key(b"arc"), crypto)),
+        )
+        targets = tuple(root / f"Arcium/{profile}/Login Data" for profile in ("Profile 4", "Profile 5"))
+        return root, targets, tuple(target.read_bytes() for target in targets)
+
+    def apply_batch(self, root, **kw):
+        return self.migrate(
+            root, mapping={"Profile 1": ["Profile 4", "Profile 5"]},
+            include_cookies=False, apply=True, arc_secret=b"arc", target_secret=b"target", **kw,
         )
 
     def test_database_uri_quotes_reserved_path_characters(self):
@@ -692,6 +714,299 @@ class Tests(unittest.TestCase):
             (root / "Arcium/Profile 4/Login Data").read_bytes(), first_before
         )
         self.assertEqual((second_target / "Login Data").read_bytes(), second_before)
+
+    def test_cancellation_after_replacement_restores_all_targets(self):
+        root, targets, originals = self.batch_fixture()
+        real_replace = m.os.replace
+
+        def cancel_after_second_replacement(source, destination):
+            result = real_replace(source, destination)
+            if Path(destination) == targets[1] and ".stage-" in Path(source).name:
+                raise KeyboardInterrupt("synthetic cancellation after replacement")
+            return result
+
+        with mock.patch.object(m.os, "replace", side_effect=cancel_after_second_replacement):
+            with self.assertRaises(KeyboardInterrupt):
+                self.apply_batch(root)
+        self.assertEqual(tuple(target.read_bytes() for target in targets), originals)
+        self.assertFalse(list((root / "Arcium").glob("*/.*.old-*")))
+        self.assertFalse(list((root / "Arcium").glob("*/.*.stage-*")))
+
+    def test_persistent_second_target_failure_restores_first_target(self):
+        root, targets, originals = self.batch_fixture()
+        real_replace = m.os.replace
+
+        def reject_second_target(source, destination):
+            if Path(destination) == targets[1]:
+                raise PermissionError("synthetic persistent target failure")
+            return real_replace(source, destination)
+
+        with mock.patch.object(m.os, "replace", side_effect=reject_second_target):
+            with self.assertRaises(PermissionError):
+                self.apply_batch(root)
+        self.assertEqual(tuple(target.read_bytes() for target in targets), originals)
+        self.assertFalse(list((root / "Arcium").glob("*/.*.old-*")))
+
+    def test_failed_rollback_keeps_original_and_continues_other_restorations(self):
+        root, targets, originals = self.batch_fixture()
+        real_replace = m.os.replace
+
+        def fail_second_install_and_rollback(source, destination):
+            if Path(destination) == targets[1]:
+                if ".old-" in Path(source).name:
+                    raise PermissionError("synthetic rollback failure")
+                real_replace(source, destination)
+                raise OSError("synthetic failure after second install")
+            return real_replace(source, destination)
+
+        with mock.patch.object(m.os, "replace", side_effect=fail_second_install_and_rollback):
+            with self.assertRaisesRegex(m.MigrationError, "originals retained at") as failure:
+                self.apply_batch(root)
+        self.assertEqual(targets[0].read_bytes(), originals[0])
+        retained = list(targets[1].parent.glob(".*.old-*"))
+        self.assertEqual(len(retained), 1)
+        self.assertEqual(retained[0].read_bytes(), originals[1])
+        self.assertIn(str(retained[0]), str(failure.exception))
+
+    def test_process_restart_before_next_replacement_rolls_back_batch(self):
+        root, targets, originals = self.batch_fixture()
+        real_replace = m.os.replace
+        restarted = False
+
+        def restart_after_first_install(source, destination):
+            nonlocal restarted
+            result = real_replace(source, destination)
+            if ".stage-" in Path(source).name:
+                restarted = True
+            return result
+
+        with mock.patch.object(m.os, "replace", side_effect=restart_after_first_install):
+            with self.assertRaisesRegex(m.MigrationError, "started during migration"):
+                self.apply_batch(root, process_check=lambda: ("Arc",) if restarted else ())
+        self.assertEqual(tuple(target.read_bytes() for target in targets), originals)
+
+    def test_target_change_before_next_replacement_is_preserved(self):
+        root, targets, originals = self.batch_fixture()
+        real_replace = m.os.replace
+        changed = b"synthetic concurrent target change"
+
+        def change_after_first_install(source, destination):
+            result = real_replace(source, destination)
+            if Path(destination) == targets[0] and ".stage-" in Path(source).name:
+                targets[1].write_bytes(changed)
+            return result
+
+        with mock.patch.object(m.os, "replace", side_effect=change_after_first_install):
+            with self.assertRaisesRegex(m.MigrationError, "target changed during migration"):
+                self.apply_batch(root)
+        self.assertEqual(targets[0].read_bytes(), originals[0])
+        self.assertEqual(targets[1].read_bytes(), changed)
+
+    def test_staging_cancellation_removes_partial_stage_and_preserves_target(self):
+        root, _ = self.fixture()
+        target = root / "Arcium/Profile 4/Login Data"
+        original = target.read_bytes()
+        real_copy = m.shutil.copy2
+
+        def cancel_stage_copy(source, destination, **kw):
+            real_copy(source, destination, **kw)
+            raise KeyboardInterrupt("synthetic staging cancellation")
+
+        with mock.patch.object(m.shutil, "copy2", side_effect=cancel_stage_copy):
+            with self.assertRaises(KeyboardInterrupt):
+                self.migrate(root, include_cookies=False, apply=True, arc_secret=b"arc", target_secret=b"target")
+        self.assertEqual(target.read_bytes(), original)
+        self.assertFalse(list(target.parent.glob(".*.stage-*")))
+
+    def test_changes_during_original_copy_stop_install_without_rollback_overwrite(self):
+        for restarted in (False, True):
+            with self.subTest(restarted=restarted):
+                root, _ = self.fixture()
+                root = root.resolve()
+                target = root / "Arcium/Profile 4/Login Data"
+                real_copy = m.shutil.copy2
+                changed = b"synthetic target change during original copy"
+                running = False
+
+                def change_during_original_copy(source, destination, **kw):
+                    nonlocal running
+                    result = real_copy(source, destination, **kw)
+                    if ".old-" in Path(destination).name:
+                        target.write_bytes(changed)
+                        running = restarted
+                    return result
+
+                with mock.patch.object(m.shutil, "copy2", side_effect=change_during_original_copy):
+                    with self.assertRaisesRegex(m.MigrationError, "started during|target changed"):
+                        self.migrate(
+                            root, include_cookies=False, apply=True, arc_secret=b"arc", target_secret=b"target",
+                            process_check=lambda: ("Arcium",) if running else (),
+                        )
+                self.assertEqual(target.read_bytes(), changed)
+                self.assertFalse(list(target.parent.glob(".*.old-*")))
+
+    def test_cancellation_after_stage_close_removes_unreturned_stage(self):
+        root, _ = self.fixture()
+        target = root / "Arcium/Profile 4/Login Data"
+        original = target.read_bytes()
+        real_connect = m.sqlite3.connect
+
+        class CancelAfterClose(sqlite3.Connection):
+            def close(self):
+                super().close()
+                raise KeyboardInterrupt("synthetic cancellation after stage close")
+
+        def connect(database, *args, **kw):
+            if ".stage-" in str(database):
+                kw["factory"] = CancelAfterClose
+            return real_connect(database, *args, **kw)
+
+        with mock.patch.object(m.sqlite3, "connect", side_effect=connect):
+            with self.assertRaises(KeyboardInterrupt):
+                self.migrate(root, include_cookies=False, apply=True, arc_secret=b"arc", target_secret=b"target")
+        self.assertEqual(target.read_bytes(), original)
+        self.assertFalse(list(target.parent.glob(".*.stage-*")))
+
+    def test_trigger_bearing_schema_preserves_existing_destination_records(self):
+        for table in ("logins", "cookies"):
+            with self.subTest(table=table):
+                root, arc = self.fixture()
+                profile = root / "Arcium/Profile 4"
+                crypto = m.AES128CBC()
+                insert(
+                    arc / "Login Data", "logins", m.LOGIN_COLUMNS,
+                    login(m.encrypt_value(b"new password", m.chromium_key(b"arc"), crypto)),
+                )
+                insert(
+                    profile / "Login Data", "logins", m.LOGIN_COLUMNS,
+                    login(m.encrypt_value(b"existing password", m.chromium_key(b"target"), crypto), ident="existing"),
+                )
+                if table == "cookies":
+                    make_db(arc / "Cookies", "cookies")
+                    make_db(profile / "Cookies", "cookies")
+                database = profile / ("Login Data" if table == "logins" else "Cookies")
+                connection = sqlite3.connect(database)
+                connection.execute(
+                    f"CREATE TRIGGER remove_existing AFTER INSERT ON {table} "
+                    f"BEGIN DELETE FROM {table} WHERE rowid=1; END"
+                )
+                connection.commit()
+                connection.close()
+                originals = {path: path.read_bytes() for path in profile.iterdir()}
+                for apply in (False, True):
+                    with self.subTest(apply=apply), self.assertRaisesRegex(m.MigrationError, "database triggers"):
+                        self.migrate(
+                            root, include_cookies=table == "cookies", apply=apply,
+                            arc_secret=b"arc" if apply else None, target_secret=b"target" if apply else None,
+                        )
+                    self.assertEqual({path: path.read_bytes() for path in profile.iterdir()}, originals)
+
+    def test_noninteger_primary_key_is_rejected_without_changing_target(self):
+        for source in (False, True):
+            with self.subTest(source=source):
+                root, arc = self.fixture()
+                target = root / "Arcium/Profile 4/Login Data"
+                database = arc / "Login Data" if source else target
+                connection = sqlite3.connect(database)
+                definition = connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE name='logins'"
+                ).fetchone()[0]
+                connection.execute("DROP TABLE logins")
+                connection.execute(definition.replace("id INTEGER PRIMARY KEY", "id TEXT PRIMARY KEY"))
+                connection.commit()
+                connection.close()
+                original = target.read_bytes()
+                for apply in (False, True):
+                    with self.subTest(apply=apply), self.assertRaisesRegex(m.MigrationError, "primary key"):
+                        self.migrate(
+                            root, include_cookies=False, apply=apply,
+                            arc_secret=b"arc" if apply else None, target_secret=b"target" if apply else None,
+                        )
+                    self.assertEqual(target.read_bytes(), original)
+
+    def test_uppercase_table_triggers_cannot_remove_existing_credentials(self):
+        root, arc = self.fixture()
+        target = root / "Arcium/Profile 4/Login Data"
+        crypto = m.AES128CBC()
+        for database, key, identity in (
+            (arc / "Login Data", b"arc", "new"),
+            (target, b"target", "existing"),
+        ):
+            insert(
+                database, "logins", m.LOGIN_COLUMNS,
+                login(m.encrypt_value(b"test password", m.chromium_key(key), crypto), ident=identity),
+            )
+        connection = sqlite3.connect(target)
+        connection.execute("ALTER TABLE logins RENAME TO temporary_logins")
+        connection.execute("ALTER TABLE temporary_logins RENAME TO LOGINS")
+        connection.execute(
+            "CREATE TRIGGER remove_existing AFTER INSERT ON LOGINS "
+            "BEGIN DELETE FROM LOGINS WHERE username_value='existing'; END"
+        )
+        connection.commit()
+        connection.close()
+        original = target.read_bytes()
+        for apply in (False, True):
+            with self.subTest(apply=apply), self.assertRaisesRegex(m.MigrationError, "database triggers"):
+                self.migrate(
+                    root, include_cookies=False, apply=apply,
+                    arc_secret=b"arc" if apply else None, target_secret=b"target" if apply else None,
+                )
+            self.assertEqual(target.read_bytes(), original)
+
+    def test_integer_primary_key_that_does_not_allocate_rowids_is_rejected(self):
+        root, _ = self.fixture()
+        target = root / "Arcium/Profile 4/Login Data"
+        target.unlink()
+        make_db(target, "logins", id_definition="id INTEGER PRIMARY KEY DESC")
+        original = target.read_bytes()
+        for apply in (False, True):
+            with self.subTest(apply=apply), self.assertRaisesRegex(m.MigrationError, "primary key"):
+                self.migrate(
+                    root, include_cookies=False, apply=apply,
+                    arc_secret=b"arc" if apply else None, target_secret=b"target" if apply else None,
+                )
+            self.assertEqual(target.read_bytes(), original)
+
+    def test_stage_cleanup_failure_preserves_retained_original_diagnostic(self):
+        root, targets, originals = self.batch_fixture()
+        real_replace = m.os.replace
+        real_unlink = Path.unlink
+
+        def fail_install_and_rollback(source, destination):
+            if Path(destination) == targets[1]:
+                if ".old-" in Path(source).name:
+                    raise PermissionError("synthetic rollback failure")
+                real_replace(source, destination)
+                raise OSError("synthetic install failure")
+            return real_replace(source, destination)
+
+        def fail_stage_cleanup(path, **kw):
+            if ".stage-" in path.name and kw.get("missing_ok"):
+                raise PermissionError("synthetic cleanup failure")
+            return real_unlink(path, **kw)
+
+        with mock.patch.object(m.os, "replace", side_effect=fail_install_and_rollback):
+            with mock.patch.object(Path, "unlink", autospec=True, side_effect=fail_stage_cleanup):
+                with self.assertRaisesRegex(m.MigrationError, "originals retained at") as failure:
+                    self.apply_batch(root)
+        self.assertEqual(targets[0].read_bytes(), originals[0])
+        retained = list(targets[1].parent.glob(".*.old-*"))
+        self.assertEqual(len(retained), 1)
+        self.assertIn(str(retained[0]), str(failure.exception))
+        self.assertTrue(any("could not remove staged" in note for note in failure.exception.__notes__))
+
+    def test_process_query_failures_stop_apply_before_backup(self):
+        root, _ = self.fixture()
+        backup = mock.Mock()
+        with mock.patch.object(m.subprocess, "run", return_value=mock.Mock(returncode=2)):
+            with self.assertRaisesRegex(m.MigrationError, "could not check whether Arc"):
+                m.run_migration(
+                    root / "Arc/User Data", root / "Arcium", {"Profile 1": ["Profile 4"]},
+                    include_cookies=False, apply=True, arc_secret=b"arc", target_secret=b"target",
+                    backup=backup,
+                )
+        backup.assert_not_called()
 
     def test_launched_process_rejects_apply(self):
         root, arc = self.fixture()

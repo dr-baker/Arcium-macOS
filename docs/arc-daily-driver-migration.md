@@ -57,9 +57,17 @@ differ only by case, cannot be assigned twice. The tool also rejects nonempty
 physical directories, with neither root inside the other.
 After reviewing the plan, quit both browsers and repeat with `--apply`.
 The tool backs up the destination before applying staged database changes.
-Unsupported schemas and encryption, active SQLite sidecars, and unsupported
-associated password records stop the migration. Keep the full backup until
-post-launch checks pass.
+Unsupported schemas and encryption, database triggers, active SQLite sidecars,
+and unsupported associated password records stop the migration. Saved-password
+databases must allocate integer IDs through their primary key. Keep the full
+backup until post-launch checks pass.
+
+The tool rechecks browser processes and the destination before each database
+replacement. Failed process queries stop the import. A replacement failure or
+cancellation triggers restoration of every changed destination. If restoration
+fails for one database, the tool continues restoring the others and reports
+the retained original database path. Use the full backup for recovery after a
+process crash or an incomplete restoration.
 
 Native Spaces within one Arcium browser profile share its cookies. Separate Arc
 account identities remain separate browser profiles. Switching Spaces alone

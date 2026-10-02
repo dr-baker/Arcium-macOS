@@ -190,20 +190,22 @@ def keychain_secret(service, account):
 
 
 def stopped_processes():
-    return tuple(
-        n
-        for n, p in (
-            ("Arc", "/Applications/Arc.app/Contents/MacOS/Arc"),
-            ("Arcium", "/Applications/Arcium.app/Contents/MacOS/Helium"),
-        )
-        if subprocess.run(
-            ["pgrep", "-f", p],
+    running = []
+    for name, executable in (
+        ("Arc", "/Applications/Arc.app/Contents/MacOS/Arc"),
+        ("Arcium", "/Applications/Arcium.app/Contents/MacOS/Helium"),
+    ):
+        result = subprocess.run(
+            ["pgrep", "-f", executable],
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-        ).returncode
-        == 0
-    )
+        )
+        if result.returncode not in (0, 1):
+            raise MigrationError(f"could not check whether {name} is running")
+        if result.returncode == 0:
+            running.append(name)
+    return tuple(running)
 
 
 def database_version(c: sqlite3.Connection) -> tuple[int, int]:
@@ -242,8 +244,23 @@ def open_checked(p: Path, table: str, columns: tuple[str, ...]) -> sqlite3.Conne
             LOGIN_VERSION if table == "logins" else COOKIE_VERSION
         ):
             raise MigrationError(f"unsupported {table} database version")
-        if tuple(r[1] for r in c.execute(f"PRAGMA table_info([{table}])")) != columns:
+        schema = tuple(c.execute(f"PRAGMA table_info([{table}])"))
+        if tuple(row[1] for row in schema) != columns:
             raise MigrationError(f"unsupported {table} schema")
+        if table == "logins":
+            primary_key = tuple(row for row in schema if row[5])
+            if (
+                len(primary_key) != 1
+                or primary_key[0][1] != "id"
+                or primary_key[0][2].strip().upper() != "INTEGER"
+                or any(row[3] == "pk" for row in c.execute("PRAGMA index_list(logins)"))
+            ):
+                raise MigrationError("unsupported logins primary key")
+        if c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='trigger' AND tbl_name=? COLLATE NOCASE LIMIT 1",
+            (table,),
+        ).fetchone():
+            raise MigrationError(f"unsupported {table} database triggers")
         return c
     except Exception:
         c.close()
@@ -420,10 +437,12 @@ def stage_db(sp, tp, table, columns, key, ak, tk, crypto, report, apply):
         report.conflicts += sum(i in existing for _, i, _ in rows)
         return None
     stage = temp_path(f".{tp.name}.stage-", tp.parent)
-    shutil.copy2(tp, stage)
-    c = sqlite3.connect(stage)
-    ix = {n: i for i, n in enumerate(columns)}
+    c = None
+    staged = False
     try:
+        shutil.copy2(tp, stage)
+        c = sqlite3.connect(stage)
+        ix = {n: i for i, n in enumerate(columns)}
         c.execute("BEGIN IMMEDIATE")
         ins = tuple(n for n in columns if not (table == "logins" and n == "id"))
         q = f"INSERT INTO [{table}] ({','.join(ins)}) VALUES ({','.join('?' for _ in ins)})"
@@ -504,16 +523,20 @@ def stage_db(sp, tp, table, columns, key, ak, tk, crypto, report, apply):
             raise MigrationError(f"{table} integrity check failed")
         c.commit()
         c.close()
+        c = None
         if table == "logins":
             report.credentials += inserted_table
         else:
             report.cookies += inserted_table
+        staged = True
         return stage
-    except Exception:
-        c.rollback()
-        c.close()
-        stage.unlink(missing_ok=True)
-        raise
+    finally:
+        try:
+            if c is not None:
+                c.close()
+        finally:
+            if not staged:
+                stage.unlink(missing_ok=True)
 
 
 def backup_target(root):
@@ -650,29 +673,65 @@ def run_migration(
             sidecars_clear(sp)
             if fingerprint(sp) != fp:
                 raise MigrationError(f"source changed during migration: {sp.name}")
-        for _, tp in stages:
+
+        def check_target(tp):
+            if process_check():
+                raise MigrationError("Arc or Arcium started during migration")
             sidecars_clear(tp)
             if fingerprint(tp) != target_fps[tp]:
                 raise MigrationError(f"target changed during migration: {tp.name}")
-            if process_check():
-                raise MigrationError("Arc or Arcium started during migration")
+
+        for _, tp in stages:
+            check_target(tp)
         originals = []
         try:
             for st, tp in stages:
+                check_target(tp)
                 old = temp_path(f".{tp.name}.old-", tp.parent)
-                shutil.copy2(tp, old)
+                try:
+                    shutil.copy2(tp, old)
+                    check_target(tp)
+                except BaseException:
+                    old.unlink(missing_ok=True)
+                    raise
                 originals.append((tp, old))
                 os.replace(st, tp)
-        except Exception:
+        except BaseException as error:
+            failed_rollbacks = []
             for tp, old in reversed(originals):
-                os.replace(old, tp)
+                try:
+                    # A failed replacement can leave its target untouched.
+                    # Keep restoring the batch even if another target fails.
+                    if fingerprint(tp) == target_fps[tp]:
+                        old.unlink(missing_ok=True)
+                    else:
+                        os.replace(old, tp)
+                except BaseException:
+                    failed_rollbacks.append(old)
+            if failed_rollbacks:
+                retained = ", ".join(str(path) for path in failed_rollbacks)
+                raise MigrationError(
+                    f"could not restore all target databases; originals retained at: {retained}"
+                ) from error
             raise
         for _, old in originals:
             old.unlink(missing_ok=True)
         return report
     finally:
+        active_error = sys.exception()
+        cleanup_failures = []
         for st, _ in stages:
-            st.unlink(missing_ok=True)
+            try:
+                st.unlink(missing_ok=True)
+            except OSError:
+                cleanup_failures.append(st)
+        if cleanup_failures:
+            retained = ", ".join(str(path) for path in cleanup_failures)
+            message = f"could not remove staged databases: {retained}"
+            if active_error is not None:
+                active_error.add_note(message)
+            else:
+                raise MigrationError(message)
 
 
 def main():
