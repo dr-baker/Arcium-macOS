@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import plistlib
 import shlex
 import shutil
 import subprocess
@@ -312,8 +314,123 @@ class DevShellCommandsTests(unittest.TestCase):
         advanced = run_zsh("he help --advanced")
         self.assertEqual(advanced.returncode, 0)
         self.assertIn("presetup", advanced.stderr)
+        self.assertIn("version - stamp the selected Chromium source with the current Arcium version", advanced.stderr)
         self.assertIn("prepare-patches - rebuilds the selected lane's generated patch catalog", advanced.stderr)
         self.assertIn("save-patch - refreshes and exports only the active top patch", advanced.stderr)
+
+    def test_public_version_uses_guarded_transaction_and_preserves_result(self) -> None:
+        for exit_code in (0, 7):
+            with self.subTest(exit_code=exit_code):
+                result = run_zsh(
+                    "___helium_lane_transaction(){ "
+                    "printf 'transaction:%s:%s\\n' \"$#\" \"$1\"; "
+                    f"return {exit_code}; }}; he version"
+                )
+                self.assertEqual(result.returncode, exit_code, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), ["transaction:1:version"])
+                self.assertEqual(result.stderr, "")
+
+    def test_public_version_runs_in_locked_material_transaction(self) -> None:
+        for producer_status, missing_input in ((0, False), (7, False), (0, True)):
+            with self.subTest(producer_status=producer_status, missing_input=missing_input):
+                with tempfile.TemporaryDirectory() as temporary:
+                    fixture = ShellFixture(Path(temporary))
+                    fixture.material_inputs()
+                    harness = fixture.root / "instrumented-harness"
+                    harness.mkdir()
+                    (harness / "devutils").symlink_to(ROOT / "devutils", target_is_directory=True)
+                    producer = fixture.root / "harmless-version-producer.py"
+                    producer.write_text(
+                        "import fcntl, json, os, sys\n"
+                        "from pathlib import Path\n"
+                        f"sys.path.insert(0, {str(ROOT / 'devutils')!r})\n"
+                        "from build_receipt import MATERIAL_INPUTS_ENV, material_inputs_at_entry\n"
+                        "root = Path(os.environ['HELIUM_DEV_WORKTREE'])\n"
+                        "assert os.environ[MATERIAL_INPUTS_ENV] == material_inputs_at_entry(root)\n"
+                        "lock = Path(os.environ['HELIUM_DEV_BUILD_ROOT']) / '.arcium/lane.lock'\n"
+                        "descriptor = int(os.environ['HELIUM_DEV_LANE_LOCK_FD'])\n"
+                        "owned, selected = os.fstat(descriptor), lock.stat()\n"
+                        "assert (owned.st_dev, owned.st_ino) == (selected.st_dev, selected.st_ino)\n"
+                        "assert json.loads(lock.read_text())['action'] == 'version'\n"
+                        "with lock.open() as competing:\n"
+                        "    try:\n"
+                        "        fcntl.flock(competing.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                        "    except BlockingIOError:\n"
+                        "        pass\n"
+                        "    else:\n"
+                        "        raise AssertionError('producer ran without the lane lock')\n"
+                        "print('producer:version')\n",
+                        encoding="utf-8",
+                    )
+                    # Keep the real dispatcher, wrapper and Python transaction.
+                    # Only the child producer is replaced in this disposable copy.
+                    (harness / "dev.sh").write_text(
+                        DEV_SH.read_text(encoding="utf-8")
+                        + "\n___helium_version_inner(){ "
+                        f"___helium_python {shlex.quote(str(producer))} || return; "
+                        f"return {producer_status}; }}\n",
+                        encoding="utf-8",
+                    )
+                    metadata = plistlib.dumps({
+                        "MountPoint": str(fixture.root), "VolumeUUID": "fixture-volume",
+                        "FilesystemType": "apfs", "FilesystemName": "Case-sensitive APFS",
+                        "WritableVolume": True, "Internal": True,
+                    }).decode("utf-8")
+                    diskutil = fixture.python_env / "bin/diskutil"
+                    diskutil.write_text(
+                        "#!/bin/sh\ncat <<'PLIST'\n" + metadata + "PLIST\n", encoding="utf-8"
+                    )
+                    diskutil.chmod(0o700)
+                    if missing_input:
+                        (fixture.worktree / "flags.macos.gn").unlink()
+                    result = run_zsh(
+                        f"_helium_harness_root={shlex.quote(str(harness))}; he version",
+                        fixture=fixture,
+                    )
+
+                    self.assertEqual(result.returncode, 2 if missing_input else producer_status, result.stderr)
+                    if missing_input:
+                        self.assertEqual(result.stdout, "")
+                        self.assertIn("flags.macos.gn", result.stderr)
+                        self.assertFalse(fixture.build_root.exists())
+                    else:
+                        self.assertEqual(result.stdout.splitlines(), ["producer:version"])
+                        self.assertEqual(result.stderr, "")
+                        lock = fixture.build_root / ".arcium/lane.lock"
+                        self.assertEqual(json.loads(lock.read_text(encoding="utf-8"))["action"], "version")
+
+    def test_explicit_help_succeeds_without_dispatching_producers(self) -> None:
+        for command in ("he", "he help", "he -h", "he --help", "he help --advanced"):
+            with self.subTest(command=command):
+                result = run_zsh(
+                    "___helium_lane_transaction(){ echo unexpected-producer; return 99; }; "
+                    + command
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("usage: he <command>", result.stderr)
+
+    def test_unsupported_public_commands_fail_without_dispatching_producers(self) -> None:
+        for command in ("versoin", "unknown-command", "--advanced"):
+            with self.subTest(command=command):
+                result = run_zsh(
+                    "___helium_lane_transaction(){ echo unexpected-producer; return 99; }; "
+                    f"he {shlex.quote(command)}"
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("unknown command: " + command, result.stderr)
+
+    def test_help_rejects_unsupported_arguments(self) -> None:
+        for command in ("he help --unsupported", "he help --advanced extra", "he --help extra"):
+            with self.subTest(command=command):
+                result = run_zsh(
+                    "___helium_lane_transaction(){ echo unexpected-producer; return 99; }; "
+                    + command
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("usage: he help [--advanced]", result.stderr)
 
     def test_reset_refuses_without_explicit_warm_output_approval(self) -> None:
         result = run_zsh(
