@@ -42,15 +42,23 @@ MATERIAL_BUILD_INPUTS = (
     "dev.sh",
     "env.sh",
     "retrieve_and_unpack_resource.sh",
+    "requirements-dev.txt",
+    "downloads.ini",
+    "flags.macos.gn",
+    "revision.txt",
     "resources",
     "devutils/arcium_app.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
+    "devutils/build_preparation.py",
+    "devutils/prepare_test_assets.py",
     "devutils/build_receipt.py",
     "devutils/build_receipt_cli.py",
     "devutils/check_source.py",
+    "devutils/check_patch_files.py",
     "devutils/gclient_identity.py",
     "devutils/helium_dev.py",
+    "devutils/helium_acquisition.sh",
     "devutils/helium_dev_build.py",
     "devutils/helium_dev_bundle.py",
     "devutils/lane_transaction.py",
@@ -63,6 +71,81 @@ MATERIAL_BUILD_INPUTS = (
     "devutils/setup_dawn_go.sh",
     "devutils/setup_python.sh",
 )
+
+
+EXECUTOR_BUILD_INPUTS = (
+    "dev.sh",
+    "devutils/arcium_app.py",
+    "devutils/build_execution.py",
+    "devutils/build_lane.py",
+    "devutils/build_preparation.py",
+    "devutils/prepare_test_assets.py",
+    "devutils/build_lane_cli.py",
+    "devutils/build_receipt.py",
+    "devutils/build_receipt_cli.py",
+    "devutils/check_source.py",
+    "devutils/gclient_identity.py",
+    "devutils/helium_dev.py",
+    "devutils/helium_acquisition.sh",
+    "devutils/helium_dev_build.py",
+    "devutils/helium_dev_bundle.py",
+    "devutils/helium_dev_runtime.py",
+    "devutils/lane_transaction.py",
+    "devutils/patch_workspace.py",
+    "devutils/profile_clone.py",
+    "devutils/quilt_state.py",
+    "devutils/quilt_state_cli.py",
+    "devutils/replay_contract.py",
+    "devutils/replay_timestamps.py",
+)
+
+
+CORE_PREPARATION_INPUTS = (
+    "utils/generate_resources.py",
+    "utils/replace_resources.py",
+    "utils/helium_version.py",
+    "utils/prune_binaries.py",
+    "utils/clone.py",
+    "utils/downloads.py",
+    "utils/_common.py",
+    "utils/_extraction.py",
+    "utils/third_party/schema.py",
+    "utils/depot_tools.patch",
+    "utils/gsutil.patch",
+    "downloads.ini",
+    "deps.ini",
+    "pruning.list",
+    "flags.gn",
+    "version.txt",
+    "revision.txt",
+    "chromium_version.txt",
+    "resources/generate_resources.txt",
+    "resources/helium_resources.txt",
+)
+
+
+MATERIAL_INPUTS_ENV = "HELIUM_DEV_MATERIAL_INPUTS_AT_ENTRY"
+
+
+HARNESS_SCRIPT_ENV = "HELIUM_DEV_HARNESS_SCRIPT"
+
+
+HARNESS_SHA256_ENV = "HELIUM_DEV_HARNESS_SHA256"
+
+
+ACQUISITION_SCRIPT_ENV = "HELIUM_DEV_ACQUISITION_SCRIPT"
+
+
+ACQUISITION_SHA256_ENV = "HELIUM_DEV_ACQUISITION_SHA256"
+
+
+ACQUISITION_TARGET_ENV = "HELIUM_DEV_ACQUISITION_TARGET"
+
+
+PYTHON_SETUP_SCRIPT_ENV = "HELIUM_DEV_PYTHON_SETUP_SCRIPT"
+
+
+PYTHON_SETUP_SHA256_ENV = "HELIUM_DEV_PYTHON_SETUP_SHA256"
 
 
 class ReceiptError(ValueError):
@@ -120,11 +203,9 @@ def _hash_material_path(root: Path, path: Path, digest: "hashlib._Hash") -> None
         digest.update(b"\n")
 
 
-def material_inputs_sha256(worktree: Path) -> str:
-    """Hash declared outer files that affect building or packaging."""
-    root = worktree.expanduser().resolve()
+def _declared_inputs_sha256(root: Path, declarations: Iterable[str]) -> str:
     digest = hashlib.sha256()
-    for declared in MATERIAL_BUILD_INPUTS:
+    for declared in declarations:
         path = root / declared
         if not path.exists() and not path.is_symlink():
             raise ReceiptError(f"declared material build input is missing: {declared}")
@@ -139,6 +220,98 @@ def material_inputs_sha256(worktree: Path) -> str:
         for candidate in paths:
             _hash_material_path(root, candidate, digest)
     return digest.hexdigest()
+
+
+def _resource_manifest(root: Path, name: str, field_counts: set[int]) -> list[list[str]]:
+    path = root / "resources" / name
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as error:
+        raise ReceiptError(f"could not read core resource manifest: {name}") from error
+    entries = []
+    for number, line in enumerate(lines, start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) not in field_counts:
+            raise ReceiptError(f"invalid core resource manifest: {name}:{number}")
+        # The utilities interpret plain relative paths. Refuse paths outside
+        # resources so every consumed source is covered by this digest.
+        for value in (fields[0], fields[-1]) if name == "generate_resources.txt" else (fields[0],):
+            relative = Path(value)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise ReceiptError(f"resource path escapes declared inputs: {name}:{number}")
+        entries.append(fields)
+    return entries
+
+
+def core_preparation_inputs_sha256(worktree: Path) -> str:
+    """Bind selected core recipes and manifest-selected original resources."""
+    root = worktree / "helium-chromium"
+    generated = _resource_manifest(root, "generate_resources.txt", {2, 3})
+    copied = _resource_manifest(root, "helium_resources.txt", {2})
+    outputs = {fields[-1] for fields in generated}
+    inputs = {fields[0] for fields in generated}
+    inputs.update(fields[0] for fields in copied if fields[0] not in outputs)
+    declarations = (*CORE_PREPARATION_INPUTS, *("resources/" + name for name in sorted(inputs)))
+    return _declared_inputs_sha256(root, declarations)
+
+
+def validate_harness_script(script: Path) -> None:
+    """Refuse definitions from a shell sourced before its file was edited."""
+    sourced = os.environ.get(HARNESS_SHA256_ENV)
+    if sourced is not None and sourced != sha256_file(script):
+        raise ReceiptError("development shell changed after sourcing; re-source dev.sh before retrying")
+
+
+def acquisition_script() -> Path:
+    root = Path(__file__).resolve().parents[1]
+    script = Path(os.environ.get(ACQUISITION_SCRIPT_ENV, str(root / "devutils/helium_acquisition.sh"))).expanduser().resolve()
+    sourced = os.environ.get(ACQUISITION_SHA256_ENV)
+    if sourced is not None and sourced != sha256_file(script):
+        raise ReceiptError("acquisition helper changed after sourcing; re-source dev.sh before retrying")
+    return script
+
+
+def executor_inputs_sha256(worktree: Path) -> str:
+    """Hash the actual helper checkout and the shell that invoked it."""
+    root = Path(__file__).resolve().parents[1]
+    digest = hashlib.sha256()
+    digest.update(_declared_inputs_sha256(root, EXECUTOR_BUILD_INPUTS).encode("ascii"))
+    script = Path(os.environ.get(HARNESS_SCRIPT_ENV, str(root / "dev.sh")))
+    script = script.expanduser().resolve()
+    validate_harness_script(script)
+    digest.update(sha256_file(script).encode("ascii"))
+    digest.update(sha256_file(acquisition_script()).encode("ascii"))
+    setup = Path(os.environ.get(PYTHON_SETUP_SCRIPT_ENV, str(worktree / "devutils/setup_python.sh"))).expanduser().resolve()
+    sourced = os.environ.get(PYTHON_SETUP_SHA256_ENV)
+    if sourced is not None and sourced != sha256_file(setup):
+        raise ReceiptError("Python setup helper changed after sourcing; re-source dev.sh before retrying")
+    digest.update(sha256_file(setup).encode("ascii"))
+    return digest.hexdigest()
+
+
+def material_inputs_sha256(worktree: Path) -> str:
+    """Bind selected source inputs and actual executor inputs independently."""
+    root = worktree.expanduser().resolve()
+    digest = hashlib.sha256()
+    for origin, value in (
+        (b"selected-source", _declared_inputs_sha256(root, MATERIAL_BUILD_INPUTS)),
+        (b"selected-core-preparation", core_preparation_inputs_sha256(root)),
+        (b"actual-executors", executor_inputs_sha256(root)),
+    ):
+        digest.update(origin + b":" + value.encode("ascii") + b"\n")
+    return digest.hexdigest()
+
+
+def material_inputs_at_entry(worktree: Path) -> str:
+    """Check inherited transaction inputs before executing another stage."""
+    current = material_inputs_sha256(worktree)
+    inherited = os.environ.get(MATERIAL_INPUTS_ENV)
+    if inherited is not None and inherited != current:
+        raise ReceiptError("material inputs changed after transaction entry; retry from stable inputs")
+    return current
 
 
 def _require_object_id(name: str, value: str) -> str:

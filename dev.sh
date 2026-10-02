@@ -12,6 +12,12 @@ else
     _helium_dev_script_path="$0"
 fi
 _helium_harness_root="$(cd -P "$(dirname "$_helium_dev_script_path")" && pwd)"
+export HELIUM_DEV_HARNESS_SCRIPT="$_helium_harness_root/dev.sh"
+if ! _helium_source_digest="$(/usr/bin/shasum -a 256 "$HELIUM_DEV_HARNESS_SCRIPT")"; then
+    echo "error: could not fingerprint development shell" >&2
+    return 2 2>/dev/null || exit 2
+fi
+export HELIUM_DEV_HARNESS_SHA256="${_helium_source_digest%% *}"
 _root_dir="${HELIUM_DEV_WORKTREE:-$_helium_harness_root}"
 _root_dir="$(cd -P "$_root_dir" && pwd)"
 
@@ -91,7 +97,21 @@ _depot_tools_dir="$_src_dir/third_party/depot_tools"
 _siso_dir="$_src_dir/third_party/siso/cipd"
 _siso_path="$_siso_dir/siso"
 
-source "$_root_dir/devutils/setup_python.sh"
+export HELIUM_DEV_PYTHON_SETUP_SCRIPT="$_root_dir/devutils/setup_python.sh"
+if ! _helium_python_setup_digest="$(/usr/bin/shasum -a 256 "$HELIUM_DEV_PYTHON_SETUP_SCRIPT")"; then
+    echo "error: could not fingerprint sourced Python setup helper" >&2
+    return 2 2>/dev/null || exit 2
+fi
+export HELIUM_DEV_PYTHON_SETUP_SHA256="${_helium_python_setup_digest%% *}"
+source "$HELIUM_DEV_PYTHON_SETUP_SCRIPT"
+
+export HELIUM_DEV_ACQUISITION_SCRIPT="$_helium_harness_root/devutils/helium_acquisition.sh"
+if ! _helium_acquisition_digest="$(/usr/bin/shasum -a 256 "$HELIUM_DEV_ACQUISITION_SCRIPT")"; then
+    echo "error: could not fingerprint acquisition helper" >&2
+    return 2 2>/dev/null || exit 2
+fi
+export HELIUM_DEV_ACQUISITION_SHA256="${_helium_acquisition_digest%% *}"
+source "$HELIUM_DEV_ACQUISITION_SCRIPT" || return
 
 alias quilt='quilt --quiltrc -'
 export QUILT_PATCHES="$_patches_dir"
@@ -134,7 +154,14 @@ ___helium_setup_siso() {
     fi
 }
 
+___helium_preparation() {
+    ___helium_python "$_helium_harness_root/devutils/build_preparation.py" \
+        --worktree "$_root_dir" --build-root "$_build_dir" "$@"
+}
+
 ___helium_setup_gn() {
+    local _preparation_entry
+    _preparation_entry="$(___helium_preparation begin gn-defaults)" || return
     local OUT_FILE="$_out_dir/args.gn"
     cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$OUT_FILE" || return
 
@@ -156,55 +183,46 @@ ___helium_setup_gn() {
     echo 'use_siso = true' >> "$OUT_FILE" || return
 
     sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE" || return
-}
-
-___helium_info_pull() {
-    local _resolved_source_mode
-    if [ "$_source_mode" = "full" ]; then
-        "$_root_dir/retrieve_and_unpack_resource.sh" -g || return
-        _resolved_source_mode=full
-    elif "$_root_dir/retrieve_and_unpack_resource.sh" -d -g; then
-        _resolved_source_mode=lite
-    else
-        "$_root_dir/retrieve_and_unpack_resource.sh" -g || return
-        _resolved_source_mode=full
-    fi
-
-    mkdir -p "$(dirname "$_source_mode_marker")" || return
-    printf '%s\n' "$_resolved_source_mode" > "${_source_mode_marker}.tmp.$$" || return
-    mv "${_source_mode_marker}.tmp.$$" "$_source_mode_marker" || return
-    _source_mode="$_resolved_source_mode"
-    export HELIUM_DEV_SOURCE_MODE="$_source_mode"
-
-    mkdir -p "$_out_dir" || return
-    cd "$_src_dir" || return
+    ___helium_preparation finish gn-defaults "$_preparation_entry"
 }
 
 ___helium_configure_inner() {
+    if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != "--refresh-defaults" ]; }; then
+        echo "usage: he configure [--refresh-defaults]" >&2
+        return 2
+    fi
     ___helium_setup_python || return
+    if [ "${1:-}" = "--refresh-defaults" ]; then
+        ___helium_setup_gn || return
+    fi
+    ___helium_preparation require gn-defaults || return
+    ___helium_python "$_helium_harness_root/devutils/prepare_test_assets.py" \
+        --worktree "$_root_dir" --build-root "$_build_dir" || return
 
     cd "$_src_dir" || return
     ___helium_setup_siso || return
     "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch" || return
     ___helium_python ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles || return
+    local _preparation_entry
+    _preparation_entry="$(___helium_preparation begin configured)" || return
     "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands || return
+    ___helium_preparation finish configured "$_preparation_entry"
 }
 
 ___helium_configure() {
     ___helium_lane_preflight 15 || return
-    ___helium_lane_transaction configure
-}
-
-___helium_toolchain() {
-    "$_root_dir/retrieve_and_unpack_resource.sh" -t
+    ___helium_lane_transaction configure "$@"
 }
 
 ___helium_resources_inner() {
     ___helium_setup_python || return
+    local _preparation_entry
+    _preparation_entry="$(___helium_preparation begin resources)" || return
 
     ___helium_python "$_main_repo/utils/generate_resources.py" "$_main_repo/resources/generate_resources.txt" "$_main_repo/resources" || return
     ___helium_python "$_main_repo/utils/replace_resources.py" "$_root_dir/resources/platform_resources.txt" "$_root_dir/resources" "$_src_dir" || return
     ___helium_python "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_resources.txt" "$_main_repo/resources" "$_src_dir" || return
+    ___helium_preparation finish resources "$_preparation_entry"
 }
 
 ___helium_resources() {
@@ -212,20 +230,23 @@ ___helium_resources() {
     ___helium_lane_transaction resources
 }
 
-___helium_version() {
+___helium_version_inner() {
     if [ ! -f "$_src_dir/chrome/VERSION" ]; then
         echo "error: Chromium source is missing chrome/VERSION" >&2
         return 1
     fi
-    if grep -q '^HELIUM_MAJOR=' "$_src_dir/chrome/VERSION"; then
-        return 0
-    fi
-
     ___helium_setup_python || return
+    local _preparation_entry
+    _preparation_entry="$(___helium_preparation begin version)" || return
     ___helium_python "$_main_repo/utils/helium_version.py" \
         --tree "$_main_repo" \
         --platform-tree "$_root_dir" \
         --chromium-tree "$_src_dir" || return
+    ___helium_preparation finish version "$_preparation_entry"
+}
+
+___helium_version() {
+    ___helium_lane_transaction version
 }
 
 ___helium_setup_presetup_inner() {
@@ -234,27 +255,18 @@ ___helium_setup_presetup_inner() {
     else
         ___helium_lane_preflight 80 || return
     fi
-    ___helium_setup_python || return
-
     if [ -d "$_src_dir/out" ]; then
         echo "$_src_dir/out already exists" >&2
-        ___helium_version || return
+        ___helium_preparation require acquisition || return
+        ___helium_version_inner || return
         return
     fi
 
-    rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir" || return
-
-    ___helium_info_pull || return
-    if [ "$_source_mode" = "full" ]; then
-        echo "preserving full Chromium source and test data"
-    else
-        ___helium_python "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list" || return
-    fi
-    ___helium_toolchain || return
+    ___helium_acquire_inner || return
     ___helium_resources_inner || return
     ___helium_setup_gn || return
 
-    ___helium_version || return
+    ___helium_version_inner || return
 }
 
 ___helium_setup_presetup() {
@@ -285,6 +297,7 @@ ___helium_reset_inner() {
         echo "use 'he reset --warm-output --approved' to remove it deliberately." >&2
         return 2
     fi
+    ___helium_preparation invalidate acquisition || return
     rm "$_subs_cache" || true
     rm "$_namesubs_cache" || true
     mv "$_src_dir" "${_src_dir}x" || return
@@ -657,20 +670,74 @@ ___helium_dev() {
 }
 
 ___helium_arcium_inner() {
+    if [ "${1:-}" = iterate ]; then
+        shift
+        ___helium_arcium_iterate_inner "$@"
+        return
+    fi
     if [ -n "$1" ]; then
-        echo "he arcium takes no options" >&2
+        echo "use he arcium or he arcium iterate --approved [--edge-budget N] [--allow-internal]" >&2
         return 2
     fi
     ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
         --root "$_root_dir" --build-root "$_build_dir" preflight || return
     ___helium_check || return
+    ___helium_require_replay_proof || return
     ___helium_configure_inner || return
     ___helium_relink --resources || return
     ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
         --root "$_root_dir" --build-root "$_build_dir" update || return
 }
 
+___helium_arcium_iterate_inner() {
+    # Keep build approval and cost limits explicit. Never infer patch ownership
+    # or silently refresh/reorder/replay a developer's applied stack.
+    local _approved=0
+    local _expect_budget=0
+    local _argument
+    for _argument in "$@"; do
+        if [ "$_expect_budget" = 1 ]; then
+            case "$_argument" in
+                ''|*[!0-9]*) echo "edge budget must be a nonnegative integer" >&2; return 2;;
+            esac
+            _expect_budget=0
+            continue
+        fi
+        case "$_argument" in
+            --approved) _approved=1;;
+            --allow-internal) ;;
+            --edge-budget) _expect_budget=1;;
+            *) echo "unknown iterate option: $_argument" >&2; return 2;;
+        esac
+    done
+    if [ "$_approved" != 1 ] || [ "$_expect_budget" = 1 ]; then
+        echo "use he arcium iterate --approved [--edge-budget N] [--allow-internal]" >&2
+        return 2
+    fi
+    local _started=$SECONDS
+    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+        --root "$_root_dir" --build-root "$_build_dir" preflight --restart || return
+    ___helium_check || return
+    ___helium_require_replay_proof || return
+    echo "arcium iterate: validation took $((SECONDS - _started))s" >&2
+    local _stage_started=$SECONDS
+    ___helium_configure_inner || return
+    echo "arcium iterate: configuration took $((SECONDS - _stage_started))s" >&2
+    _stage_started=$SECONDS
+    ___helium_build_full "$@" || return
+    echo "arcium iterate: build took $((SECONDS - _stage_started))s" >&2
+    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+        --root "$_root_dir" --build-root "$_build_dir" update --restart || return
+    echo "arcium iterate: completed in $((SECONDS - _started))s" >&2
+}
+
 ___helium_arcium() {
+    if [ "${1:-}" = status ]; then
+        shift
+        ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+            --root "$_root_dir" status "$@"
+        return
+    fi
     ___helium_lane_transaction arcium "$@"
 }
 
@@ -872,7 +939,7 @@ __helium_menu() {
         lane) shift; ___helium_lane "$@";;
         setup) ___helium_setup;;
         presetup) ___helium_setup_presetup;;
-        configure) ___helium_configure;;
+        configure) shift; ___helium_configure "$@";;
         resources) ___helium_resources;;
 
         sub|unsub) ___helium_substitution "$1";;
@@ -909,6 +976,8 @@ __helium_menu() {
         *)
             echo "usage: he <command>" >&2
             echo "\tarcium - update, install, and launch the stable personal browser" >&2
+            echo "\tarcium status [--json] - inspect the installed app and persistent profile without a build lane" >&2
+            echo "\tarcium iterate --approved [--edge-budget N] [--allow-internal] - build, prepare, and gracefully restart Arcium" >&2
             echo "\tbootstrap --approved [--full-source] [--allow-internal] - one-time cold browser build" >&2
             echo "\tcheck - validate the active patch catalog and applied state" >&2
             echo "\tcontext [--json] - show source, lane, proof, bundle, and limitations" >&2
@@ -925,7 +994,7 @@ __helium_menu() {
             echo "\nadvanced:" >&2
             echo "\tsetup - prepares source, patches, and the generated graph without building" >&2
             echo "\tpresetup - downloads sources, sets up GN, and prepares third-party dependencies" >&2
-            echo "\tconfigure - generates build configuration and tools" >&2
+            echo "\tconfigure [--refresh-defaults] - generate graph; explicit flag rewrites default args" >&2
             echo "\tresources - generates and copies helium resources (such as icons)" >&2
 
             echo "\n" >&2

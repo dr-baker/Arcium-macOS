@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import plistlib
 import subprocess
 import tempfile
 import unittest
@@ -11,6 +13,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from devutils.tests.test_build_receipt import material_fixture
 from lane_transaction import workflow_environment  # noqa: E402
 
 
@@ -19,6 +22,23 @@ CLI = ROOT / "devutils" / "lane_transaction.py"
 
 
 class LaneTransactionTests(unittest.TestCase):
+    def _fixture_environment(self, root: Path) -> dict[str, str]:
+        material_fixture(root)
+        tools = root / "fake-tools"
+        tools.mkdir()
+        diskutil = tools / "diskutil"
+        metadata = plistlib.dumps({
+            "MountPoint": str(root.resolve()),
+            "VolumeUUID": "fixture-volume",
+            "FilesystemType": "apfs",
+            "FilesystemName": "Case-sensitive APFS",
+            "WritableVolume": True,
+            "Internal": True,
+        }).decode("utf-8")
+        diskutil.write_text("#!/bin/sh\ncat <<'PLIST'\n" + metadata + "PLIST\n", encoding="utf-8")
+        diskutil.chmod(0o700)
+        return {**os.environ, "PATH": str(tools) + ":/usr/bin:/bin:/usr/sbin:/sbin"}
+
     def test_heavy_lane_routes_temporary_traffic_to_build_volume(self) -> None:
         environment = workflow_environment(
             {"TMPDIR": "/internal/temp"},
@@ -34,6 +54,7 @@ class LaneTransactionTests(unittest.TestCase):
     def test_transaction_holds_lock_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            environment = self._fixture_environment(root)
             script = root / "dev.sh"
             script.write_text(
                 "___helium_configure_inner() { "
@@ -62,6 +83,7 @@ class LaneTransactionTests(unittest.TestCase):
                 check=False,
                 capture_output=True,
                 text=True,
+                env=environment,
             )
             self.assertEqual(result.returncode, 7, result.stderr)
             payload = json.loads(
@@ -74,6 +96,7 @@ class LaneTransactionTests(unittest.TestCase):
     def test_heavy_preflight_does_not_create_lane_on_wrong_volume(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            environment = self._fixture_environment(root)
             script = root / "dev.sh"
             script.write_text("___helium_configure_inner() { return 0; }\n", encoding="utf-8")
             build_root = root / "missing-t9" / "build"
@@ -96,6 +119,7 @@ class LaneTransactionTests(unittest.TestCase):
                 check=False,
                 capture_output=True,
                 text=True,
+                env=environment,
             )
             self.assertEqual(result.returncode, 2)
             self.assertFalse(build_root.exists())
@@ -103,6 +127,7 @@ class LaneTransactionTests(unittest.TestCase):
     def test_worktree_lane_preserves_callers_temporary_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
+            environment = self._fixture_environment(root)
             script = root / "dev.sh"
             observed = root / "observed-temp"
             script.write_text(
@@ -127,7 +152,7 @@ class LaneTransactionTests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 env={
-                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                    **environment,
                     "TMPDIR": str(root / "callers-temp"),
                 },
             )

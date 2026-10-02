@@ -19,12 +19,14 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
+from build_preparation import prepared_build_digest
 from build_lane import LaneError, acquire_lane_lock
-from build_execution import ExecutionError, invalidate_execution, record_execution
-from build_receipt import ReceiptError
+from build_execution import ExecutionError, invalidate_execution, material_guard, record_execution, verify_material_inputs
+from build_receipt import ReceiptError, material_inputs_at_entry
 from build_receipt_cli import (
     _publish_packaged_build,
     require_current_packaged_build,
@@ -376,6 +378,7 @@ def _run_locked(
     seed_from: str | None = None,
     home: str | os.PathLike[str] | None = None,
     registry_root: Path | None = None,
+    material_at_entry: str,
 ) -> dict[str, object]:
     manifest_path = manifest_path_for(profile, registry_root)
     existing = discover_chromium_processes(
@@ -391,6 +394,7 @@ def _run_locked(
     _prepare_selected_profile(
         profile, seed_from, action=action, home=home
     )
+    verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
     command = (str(paths.executable_path), *launch_arguments(profile, passthrough))
     process = subprocess.Popen(command, cwd=paths.source_dir, start_new_session=True)
     deadline = time.monotonic() + 8.0
@@ -399,7 +403,9 @@ def _run_locked(
         cohort = discover_chromium_processes(
             cohort_text, executable_path=paths.executable_path, user_data_dir=profile.user_data_dir
         )
-        if cohort.main_pid is not None:
+        if (cohort.main_pid == process.pid
+                and live_singleton_owner(profile) == process.pid
+                and process.poll() is None):
             started = _process_started_at(cohort.main_pid)
             manifest = _manifest_for(
                 paths=paths,
@@ -525,6 +531,7 @@ def _runtime_action_locked(
     build_root: str | os.PathLike[str] | None = None,
     home: str | os.PathLike[str] | None = None,
     registry_root: str | os.PathLike[str] | None = None,
+    material_at_entry: str | None = None,
 ) -> dict[str, object]:
     """Perform one runtime action after any required lane lock is held."""
 
@@ -539,6 +546,8 @@ def _runtime_action_locked(
     )
     identity = resolve_dev_identity(profile.mode, profile.name)
     if action in {"run", "restart"}:
+        if material_at_entry is None:
+            raise HarnessError("runtime launch requires a material input guard")
         selected_build_root = (
             Path(build_root).expanduser().resolve()
             if build_root is not None
@@ -601,6 +610,7 @@ def _runtime_action_locked(
                 seed_from=seed_from,
                 home=home,
                 registry_root=registry,
+                material_at_entry=material_at_entry,
             )
         if action == "status":
             if passthrough:
@@ -667,6 +677,7 @@ def _runtime_action_locked(
                 seed_from=seed_from,
                 home=home,
                 registry_root=registry,
+                material_at_entry=material_at_entry,
             )
         raise HarnessError(f"unknown runtime action: {action}")
     finally:
@@ -704,9 +715,10 @@ def runtime_action(
         "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
         "worktree": str(worktree),
     }
+    material_at_entry = material_inputs_at_entry(worktree)
     with acquire_lane_lock(
         selected_build_root / ".arcium" / "lane.lock", owner
-    ):
+    ), material_guard(worktree, selected_build_root, expected=material_at_entry):
         return _runtime_action_locked(
             action,
             root,
@@ -714,6 +726,7 @@ def runtime_action(
             build_root=build_root,
             home=home,
             registry_root=registry_root,
+            material_at_entry=material_at_entry,
         )
 
 
@@ -768,7 +781,15 @@ def build_action(
         "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
         "worktree": str(worktree),
     }
-    with acquire_lane_lock(lock_path, owner):
+    material_at_entry = (
+        material_inputs_at_entry(worktree)
+        if action == "relink" or (action == "build-full" and namespace.approved)
+        else None
+    )
+    with acquire_lane_lock(lock_path, owner), (
+        material_guard(worktree, build_dir, expected=material_at_entry)
+        if material_at_entry is not None else nullcontext()
+    ):
         if action == "build-plan":
             ensure_gclient_identity(build_dir)
             result = builder.build_plan(namespace.targets)
@@ -780,6 +801,7 @@ def build_action(
                 raise RuntimeInputError("relink takes no graph targets")
             if namespace.resources:
                 require_current_replay_proof(worktree, source_dir)
+                preparation_at_entry = prepared_build_digest(worktree, build_dir)
                 invalidate_execution(build_dir)
             ensure_gclient_identity(build_dir)
             result = builder.relink(
@@ -795,6 +817,8 @@ def build_action(
                     lane=str(owner["lane"]),
                     action="relink-resources",
                     targets=result.targets,
+                    material_inputs_at_entry=material_at_entry,
+                    prepared_inputs_at_entry=preparation_at_entry,
                 )
         elif action == "build-full":
             if namespace.targets:
@@ -804,6 +828,7 @@ def build_action(
             # requires a fresh full Quilt replay.
             if namespace.approved:
                 require_current_replay_proof(worktree, source_dir)
+                preparation_at_entry = prepared_build_digest(worktree, build_dir)
                 invalidate_execution(build_dir)
                 ensure_gclient_identity(build_dir)
             result = builder.build_full(approved=namespace.approved)
@@ -814,6 +839,8 @@ def build_action(
                     lane=str(owner["lane"]),
                     action="build-full",
                     targets=result.targets,
+                    material_inputs_at_entry=material_at_entry,
+                    prepared_inputs_at_entry=preparation_at_entry,
                 )
         else:
             raise HarnessError(f"unknown build action: {action}")
@@ -840,7 +867,10 @@ def dev_bundle_action(
     lane = os.environ.get("HELIUM_DEV_LANE", "worktree")
     lock_path = build_dir / ".arcium" / "lane.lock"
     owner = {"action": "dev-bundle", "lane": lane, "worktree": str(worktree)}
-    with acquire_lane_lock(lock_path, owner):
+    material_at_entry = material_inputs_at_entry(worktree)
+    with acquire_lane_lock(lock_path, owner), material_guard(
+        worktree, build_dir, expected=material_at_entry
+    ):
         document = _package_dev_bundle_locked(
             resolve_bundle_paths(root, build_root, identity=identity),
             identity=identity,

@@ -17,7 +17,9 @@ from build_execution import (  # noqa: E402
     require_current_execution,
     tree_sha256,
 )
-from build_receipt import MATERIAL_BUILD_INPUTS, SourceReceipt  # noqa: E402
+from build_receipt import SourceReceipt, material_inputs_sha256  # noqa: E402
+from build_preparation import acquisition_target, input_digest, prepared_build_digest, record_stage
+from devutils.tests.test_build_receipt import material_fixture
 from replay_contract import ReplayReceipt  # noqa: E402
 
 
@@ -42,19 +44,13 @@ class BuildExecutionTests(unittest.TestCase):
         )
 
     def artifacts(self, build_root: Path) -> None:
-        for declared in MATERIAL_BUILD_INPUTS:
-            path = build_root.parent / "worktree" / declared
-            if declared == "resources":
-                path.mkdir(parents=True, exist_ok=True)
-                (path / "icon.txt").write_text("icon\n", encoding="utf-8")
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(declared + "\n", encoding="utf-8")
+        material_fixture(build_root.parent / "worktree")
         out = build_root / "src" / "out" / "Default"
         executable = out / "Helium.app" / "Contents" / "MacOS" / "Helium"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"browser")
         (out / "libchrome_dll.dylib").write_bytes(b"component")
+        (out / "libtest_gpu.dylib").write_bytes(b"gpu component")
         (out / "args.gn").write_text("is_component_build = true\n", encoding="utf-8")
 
     def test_receipt_is_deterministic_and_binds_replay_and_lane(self) -> None:
@@ -107,13 +103,29 @@ class BuildExecutionTests(unittest.TestCase):
             with patch(
                 "build_execution.require_current_replay_proof",
                 return_value=replay,
-            ):
+            ), patch("build_preparation.require_current_replay_proof", return_value=replay):
+                worktree = Path(temporary) / "worktree"
+                metadata = build_root / ".arcium"
+                metadata.mkdir()
+                (metadata / "source-mode").write_text("lite\n", encoding="utf-8")
+                (metadata / "acquisition-target").write_text(acquisition_target() + "\n", encoding="utf-8")
+                version = build_root / "src/chrome/VERSION"
+                version.parent.mkdir(parents=True)
+                version.write_text("MAJOR=151\n", encoding="utf-8")
+                out = build_root / "src/out/Default"
+                (out / "gn").write_bytes(b"fake gn")
+                (out / "build.ninja").write_text("graph\n", encoding="utf-8")
+                for stage in ("acquisition", "resources", "version", "gn-defaults", "configured"):
+                    record_stage(worktree, build_root, stage, input_digest(worktree, build_root, stage))
+                preparation_at_entry = prepared_build_digest(worktree, build_root)
                 record_execution(
-                    Path(temporary) / "worktree",
+                    worktree,
                     build_root,
                     lane="heavy",
                     action="build-full",
                     targets=("chrome",),
+                    material_inputs_at_entry=material_inputs_sha256(worktree),
+                    prepared_inputs_at_entry=preparation_at_entry,
                 )
                 self.assertIsNotNone(
                     require_current_execution(
@@ -124,14 +136,19 @@ class BuildExecutionTests(unittest.TestCase):
                     require_current_execution(
                         Path(temporary) / "worktree", build_root, lane="local"
                     )
-                (Path(temporary) / "worktree" / "dev.sh").write_text(
-                    "changed\n", encoding="utf-8"
-                )
+                dev_script = Path(temporary) / "worktree" / "dev.sh"
+                original_script = dev_script.read_bytes()
+                dev_script.write_text("changed\n", encoding="utf-8")
                 with self.assertRaisesRegex(ExecutionError, "changed"):
                     require_current_execution(
                         Path(temporary) / "worktree", build_root, lane="heavy"
                     )
-                component = build_root / "src" / "out" / "Default" / "libchrome_dll.dylib"
+                # Restore the input so the next rejection must concern the
+                # runtime library, rather than the earlier source mutation.
+                dev_script.write_bytes(original_script)
+                component = (
+                    build_root / "src" / "out" / "Default" / "libtest_gpu.dylib"
+                )
                 component.write_bytes(b"changed")
                 with self.assertRaisesRegex(ExecutionError, "changed"):
                     require_current_execution(

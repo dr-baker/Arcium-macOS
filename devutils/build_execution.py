@@ -4,21 +4,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+
+
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import stat
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from build_receipt import (
     RECEIPT_SCHEMA,
     ReceiptError,
     material_inputs_sha256,
+    material_inputs_at_entry,
     sha256_file,
     write_receipt_atomic,
 )
+from build_preparation import prepared_build_digest
+
+
 from replay_contract import ReplayError, ReplayReceipt, require_current_replay_proof
 
 
@@ -82,15 +89,36 @@ def tree_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
+def component_runtime_libraries(out_dir: Path) -> tuple[Path, ...]:
+    """Select the loose runtime libraries copied into component-build bundles."""
+    try:
+        args = (out_dir / "args.gn").read_text(encoding="utf-8")
+        if not re.search(r"(?m)^\s*is_component_build\s*=\s*true\s*$", args):
+            return ()
+        libraries = tuple(sorted(out_dir.glob("*.dylib")))
+        if not libraries:
+            raise ExecutionError("component build has no runtime libraries")
+        for library in libraries:
+            if not library.is_file() or library.is_symlink():
+                raise ExecutionError(f"unsafe component runtime library: {library}")
+        return libraries
+    except (OSError, UnicodeError) as error:
+        raise ExecutionError("could not inspect component runtime libraries") from error
+
+
 def _artifact_digests(build_root: Path) -> dict[str, str]:
     out = build_root / "src" / "out" / "Default"
-    return {
+    artifacts = {
         "Helium.app": tree_sha256(out / "Helium.app"),
         "Helium.app/Contents/MacOS/Helium": sha256_file(
             out / "Helium.app" / "Contents" / "MacOS" / "Helium"
         ),
-        "libchrome_dll.dylib": sha256_file(out / "libchrome_dll.dylib"),
     }
+    artifacts.update(
+        (library.name, sha256_file(library))
+        for library in component_runtime_libraries(out)
+    )
+    return artifacts
 
 
 @dataclass(frozen=True)
@@ -102,6 +130,7 @@ class ExecutionReceipt:
     targets: tuple[str, ...]
     gn_args_sha256: str
     material_inputs_sha256: str
+    preparation_sha256: str
     applied_series_sha256: str
     artifacts: dict[str, str]
     receipt_id: str
@@ -117,6 +146,7 @@ class ExecutionReceipt:
         gn_args_sha256: str,
         artifacts: dict[str, str],
         material_inputs_sha256: str = "0" * 64,
+        preparation_sha256: str = "0" * 64,
     ) -> "ExecutionReceipt":
         normalized_targets = tuple(dict.fromkeys(str(target) for target in targets))
         if not _LANE.fullmatch(lane):
@@ -128,6 +158,7 @@ class ExecutionReceipt:
         digests = {
             "gn_args_sha256": gn_args_sha256,
             "material_inputs_sha256": material_inputs_sha256,
+            "preparation_sha256": preparation_sha256,
             "applied_series_sha256": replay.applied_series_sha256,
             **artifacts,
         }
@@ -141,6 +172,8 @@ class ExecutionReceipt:
             "action": action,
             "targets": list(normalized_targets),
             "gn_args_sha256": gn_args_sha256,
+            "material_inputs_sha256": material_inputs_sha256,
+            "preparation_sha256": preparation_sha256,
             "applied_series_sha256": replay.applied_series_sha256,
             "artifacts": dict(sorted(artifacts.items())),
         }
@@ -153,6 +186,7 @@ class ExecutionReceipt:
             targets=normalized_targets,
             gn_args_sha256=gn_args_sha256,
             material_inputs_sha256=material_inputs_sha256,
+            preparation_sha256=preparation_sha256,
             applied_series_sha256=replay.applied_series_sha256,
             artifacts=dict(sorted(artifacts.items())),
             receipt_id=receipt_id,
@@ -169,6 +203,7 @@ class ExecutionReceipt:
             "targets": list(self.targets),
             "gn_args_sha256": self.gn_args_sha256,
             "material_inputs_sha256": self.material_inputs_sha256,
+            "preparation_sha256": self.preparation_sha256,
             "applied_series_sha256": self.applied_series_sha256,
             "artifacts": dict(self.artifacts),
         }
@@ -179,13 +214,48 @@ def execution_path(build_root: Path) -> Path:
 
 
 def invalidate_execution(build_root: Path) -> None:
-    for name in ("execution.json", "build.json"):
+    receipts = build_root.resolve() / ".arcium" / "receipts"
+    for path in (receipts / "execution.json", *receipts.glob("build*.json")):
         try:
-            (build_root.resolve() / ".arcium" / "receipts" / name).unlink()
+            path.unlink()
         except FileNotFoundError:
             pass
         except OSError as error:
-            raise ExecutionError(f"could not invalidate stale receipt: {name}") from error
+            raise ExecutionError(f"could not invalidate stale receipt: {path.name}") from error
+
+
+def capture_material_inputs(worktree: Path) -> str:
+    """Take a read-only snapshot before attempting the lane lock."""
+    try:
+        return material_inputs_at_entry(worktree)
+    except ReceiptError as error:
+        raise ExecutionError(str(error)) from error
+
+
+def verify_material_inputs(worktree: Path, build_root: Path, expected: str) -> None:
+    """Refuse proof after a selected recipe or executor changes mid-action."""
+    try:
+        current = material_inputs_sha256(worktree)
+    except ReceiptError as error:
+        invalidate_execution(build_root)
+        raise ExecutionError("could not recheck material inputs; downstream proof invalidated") from error
+    if current != expected:
+        invalidate_execution(build_root)
+        raise ExecutionError("material inputs changed during action; downstream proof invalidated")
+
+
+@contextmanager
+def material_guard(
+    worktree: Path, build_root: Path, *, expected: str | None = None
+) -> Iterator[str]:
+    if expected is None:
+        expected = capture_material_inputs(worktree)
+    else:
+        verify_material_inputs(worktree, build_root, expected)
+    try:
+        yield expected
+    finally:
+        verify_material_inputs(worktree, build_root, expected)
 
 
 def record_execution(
@@ -195,9 +265,13 @@ def record_execution(
     lane: str,
     action: str,
     targets: Iterable[str],
+    material_inputs_at_entry: str,
+    prepared_inputs_at_entry: str,
 ) -> ExecutionReceipt:
     replay = require_current_replay_proof(worktree, build_root / "src")
     try:
+        if prepared_build_digest(worktree, build_root) != prepared_inputs_at_entry:
+            raise ReceiptError("prepared build inputs changed during compilation; repeat preparation and build")
         args_digest = sha256_file(build_root / "src" / "out" / "Default" / "args.gn")
         receipt = ExecutionReceipt.create(
             replay=replay,
@@ -206,8 +280,10 @@ def record_execution(
             targets=targets,
             gn_args_sha256=args_digest,
             artifacts=_artifact_digests(build_root),
-            material_inputs_sha256=material_inputs_sha256(worktree),
+            material_inputs_sha256=material_inputs_at_entry,
+            preparation_sha256=prepared_inputs_at_entry,
         )
+        verify_material_inputs(worktree, build_root, material_inputs_at_entry)
         write_receipt_atomic(execution_path(build_root), receipt)  # type: ignore[arg-type]
         return receipt
     except (OSError, ReceiptError) as error:
@@ -227,6 +303,7 @@ def _read_execution(path: Path, replay: ReplayReceipt) -> ExecutionReceipt:
             gn_args_sha256=str(value["gn_args_sha256"]),
             artifacts={str(name): str(digest) for name, digest in value["artifacts"].items()},
             material_inputs_sha256=str(value["material_inputs_sha256"]),
+            preparation_sha256=str(value["preparation_sha256"]),
         )
     except (OSError, KeyError, TypeError, ValueError, ReceiptError) as error:
         raise ExecutionError("build execution receipt is missing or malformed; rebuild") from error
@@ -252,11 +329,13 @@ def require_current_execution(
         current_args = sha256_file(build_root / "src" / "out" / "Default" / "args.gn")
         current_artifacts = _artifact_digests(build_root)
         current_material_inputs = material_inputs_sha256(worktree)
+        current_preparation = prepared_build_digest(worktree, build_root)
     except (OSError, ReceiptError) as error:
         raise ExecutionError("could not validate runnable build artifacts") from error
     if (
         receipt.gn_args_sha256 != current_args
         or receipt.material_inputs_sha256 != current_material_inputs
+        or receipt.preparation_sha256 != current_preparation
         or receipt.artifacts != current_artifacts
     ):
         raise ExecutionError("runnable build artifacts changed after the recorded build; rebuild")

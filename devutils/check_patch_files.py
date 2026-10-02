@@ -67,6 +67,7 @@ def _staged_patch_view(patches_dir: Path, series_path: Path):
 
 def validate_patches_dir(patches_dir: Path) -> bool:
     """Return whether the active patch catalog produced any warnings."""
+    patches_dir = patches_dir.expanduser().resolve()
     selected_series = active_series(patches_dir)
     with _staged_patch_view(patches_dir, selected_series) as view:
         series_path = Path("series")

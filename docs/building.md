@@ -180,16 +180,68 @@ already exists, the command stops and directs you to `he dev`.
 
 ### Build and run normal changes
 
-From the canonical checkout, run the one normal development command:
+From the canonical checkout, update and launch the installed Arcium app:
 
 ```sh
 source dev.sh
-he dev
+he arcium
 ```
 
-`he dev` checks patch files, requires a current full replay proof, regenerates
-the build configuration, relinks the component build with current resources,
-creates `Helium Dev.app`, and launches the persistent development profile.
+`he arcium` requires Arcium and other users of its profile to be closed.
+On first use, it also requires the source Helium profile to be closed for cloning. It checks patches,
+regenerates GN, relinks with resources, and packages, installs, and launches
+`/Applications/Arcium.app` with the persistent Arcium profile and real Keychain.
+It does not compile arbitrary C++ changes. For explicitly isolated testing,
+use `he dev --isolated NAME`.
+
+The bundle's `CrProductDirName` must be `Arcium`. Packaging sets it, and install
+and launch checks reject a different value. Dock launches and tool launches
+therefore use `~/Library/Application Support/Arcium`. The launcher leaves the
+browser's profile selection and crash recovery enabled.
+
+Inspect the installed app without building, restarting, or requiring the T9 lane:
+
+```sh
+he arcium status --json
+```
+
+The report includes the bundle, user-data root, main PID, profile-lock owner,
+and mock Keychain flag. A mismatch returns a failure status. The user-data root
+contains several browser profiles; this report does not claim which profile
+window is frontmost. `chrome://version` shows that window's profile path.
+
+To compile changes while you keep using Arcium, then restart into the result:
+
+```sh
+he arcium iterate --approved
+```
+
+Iteration holds the selected lane lock across validation, configuration, the
+full application build, packaging, and restart. Siso builds the pending work
+in the full application graph. The existing build edge budget applies; pass
+`--edge-budget N` only after inspecting the build plan. Internal storage still
+requires `--allow-internal`. Iteration does not skip GN, infer patch ownership,
+capture patches, or replay them automatically. Save your patch deliberately
+and run `he replay` when its proof is stale, including after patch order changes.
+
+Iteration signs the replacement and copies it to staging on the installation
+volume before requesting a normal quit of the exact installed Arcium process.
+Restart recognizes a normal Dock or Finder launch by its exact executable,
+bundle metadata, and live profile-lock owner. An explicit conflicting profile
+or mock Keychain flag blocks restart. Once the Arcium profile exists, updates
+no longer depend on the original Helium profile being closed. If a dialog prevents
+quitting, the command stops without replacing the app. It never forces a quit.
+Close the dialog and retry. The command reports preparation and handoff times.
+
+Both commands verify the staged and installed bundles. A failed replacement
+or installed signature check restores the previous bundle. They also check
+that the launched PID uses the installed executable and owns the persistent
+profile lock for at least one second.
+If launch fails, the error reports a retained previous bundle path. The command
+does not automatically downgrade an app that may already have changed profile
+data. The browser may remain closed after a failed handoff; resolve the error
+and rerun the command. Profile data is never rolled back. A successful launch
+check does not prove session restoration or the changed UI behavior.
 
 The expensive replay is explicit and serialized with every other build action:
 
@@ -310,6 +362,16 @@ After source retrieval succeeds, the lane records `full` in
 `HELIUM_DEV_SOURCE_MODE` is unset. Full-source setup preserves Chromium's
 tracked test data instead of applying the product-only binary pruning list.
 Build and package receipts remain separate.
+
+Full-source `he configure` also prepares the DEPS-pinned test-font dependency.
+This warm stage downloads through the pinned depot_tools producer, verifies the
+archive hash and size, and checks every extracted path and file against the
+archive. Its receipt binds the acquisition, DEPS descriptor, producer code,
+retained archive, and extracted contents. A current receipt avoids another
+download. Missing or stale proof requires fresh extraction of that dependency.
+It does not sync Git, run all hooks, or replace the acquired Chromium tree.
+The configured graph and build proof both require this stage for full-source
+lanes. Product-only lite lanes keep their existing preparation flow.
 
 `he build-full --approved` is the explicit broad-build path. It still runs a
 dry run, requires a current replay receipt, and enforces the pending-edge

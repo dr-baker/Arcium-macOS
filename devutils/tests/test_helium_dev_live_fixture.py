@@ -41,7 +41,23 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
                 )
             subprocess.run(
                 [compiler, "-x", "c", "-", "-o", str(executable)],
-                input="#include <unistd.h>\nint main(void) { for (;;) sleep(1); }\n",
+                input=r"""
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (strncmp(argv[i], "--user-data-dir=", 16) != 0) continue;
+        char path[PATH_MAX], owner[128];
+        snprintf(path, sizeof(path), "%s/SingletonLock", argv[i] + 16);
+        snprintf(owner, sizeof(owner), "fixture-%d", getpid());
+        if (symlink(owner, path) != 0) return 2;
+        for (;;) sleep(1);
+    }
+    return 3;
+}
+""",
                 text=True,
                 check=True,
                 capture_output=True,

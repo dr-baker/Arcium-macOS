@@ -24,7 +24,14 @@ from pathlib import Path
 from typing import Callable
 
 from build_lane import LaneError, acquire_lane_lock
-from build_execution import ExecutionError, require_current_execution, tree_sha256
+from build_execution import (
+    ExecutionError,
+    capture_material_inputs,
+    material_guard,
+    require_current_execution,
+    tree_sha256,
+    verify_material_inputs,
+)
 
 
 class BundleError(RuntimeError):
@@ -350,6 +357,7 @@ def _package_dev_bundle_locked(
 ) -> dict[str, object]:
     """Package while a verified parent owns the generated lane."""
     try:
+        material_at_entry = capture_material_inputs(paths.worktree)
         require_current_execution(
             paths.worktree,
             paths.source_dir.parent,
@@ -369,6 +377,10 @@ def _package_dev_bundle_locked(
             sign_and_verify_ad_hoc(staging_app)
         else:
             signer(staging_app)
+        try:
+            verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+        except ExecutionError as error:
+            raise BundleError(str(error)) from error
         _publish_dev_bundle(staging_app, paths.dev_app)
         staging_root.rmdir()
     except BundleError:
@@ -428,8 +440,11 @@ def package_dev_bundle(
         "worktree": str(paths.worktree),
     }
     try:
+        material_at_entry = capture_material_inputs(paths.worktree)
         with acquire_lane_lock(
             paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ), material_guard(
+            paths.worktree, paths.source_dir.parent, expected=material_at_entry
         ):
             return _package_dev_bundle_locked(
                 paths,
@@ -437,5 +452,5 @@ def package_dev_bundle(
                 copy_runner=copy_runner,
                 signer=signer,
             )
-    except LaneError as error:
+    except (LaneError, ExecutionError) as error:
         raise BundleError(str(error)) from error

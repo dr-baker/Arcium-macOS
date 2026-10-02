@@ -367,6 +367,7 @@ class DevShellCommandsTests(unittest.TestCase):
         result = run_zsh(
             "python3(){ if [[ $* == *preflight* ]]; then echo preflight; else echo install; fi; }; "
             "___helium_check(){ echo check; }; "
+            "___helium_require_replay_proof(){ echo replay-proof; }; "
             "___helium_configure(){ echo configure; }; "
             "___helium_relink(){ echo relink:$*; }; "
             "___helium_configure_inner(){ echo configure; }; "
@@ -376,7 +377,7 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.splitlines(),
-            ["preflight", "check", "configure", "relink:--resources", "install"],
+            ["preflight", "check", "replay-proof", "configure", "relink:--resources", "install"],
         )
 
         refused = run_zsh(
@@ -384,7 +385,7 @@ class DevShellCommandsTests(unittest.TestCase):
             "he arcium extra"
         )
         self.assertEqual(refused.returncode, 2)
-        self.assertIn("takes no options", refused.stderr)
+        self.assertIn("use he arcium", refused.stderr)
 
     def test_setup_stops_at_first_failed_stage(self) -> None:
         result = run_zsh(

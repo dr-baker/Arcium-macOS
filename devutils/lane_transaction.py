@@ -12,6 +12,22 @@ import sys
 from build_lane import LaneError, LaneSpec, acquire_lane_lock, inspect_lane
 
 
+from build_execution import ExecutionError, material_guard
+
+
+from build_receipt import (
+    HARNESS_SCRIPT_ENV,
+    HARNESS_SHA256_ENV,
+    ACQUISITION_SCRIPT_ENV,
+    ACQUISITION_SHA256_ENV,
+    PYTHON_SETUP_SCRIPT_ENV,
+    PYTHON_SETUP_SHA256_ENV,
+    MATERIAL_INPUTS_ENV,
+    ReceiptError,
+    material_inputs_at_entry,
+)
+
+
 _FUNCTIONS = {
     "arcium": "___helium_arcium_inner",
     "bootstrap": "___helium_bootstrap_inner",
@@ -36,6 +52,7 @@ _FUNCTIONS = {
     "translate": "___helium_apply_translations_inner",
     "transgen": "___helium_generate_translations_inner",
     "unmerge": "___helium_patches_unmerge_inner",
+    "version": "___helium_version_inner",
 }
 
 
@@ -107,14 +124,34 @@ def main(argv: list[str] | None = None) -> int:
         lane=arguments.lane,
         worktree=worktree,
     )
+    # The child sources this exact shell; its helper modules remain those of
+    # the executing lane_transaction.py checkout.
+    previous_script = os.environ.get(HARNESS_SCRIPT_ENV)
+    previous_digest = os.environ.get(HARNESS_SHA256_ENV)
+    previous_sourced_helpers = {key: os.environ.get(key) for key in (ACQUISITION_SCRIPT_ENV, ACQUISITION_SHA256_ENV, PYTHON_SETUP_SCRIPT_ENV, PYTHON_SETUP_SHA256_ENV)}
+    prior_path = Path(previous_script or Path(__file__).resolve().parents[1] / "dev.sh")
+    if prior_path.expanduser().resolve() != script:
+        # A custom --script will be freshly sourced in the child. Keep the
+        # existing sourced-definition evidence when it is the same script.
+        os.environ.pop(HARNESS_SHA256_ENV, None)
+        environment.pop(HARNESS_SHA256_ENV, None)
+        for key in previous_sourced_helpers:
+            os.environ.pop(key, None)
+            environment.pop(key, None)
+    os.environ[HARNESS_SCRIPT_ENV] = str(script)
+    environment[HARNESS_SCRIPT_ENV] = str(script)
     try:
+        material_at_entry = material_inputs_at_entry(worktree)
         inspect_lane(spec).require_ok()
-        with acquire_lane_lock(lock_path, owner) as descriptor:
+        with acquire_lane_lock(lock_path, owner) as descriptor, material_guard(
+            worktree, build_root, expected=material_at_entry
+        ):
             inspect_lane(spec).require_ok()
             if heavy:
                 temporary_root = build_root / ".arcium" / "tmp"
                 temporary_root.mkdir(parents=True, exist_ok=True)
             environment["HELIUM_DEV_LANE_LOCK_FD"] = str(descriptor)
+            environment[MATERIAL_INPUTS_ENV] = material_at_entry
             completed = subprocess.run(
                 [
                     "zsh",
@@ -129,9 +166,23 @@ def main(argv: list[str] | None = None) -> int:
                 env=environment,
                 pass_fds=(descriptor,),
             )
-    except (LaneError, OSError) as error:
+    except (LaneError, ExecutionError, ReceiptError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 2
+    finally:
+        for key, previous in previous_sourced_helpers.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+        if previous_digest is None:
+            os.environ.pop(HARNESS_SHA256_ENV, None)
+        else:
+            os.environ[HARNESS_SHA256_ENV] = previous_digest
+        if previous_script is None:
+            os.environ.pop(HARNESS_SCRIPT_ENV, None)
+        else:
+            os.environ[HARNESS_SCRIPT_ENV] = previous_script
     return completed.returncode
 
 

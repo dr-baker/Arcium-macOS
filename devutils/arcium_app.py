@@ -12,12 +12,20 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Sequence
 
-from build_execution import ExecutionError, require_current_execution
+from build_execution import (
+    ExecutionError,
+    capture_material_inputs,
+    component_runtime_libraries,
+    material_guard,
+    require_current_execution,
+    verify_material_inputs,
+)
 from build_lane import LaneError, acquire_lane_lock
 from helium_dev_bundle import (
     BundleError,
@@ -30,6 +38,10 @@ from helium_dev_bundle import (
     resolve_bundle_paths,
 )
 from profile_clone import ProfileCloneError, clone_profile_once
+from helium_dev_runtime import (
+    ProcessCohort, ProcessRecord, ProfileSpec, discover_chromium_processes,
+    live_singleton_owner,
+)
 
 
 ARCIUM_BUNDLE_ID = "net.imput.arcium"
@@ -106,6 +118,8 @@ def rewrite_arcium_metadata(app_path: Path) -> int:
             info["CFBundleIdentifier"] = ARCIUM_BUNDLE_ID
             info["CFBundleDisplayName"] = ARCIUM_NAME
             info["CFBundleName"] = ARCIUM_NAME
+            # Chromium uses this for Dock and LaunchServices profile selection.
+            info["CrProductDirName"] = DEFAULT_PROFILE_NAME
         _write_plist(path, info, original)
         changed += 1
     return changed
@@ -221,10 +235,17 @@ def sign_and_verify(app_path: Path, identity: str) -> None:
         raise ArciumError("Arcium signing or verification failed") from error
 
 
-def _replace_directory(candidate: Path, destination: Path) -> None:
+def _replace_directory(
+    candidate: Path,
+    destination: Path,
+    *,
+    verifier: Callable[[Path], None] | None = None,
+    retain_previous: bool = False,
+) -> Path | None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     previous = destination.parent / f".{destination.name}.previous-{uuid.uuid4().hex}"
     moved_previous = False
+    installed = False
     try:
         if destination.exists() or destination.is_symlink():
             if destination.is_symlink() or not destination.is_dir():
@@ -232,33 +253,36 @@ def _replace_directory(candidate: Path, destination: Path) -> None:
             os.replace(destination, previous)
             moved_previous = True
         os.replace(candidate, destination)
+        installed = True
+        if verifier is not None:
+            verifier(destination)
     except Exception:
+        if installed:
+            shutil.rmtree(destination)
         if moved_previous and not destination.exists() and previous.exists():
             os.replace(previous, destination)
         raise
+    if retain_previous and moved_previous:
+        return previous
     if previous.exists():
         shutil.rmtree(previous)
+    return None
 
 
 def copy_component_libraries(out_dir: Path, app_path: Path) -> int:
     """Make a component-build application self-contained before signing it."""
 
-    args_path = out_dir / "args.gn"
-    if not args_path.is_file():
-        raise ArciumError("Chromium build arguments are missing")
-    args = args_path.read_text(encoding="utf-8")
-    if not re.search(r"(?m)^\s*is_component_build\s*=\s*true\s*$", args):
+    try:
+        libraries = component_runtime_libraries(out_dir)
+    except ExecutionError as error:
+        raise ArciumError(str(error)) from error
+    if not libraries:
         return 0
 
     frameworks = app_path / "Contents" / "Frameworks"
     if not frameworks.is_dir():
         raise ArciumError("copied Arcium bundle has no Frameworks directory")
-    libraries = sorted(out_dir.glob("*.dylib"))
-    if not libraries:
-        raise ArciumError("component build has no runtime libraries")
     for source in libraries:
-        if not source.is_file() or source.is_symlink():
-            raise ArciumError(f"unsafe component runtime library: {source}")
         shutil.copy2(source, frameworks / source.name)
     return len(libraries)
 
@@ -271,6 +295,7 @@ def _package_arcium_locked(
     copy_runner: CommandRunner | None = None,
 ) -> dict[str, object]:
     try:
+        material_at_entry = capture_material_inputs(paths.worktree)
         require_current_execution(
             paths.worktree,
             paths.source_dir.parent,
@@ -287,6 +312,10 @@ def _package_arcium_locked(
         component_library_count = copy_component_libraries(paths.out_dir, staging_app)
         plist_count = rewrite_arcium_metadata(staging_app)
         signer(staging_app, identity)
+        try:
+            verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+        except ExecutionError as error:
+            raise ArciumError(str(error)) from error
         _replace_directory(staging_app, output_app)
         staging_root.rmdir()
     except Exception:
@@ -321,8 +350,11 @@ def package_arcium(
         "worktree": str(paths.worktree),
     }
     try:
+        material_at_entry = capture_material_inputs(paths.worktree)
         with acquire_lane_lock(
             paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ), material_guard(
+            paths.worktree, paths.source_dir.parent, expected=material_at_entry
         ):
             return _package_arcium_locked(
                 paths,
@@ -330,14 +362,14 @@ def package_arcium(
                 signer=signer,
                 copy_runner=copy_runner,
             )
-    except LaneError as error:
+    except (LaneError, ExecutionError) as error:
         raise ArciumError(str(error)) from error
 
 
 def process_conflicts(
     ps_text: str,
     *,
-    source_profile: Path,
+    source_profile: Path | None,
     target_profile: Path,
     install_path: Path,
 ) -> tuple[str, ...]:
@@ -346,9 +378,9 @@ def process_conflicts(
         stripped = line.strip()
         if not stripped:
             continue
-        is_release = "/Helium.app/Contents/MacOS/Helium" in stripped
-        is_arcium = str(install_path / "Contents" / "MacOS" / "Helium") in stripped
-        source_selected = f"--user-data-dir={source_profile}" in stripped
+        is_release = source_profile is not None and "/Helium.app/Contents/MacOS/Helium" in stripped
+        is_arcium = str(install_path / "Contents" / "MacOS") + "/" in stripped
+        source_selected = source_profile is not None and f"--user-data-dir={source_profile}" in stripped
         target_selected = f"--user-data-dir={target_profile}" in stripped
         is_dev = "/Helium Dev.app/Contents/MacOS/Helium" in stripped
         safe_dev = (
@@ -375,7 +407,7 @@ def _ps_snapshot(runner: CommandRunner = subprocess.run) -> str:
 
 def require_closed(
     *,
-    source_profile: Path,
+    source_profile: Path | None,
     target_profile: Path,
     install_path: Path,
     ps_text: str | None = None,
@@ -387,12 +419,132 @@ def require_closed(
         target_profile=target_profile,
         install_path=install_path,
     )
+    owners = tuple(str(pid) for profile in (source_profile, target_profile)
+                   if profile is not None and (pid := _profile_owner(profile)) is not None)
+    conflicts = tuple(dict.fromkeys((*conflicts, *owners)))
     if conflicts:
         raise ArciumError(
-            "quit installed Helium and Arcium before updating (matching PIDs: "
+            "quit browsers using the required profiles before updating (matching PIDs: "
             + ", ".join(conflicts)
             + ")"
         )
+
+
+def _profile_owner(profile: Path) -> int | None:
+    return live_singleton_owner(ProfileSpec("normal", None, profile))
+
+
+def installed_executable(install_path: Path) -> Path:
+    info = _read_plist(install_path / "Contents" / "Info.plist")
+    return install_path / "Contents" / "MacOS" / _safe_executable_name(info.get("CFBundleExecutable"))
+
+
+def installed_processes(snapshot: str, install_path: Path, profile: Path) -> ProcessCohort:
+    """Recognize explicit launches and verified Dock/Finder launches alike."""
+    if not install_path.exists():
+        return ProcessCohort((), None)
+    executable = installed_executable(install_path)
+    explicit = discover_chromium_processes(
+        snapshot, executable_path=executable, user_data_dir=profile,
+    )
+    records = list(explicit.records)
+    # A missing switch is meaningful only when the bundle's product directory
+    # resolves to this root. The singleton lock independently proves ownership.
+    if profile == arcium_profile_path():
+        try:
+            verify_profile_identity(install_path)
+        except (ArciumError, BundleError, OSError):
+            pass
+        else:
+            owner = _profile_owner(profile)
+            for line in snapshot.splitlines():
+                match = re.fullmatch(r"\s*(\d+)\s+(.+?)\s*", line)
+                if match is None or int(match[1]) != owner:
+                    continue
+                command = match[2]
+                if command != str(executable) and not command.startswith(str(executable) + " "):
+                    continue
+                if re.search(r"(?:^|\s)--(?:user-data-dir|type)(?:=|\s|$)", command):
+                    continue
+                records.append(ProcessRecord(owner, command, (str(executable),)))
+    mains = [record for record in records
+             if not re.search(r"(?:^|\s)--type(?:=|\s|$)", record.command)]
+    return ProcessCohort(tuple(records), mains[0].pid if len(mains) == 1 else None)
+
+
+def restart_candidate(
+    snapshot: str, *, source_profile: Path | None, target_profile: Path, install_path: Path
+) -> int | None:
+    """Permit only one exact installed browser; other profile owners still block."""
+    cohort = installed_processes(snapshot, install_path, target_profile)
+    if any(re.search(r"(?:^|\s)--use-mock-keychain(?:=|\s|$)", record.command)
+           for record in cohort.records):
+        raise ArciumError("persistent Arcium is running with a mock Keychain; quit it before updating")
+    conflicts = set(process_conflicts(
+        snapshot, source_profile=source_profile,
+        target_profile=target_profile, install_path=install_path,
+    ))
+    for profile in (source_profile, target_profile):
+        owner = _profile_owner(profile) if profile is not None else None
+        if owner is not None:
+            if profile == source_profile or owner != cohort.main_pid:
+                raise ArciumError("another live browser owns a profile required by Arcium")
+            conflicts.add(str(owner))
+    if not conflicts:
+        return None
+    if cohort.main_pid is None or conflicts - {str(pid) for pid in cohort.pids}:
+        raise ArciumError(
+            "restart requires one exact installed Arcium using its persistent profile; "
+            "quit other Helium/Arcium profile owners first"
+        )
+    return cohort.main_pid
+
+
+def request_graceful_quit(pid: int, install_path: Path) -> None:
+    # NSRunningApplication addresses the freshly identified PID, checks its
+    # executable again, and asks for a normal quit. Never forceTerminate/kill.
+    script = '''ObjC.import('AppKit');
+function run(argv) {
+    const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(argv[0]));
+    if (app.isNil() || app.terminated) return;
+    if (ObjC.unwrap(app.executableURL.path) !== argv[1] ||
+        ObjC.unwrap(app.bundleIdentifier) !== argv[2]) throw Error('Arcium process changed');
+    if (!app.terminate) throw Error('Arcium refused to quit');
+}'''
+    try:
+        subprocess.run(
+            ["/usr/bin/osascript", "-l", "JavaScript", "-e", script, str(pid),
+             str(installed_executable(install_path)), ARCIUM_BUNDLE_ID],
+            check=True, capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise ArciumError("could not request a normal Arcium quit; installed app was not replaced") from error
+
+
+def quit_for_restart(
+    *, source_profile: Path | None, target_profile: Path, install_path: Path, timeout: float = 15.0
+) -> None:
+    arguments = dict(source_profile=source_profile, target_profile=target_profile,
+                     install_path=install_path)
+    pid = restart_candidate(_ps_snapshot(), **arguments)
+    if pid is None:
+        return
+    # Refresh the profile/executable match immediately before requesting quit.
+    if restart_candidate(_ps_snapshot(), **arguments) != pid:
+        raise ArciumError("Arcium process changed before restart; retry the command")
+    request_graceful_quit(pid, install_path)
+    deadline = time.monotonic() + timeout
+    while True:
+        snapshot = _ps_snapshot()
+        if not process_conflicts(snapshot, **arguments):
+            require_closed(**arguments, ps_text=snapshot)
+            return
+        if time.monotonic() >= deadline:
+            raise ArciumError(
+                "Arcium did not finish quitting; resolve any open dialog and retry. "
+                "Installed app was not replaced"
+            )
+        time.sleep(0.2)
 
 
 def initialize_profile(
@@ -407,24 +559,39 @@ def initialize_profile(
         raise ArciumError(str(error)) from error
 
 
-def install_arcium(candidate: Path, destination: Path) -> str:
+@contextmanager
+def prepared_install(candidate: Path, destination: Path):
+    """Copy and verify on the destination volume before interrupting a browser."""
     if candidate.is_symlink() or not candidate.is_dir():
         raise ArciumError(f"Arcium candidate is missing: {candidate}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
     staging = destination.parent / f".{destination.name}.install-{uuid.uuid4().hex}"
     try:
         method = _copy_source(candidate, staging, None)
-        _replace_directory(staging, destination)
-    except Exception:
+        verify_installed_arcium(staging)
+        yield staging, method
+    finally:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
-        raise
+
+
+def install_arcium(candidate: Path, destination: Path) -> str:
+    with prepared_install(candidate, destination) as (staging, method):
+        _replace_directory(staging, destination, verifier=verify_installed_arcium)
     return method
 
 
-def verify_installed_arcium(destination: Path) -> None:
+def verify_profile_identity(destination: Path) -> dict[str, object]:
     info = _read_plist(destination / "Contents" / "Info.plist")
     if info.get("CFBundleIdentifier") != ARCIUM_BUNDLE_ID:
         raise ArciumError("installed Arcium has the wrong bundle identifier")
+    if info.get("CrProductDirName") != DEFAULT_PROFILE_NAME:
+        raise ArciumError("Arcium bundle has the wrong default profile directory; repackage it before launching")
+    return info
+
+
+def verify_installed_arcium(destination: Path) -> None:
+    verify_profile_identity(destination)
     try:
         subprocess.run(
             ["/usr/bin/codesign", "--verify", "--deep", "--strict", str(destination)],
@@ -440,9 +607,7 @@ def launch_arcium(
     install_path: Path,
     profile: Path,
 ) -> int:
-    info = _read_plist(install_path / "Contents" / "Info.plist")
-    if info.get("CFBundleIdentifier") != ARCIUM_BUNDLE_ID:
-        raise ArciumError("installed Arcium has the wrong bundle identifier")
+    info = verify_profile_identity(install_path)
     executable_name = _safe_executable_name(info.get("CFBundleExecutable"))
     executable = install_path / "Contents" / "MacOS" / executable_name
     if not executable.is_file() or not os.access(executable, os.X_OK):
@@ -451,9 +616,7 @@ def launch_arcium(
         [
             str(executable),
             f"--user-data-dir={profile}",
-            f"--profile-directory={DEFAULT_PROFILE_DIRECTORY}",
             "--no-first-run",
-            "--disable-session-crashed-bubble",
             "--enable-features=" + ",".join(DEFAULT_FEATURES),
         ],
         stdin=subprocess.DEVNULL,
@@ -464,6 +627,23 @@ def launch_arcium(
     return process.pid
 
 
+def verify_arcium_launch(install_path: Path, profile: Path, pid: int) -> None:
+    deadline = time.monotonic() + 10.0
+    profile_spec = ProfileSpec("normal", None, profile, DEFAULT_PROFILE_DIRECTORY)
+    observed_since: float | None = None
+    while time.monotonic() < deadline:
+        cohort = installed_processes(_ps_snapshot(), install_path, profile)
+        if cohort.main_pid == pid and live_singleton_owner(profile_spec) == pid:
+            if observed_since is None:
+                observed_since = time.monotonic()
+            elif time.monotonic() - observed_since >= 1.0:
+                return
+        else:
+            observed_since = None
+        time.sleep(0.2)
+    raise ArciumError("Arcium launch did not produce the expected process and profile")
+
+
 def _update_action_locked(
     paths: BundlePaths,
     *,
@@ -471,8 +651,10 @@ def _update_action_locked(
     install_path: Path = DEFAULT_INSTALL_PATH,
     ps_text: str | None = None,
     launch: bool = True,
+    restart: bool = False,
 ) -> dict[str, object]:
     try:
+        material_at_entry = capture_material_inputs(paths.worktree)
         require_current_execution(
             paths.worktree,
             paths.source_dir.parent,
@@ -483,24 +665,47 @@ def _update_action_locked(
     source_profile = source_profile_path(home)
     target_profile = arcium_profile_path(home)
     with update_lock(home):
-        require_closed(
-            source_profile=source_profile,
-            target_profile=target_profile,
-            install_path=install_path,
-            ps_text=ps_text,
-        )
+        profile_arguments = dict(source_profile=source_profile if not target_profile.is_dir() else None,
+                                 target_profile=target_profile, install_path=install_path)
+        if restart:
+            restart_candidate(_ps_snapshot(), **profile_arguments)
+        else:
+            require_closed(**profile_arguments, ps_text=ps_text)
         identity = resolve_signing_identity()
+        # Validate an existing destination, or seed only while both browsers
+        # are closed. Profile preparation must fail before requesting a quit.
+        if not target_profile.exists() and not target_profile.is_symlink():
+            require_closed(**profile_arguments)
         migration = initialize_profile(source_profile, target_profile)
+        started = time.monotonic()
         package = _package_arcium_locked(paths, identity=identity)
-        install_method = install_arcium(Path(str(package["app_path"])), install_path)
-        verify_installed_arcium(install_path)
-        require_closed(
-            source_profile=source_profile,
-            target_profile=target_profile,
-            install_path=install_path,
-            ps_text=ps_text,
-        )
-        pid = launch_arcium(install_path, target_profile) if launch else None
+        with prepared_install(Path(str(package["app_path"])), install_path) as (staging, install_method):
+            preparation_seconds = time.monotonic() - started
+            print(f"arcium: replacement prepared in {preparation_seconds:.1f}s", file=sys.stderr)
+            handoff_started = time.monotonic()
+            verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+            if restart:
+                quit_for_restart(**profile_arguments)
+            require_closed(**profile_arguments)
+            verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+            previous = _replace_directory(
+                staging, install_path, verifier=verify_installed_arcium, retain_previous=True,
+            )
+            try:
+                require_closed(**profile_arguments)
+                verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+                pid = launch_arcium(install_path, target_profile) if launch else None
+                if pid is not None:
+                    verify_arcium_launch(install_path, target_profile, pid)
+            except Exception as error:
+                recovery = f" Previous bundle retained at {previous}." if previous else ""
+                raise ArciumError(f"Arcium handoff failed.{recovery} Profile was not rolled back: {error}") from error
+            if previous is not None:
+                try:
+                    shutil.rmtree(previous)
+                except OSError:
+                    print(f"arcium: launch verified; could not remove previous bundle at {previous}", file=sys.stderr)
+            handoff_seconds = time.monotonic() - handoff_started
     return {
         "ok": True,
         "action": "arcium",
@@ -513,6 +718,9 @@ def _update_action_locked(
         "mock_keychain": False,
         "pid": pid,
         "source_profile_unchanged": True,
+        "restart": restart,
+        "preparation_seconds": round(preparation_seconds, 3),
+        "handoff_seconds": round(handoff_seconds, 3),
     }
 
 
@@ -524,6 +732,7 @@ def update_action(
     install_path: Path = DEFAULT_INSTALL_PATH,
     ps_text: str | None = None,
     launch: bool = True,
+    restart: bool = False,
 ) -> dict[str, object]:
     """Update stable Arcium while owning the complete generated-lane transaction."""
 
@@ -534,8 +743,11 @@ def update_action(
         "worktree": str(paths.worktree),
     }
     try:
+        material_at_entry = capture_material_inputs(paths.worktree)
         with acquire_lane_lock(
             paths.source_dir.parent / ".arcium" / "lane.lock", owner
+        ), material_guard(
+            paths.worktree, paths.source_dir.parent, expected=material_at_entry
         ):
             return _update_action_locked(
                 paths,
@@ -543,8 +755,9 @@ def update_action(
                 install_path=install_path,
                 ps_text=ps_text,
                 launch=launch,
+                restart=restart,
             )
-    except LaneError as error:
+    except (LaneError, ExecutionError) as error:
         raise ArciumError(str(error)) from error
 
 
@@ -553,15 +766,16 @@ def preflight_action(
     home: str | os.PathLike[str] | None = None,
     install_path: Path = DEFAULT_INSTALL_PATH,
     ps_text: str | None = None,
+    restart: bool = False,
 ) -> dict[str, object]:
     source_profile = source_profile_path(home)
     target_profile = arcium_profile_path(home)
-    require_closed(
-        source_profile=source_profile,
-        target_profile=target_profile,
-        install_path=install_path,
-        ps_text=ps_text,
-    )
+    arguments = dict(source_profile=source_profile if not target_profile.is_dir() else None,
+                     target_profile=target_profile, install_path=install_path)
+    if restart:
+        restart_candidate(_ps_snapshot() if ps_text is None else ps_text, **arguments)
+    else:
+        require_closed(**arguments, ps_text=ps_text)
     identity = resolve_signing_identity()
     if not target_profile.exists() and not source_profile.is_dir():
         raise ArciumError(f"Helium profile is missing: {source_profile}")
@@ -574,27 +788,68 @@ def preflight_action(
     }
 
 
+def status_action(*, install_path: Path = DEFAULT_INSTALL_PATH) -> dict[str, object]:
+    """Read bundle identity and live ownership without opening or changing a profile."""
+    profile = arcium_profile_path()
+    verify_installed_arcium(install_path)
+    snapshot = _ps_snapshot()
+    cohort = installed_processes(snapshot, install_path, profile)
+    executable = re.escape(str(installed_executable(install_path)))
+    installed_running = any(
+        re.match(rf"^\s*\d+\s+{executable}(?:\s|$)", line)
+        and not re.search(r"(?:^|\s)--type(?:=|\s|$)", line)
+        for line in snapshot.splitlines()
+    )
+    owner = _profile_owner(profile)
+    mock_keychain = any(re.search(r"(?:^|\s)--use-mock-keychain(?:=|\s|$)", record.command)
+                        for record in cohort.records)
+    running = cohort.main_pid is not None and owner == cohort.main_pid
+    stopped = not installed_running and owner is None
+    return {
+        "ok": (running and not mock_keychain) or stopped,
+        "action": "arcium-status",
+        "app_path": str(install_path),
+        "bundle_identifier": ARCIUM_BUNDLE_ID,
+        "product_directory_name": DEFAULT_PROFILE_NAME,
+        "profile": str(profile),
+        "pid": cohort.main_pid,
+        "profile_owner_pid": owner,
+        "state": "running" if running else ("stopped" if stopped else "profile-mismatch"),
+        "mock_keychain": mock_keychain,
+    }
+
+
 def _emit(document: dict[str, object], json_mode: bool) -> None:
     if json_mode:
         print(json.dumps(document, sort_keys=True))
+    elif document.get("action") == "arcium-status":
+        print(f"arcium: {document['state']}, PID {document['pid']}, profile owner {document['profile_owner_pid']}")
+        print(f"arcium: bundle {document['app_path']}")
+        print(f"arcium: profile root {document['profile']}")
+        print(f"arcium: mock Keychain {document['mock_keychain']}")
     elif document.get("action") == "arcium-preflight":
         print("arcium: preflight passed")
     else:
-        print(f"arcium: installed and launched {document.get('app_path')}")
+        action = "installed and launched" if document.get("pid") is not None else "installed"
+        print(f"arcium: {action} {document.get('app_path')}")
+        print(f"arcium: handoff took {document.get('handoff_seconds')}s")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
     parser.add_argument("--build-root")
-    parser.add_argument("action", choices=("preflight", "update"))
+    parser.add_argument("action", choices=("preflight", "update", "status"))
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--restart", action="store_true", help="prepare before requesting a normal quit of the exact installed Arcium")
     args = parser.parse_args(argv)
     try:
-        if args.action == "preflight":
-            document = preflight_action()
+        if args.action == "status":
+            document = status_action()
+        elif args.action == "preflight":
+            document = preflight_action(restart=args.restart)
         else:
-            document = update_action(args.root, build_root=args.build_root)
+            document = update_action(args.root, build_root=args.build_root, restart=args.restart)
     except (
         ArciumError,
         BundleError,
@@ -608,7 +863,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps({"ok": False, "action": f"arcium-{args.action}", "error": str(error)}))
         return 2
     _emit(document, args.json)
-    return 0
+    return 0 if document.get("ok") else 2
 
 
 if __name__ == "__main__":

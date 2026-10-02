@@ -8,6 +8,7 @@ from pathlib import Path
 
 from devutils.build_receipt import (
     BuildReceipt,
+    CORE_PREPARATION_INPUTS,
     MATERIAL_BUILD_INPUTS,
     ReceiptError,
     SourceReceipt,
@@ -20,6 +21,25 @@ from devutils.build_receipt import (
 _CORE = "2" * 40
 _HASH_A = "a" * 64
 _HASH_B = "b" * 64
+
+
+def material_fixture(root: Path) -> None:
+    """Create selected inputs while hashing the real canonical executors."""
+    for declared in MATERIAL_BUILD_INPUTS:
+        path = root / declared
+        if declared == "resources":
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "icon.txt").write_text("icon\n", encoding="utf-8")
+            (path / "platform_resources.txt").write_text("", encoding="utf-8")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if not path.exists():
+                path.write_text(declared + "\n", encoding="utf-8")
+    for declared in CORE_PREPARATION_INPUTS:
+        path = root / "helium-chromium" / declared
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = "" if declared.startswith("resources/") else declared + "\n"
+        path.write_text(content, encoding="utf-8")
 
 
 class BuildReceiptTest(unittest.TestCase):
@@ -128,14 +148,7 @@ class BuildReceiptTest(unittest.TestCase):
     def test_material_inputs_ignore_docs_and_tooling_tests(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for declared in MATERIAL_BUILD_INPUTS:
-                path = root / declared
-                if declared == "resources":
-                    path.mkdir(parents=True)
-                    (path / "icon.txt").write_text("icon\n", encoding="utf-8")
-                else:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(declared + "\n", encoding="utf-8")
+            material_fixture(root)
             before = material_inputs_sha256(root)
             (root / "docs").mkdir()
             (root / "docs" / "building.md").write_text("docs\n", encoding="utf-8")
@@ -149,14 +162,7 @@ class BuildReceiptTest(unittest.TestCase):
     def test_material_build_input_change_invalidates_digest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            for declared in MATERIAL_BUILD_INPUTS:
-                path = root / declared
-                if declared == "resources":
-                    path.mkdir(parents=True)
-                    (path / "icon.txt").write_text("icon\n", encoding="utf-8")
-                else:
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(declared + "\n", encoding="utf-8")
+            material_fixture(root)
             before = material_inputs_sha256(root)
             (root / "resources" / "icon.txt").write_text("changed\n", encoding="utf-8")
             self.assertNotEqual(before, material_inputs_sha256(root))
