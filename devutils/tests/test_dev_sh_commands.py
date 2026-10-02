@@ -535,6 +535,52 @@ class DevShellCommandsTests(unittest.TestCase):
                 (fixture.build_root / ".arcium/receipts/prepared-acquisition.json").exists()
             )
 
+    def test_pending_recovery_blocks_configuration_before_lane_mutation(self) -> None:
+        for option in ("", "--refresh-defaults"):
+            with self.subTest(option=option), tempfile.TemporaryDirectory() as temporary:
+                fixture = ShellFixture(Path(temporary))
+                fixture.material_inputs()
+                out = fixture.build_root / "src/out/Default"
+                out.mkdir(parents=True)
+                journal = fixture.build_root / ".arcium/replay-timestamps.json"
+                journal.parent.mkdir(parents=True)
+                journal.write_bytes(b"pending fixture recovery\n")
+                bootstrap_marker = fixture.root / "bootstrap-invoked"
+                bootstrap = fixture.build_root / "src/tools/gn/bootstrap/bootstrap.py"
+                bootstrap.parent.mkdir(parents=True)
+                bootstrap.write_text(
+                    "from pathlib import Path\nimport sys\n"
+                    f"Path({str(bootstrap_marker)!r}).write_text('invoked\\n')\n"
+                    "Path(sys.argv[sys.argv.index('-o') + 1]).write_bytes(b'fixture gn')\n"
+                    "print('bootstrap')\n",
+                    encoding="utf-8",
+                )
+                dawn = fixture.worktree / "devutils/setup_dawn_go.sh"
+                dawn.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                dawn.chmod(0o755)
+                result = run_zsh(
+                    "___helium_setup_python(){ :; }; "
+                    "print lite > \"$_source_mode_marker\"; "
+                    "print \"$HELIUM_DEV_ACQUISITION_TARGET\" > \"$_build_dir/.arcium/acquisition-target\"; "
+                    "print 'is_component_build = true' > \"$_out_dir/args.gn\"; "
+                    "for stage in acquisition gn-defaults; do "
+                    "entry=\"$(___helium_preparation begin \"$stage\")\" || exit $?; "
+                    "___helium_preparation finish \"$stage\" \"$entry\" || exit $?; done; "
+                    "python3(){ "
+                    "if [[ \"$1\" = \"$_helium_harness_root/devutils/prepare_test_assets.py\" ]]; then "
+                    "echo test-assets; return 0; fi; command python3 \"$@\"; }; "
+                    "___helium_setup_gn(){ echo unexpected-default-refresh; return 9; }; "
+                    "___helium_setup_siso(){ echo siso; }; "
+                    f"___helium_configure_inner {option}",
+                    fixture=fixture,
+                )
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("timestamp recovery is pending", result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(bootstrap_marker.exists())
+                self.assertEqual((out / "args.gn").read_text(), "is_component_build = true\n")
+                self.assertEqual(journal.read_bytes(), b"pending fixture recovery\n")
+
     def test_configure_stops_after_failed_siso_setup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = ShellFixture(Path(temporary))
@@ -552,6 +598,7 @@ class DevShellCommandsTests(unittest.TestCase):
                 "if [[ \"$1\" = \"$_helium_harness_root/devutils/prepare_test_assets.py\" ]]; then "
                 "echo test-assets; return 0; fi; command python3 \"$@\"; }; "
                 "___helium_setup_siso(){ echo siso; return 8; }; "
+                "___helium_require_replay_proof(){ :; }; "
                 "___helium_configure_inner",
                 fixture=fixture,
             )

@@ -414,6 +414,10 @@ he version
 he configure --refresh-defaults
 ```
 
+Finish pending recovery with `he replay` before configuring. Configuration checks
+current replay proof before changing defaults, preparing assets or bootstrapping
+GN, which itself compiles a tool.
+
 Review and save intended `args.gn` settings before the explicit refresh. The flag
 recreates defaults from the selected core and macOS flags and replaces `args.gn`.
 Reapply any intended adjustments after reviewing the new defaults, then run
