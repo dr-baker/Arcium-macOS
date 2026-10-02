@@ -429,8 +429,16 @@ to the resulting arguments, graph, replay, inputs, and artifacts.
 Build evidence appears under `.arcium/build-evidence/<invocation-id>/` for each
 autoninja plan and build. It retains bounded output, starting arguments and
 available Siso metrics. Missing, stale, malformed or truncated data remains
-explicit. Diagnostics participate in both selected-source and actual-executor
-material hashes; collecting evidence does not preserve an old build receipt.
+explicit. Diagnostics participate in the actual-executor material hash;
+collecting evidence does not preserve an old build receipt.
+
+When `HELIUM_DEV_WORKTREE` selects another source worktree, the sourced canonical
+`dev.sh` executes its own diagnostics module. The selected worktree supplies its
+recipes, resources, core checkout, and directly invoked helpers such as Python
+and Dawn setup. It does not need an unused diagnostics copy. Missing or changed
+diagnostics in the executing harness still rejects material proof. Re-source
+the canonical harness after tooling changes and regenerate stale preparation
+and build receipts through their producers.
 
 ### Use an exact development profile
 

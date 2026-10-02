@@ -52,7 +52,7 @@ Archive writes and evidence reads use pinned lane-relative directory
 descriptors. Symlinked state directories are refused, and replaced directories
 produce unavailable evidence rather than redirects. Parser recursion failures
 remain explicit on Python 3.13. The diagnostics module participates in the
-selected-source and actual-executor material-input digests.
+material-input digest through the actual executing harness checkout.
 
 ## Verification and integration limits
 
@@ -75,8 +75,9 @@ git diff --check
 
 The integrated source starts from tooling commit
 `242f7f701253124918a602bd3b6dde299ff8c777` and pins core commit
-`452e4d37b31de8674ddc5430defa1ad9092e6a3f`. Diagnostics enter both material input
-lists in `build_receipt.py`. That receipt helper also participates in the
+`452e4d37b31de8674ddc5430defa1ad9092e6a3f`. Diagnostics remain mandatory executor
+inputs in `build_receipt.py`; another selected source worktree does not need an
+unused module copy. That receipt helper also participates in the
 preparation-producer digest, so this integration invalidates every
 non-acquisition preparation receipt. Follow
 [Refresh preparation proof](building.md#refresh-preparation-proof), including

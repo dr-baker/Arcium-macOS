@@ -1,6 +1,8 @@
 """Tests for portable source and build receipts."""
 
 import json
+import os
+import shutil
 import stat
 import tempfile
 import unittest
@@ -12,8 +14,10 @@ from devutils.build_receipt import (
     CORE_PREPARATION_INPUTS,
     EXECUTOR_BUILD_INPUTS,
     MATERIAL_BUILD_INPUTS,
+    MATERIAL_INPUTS_ENV,
     ReceiptError,
     SourceReceipt,
+    material_inputs_at_entry,
     material_inputs_sha256,
     sha256_file,
     write_receipt_atomic,
@@ -172,7 +176,7 @@ class BuildReceiptTest(unittest.TestCase):
             (root / "devutils/replay_timestamps.py").write_text("changed helper\n")
             self.assertNotEqual(before, material_inputs_sha256(root))
             before = material_inputs_sha256(root)
-            (root / "devutils/build_diagnostics.py").write_text("changed diagnostics\n")
+            (root / "devutils/setup_dawn_go.sh").write_text("changed selected setup helper\n")
             self.assertNotEqual(before, material_inputs_sha256(root))
 
             executor = root / "executor"
@@ -193,6 +197,50 @@ class BuildReceiptTest(unittest.TestCase):
                         path = executor / relative
                         path.write_text(path.read_text() + "changed executor input\n")
                         self.assertNotEqual(before, material_inputs_sha256(root))
+
+    def test_external_executor_accepts_source_without_diagnostics_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            material_fixture(root)
+            diagnostics = root / "devutils/build_diagnostics.py"
+            diagnostics.unlink(missing_ok=True)
+            before = material_inputs_at_entry(root)
+            self.assertEqual(len(before), 64)
+            # This file is not imported by the external executing harness.
+            diagnostics.write_text("unused selected copy\n", encoding="utf-8")
+            self.assertEqual(before, material_inputs_at_entry(root))
+            setup = root / "devutils/setup_python.sh"
+            setup.unlink()
+            with self.assertRaisesRegex(ReceiptError, "missing: devutils/setup_python.sh"):
+                material_inputs_at_entry(root)
+
+    def test_actual_executor_diagnostics_remain_required_and_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            selected = root / "selected"
+            material_fixture(selected)
+            (selected / "devutils/build_diagnostics.py").unlink(missing_ok=True)
+            before = material_inputs_at_entry(selected)
+            executor = root / "executor"
+            actual_executor = Path(__file__).resolve().parents[2]
+            for relative in EXECUTOR_BUILD_INPUTS:
+                destination = executor / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(actual_executor / relative, destination)
+            with patch("devutils.build_receipt.__file__", str(executor / "devutils/build_receipt.py")):
+                self.assertEqual(before, material_inputs_at_entry(selected))
+                diagnostics = executor / "devutils/build_diagnostics.py"
+                original = diagnostics.read_bytes()
+                diagnostics.write_bytes(original + b"changed actual executor\n")
+                self.assertNotEqual(before, material_inputs_at_entry(selected))
+                with patch.dict(os.environ, {MATERIAL_INPUTS_ENV: before}):
+                    with self.assertRaisesRegex(ReceiptError, "changed after transaction entry"):
+                        material_inputs_at_entry(selected)
+                diagnostics.write_bytes(original)
+                self.assertEqual(before, material_inputs_at_entry(selected))
+                diagnostics.unlink()
+                with self.assertRaisesRegex(ReceiptError, "missing: devutils/build_diagnostics.py"):
+                    material_inputs_at_entry(selected)
 
 
 if __name__ == "__main__":

@@ -48,7 +48,6 @@ MATERIAL_BUILD_INPUTS = (
     "revision.txt",
     "resources",
     "devutils/arcium_app.py",
-    "devutils/build_diagnostics.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
     "devutils/build_preparation.py",
@@ -74,6 +73,8 @@ MATERIAL_BUILD_INPUTS = (
 )
 
 
+# Diagnostics are imported beside the executing builder. A canonical harness
+# can select another source worktree that has no diagnostics copy.
 EXECUTOR_BUILD_INPUTS = (
     "dev.sh",
     "entitlements/app-entitlements.plist",
