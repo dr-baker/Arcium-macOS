@@ -21,10 +21,11 @@ import sys
 from threading import Event, Lock, Thread
 from typing import Callable, Mapping, Protocol, Sequence
 
-
 if __package__:
+    from .build_diagnostics import BuildEvidence
     from .replay_timestamps import has_pending_recovery
 else:
+    from build_diagnostics import BuildEvidence
     from replay_timestamps import has_pending_recovery
 
 
@@ -257,6 +258,7 @@ class BuildResult:
     running_process_stale: bool | None = None
     warnings: tuple[str, ...] = ()
     error: str | None = None
+    evidence_paths: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -270,6 +272,7 @@ class BuildResult:
             "running_process_stale": self.running_process_stale,
             "warnings": list(self.warnings),
             "error": self.error,
+            "evidence_paths": list(self.evidence_paths),
         }
 
 
@@ -618,6 +621,8 @@ class HeliumDevBuilder:
     runner: CommandRunner = subprocess_runner
     edge_budget: int = DEFAULT_EDGE_BUDGET
     _commands: list[tuple[str, ...]] = field(default_factory=list, init=False)
+    _evidence_paths: list[str] = field(default_factory=list, init=False)
+    _evidence_warnings: list[str] = field(default_factory=list, init=False)
 
     def _environment(self) -> dict[str, str]:
         environment = dict(os.environ)
@@ -627,6 +632,8 @@ class HeliumDevBuilder:
 
     def _reset_commands(self) -> None:
         self._commands.clear()
+        self._evidence_paths.clear()
+        self._evidence_warnings.clear()
 
     def _run(
         self,
@@ -639,12 +646,43 @@ class HeliumDevBuilder:
                 and "-n" not in argv and has_pending_recovery(self.paths.source_dir)):
             raise BuildInputError("timestamp recovery is pending; finish he replay before building")
         self._commands.append(argv)
-        return self.runner(
-            argv,
-            cwd=self.paths.source_dir,
-            env=self._environment(),
-            progress_total=progress_total,
-        )
+        evidence = None
+        if len(argv) > 1 and argv[1] == str(self.paths.autoninja_path):
+            try:
+                evidence = BuildEvidence(
+                    self.paths.source_dir.parent / ".arcium" / "build-evidence",
+                    self.paths.out_dir, argv,
+                )
+            except OSError as error:
+                self._evidence_warnings.append(f"build evidence unavailable: {type(error).__name__}")
+        result = None
+        error_type = None
+        try:
+            result = self.runner(
+                argv,
+                cwd=self.paths.source_dir,
+                env=self._environment(),
+                progress_total=progress_total,
+            )
+            return result
+        except BaseException as error:
+            error_type = type(error).__name__
+            raise
+        finally:
+            if evidence is not None:
+                try:
+                    path = evidence.finish(
+                        returncode=result.returncode if result is not None else None,
+                        stdout=result.stdout if result is not None else "",
+                        stderr=result.stderr if result is not None else "",
+                        timed_out=result.timed_out if result is not None else False,
+                        stdout_truncated=result.stdout_truncated if result is not None else False,
+                        stderr_truncated=result.stderr_truncated if result is not None else False,
+                        error_type=error_type,
+                    )
+                    self._evidence_paths.append(str(path))
+                except OSError as error:
+                    self._evidence_warnings.append(f"build evidence incomplete: {type(error).__name__}")
 
     def _result(
         self,
@@ -667,7 +705,8 @@ class HeliumDevBuilder:
             proof_gates=tuple(proof_gates),
             artifact_state=artifact_status.artifact_state,
             running_process_stale=artifact_status.running_process_stale,
-            warnings=tuple(warnings) + artifact_status.warnings,
+            warnings=tuple(warnings) + artifact_status.warnings + tuple(self._evidence_warnings),
+            evidence_paths=tuple(self._evidence_paths),
             error=error,
         )
 

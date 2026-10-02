@@ -48,6 +48,7 @@ MATERIAL_BUILD_INPUTS = (
     "revision.txt",
     "resources",
     "devutils/arcium_app.py",
+    "devutils/build_diagnostics.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
     "devutils/build_preparation.py",

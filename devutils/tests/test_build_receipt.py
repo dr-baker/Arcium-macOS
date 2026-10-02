@@ -171,6 +171,9 @@ class BuildReceiptTest(unittest.TestCase):
             before = material_inputs_sha256(root)
             (root / "devutils/replay_timestamps.py").write_text("changed helper\n")
             self.assertNotEqual(before, material_inputs_sha256(root))
+            before = material_inputs_sha256(root)
+            (root / "devutils/build_diagnostics.py").write_text("changed diagnostics\n")
+            self.assertNotEqual(before, material_inputs_sha256(root))
 
             executor = root / "executor"
             entitlements = (
