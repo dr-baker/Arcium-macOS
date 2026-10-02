@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Merge Arc's macOS Chromium cookies into Helium's Default profile.
+"""Shared Arc cookie helpers for profile migration tools.
 
-This is intentionally a local, one-shot migration helper. It reads the two
-app-specific Keychain secrets through the `security` command, decrypts Arc
-cookies in memory, and writes freshly encrypted values into Helium's cookie
-database. It never prints cookie values or writes plaintext cookies to disk.
-
-Both browsers must be fully quit before running this script.
+The legacy command-line migration is disabled because it merged every Arc
+profile into one destination. Import the helpers from a tool that requires
+explicit source-to-target profile mappings.
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import shutil
@@ -46,6 +42,11 @@ COOKIE_COLUMNS = (
 
 DEFAULT_ARC_ROOT = Path.home() / "Library/Application Support/Arc/User Data"
 DEFAULT_HELIUM_ROOT = Path.home() / "Library/Application Support/net.imput.helium"
+LEGACY_CLI_MESSAGE = (
+    "Direct cookie migration via devutils/import_arc_cookies.py is disabled. "
+    "Use devutils/import_arc_credentials.py with explicit --map SOURCE_PROFILE=TARGET_PROFILE "
+    "and --include-cookies."
+)
 
 
 def keychain_secret(service: str, account: str) -> bytes:
@@ -158,70 +159,8 @@ def backup_helium(helium_root: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--arc-root", type=Path, default=DEFAULT_ARC_ROOT)
-    parser.add_argument("--helium-root", type=Path, default=DEFAULT_HELIUM_ROOT)
-    args = parser.parse_args()
-
-    ensure_quit()
-    arc_root = args.arc_root.expanduser()
-    helium_root = args.helium_root.expanduser()
-    helium_profile = helium_root / "Default"
-    if not (arc_root / "Local State").exists():
-        raise RuntimeError(f"Arc profile root not found: {arc_root}")
-    if not (helium_profile / "Cookies").exists():
-        raise RuntimeError(f"Helium cookie database not found: {helium_profile / 'Cookies'}")
-
-    backup = backup_helium(helium_root)
-    arc_key = chromium_key(keychain_secret("Arc Safe Storage", "Arc"))
-    helium_key = chromium_key(keychain_secret("Helium Storage Key", "Helium"))
-
-    names = profile_name_map(arc_root)
-    selected = []
-    for profile_dir in sorted(arc_root.iterdir()):
-        if not profile_dir.is_dir() or not (profile_dir / "Cookies").exists():
-            continue
-        rows = profile_cookie_rows(profile_dir)
-        if rows:
-            selected.append(
-                (profile_dir.name, names.get(profile_dir.name, profile_dir.name), rows)
-            )
-
-    # Last-write-wins across Arc profiles and against existing Helium cookies.
-    merged = {}
-    for profile_id, profile_name, rows in selected:
-        for row in rows:
-            encrypted = row[5]
-            if not encrypted:
-                continue
-            plain = decrypt_cookie(encrypted, arc_key)
-            rewritten = list(row)
-            rewritten[4] = ""
-            rewritten[5] = encrypt_cookie(plain, helium_key)
-            unique_key = (row[1], row[2], row[18], row[3], row[6], row[14], row[15])
-            current = merged.get(unique_key)
-            if current is None or row[16] >= current[0][16]:
-                merged[unique_key] = (rewritten, profile_id, profile_name)
-
-    database = helium_profile / "Cookies"
-    connection = sqlite3.connect(database)
-    try:
-        connection.execute("PRAGMA busy_timeout=5000")
-        placeholders = ",".join("?" for _ in COOKIE_COLUMNS)
-        query = f"INSERT OR REPLACE INTO cookies ({','.join(COOKIE_COLUMNS)}) VALUES ({placeholders})"
-        connection.executemany(query, [item[0] for item in merged.values()])
-        connection.commit()
-    except Exception:
-        connection.rollback()
-        raise
-    finally:
-        connection.close()
-
-    print(f"Imported {len(merged)} cookies from {len(selected)} Arc profiles.")
-    for profile_id, profile_name, rows in selected:
-        print(f"  {profile_id}: {profile_name} ({len(rows)} cookies)")
-    print(f"Backup: {backup}")
-    return 0
+    print(LEGACY_CLI_MESSAGE, file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
