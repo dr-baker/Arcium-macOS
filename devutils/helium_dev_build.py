@@ -22,6 +22,12 @@ from threading import Event, Lock, Thread
 from typing import Callable, Mapping, Protocol, Sequence
 
 
+if __package__:
+    from .replay_timestamps import has_pending_recovery
+else:
+    from replay_timestamps import has_pending_recovery
+
+
 DEFAULT_EDGE_BUDGET = 500
 COMPONENT_RELINK_TARGET = "libchrome_dll.dylib"
 RESOURCE_RELINK_TARGET = "chrome_app"
@@ -629,6 +635,9 @@ class HeliumDevBuilder:
         progress_total: int | None = None,
     ) -> CommandResult:
         argv = tuple(str(arg) for arg in args)
+        if (len(argv) > 1 and argv[1] == str(self.paths.autoninja_path)
+                and "-n" not in argv and has_pending_recovery(self.paths.source_dir)):
+            raise BuildInputError("timestamp recovery is pending; finish he replay before building")
         self._commands.append(argv)
         return self.runner(
             argv,
@@ -785,10 +794,17 @@ class HeliumDevBuilder:
                 proof_gates=tuple(plan.proof_gates) + ("no-work-plan",),
                 warnings=("dry-run reported no work; build was not executed",),
             )
-        result = self._run(
-            self._autoninja_command(plan.targets, dry_run=False),
-            progress_total=plan.edge_count,
-        )
+        try:
+            result = self._run(
+                self._autoninja_command(plan.targets, dry_run=False),
+                progress_total=plan.edge_count,
+            )
+        except BuildError as error:
+            return self._result(
+                ok=False, action=action, targets=plan.targets,
+                edge_count=plan.edge_count, proof_gates=plan.proof_gates,
+                error=str(error),
+            )
         if result.returncode != 0:
             detail = "autoninja build failed"
             if result.timed_out:

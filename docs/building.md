@@ -269,15 +269,21 @@ regular source files so Quilt does not make unchanged headers look newer than
 compiled outputs. It snapshots the currently applied stack under the lane lock,
 performs the full zero-fuzz replay, verifies the complete stack and source
 identity, then restores timestamps only where content and permissions still
-match. The snapshot stays in memory and is discarded when the command ends.
-Replay publishes its proof after restoration. The proof continues to hash paths,
-file types, permissions, and contents, independently of timestamps.
+match. The snapshot persists in the lane's `.arcium/replay-timestamps.json`.
+Failed attempts retain the original snapshot for recovery, including when the
+applied stack is empty. Replay publishes verified proof, retires the snapshot,
+then restores timestamps. Pending recovery prevents proof acceptance and
+compilation. The proof continues to hash paths, file types, permissions, and
+contents, independently of timestamps.
 
 Changed files, new files, deleted files, unreadable or unstable files, symlinks,
 and hard links receive no timestamp restoration. Generated roots `out`, `gen`,
 and `obj`, plus Git, Quilt, and lane metadata, are excluded. A partial stack
 preserves only its already-applied paths; a fully popped stack has no timestamp
-snapshot. A failed pop, push, or replay validation does not restore timestamps.
+records unless it is recovering from a failed attempt. A failed pop, push, or
+replay validation does not restore timestamps. A corrupt snapshot or a changed
+recovery context blocks replay until the lane state is inspected and the
+snapshot is deliberately removed.
 This optimization does not retain old build or execution receipts, bypass a
 build check, or change packaging and signing requirements.
 

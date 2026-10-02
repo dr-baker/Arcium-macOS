@@ -99,6 +99,34 @@ class ReplayContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ReplayError, "no current"):
             require_current_replay_proof(outer, source)
 
+    def test_crash_after_proof_blocks_build_until_recovery_completes(self) -> None:
+        outer, source = self.fixture()
+        with patch("replay_contract._run_quilt", return_value=subprocess.CompletedProcess([], 0)), \
+             patch("replay_contract.consume_recovery_timestamps", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                replay(outer, source)
+        self.assertTrue(receipt_path(source.parent).is_file())
+        snapshot = source.parent / ".arcium/replay-timestamps.json"
+        self.assertTrue(snapshot.is_file())
+        with self.assertRaisesRegex(ReplayError, "recovery is pending"):
+            require_current_replay_proof(outer, source)
+        with patch("replay_contract._run_quilt", return_value=subprocess.CompletedProcess([], 0)):
+            completed = replay(outer, source)
+        self.assertFalse(snapshot.exists())
+        self.assertEqual(require_current_replay_proof(outer, source), completed)
+
+    def test_corrupt_or_dangling_recovery_snapshot_blocks_valid_proof(self) -> None:
+        outer, source = self.fixture()
+        _write_proof(outer, source)
+        snapshot = source.parent / ".arcium/replay-timestamps.json"
+        snapshot.write_bytes(b"corrupt")
+        with self.assertRaisesRegex(ReplayError, "recovery is pending"):
+            require_current_replay_proof(outer, source)
+        snapshot.unlink()
+        snapshot.symlink_to(source.parent / "missing")
+        with self.assertRaisesRegex(ReplayError, "recovery is pending"):
+            require_current_replay_proof(outer, source)
+
     def test_docs_and_tooling_only_changes_do_not_stale_replay_proof(self) -> None:
         outer, source = self.fixture()
         _write_proof(outer, source)
