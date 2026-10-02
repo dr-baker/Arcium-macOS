@@ -129,6 +129,22 @@ class ReplayContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ReplayError, "unsupported schema"):
             require_current_replay_proof(outer, source)
 
+    def test_reordered_series_invalidates_proof_even_with_matching_applied_order(self) -> None:
+        outer, source = self.fixture()
+        (outer / "patches/personal/second.patch").write_text("second patch bytes\n")
+        series = outer / "patches/series.merged"
+        applied = source / ".pc/applied-patches"
+        original = "personal/feature.patch\npersonal/second.patch\n"
+        series.write_text(original)
+        applied.write_text(original)
+        _write_proof(outer, source)
+        self.assertIsNotNone(require_current_replay_proof(outer, source))
+        reordered = "personal/second.patch\npersonal/feature.patch\n"
+        series.write_text(reordered)
+        applied.write_text(reordered)
+        with self.assertRaisesRegex(ReplayError, "stale"):
+            require_current_replay_proof(outer, source)
+
     def test_failed_push_invalidates_prior_proof(self) -> None:
         outer, source = self.fixture()
         _write_proof(outer, source)

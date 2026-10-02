@@ -18,6 +18,7 @@ CLI = WORKTREE / "devutils" / "helium_dev.py"
 sys.path.insert(0, str(WORKTREE / "devutils"))
 import helium_dev  # noqa: E402
 import helium_dev_runtime as runtime  # noqa: E402
+from devutils.tests.test_build_receipt import material_fixture
 from replay_contract import ReplayError  # noqa: E402
 
 
@@ -53,6 +54,7 @@ class HeliumDevCliTests(unittest.TestCase):
 
     def test_json_error_never_contaminates_stdout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
+            material_fixture(Path(temporary))
             result = subprocess.run(
                 [
                     sys.executable,
@@ -100,6 +102,7 @@ class HeliumDevCliTests(unittest.TestCase):
             "helium_dev.require_current_replay_proof",
             side_effect=ReplayError("run he replay"),
         ):
+            material_fixture(Path(temporary))
             with self.assertRaisesRegex(ReplayError, "run he replay"):
                 helium_dev.build_action(
                     "build-full",
@@ -113,6 +116,7 @@ class HeliumDevCliTests(unittest.TestCase):
             "packaged build proof is stale"
         )
         with tempfile.TemporaryDirectory() as temporary:
+            material_fixture(Path(temporary))
             with self.assertRaisesRegex(helium_dev.ReceiptError, "stale"):
                 helium_dev.runtime_action("run", temporary, ())
 
@@ -175,12 +179,15 @@ class HeliumDevCliTests(unittest.TestCase):
         ), patch(
             "helium_dev.require_current_replay_proof"
         ), patch(
+            "helium_dev.prepared_build_digest", return_value="c" * 64
+        ), patch(
             "helium_dev.invalidate_execution"
         ), patch(
             "helium_dev.resolve_dev_identity", wraps=helium_dev.resolve_dev_identity
         ) as resolve_identity, patch(
             "helium_dev._artifact_status_for_root"
         ) as artifact_status:
+            material_fixture(Path(temporary))
             result = MagicMock(ok=False)
             builder.return_value.relink.side_effect = lambda **kwargs: (
                 kwargs["artifact_status_probe"](), result
@@ -240,7 +247,9 @@ class HeliumDevCliTests(unittest.TestCase):
                     f"102 {executable} --user-data-dir={profile.user_data_dir}",
                 )
             )
-            with patch("helium_dev._quilt_top", return_value=(None, [])):
+            with patch("helium_dev._quilt_top", return_value=(None, [])), patch(
+                "helium_dev._process_started_at", return_value=0
+            ):
                 manifest = helium_dev._manifest_for(
                     paths=paths,
                     profile=profile,
@@ -273,7 +282,9 @@ class HeliumDevCliTests(unittest.TestCase):
             )
             profile = helium_dev.resolve_profile("isolated", "features", home=root / "home")
             ps_text = f"101 {executable} --user-data-dir={profile.user_data_dir}"
-            with patch("helium_dev._quilt_top", return_value=(None, [])):
+            with patch("helium_dev._quilt_top", return_value=(None, [])), patch(
+                "helium_dev._process_started_at", return_value=0
+            ):
                 manifest = helium_dev._manifest_for(
                     paths=paths,
                     profile=profile,
@@ -328,7 +339,9 @@ class HeliumDevCliTests(unittest.TestCase):
             )
             runtime.write_manifest_atomic(manifest_path, prior)
             ps_text = ""
-            with patch("helium_dev._quilt_top", return_value=(None, [])):
+            with patch("helium_dev._quilt_top", return_value=(None, [])), patch(
+                "helium_dev._process_started_at", return_value=0
+            ):
                 manifest = helium_dev._manifest_for(
                     paths=paths,
                     profile=profile,

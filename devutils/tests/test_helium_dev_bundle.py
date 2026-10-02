@@ -23,6 +23,7 @@ from helium_dev_bundle import (  # noqa: E402
     package_dev_bundle,
     resolve_dev_identity,
 )
+from devutils.tests.test_build_receipt import material_fixture
 from build_execution import ExecutionError  # noqa: E402
 
 
@@ -39,6 +40,7 @@ class HeliumDevBundleTests(unittest.TestCase):
         temporary = Path(tempfile.mkdtemp(prefix="helium-dev-bundle-test-"))
         self.addCleanup(lambda: shutil.rmtree(temporary, ignore_errors=True))
         root = temporary / "worktree"
+        material_fixture(root)
         source = root / "build" / "src"
         output = source / "out" / "Default"
         app = output / "Helium.app"
@@ -252,6 +254,7 @@ class HeliumDevBundleTests(unittest.TestCase):
     def test_run_preflight_does_not_launch_or_create_profile(self) -> None:
         root = Path(tempfile.mkdtemp(prefix="helium-preflight-test-"))
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
+        material_fixture(root)
         executable = root / "Helium Dev.app" / "Contents" / "MacOS" / "Helium"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"fixture")

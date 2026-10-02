@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 import plistlib
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -17,6 +15,7 @@ from unittest.mock import patch
 DEVUTILS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEVUTILS))
 import helium_dev  # noqa: E402
+from devutils.tests.test_build_receipt import material_fixture  # noqa: E402
 
 
 class HeliumDevLiveFixtureTests(unittest.TestCase):
@@ -26,6 +25,7 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
             self.skipTest("C compiler unavailable for executable fixture")
         with tempfile.TemporaryDirectory(prefix="helium dev fixture ") as temporary:
             root = Path(temporary)
+            material_fixture(root)
             source = root / "build" / "src"
             identity = helium_dev.resolve_dev_identity("isolated", "live-fixture")
             app = source / "out" / "Default" / identity.app_name
@@ -41,16 +41,42 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
                 )
             subprocess.run(
                 [compiler, "-x", "c", "-", "-o", str(executable)],
-                input="#include <unistd.h>\nint main(void) { for (;;) sleep(1); }\n",
+                input=r"""
+#include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (strncmp(argv[i], "--user-data-dir=", 16) != 0) continue;
+        char path[PATH_MAX], owner[128];
+        snprintf(path, sizeof(path), "%s/SingletonLock", argv[i] + 16);
+        snprintf(owner, sizeof(owner), "fixture-%d", getpid());
+        if (symlink(owner, path) != 0) return 2;
+        for (;;) sleep(1);
+    }
+    return 3;
+}
+""",
                 text=True,
                 check=True,
                 capture_output=True,
             )
             (source / "out" / "Default" / "libchrome_dll.dylib").write_bytes(b"fixture")
             home, registry = root / "home", root / "registry"
-            pid: int | None = None
+            children: list[subprocess.Popen[bytes]] = []
+            popen = subprocess.Popen
+
+            def track_fixture_child(command, *args, **kwargs):
+                child = popen(command, *args, **kwargs)
+                if command[0] == str(executable):
+                    children.append(child)
+                return child
+
             try:
-                with patch("helium_dev.require_current_packaged_build"):
+                with patch("helium_dev.require_current_packaged_build"), patch(
+                    "helium_dev.subprocess.Popen", side_effect=track_fixture_child
+                ):
                     launched = helium_dev.runtime_action(
                         "run",
                         str(root),
@@ -74,11 +100,8 @@ class HeliumDevLiveFixtureTests(unittest.TestCase):
                 self.assertTrue(stopped["ok"])
                 self.assertEqual(stopped["process_count"], 0)
             finally:
-                if isinstance(pid, int):
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        pass
+                for child in children:
+                    helium_dev._stop_owned_child(child)
 
 
 if __name__ == "__main__":

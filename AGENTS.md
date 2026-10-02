@@ -23,12 +23,21 @@ change, regardless of which tools helped create it.
 - Normal work uses the canonical `helium-macos/main` checkout. Use a branch or
   isolated worktree only for genuinely parallel or risky work.
 - Keep `helium-chromium/` at the commit recorded by the outer gitlink.
-- Source `dev.sh` and run `he dev` for normal development; lane selection is
-  automatic and requires a structurally warm lane.
+- Source `dev.sh` on canonical main. `he arcium` updates and launches
+  `/Applications/Arcium.app` from current build output and requires it closed.
+  Use `he arcium iterate --approved` to build the full application and gracefully
+  restart it with the persistent Arcium profile and real Keychain. Patch capture
+  and replay remain explicit; keep existing build guards. See `docs/building.md`.
+- Before a runtime handoff, if the session has not established a preference,
+  clarify once: build only, restart installed Arcium, or isolated testing.
+  Continue source and test work while awaiting the answer; do not ask again
+  when already authorized. Use `he dev --isolated NAME` only for requested
+  isolated testing. Never infer launch mode from branch ancestry.
 - Put shared browser behavior in Arcium core. Keep only macOS-specific changes
   here.
 - Keep generated Chromium source, Siso state, and build output in one stable
-  lane. Generated merged catalogs live under `build-root/.arcium/patches`.
+  lane. Automatic lane selection requires a structurally warm lane.
+  Generated merged catalogs live under `build-root/.arcium/patches`.
   Never copy or symlink generated state between lanes.
 - Select the source worktree and the build lane separately. Record both when
   reporting build or runtime proof.
@@ -41,8 +50,8 @@ change, regardless of which tools helped create it.
 - Keep heavy-lane temporary files and build logs on the heavy volume. Internal
   free space is still required for macOS and swap.
 - Understand and inspect all generated or AI-assisted output before submission.
-- Use the exact Dev bundle and a development profile for behavior tests. State
-  each completed proof gate accurately.
+- Verify the exact launched bundle and profile for behavior tests. State each
+  completed proof gate accurately.
 - Disclose uncertainty, missing tests, and tool-generated work that needs extra
   review.
 - Do not send duplicate, automated, or unreviewed contributions.
