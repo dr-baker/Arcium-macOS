@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import io
+import fcntl
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +19,7 @@ WORKTREE = Path(__file__).resolve().parents[2]
 CLI = WORKTREE / "devutils" / "helium_dev.py"
 sys.path.insert(0, str(WORKTREE / "devutils"))
 import helium_dev  # noqa: E402
+import build_lane  # noqa: E402
 import helium_dev_runtime as runtime  # noqa: E402
 from devutils.tests.test_build_receipt import material_fixture
 from replay_contract import ReplayError  # noqa: E402
@@ -110,6 +113,77 @@ class HeliumDevCliTests(unittest.TestCase):
                     ("--approved",),
                 )
         builder.return_value.build_full.assert_not_called()
+
+    def test_heavy_build_creates_temp_under_lock_and_material_guard(self) -> None:
+        for fail in (False, True):
+            with self.subTest(fail=fail), tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
+                root = Path(temporary).resolve()
+                material_fixture(root)
+                lane = root / ("long-lane-" * 12)
+                volume = build_lane.VolumeInfo(root, "fixture-volume", "apfs", "Case-sensitive APFS",
+                                               1024, True, True, True, True, True, "USB")
+                selector = build_lane.heavy_lane_temp
+                actual_guard = helium_dev.material_guard
+                guarded = False
+                selected = None
+                @contextmanager
+                def checked_guard(*args, **kwargs):
+                    nonlocal guarded
+                    with actual_guard(*args, **kwargs):
+                        guarded = True
+                        try:
+                            yield
+                        finally:
+                            guarded = False
+                def checked_selector(spec, *, create=False):
+                    nonlocal selected
+                    if create:
+                        self.assertTrue(guarded)
+                        with (lane / ".arcium/lane.lock").open() as competing:
+                            with self.assertRaises(BlockingIOError):
+                                fcntl.flock(competing.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    selected = selector(spec, create=create, volume_probe=lambda _path: volume)
+                    if not create:
+                        self.assertFalse(selected.parent.exists())
+                    return selected
+                def harmless_plan(_targets):
+                    self.assertEqual(os.environ["TMPDIR"], str(selected))
+                    self.assertTrue(selected.is_dir())
+                    if fail:
+                        raise RuntimeError("harmless fixture producer failed")
+                    return MagicMock(as_dict=lambda: {"ok": True})
+                with patch.dict(os.environ, {"HELIUM_DEV_LANE": "heavy", "HELIUM_DEV_HEAVY_VOLUME_UUID": "fixture-volume", "TMPDIR": "caller-temp"}), patch(
+                    "helium_dev.heavy_lane_temp", side_effect=checked_selector
+                ), patch("build_lane.heavy_lane_temp", side_effect=checked_selector), patch(
+                    "helium_dev.material_guard", side_effect=checked_guard
+                ), patch("helium_dev.ensure_gclient_identity"), patch("helium_dev.HeliumDevBuilder") as builder:
+                    builder.return_value.build_plan.side_effect = harmless_plan
+                    if fail:
+                        with self.assertRaisesRegex(RuntimeError, "fixture producer"):
+                            helium_dev.build_action("build-plan", str(root), ("obj/a.o",), build_root=lane)
+                    else:
+                        self.assertTrue(helium_dev.build_action("build-plan", str(root), ("obj/a.o",), build_root=lane)["ok"])
+                    self.assertEqual(os.environ["TMPDIR"], "caller-temp")
+                self.assertFalse((lane / ".arcium/tmp").exists())
+
+    def test_heavy_build_rejects_symlink_before_lock_or_producer(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
+            root = Path(temporary).resolve()
+            material_fixture(root)
+            target = root / "target"
+            target.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(target, target_is_directory=True)
+            volume = build_lane.VolumeInfo(root, "fixture-volume", "apfs", "Case-sensitive APFS",
+                                           1024, True, True, True, True, True, "USB")
+            selector = build_lane.heavy_lane_temp
+            with patch.dict(os.environ, {"HELIUM_DEV_LANE": "heavy", "HELIUM_DEV_HEAVY_VOLUME_UUID": "fixture-volume"}), patch(
+                "helium_dev.heavy_lane_temp", side_effect=lambda spec: selector(spec, volume_probe=lambda _path: volume)
+            ), patch("helium_dev.HeliumDevBuilder") as builder:
+                with self.assertRaises(build_lane.LaneError):
+                    helium_dev.build_action("build-plan", str(root), ("obj/a.o",), build_root=alias / "build")
+                builder.return_value.build_plan.assert_not_called()
+            self.assertEqual(list(target.iterdir()), [])
 
     def test_run_requires_current_packaged_build(self) -> None:
         self.packaged_build.side_effect = helium_dev.ReceiptError(

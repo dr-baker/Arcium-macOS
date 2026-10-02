@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from build_lane import LaneError, LaneSpec, acquire_lane_lock, inspect_lane
+from build_lane import LaneError, LaneSpec, acquire_lane_lock, heavy_lane_temp, inspect_lane
 
 
 from build_execution import ExecutionError, material_guard
@@ -73,8 +73,6 @@ def workflow_environment(
             "HELIUM_DEV_WORKTREE": str(worktree),
         }
     )
-    if lane == "heavy":
-        environment["TMPDIR"] = str(build_root / ".arcium" / "tmp")
     return environment
 
 
@@ -93,7 +91,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     worktree = arguments.worktree.expanduser().resolve()
-    build_root = arguments.build_root.expanduser().resolve()
+    build_root = arguments.build_root.expanduser().absolute()
     script = arguments.script.expanduser().resolve()
     if not script.is_file():
         print(f"development shell is missing: {script}", file=sys.stderr)
@@ -143,13 +141,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         material_at_entry = material_inputs_at_entry(worktree)
         inspect_lane(spec).require_ok()
+        if heavy:
+            heavy_lane_temp(spec)  # Pure validation before creating the lock path.
         with acquire_lane_lock(lock_path, owner) as descriptor, material_guard(
             worktree, build_root, expected=material_at_entry
         ):
             inspect_lane(spec).require_ok()
             if heavy:
-                temporary_root = build_root / ".arcium" / "tmp"
-                temporary_root.mkdir(parents=True, exist_ok=True)
+                environment["TMPDIR"] = str(heavy_lane_temp(spec, create=True))
+                environment["HELIUM_DEV_HEAVY_VOLUME_UUID"] = spec.expected_volume_uuid
             environment["HELIUM_DEV_LANE_LOCK_FD"] = str(descriptor)
             environment[MATERIAL_INPUTS_ENV] = material_at_entry
             completed = subprocess.run(

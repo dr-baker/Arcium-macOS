@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect one selected Arcium build lane without changing it."""
+"""Inspect a selected Arcium build lane or select its short temporary path."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import sys
 
-from build_lane import LaneError, LaneSpec, inspect_lane
+from build_lane import LaneError, LaneSpec, heavy_lane_temp, inspect_lane
 
 
 GIB = 1024**3
@@ -21,6 +21,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-free-gib", type=int, default=15)
     parser.add_argument("--expected-volume-uuid")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--select-temp", action="store_true")
     return parser
 
 
@@ -41,6 +42,16 @@ def main(argv: list[str] | None = None) -> int:
         warn_if_ownership_disabled=heavy,
     )
     try:
+        if arguments.select_temp:
+            if arguments.json:
+                raise LaneError("--select-temp cannot be combined with --json")
+            temporary = heavy_lane_temp(spec)
+            report = inspect_lane(spec)
+            report.require_ok()
+            for diagnostic in report.diagnostics:
+                print(f"{diagnostic.severity}: {diagnostic.message}", file=sys.stderr)
+            print(temporary)
+            return 0
         report = inspect_lane(spec)
     except LaneError as error:
         print(str(error), file=sys.stderr)
