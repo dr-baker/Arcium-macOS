@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from build_preparation import prepared_build_digest
-from build_lane import LaneError, acquire_lane_lock
+from build_lane import LaneError, LaneSpec, acquire_lane_lock, heavy_lane_temp, heavy_temp_environment
 from build_execution import ExecutionError, invalidate_execution, material_guard, record_execution, verify_material_inputs
 from build_receipt import ReceiptError, material_inputs_at_entry
 from build_receipt_cli import (
@@ -812,7 +812,7 @@ def build_action(
     build_dir = (
         worktree / "build"
         if build_root is None
-        else Path(build_root).expanduser().resolve()
+        else Path(build_root).expanduser().absolute()
     )
     source_dir = build_dir / "src"
     out_dir = source_dir / "out" / "Default"
@@ -831,15 +831,19 @@ def build_action(
         "lane": os.environ.get("HELIUM_DEV_LANE", "worktree"),
         "worktree": str(worktree),
     }
+    needs_heavy_temp = owner["lane"] == "heavy" and (action != "build-full" or namespace.approved)
+    temp_spec = LaneSpec("heavy", build_dir, 0, expected_volume_uuid=os.environ.get("HELIUM_DEV_HEAVY_VOLUME_UUID"))
+    if needs_heavy_temp:
+        heavy_lane_temp(temp_spec)
     material_at_entry = (
         material_inputs_at_entry(worktree)
-        if action == "relink" or (action == "build-full" and namespace.approved)
+        if needs_heavy_temp or action == "relink" or (action == "build-full" and namespace.approved)
         else None
     )
     with acquire_lane_lock(lock_path, owner), (
         material_guard(worktree, build_dir, expected=material_at_entry)
         if material_at_entry is not None else nullcontext()
-    ):
+    ), (heavy_temp_environment(temp_spec) if needs_heavy_temp else nullcontext()):
         if action == "build-plan":
             ensure_gclient_identity(build_dir)
             result = builder.build_plan(namespace.targets)

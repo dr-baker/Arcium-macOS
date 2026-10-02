@@ -33,13 +33,14 @@ class LaneTransactionTests(unittest.TestCase):
             "FilesystemType": "apfs",
             "FilesystemName": "Case-sensitive APFS",
             "WritableVolume": True,
-            "Internal": True,
+            "Internal": False,
+            "GlobalPermissionsEnabled": True,
         }).decode("utf-8")
         diskutil.write_text("#!/bin/sh\ncat <<'PLIST'\n" + metadata + "PLIST\n", encoding="utf-8")
         diskutil.chmod(0o700)
         return {**os.environ, "PATH": str(tools) + ":/usr/bin:/bin:/usr/sbin:/sbin"}
 
-    def test_heavy_lane_routes_temporary_traffic_to_build_volume(self) -> None:
+    def test_environment_defers_temp_creation_to_the_verified_locked_region(self) -> None:
         environment = workflow_environment(
             {"TMPDIR": "/internal/temp"},
             build_root=Path("/Volumes/T9/ArciumBuild/build"),
@@ -48,8 +49,89 @@ class LaneTransactionTests(unittest.TestCase):
         )
         self.assertEqual(
             environment["TMPDIR"],
-            "/Volumes/T9/ArciumBuild/build/.arcium/tmp",
+            "/internal/temp",
         )
+
+    def test_heavy_transaction_creates_short_temp_only_while_locked(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
+            root = Path(temporary).resolve()
+            environment = self._fixture_environment(root)
+            observed = root / "observed-temp"
+            script = root / "dev.sh"
+            script.write_text(
+                "___helium_configure_inner(){ python3 -c 'import fcntl,json,os; "
+                "from pathlib import Path; p=Path(os.environ[\"TMPDIR\"]); "
+                "assert p.is_dir() and p.stat().st_mode & 0o777 == 0o700; "
+                "lock=Path(os.environ[\"HELIUM_DEV_BUILD_ROOT\"])/\".arcium/lane.lock\"; "
+                "assert json.loads(lock.read_text())[\"action\"] == \"configure\"; "
+                "assert os.environ[\"HELIUM_DEV_MATERIAL_INPUTS_AT_ENTRY\"]; "
+                "fd=int(os.environ[\"HELIUM_DEV_LANE_LOCK_FD\"]); "
+                "assert os.fstat(fd).st_ino==lock.stat().st_ino; "
+                "Path(os.environ[\"OBSERVED_TEMP\"]).write_text(str(p))'; return 7; }\n",
+                encoding="utf-8",
+            )
+            environment["OBSERVED_TEMP"] = str(observed)
+            build_root = root / ("long-build-lane-" * 10)
+            result = subprocess.run(
+                [sys.executable, str(CLI), "--worktree", str(root), "--build-root", str(build_root),
+                 "--lane", "heavy", "--expected-volume-uuid", "fixture-volume", "--script", str(script), "configure"],
+                env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 7, result.stderr)
+            selected = Path(observed.read_text(encoding="utf-8"))
+            self.assertEqual(selected.parent.parent, root)
+            self.assertLess(len(os.fsencode(str(selected) + "/sccacheXXXXXX/sock")), 104)
+            self.assertFalse((build_root / ".arcium/tmp").exists())
+
+    def test_heavy_transaction_rejects_lexical_symlink_before_lock_creation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
+            root = Path(temporary).resolve()
+            environment = self._fixture_environment(root)
+            target = root / "target"
+            target.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(target, target_is_directory=True)
+            script = root / "dev.sh"
+            script.write_text("___helium_configure_inner(){ echo unexpected-producer; }\n")
+            result = subprocess.run(
+                [sys.executable, str(CLI), "--worktree", str(root), "--build-root", str(alias / "build"),
+                 "--lane", "heavy", "--expected-volume-uuid", "fixture-volume", "--script", str(script), "configure"],
+                env=environment, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertFalse((target / "build").exists())
+            self.assertFalse((root / f".arcium-tmp-{os.geteuid()}").exists())
+
+    def test_heavy_transaction_passes_validated_cli_pin_to_the_real_sourced_shell(self) -> None:
+        for ambient in (None, "stale-ambient-volume"):
+            with self.subTest(ambient=ambient), tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
+                root = Path(temporary).resolve()
+                environment = self._fixture_environment(root)
+                environment.pop("HELIUM_DEV_HEAVY_VOLUME_UUID", None)
+                if ambient is not None:
+                    environment["HELIUM_DEV_HEAVY_VOLUME_UUID"] = ambient
+                (root / "fake-tools/python3").symlink_to(sys.executable)
+                for helper in ("setup_python.sh", "helium_acquisition.sh"):
+                    (root / "devutils" / helper).write_bytes((ROOT / "devutils" / helper).read_bytes())
+                observed = root / "observed-pin.json"
+                environment["OBSERVED_PIN"] = str(observed)
+                script = root / "dev.sh"
+                script.write_text(
+                    (ROOT / "dev.sh").read_text()
+                    + "\n___helium_configure_inner(){ ___helium_python -c 'import json,os,sys; "
+                    "from pathlib import Path; Path(os.environ[\"OBSERVED_PIN\"]).write_text("
+                    "json.dumps([os.environ[\"HELIUM_DEV_HEAVY_VOLUME_UUID\"],sys.argv[1]]))' "
+                    '"$_heavy_volume_uuid"; }\n',
+                    encoding="utf-8",
+                )
+                result = subprocess.run(
+                    [sys.executable, str(CLI), "--worktree", str(root), "--build-root", str(root / "build"),
+                     "--lane", "heavy", "--expected-volume-uuid", "fixture-volume", "--script", str(script), "configure"],
+                    env=environment, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(observed.read_text()), ["fixture-volume", "fixture-volume"])
 
     def test_transaction_holds_lock_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

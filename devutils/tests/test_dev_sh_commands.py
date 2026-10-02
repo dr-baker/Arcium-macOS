@@ -544,19 +544,43 @@ class DevShellCommandsTests(unittest.TestCase):
         self.assertNotIn("setup", result.stdout)
 
     def test_direct_heavy_build_routes_temporary_traffic_to_lane(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            build_root = Path(temporary) / "build"
+        with tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
+            fixture = ShellFixture(Path(temporary))
+            build_root = fixture.build_root
+            metadata = plistlib.dumps({
+                "MountPoint": str(fixture.root), "VolumeUUID": "fixture-volume",
+                "FilesystemType": "apfs", "FilesystemName": "Case-sensitive APFS",
+                "WritableVolume": True, "Internal": False, "GlobalPermissionsEnabled": False,
+            }).decode("utf-8")
+            diskutil = fixture.python_env / "bin/diskutil"
+            diskutil.write_text("#!/bin/sh\ncat <<'PLIST'\n" + metadata + "PLIST\n")
+            diskutil.chmod(0o700)
             result = run_zsh(
-                f"_dev_lane=heavy; _build_dir={build_root!s}; "
+                f"_dev_lane=heavy; _build_dir={shlex.quote(str(build_root))}; _heavy_volume_uuid=fixture-volume; "
                 "___helium_lane_preflight(){ return 0; }; "
-                "___helium_harness(){ printf '%s\\n' \"$TMPDIR\"; }; "
-                "___helium_build_full --approved"
+                "___helium_harness(){ [ ! -d \"$TMPDIR\" ] || return 99; printf '%s\\n' \"$TMPDIR\"; }; "
+                "___helium_build_full --approved", fixture=fixture,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                result.stdout.strip(),
-                str(build_root / ".arcium" / "tmp"),
-            )
+            selected = Path(result.stdout.strip())
+            self.assertEqual(selected.parent.parent, fixture.root)
+            self.assertLess(len(os.fsencode(str(selected) + "/sccacheXXXXXX/sock")), 104)
+            self.assertFalse(selected.parent.exists())
+            self.assertFalse(build_root.exists())
+            self.assertIn("volume ownership is disabled", result.stderr)
+
+    def test_source_exports_the_selected_heavy_volume_pin_to_python_children(self) -> None:
+        for before_source, expected in (
+            ("unset HELIUM_DEV_HEAVY_VOLUME_UUID", "75279EDB-CF1D-4EBF-8C7C-FD7249DCBCAF"),
+            ("export HELIUM_DEV_HEAVY_VOLUME_UUID=fixture-volume", "fixture-volume"),
+        ):
+            with self.subTest(expected=expected):
+                result = run_zsh(
+                    "___helium_python -c 'import os; print(os.environ.get(\"HELIUM_DEV_HEAVY_VOLUME_UUID\"))'",
+                    before_source=before_source,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_expensive_work_refuses_unapproved_local_storage(self) -> None:
         build = run_zsh(

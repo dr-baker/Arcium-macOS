@@ -73,6 +73,7 @@ case "$_source_mode" in
         ;;
 esac
 _heavy_volume_uuid="${HELIUM_DEV_HEAVY_VOLUME_UUID:-75279EDB-CF1D-4EBF-8C7C-FD7249DCBCAF}"
+export HELIUM_DEV_HEAVY_VOLUME_UUID="$_heavy_volume_uuid"
 export HELIUM_DEV_LANE="$_dev_lane"
 export HELIUM_DEV_BUILD_ROOT="$_build_dir"
 export HELIUM_DEV_SOURCE_MODE="$_source_mode"
@@ -434,8 +435,10 @@ ___helium_prepare_lane_temp() {
     if [ "$_dev_lane" != "heavy" ]; then
         return
     fi
-    local _lane_temp="$_build_dir/.arcium/tmp"
-    mkdir -p "$_lane_temp" || return
+    local _lane_temp
+    _lane_temp="$(___helium_python "$_helium_harness_root/devutils/build_lane_cli.py" \
+        --name heavy --root "$_build_dir" --minimum-free-gib 0 \
+        --expected-volume-uuid "$_heavy_volume_uuid" --select-temp)" || return
     export TMPDIR="$_lane_temp"
 }
 
