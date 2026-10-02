@@ -138,14 +138,16 @@ class BuildExecutionTests(unittest.TestCase):
                     require_current_execution(
                         Path(temporary) / "worktree", build_root, lane="local"
                     )
-                for relative in ("dev.sh", "devutils/build_diagnostics.py"):
+                for relative in ("dev.sh", "devutils/check_patch_files.py"):
                     with self.subTest(selected_input=relative):
                         selected_input = worktree / relative
                         original = selected_input.read_bytes()
                         selected_input.write_bytes(original + b"changed selected input\n")
-                        with self.assertRaisesRegex(ExecutionError, "changed"):
-                            require_current_execution(worktree, build_root, lane="heavy")
-                        selected_input.write_bytes(original)
+                        try:
+                            with self.assertRaisesRegex(ExecutionError, "changed"):
+                                require_current_execution(worktree, build_root, lane="heavy")
+                        finally:
+                            selected_input.write_bytes(original)
                         self.assertIsNotNone(require_current_execution(worktree, build_root, lane="heavy"))
 
                 executor = Path(temporary) / "executor"

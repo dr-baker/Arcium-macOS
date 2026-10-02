@@ -108,6 +108,42 @@ def run_zsh(
 
 
 class DevShellCommandsTests(unittest.TestCase):
+    def test_external_harness_checks_preparation_without_source_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ShellFixture(Path(temporary))
+            fixture.material_inputs()
+            diagnostics = fixture.worktree / "devutils/build_diagnostics.py"
+            diagnostics.unlink(missing_ok=True)
+            metadata = fixture.build_root / ".arcium"
+            metadata.mkdir(parents=True)
+            (metadata / "source-mode").write_text("lite\n", encoding="utf-8")
+            (metadata / "acquisition-target").write_text(platform.machine() + "\n", encoding="utf-8")
+            producer_marker = fixture.root / "producer-invoked"
+            setup_receipt = (
+                "import sys; from pathlib import Path; "
+                f"sys.path.insert(0, {str(ROOT / 'devutils')!r}); "
+                "from build_preparation import input_digest, record_stage; "
+                "worktree=Path(sys.argv[1]); lane=Path(sys.argv[2]); "
+                "record_stage(worktree, lane, 'acquisition', input_digest(worktree, lane, 'acquisition'))"
+            )
+            result = run_zsh(
+                f"___helium_python -c {shlex.quote(setup_receipt)} "
+                f"{shlex.quote(str(fixture.worktree))} {shlex.quote(str(fixture.build_root))} || exit $?; "
+                f"tripwire(){{ print invoked >> {shlex.quote(str(producer_marker))}; return 99; }}; "
+                "___helium_acquire_inner(){ tripwire; }; "
+                "___helium_resources_inner(){ tripwire; }; "
+                "___helium_version_inner(){ tripwire; }; "
+                "___helium_setup_python(){ tripwire; }; "
+                "___helium_setup_gn(){ tripwire; }; "
+                "___helium_preparation require acquisition",
+                fixture=fixture,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+            self.assertFalse(diagnostics.exists())
+            self.assertFalse(producer_marker.exists())
+            self.assertFalse((fixture.build_root / "src").exists())
+
     def test_he_python_does_not_write_bytecode_into_the_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
