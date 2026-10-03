@@ -19,4 +19,6 @@ helium/macos/open-shortcuts-settings-action.patch
 
 helium/macos/native-translation-context-option.patch
 
+personal/arcium-little-arc-macos.patch
 personal/arcium-spaces-macos.patch
+personal/arcium-app-controller-macos-fixtures.patch

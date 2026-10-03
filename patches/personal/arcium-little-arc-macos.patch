@@ -1,0 +1,104 @@
+# macOS external URL ingress and existing Little Arc AppController regressions.
+# Product owner; requires core personal/arcium-little-arc.patch.
+--- a/chrome/browser/app_controller_mac.mm
++++ b/chrome/browser/app_controller_mac.mm
+@@ -78,6 +78,7 @@
+ #include "chrome/browser/ui/browser_command_controller.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_live_tab_context.h"
++#include "chrome/browser/ui/helium/helium_little_arc.h"
+ #include "chrome/browser/ui/browser_mac.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+@@ -2598,6 +2599,11 @@
+     profile = ProfileManager::MaybeForceOffTheRecordMode(
+         profile->GetOriginalProfile());
+   }
++  // Little Arc: keep the main window's tab state intact for external links.
++  if (helium::ShouldOpenExternalLinksInLittleArc(profile) &&
++      helium::OpenUrlsInLittleArc(profile, urls)) {
++    return;
++  }
+   // Use FindTabbedBrowser() to ensure URLs open in a normal tabbed browser
+   // window, not in PWA/app windows which cannot accept new tabs.
+   BrowserWindowInterface* browser =
+--- a/chrome/browser/app_controller_mac_browsertest.mm
++++ b/chrome/browser/app_controller_mac_browsertest.mm
+@@ -56,6 +56,7 @@
+ #include "chrome/browser/shortcuts/chrome_webloc_file.h"
+ #include "chrome/browser/signin/signin_util.h"
+ #include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+@@ -63,6 +64,7 @@
+ #include "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
+ #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
+ #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
++#include "chrome/browser/ui/helium/helium_little_arc.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/profiles/profile_picker.h"
+ #include "chrome/browser/ui/profiles/profile_ui_test_utils.h"
+@@ -294,6 +296,61 @@
+   return browsers;
+ }
+ 
++IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest,
++                       LittleArcExternalLinkPromotesLiveTab) {
++  ASSERT_TRUE(embedded_test_server()->Start());
++  std::ignore = AppController.sharedController;
++  browser()->profile()->GetPrefs()->SetBoolean(
++      prefs::kHeliumLittleArcExternalLinks, true);
++
++  const int original_tab_count = browser()->tab_strip_model()->count();
++  content::WebContents* original_active_tab =
++      browser()->tab_strip_model()->GetActiveWebContents();
++  const GURL url = embedded_test_server()->GetURL("/simple.html");
++  ui_test_utils::BrowserCreatedObserver browser_created_observer;
++  content::TestNavigationObserver navigation_observer(url);
++  navigation_observer.StartWatchingNewWebContents();
++
++  SendOpenUrlToAppController(url);
++  BrowserWindowInterface* popup_window = browser_created_observer.Wait();
++  navigation_observer.Wait();
++  ASSERT_TRUE(popup_window);
++  Browser* popup = popup_window->GetBrowserForMigrationOnly();
++  ASSERT_TRUE(popup);
++  EXPECT_TRUE(popup->is_type_popup());
++  EXPECT_TRUE(helium::IsLittleArcBrowser(popup));
++  EXPECT_TRUE(popup->omit_from_session_restore());
++  EXPECT_FALSE(popup->should_trigger_session_restore());
++  EXPECT_EQ(original_tab_count, browser()->tab_strip_model()->count());
++  EXPECT_EQ(original_active_tab,
++            browser()->tab_strip_model()->GetActiveWebContents());
++
++  content::WebContents* promoted_contents =
++      popup->tab_strip_model()->GetActiveWebContents();
++  ASSERT_TRUE(promoted_contents);
++  ui_test_utils::BrowserDestroyedObserver destroyed_observer(popup);
++  EXPECT_TRUE(chrome::ExecuteCommand(popup, IDC_OPEN_FILE));
++  destroyed_observer.Wait();
++
++  EXPECT_EQ(original_tab_count + 1, browser()->tab_strip_model()->count());
++  EXPECT_EQ(promoted_contents,
++            browser()->tab_strip_model()->GetActiveWebContents());
++  EXPECT_EQ(url, promoted_contents->GetLastCommittedURL());
++}
++
++IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest,
++                       LittleArcSkipsMultipleExternalLinks) {
++  std::ignore = AppController.sharedController;
++  browser()->profile()->GetPrefs()->SetBoolean(
++      prefs::kHeliumLittleArcExternalLinks, true);
++
++  EXPECT_EQ(nullptr, helium::OpenUrlsInLittleArc(
++                         browser()->profile(),
++                         {GURL("https://example.test/one"),
++                          GURL("https://example.test/two")}));
++  EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
++}
++
+ // Test browser shutdown with a command in the message queue.
+ IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, CommandDuringShutdown) {
+   EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
