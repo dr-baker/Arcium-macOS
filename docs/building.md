@@ -39,7 +39,7 @@
 
 ## Official (non-development) build
 
-First, ensure the Xcode application is open.
+Open the Xcode application before preparing an official build.
 
 If you want to notarize the build, you need to have an Apple Developer ID and a valid Apple Developer Program membership. You also need to set the following environment variables:
 
@@ -47,35 +47,74 @@ If you want to notarize the build, you need to have an Apple Developer ID and a 
 - `PROD_MACOS_NOTARIZATION_APPLE_ID`: The email you used to register your Apple Account and Apple Developer Program
 - `PROD_MACOS_NOTARIZATION_TEAM_ID`: Your Apple Developer Team ID, which can be found in the Apple Developer membership page
 - `PROD_MACOS_NOTARIZATION_PWD`: An app-specific password generated in the Apple ID account settings
-- `PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH`: Path to the provisioning profile that allows you to use entitlements which need to be specifically approved by Apple (`com.apple.developer.web-browser.public-key-credential`, `com.apple.developer.associated-domains.applinks.read-write`).
 
-If you don't have an Apple Developer ID to sign the build (or you don't want to sign it), you can simply not specify MACOS_CERTIFICATE_NAME.
+Set `PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH` only when using a provisioning
+profile for the additional Apple-approved entitlements
+`com.apple.developer.web-browser.public-key-credential` and
+`com.apple.developer.associated-domains.applinks.read-write`. Without it, the
+packaging script uses the standard app entitlements.
+
+For an ad hoc signature without notarization, leave `MACOS_CERTIFICATE_NAME` unset.
 
 ```sh
 git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git
 cd Arcium-macOS
 ```
 
-to switch to the desired release or development branch.
+Check out the intended release or development branch before building.
 
-Finally, run the following (if you are building for the same architecture as your Mac, i.e. x86_64 for Intel Macs or arm64 for Apple Silicon Macs, or if you are building for arm64 on an Intel Mac and you set the appropriate build flag):
+For an Apple Silicon release, run:
 
 ```sh
-./build.sh
+./build.sh arm64
 ```
 
-or, if you want to build for x86_64 on an Apple Silicon Mac:
+For an Intel release, run:
 
 ```sh
 ./build.sh x86_64
 ```
 
-Once it's complete, a `.dmg` should appear in `build/`.
+The script defaults to `arm64` when the architecture is omitted, including on
+an Intel host. Pass the architecture explicitly for release validation.
 
-**NOTE**: If the build fails, you must take additional steps before re-running the build:
+A successful build produces `arcium_*.dmg` in `build/`. Packaging copies
+the compiled `Helium.app` into a temporary `Arcium.app`, rewrites its bundle
+identifiers and profile directory, then signs that copy before making the disk
+image. The original GN output stays intact. The disk image contains Arcium;
+internal executable and framework filenames remain those expected by Chromium.
 
-* If the build fails while downloading the Chromium source code, it can be fixed by removing `build/downloads_cache` and re-running the build instructions.
-* If the build fails at any other point after downloading, it can be fixed by removing `build/src` and re-running the build instructions.
+Run this official build in a dedicated checkout with enough storage for fresh
+source and output. `build.sh` prepares `<checkout>/build/src` and resets its
+output directory. It does not select or protect a development lane through the
+`he` command's transaction lock. It refuses a prepared development lane and
+binds source retrieval to this checkout's build directory, overriding ambient
+development paths. Use a dedicated checkout for an official build.
+
+The official configuration uses `is_official_build=true` and PGO phase 2, and
+builds both `chrome` and `chromedriver`. A passing component development build
+does not establish that this configuration builds, signs, or runs correctly.
+The legacy `build.sh -d` option downloads source instead of cloning it and keeps
+PGO phase 0. Use the commands above for release configuration validation.
+
+Automatic updates are disabled by default. To enable them in GitHub Actions,
+configure the `PROD_MACOS_SPARKLE_ED_PUB_KEY` secret and the
+`PROD_MACOS_SPARKLE_FEED_BASE_URL` repository variable together. The key must
+encode a 32-byte Ed25519 public key in base64. The HTTPS base URL must serve
+`mac/appcast-arm64.xml` and `mac/appcast-x86_64.xml`. Partial configuration fails
+the build setup. Building release assets does not publish these appcasts.
+
+For a manual build, enabling `enable_sparkle` also requires
+`sparkle_ed_key` and the complete `sparkle_feed_url` in the GN
+configuration. Validate that each feed serves the intended Arcium release and
+that its signatures match the configured key before distributing an
+update-enabled build. The app retains the existing update-consent and
+automatic-check preferences.
+
+After a failed official build, reset its incomplete inputs before trying again:
+
+* If the build fails while downloading Chromium source, remove `build/download_cache` and run the build again.
+* If the build fails after the download, remove `build/src` and run the build again.
 
 ## Development build and environment
 

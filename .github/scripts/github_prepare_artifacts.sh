@@ -1,5 +1,9 @@
-#!/bin/bash -eux
-# Simple script for packing Helium macOS build artifacts on GitHub Actions
+#!/bin/bash
+# Prepare Arcium release artifacts and the resumable CI build archive.
+
+# This entrypoint expands signing credentials before invoking the packager.
+set +x
+set -euo pipefail
 
 _target_cpu="${1:-x86_64}"
 
@@ -10,17 +14,15 @@ _src_dir="$_root_dir/build/src"
 # If build finished successfully
 if [[ -f "$_root_dir/build_finished_$_target_cpu.log" ]] ; then
   # For packaging
-  _helium_version=$(python3 "$_main_repo/utils/helium_version.py" --tree "$_main_repo" --platform-tree "$_root_dir" --print)
+  _release_version=$(python3 "$_main_repo/utils/helium_version.py" --tree "$_main_repo" --platform-tree "$_root_dir" --print)
 
-  _file_name="helium_${_helium_version}_${_target_cpu}-macos.dmg"
+  _file_name="arcium_${_release_version}_${_target_cpu}-macos.dmg"
   _hash_name="${_file_name}.hashes.md"
 
   cd "$_src_dir"
 
-  xattr -cs out/Default/Helium.app
-
   # Prepar the certificate for app signing
-  echo $MACOS_CERTIFICATE | base64 --decode > "$TMPDIR/certificate.p12"
+  printf '%s' "$MACOS_CERTIFICATE" | base64 --decode > "$TMPDIR/certificate.p12"
 
   security create-keychain -p "$MACOS_CI_KEYCHAIN_PWD" build.keychain
   security default-keychain -s build.keychain
@@ -29,8 +31,9 @@ if [[ -f "$_root_dir/build_finished_$_target_cpu.log" ]] ; then
   security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$MACOS_CI_KEYCHAIN_PWD" build.keychain
 
   if ! [ -z "${PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_B64:-}" ]; then
-    export PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH=$(mktemp)
-    echo "$PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_B64" \
+    PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH=$(mktemp)
+    export PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH
+    printf '%s' "$PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_B64" \
       | base64 --decode > "$PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH"
   fi
 
@@ -48,7 +51,7 @@ if [[ -f "$_root_dir/build_finished_$_target_cpu.log" ]] ; then
 
   _hash_md=$(paste ./hash_types.txt ./sums.txt | awk '{print $1 " " $2}')
 
-  echo "file_name=$_file_name" >> $GITHUB_OUTPUT
+  echo "file_name=$_file_name" >> "$GITHUB_OUTPUT"
 
   _gh_run_href="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 

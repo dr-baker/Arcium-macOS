@@ -2,25 +2,56 @@
 
 set -eux
 
-# Build script for local macOS environment
-_root_dir="$(dirname "$(greadlink -f "$0")")"
-
-source "$_root_dir/env.sh"
-___helium_setup_python
-
-# Clone to get the Chromium Source
+# Validate inputs before preparing dependencies or resetting build output.
 clone=true
-while getopts 'd' OPTION; do
+while getopts ':d' OPTION; do
   case "$OPTION" in
     d)
       clone=false
+      ;;
+    *)
+      echo "Unsupported build option: -$OPTARG" >&2
+      exit 2
       ;;
   esac
 done
 
 shift "$(($OPTIND -1))"
 
-_arch=${1:-arm64}
+if [[ $# -gt 1 ]]; then
+  echo 'Usage: build.sh [-d] [arm64|x86_64]' >&2
+  exit 2
+fi
+
+_build_target_arch=${1-arm64}
+case "$_build_target_arch" in
+  arm64|x86_64) ;;
+  *)
+    echo "Unsupported macOS build architecture: $_build_target_arch" >&2
+    exit 2
+    ;;
+esac
+
+# Build script for local macOS environment
+_root_dir="$(dirname "$(greadlink -f "$0")")"
+
+# Python paths are resolved while env.sh is sourced. Bind them before that
+# happens so a standalone release build cannot use an ambient development lane.
+export HELIUM_DEV_BUILD_ROOT="$_root_dir/build"
+export HELIUM_DEV_PYTHON_ENV="$_root_dir/build/python-env"
+source "$_root_dir/env.sh"
+
+# env.sh initializes _arch from the host. Preserve the requested build target.
+_arch="$_build_target_arch"
+
+if [[ -e "$_root_dir/build/.arcium/lane.lock" || -d "$_src_dir/.pc" ]]; then
+  echo 'Refusing to reset a development lane; use a dedicated release checkout.' >&2
+  exit 2
+fi
+
+# Keep resource retrieval inside the same release checkout.
+export HELIUM_DEV_DOWNLOAD_CACHE="$_download_cache"
+___helium_setup_python
 
 # Add local clang and build tools to PATH
 # export PATH="$PATH:$_src_dir/third_party/llvm-build/Release+Asserts/bin"
@@ -38,9 +69,11 @@ mkdir -p "$_src_dir/out/Default"
 
 python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
 "$_root_dir/retrieve_and_unpack_resource.sh" -t
+"$_root_dir/devutils/setup_dawn_go.sh" \
+    "$_src_dir" "$_depot_tools_dir" "$_arch"
 
 # Apply patches, substitutions and translations
-python3 "$_main_repo/utils/patches.py" apply "$_src_dir" "$_main_repo/patches" "$_root_dir/patches"
+python3 "$_main_repo/utils/patches.py" apply --no-fuzz "$_src_dir" "$_main_repo/patches" "$_root_dir/patches"
 python3 "$_main_repo/utils/domain_substitution.py" apply -r "$_main_repo/domain_regex.list" -f "$_main_repo/domain_substitution.list" "$_src_dir"
 python3 "$_main_repo/utils/name_substitution.py" --sub -t "$_src_dir"
 python3 "$_main_repo/utils/i18n_apply.py" -t "$_src_dir"

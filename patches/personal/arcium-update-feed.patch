@@ -1,0 +1,325 @@
+--- a/chrome/updater/sparkle.gni
++++ b/chrome/updater/sparkle.gni
+@@ -9,9 +9,17 @@
+   # SUPublicEDKey: EdDSA key used for signing Sparkle updates.
+   sparkle_ed_key = ""
+ 
++  # SUFeedURL: configured Arcium Sparkle appcast for this build architecture.
++  sparkle_feed_url = ""
++
+   # SUEnableAutomaticChecks: enable automatic checking of updates
+   sparkle_automatic_checks = false
+ 
+   # SUScheduledCheckInterval: number of seconds between update checks (min: 3600)
+   sparkle_check_interval = 3600
+ }
++
++if (enable_sparkle) {
++  assert(sparkle_ed_key != "", "enable_sparkle requires sparkle_ed_key")
++  assert(sparkle_feed_url != "", "enable_sparkle requires sparkle_feed_url")
++}
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -515,11 +515,10 @@
+     }
+ 
+     if (enable_sparkle) {
+-      assert(sparkle_ed_key != "")
+-
+       args += [
+         "--sparkle=1",
+         "--sparkle_ed_key=$sparkle_ed_key",
++        "--sparkle_feed_url=$sparkle_feed_url",
+         "--sparkle_check_interval=$sparkle_check_interval",
+       ]
+ 
+--- a/build/apple/tweak_info_plist.py
++++ b/build/apple/tweak_info_plist.py
+@@ -21,6 +21,8 @@
+ #
+ 
+ 
++import base64
++import binascii
+ import optparse
+ import os
+ import plistlib
+@@ -28,6 +30,7 @@
+ import subprocess
+ import sys
+ import tempfile
++from urllib.parse import urlsplit
+ 
+ TOP = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+ 
+@@ -195,8 +198,36 @@
+   return re.match(r'^[0-9a-zA-Z-.]+$', bundle_identifier) is not None
+ 
+ 
+-def _AddSparkleKeys(plist, ed_key, auto_checks, check_interval):
++def _IsValidSparklePublicKey(public_key):
++  try:
++    decoded_key = base64.b64decode(public_key, validate=True)
++  except (binascii.Error, ValueError, TypeError):
++    return False
++
++  return (len(decoded_key) == 32 and
++          base64.b64encode(decoded_key).decode('ascii') == public_key)
++
++
++def _IsValidSparkleFeedURL(feed_url):
++  if not feed_url or any(character.isspace() or ord(character) < 0x20
++                         for character in feed_url):
++    return False
++
++  try:
++    parsed_url = urlsplit(feed_url)
++    # Accessing .port validates any explicit port syntax.
++    _ = parsed_url.port
++  except ValueError:
++    return False
++
++  return (parsed_url.scheme == 'https' and parsed_url.hostname is not None and
++          parsed_url.username is None and parsed_url.password is None and
++          not parsed_url.fragment)
++
++
++def _AddSparkleKeys(plist, ed_key, feed_url, auto_checks, check_interval):
+   plist['SUPublicEDKey'] = ed_key
++  plist['SUFeedURL'] = feed_url
+   plist['SUEnableAutomaticChecks'] = 'YES' if auto_checks else 'NO'
+   plist['SUScheduledCheckInterval'] = check_interval
+   plist['SUVerifyUpdateBeforeExtraction'] = 'YES'
+@@ -205,7 +236,7 @@
+ 
+ def _RemoveSparkleKeys(plist):
+   """Removes any set Sparkle keys."""
+-  _RemoveKeys(plist, 'SUPublicEDKey', 'SUEnableAutomaticChecks',
++  _RemoveKeys(plist, 'SUPublicEDKey', 'SUFeedURL', 'SUEnableAutomaticChecks',
+               'SUScheduledCheckInterval', 'SUVerifyUpdateBeforeExtraction',
+               'SUShowReleaseNotes')
+ 
+@@ -350,6 +381,11 @@
+                     action='store',
+                     default=None,
+                     help='Sparkle update signing EdDSA key')
++  parser.add_option('--sparkle_feed_url',
++                    dest='sparkle_feed_url',
++                    action='store',
++                    default=None,
++                    help='Configured Arcium Sparkle appcast URL')
+   parser.add_option('--sparkle_automatic_checks',
+                     dest='sparkle_automatic_checks',
+                     action='store',
+@@ -508,13 +544,18 @@
+ 
+   # Add Sparkle parameters if configured to do so.
+   if options.use_sparkle:
+-    if not options.sparkle_ed_key:
+-      print('Sparkle updates require an EdDSA key.', file=sys.stderr)
++    if not _IsValidSparklePublicKey(options.sparkle_ed_key):
++      print('Sparkle updates require a base64-encoded 32-byte EdDSA public key.',
++            file=sys.stderr)
++      return 1
++    if not _IsValidSparkleFeedURL(options.sparkle_feed_url):
++      print('Sparkle updates require a valid HTTPS feed URL.',
++            file=sys.stderr)
+       return 1
+     if options.sparkle_check_interval < 3600:
+       print('Sparkle update check interval must be at least 1 hour (3600).', file=sys.stderr)
+       return 1
+-    _AddSparkleKeys(plist, options.sparkle_ed_key,
++    _AddSparkleKeys(plist, options.sparkle_ed_key, options.sparkle_feed_url,
+                     options.sparkle_automatic_checks,
+                     options.sparkle_check_interval)
+   else:
+--- a/chrome/browser/mac/sparkle_glue.mm
++++ b/chrome/browser/mac/sparkle_glue.mm
+@@ -22,6 +22,7 @@
+ #include "build/branding_buildflags.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/channel_selection.h"
++#include "chrome/browser/helium_flag_choices.h"
+ #include "chrome/browser/lifetime/application_lifetime.h"
+ #include "chrome/browser/obsolete_system/obsolete_system.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -157,14 +158,27 @@
+ 
+ // Delegated method. Return the appcast URL for the installed channel.
+ - (NSString*)feedURLStringForUpdater:(SPUUpdater*)updater {
+-  helium::TryAcquireProfilePtr();
+-
+-  if (!profile_) {
++  if (![self shouldAccessUpdateService]) {
+     return @"";
+   }
+ 
+-  return base::SysUTF8ToNSString(
+-    helium::GetBrowserUpdateURL(*profile_->GetPrefs()).spec());
++  NSString* configuredFeedURL = base::apple::ObjCCast<NSString>(
++      [[NSBundle mainBundle] objectForInfoDictionaryKey:@"SUFeedURL"]);
++  if (configuredFeedURL.length == 0) {
++    return @"";
++  }
++
++  const auto* command_line = base::CommandLine::ForCurrentProcess();
++  if (command_line->HasSwitch(helium::kUpdateServerUrlCommandLine)) {
++    const std::string override_base =
++        command_line->GetSwitchValueASCII(helium::kUpdateServerUrlCommandLine);
++    if (helium::GetValidUserOverridenURL(override_base)) {
++      return base::SysUTF8ToNSString(
++          helium::GetBrowserUpdateURL(*profile_->GetPrefs()).spec());
++    }
++  }
++
++  return configuredFeedURL;
+ }
+ 
+ - (void)updater:(SPUUpdater*)updater failedToDownloadUpdate:(NSError*)error {
+--- /dev/null
++++ b/build/apple/tweak_info_plist_test.py
+@@ -0,0 +1,144 @@
++#!/usr/bin/env python3
++
++# Copyright 2026 The Arcium Authors
++# You can use, redistribute, and/or modify this source code under
++# the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++import base64
++import contextlib
++import io
++import plistlib
++import tempfile
++import unittest
++from pathlib import Path
++
++import tweak_info_plist
++
++
++PUBLIC_KEY = base64.b64encode(bytes(range(32))).decode('ascii')
++
++
++class SparkleInfoPlistTest(unittest.TestCase):
++  def run_tweak(self, source_plist, *sparkle_args):
++    with tempfile.TemporaryDirectory() as temp_dir:
++      input_path = Path(temp_dir) / 'input.plist'
++      output_path = Path(temp_dir) / 'output.plist'
++      with input_path.open('wb') as output:
++        plistlib.dump(source_plist, output)
++
++      stderr = io.StringIO()
++      with contextlib.redirect_stderr(stderr):
++        result = tweak_info_plist.Main([
++            '--plist=%s' % input_path,
++            '--output=%s' % output_path,
++            '--version=1.2.3.4',
++            '--scm=0',
++            '--bundle_id=net.imput.arcium',
++            *sparkle_args,
++        ])
++
++      result_plist = None
++      if output_path.exists():
++        with output_path.open('rb') as output:
++          result_plist = plistlib.load(output)
++      return result, result_plist, stderr.getvalue()
++
++  def test_sparkle_feed_url_is_written_to_info_plist(self):
++    result, plist, _ = self.run_tweak(
++        {},
++        '--sparkle=1',
++        '--sparkle_ed_key=%s' % PUBLIC_KEY,
++        '--sparkle_feed_url=https://updates.example.invalid/mac/appcast-arm64.xml',
++        '--sparkle_check_interval=3600',
++    )
++
++    self.assertIsNone(result)
++    self.assertEqual(
++        'https://updates.example.invalid/mac/appcast-arm64.xml',
++        plist['SUFeedURL'])
++    self.assertEqual(PUBLIC_KEY, plist['SUPublicEDKey'])
++    self.assertEqual('NO', plist['SUEnableAutomaticChecks'])
++    self.assertEqual(3600, plist['SUScheduledCheckInterval'])
++
++  def test_sparkle_requires_a_configured_feed_url(self):
++    result, plist, stderr = self.run_tweak(
++        {},
++        '--sparkle=1',
++        '--sparkle_ed_key=%s' % PUBLIC_KEY,
++        '--sparkle_check_interval=3600',
++    )
++
++    self.assertEqual(1, result)
++    self.assertIsNone(plist)
++    self.assertIn('valid HTTPS feed URL', stderr)
++
++  def test_sparkle_rejects_non_https_feed_urls(self):
++    result, plist, stderr = self.run_tweak(
++        {},
++        '--sparkle=1',
++        '--sparkle_ed_key=%s' % PUBLIC_KEY,
++        '--sparkle_feed_url=http://updates.example.invalid/appcast.xml',
++        '--sparkle_check_interval=3600',
++    )
++
++    self.assertEqual(1, result)
++    self.assertIsNone(plist)
++    self.assertIn('valid HTTPS feed URL', stderr)
++
++  def test_sparkle_accepts_feed_paths_and_query_strings(self):
++    feed_url = 'https://updates.example.invalid/feed/current?channel=beta'
++    result, plist, _ = self.run_tweak(
++        {},
++        '--sparkle=1',
++        '--sparkle_ed_key=%s' % PUBLIC_KEY,
++        '--sparkle_feed_url=%s' % feed_url,
++        '--sparkle_check_interval=3600',
++    )
++
++    self.assertIsNone(result)
++    self.assertEqual(feed_url, plist['SUFeedURL'])
++
++  def test_sparkle_rejects_public_keys_with_wrong_decoded_length(self):
++    short_key = base64.b64encode(bytes(31)).decode('ascii')
++    result, plist, stderr = self.run_tweak(
++        {},
++        '--sparkle=1',
++        '--sparkle_ed_key=%s' % short_key,
++        '--sparkle_feed_url=https://updates.example.invalid/appcast',
++        '--sparkle_check_interval=3600',
++    )
++
++    self.assertEqual(1, result)
++    self.assertIsNone(plist)
++    self.assertIn('base64-encoded 32-byte EdDSA public key', stderr)
++
++  def test_sparkle_rejects_invalid_base64_public_keys(self):
++    result, plist, stderr = self.run_tweak(
++        {},
++        '--sparkle=1',
++        '--sparkle_ed_key=invalid!',
++        '--sparkle_feed_url=https://updates.example.invalid/appcast',
++        '--sparkle_check_interval=3600',
++    )
++
++    self.assertEqual(1, result)
++    self.assertIsNone(plist)
++    self.assertIn('base64-encoded 32-byte EdDSA public key', stderr)
++
++  def test_disabled_sparkle_removes_feed_and_signing_keys(self):
++    result, plist, _ = self.run_tweak({
++        'SUFeedURL': 'https://updates.example.invalid/old.xml',
++        'SUPublicEDKey': 'old-key',
++        'SUEnableAutomaticChecks': 'YES',
++        'SUScheduledCheckInterval': 3600,
++    })
++
++    self.assertIsNone(result)
++    self.assertNotIn('SUFeedURL', plist)
++    self.assertNotIn('SUPublicEDKey', plist)
++    self.assertNotIn('SUEnableAutomaticChecks', plist)
++    self.assertNotIn('SUScheduledCheckInterval', plist)
++
++
++if __name__ == '__main__':
++  unittest.main()

@@ -1,8 +1,8 @@
 import os
 import argparse
+from pathlib import Path
 import subprocess
 import tempfile
-import requests
 from time import sleep
 
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
@@ -23,12 +23,17 @@ class mount(object):
 
 def get_asset_url(release, arch):
   for asset in release['assets']:
-      if asset['name'].endswith(f'_{arch}-macos.dmg'):
+      if (
+        asset['name'].startswith('arcium_')
+        and asset['name'].endswith(f'_{arch}-macos.dmg')
+      ):
         return asset['browser_download_url']
-  assert(False)
+  return None
 
 
 def get_historic_dmg_urls():
+  import requests
+
   repo = os.environ.get('GITHUB_REPOSITORY', 'dr-baker/Arcium-macOS')
   response = requests.get(
     f'https://api.github.com/repos/{repo}/releases?per_page=5',
@@ -43,7 +48,8 @@ def get_historic_dmg_urls():
     version = release['tag_name'].split('-')[0]
     x86_url = get_asset_url(release, 'x86_64')
     arm_url = get_asset_url(release, 'arm64')
-    urls[version] = (arm_url, x86_url)
+    if arm_url is not None or x86_url is not None:
+      urls[version] = (arm_url, x86_url)
 
   return urls
 
@@ -66,10 +72,24 @@ def do_diff(old_path, new_path, out_path):
   ])
 
 
+def mounted_release_app_path(mountpoint):
+  """Resolve the Arcium app bundle in a mounted release disk image."""
+  mountpoint = Path(mountpoint)
+  path = mountpoint / "Arcium.app"
+  if path.is_dir():
+    return str(path)
+  raise FileNotFoundError(f"release disk image has no Arcium.app: {mountpoint}")
+
+
 def generate_delta_for(version, urls, args):
+  import requests
+
   for i, arch in enumerate(['arm64', 'x86_64']):
     if args[i] is None:
       print(f'skipping {arch}')
+      continue
+    if urls[i] is None:
+      print(f'skipping {arch}: release has no Arcium DMG')
       continue
 
     with tempfile.NamedTemporaryFile(suffix='.dmg') as f:
@@ -79,7 +99,9 @@ def generate_delta_for(version, urls, args):
       print(f.name)
       with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
         with mount(f.name, d1), mount(args[i], d2):
-          do_diff(d1 + '/Helium.app', d2 + '/Helium.app', f'{args[2]}/{version}-{arch}.delta')
+          old_app = mounted_release_app_path(d1)
+          new_app = mounted_release_app_path(d2)
+          do_diff(old_app, new_app, f'{args[2]}/{version}-{arch}.delta')
 
 
 if __name__ == '__main__':
