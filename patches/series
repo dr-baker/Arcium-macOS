@@ -28,3 +28,4 @@ personal/arcium-settingsui-production.patch
 personal/arcium-background-effects-macos.patch
 personal/arcium-collapsed-sidebar-frame-macos.patch
 personal/arcium-arc-default-full-collapse-macos.patch
+personal/arcium-feature-settings-macos.patch
