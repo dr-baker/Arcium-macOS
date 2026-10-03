@@ -22,3 +22,9 @@ helium/macos/native-translation-context-option.patch
 personal/arcium-little-arc-macos.patch
 personal/arcium-spaces-macos.patch
 personal/arcium-app-controller-macos-fixtures.patch
+personal/arcium-chrome-appearance-macos.patch
+personal/arcium-native-settings-macos.patch
+personal/arcium-settingsui-production.patch
+personal/arcium-background-effects-macos.patch
+personal/arcium-collapsed-sidebar-frame-macos.patch
+personal/arcium-arc-default-full-collapse-macos.patch

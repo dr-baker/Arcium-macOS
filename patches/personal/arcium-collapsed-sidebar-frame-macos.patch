@@ -1,0 +1,329 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_model.cc
++++ b/chrome/browser/ui/cocoa/arcium_settings_model.cc
+@@ -43,7 +43,7 @@
+ constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
+ constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
+ 
+-constexpr std::array<std::string_view, 30> kProfilePreferences = {
++constexpr std::array<std::string_view, 32> kProfilePreferences = {
+     prefs::kRestoreOnStartup,
+     prefs::kPromptForDownload,
+     prefs::kHeliumLittleArcExternalLinks,
+@@ -52,6 +52,8 @@
+     prefs::kShiftRightClickContextMenu,
+     prefs::kHeliumLayout,
+     prefs::kVerticalTabsUncollapsedWidth,
++    arcium::kCollapsedSidebarStylePref,
++    arcium::kChromeFrameBorderWidthPref,
+     arcium::kChromeUIScalePref,
+     prefs::kHeliumVerticalRightAligned,
+     prefs::kHeliumZenMode,
+--- a/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ b/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -92,6 +92,8 @@
+ NSString* const kKeyAppearance = @"settings_appearance";
+ NSString* const kKeyChromeAppearance = @"chrome_appearance";
+ NSString* const kKeySidebarWidth = @"sidebar_width";
++NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
++NSString* const kKeyChromeFrameBorderWidth = @"chrome_frame_border_width";
+ NSString* const kKeyChromeUIScale = @"chrome_ui_scale";
+ NSString* const kKeySharedPalette = @"shared_palette";
+ NSString* const kKeyRoundedFrame = @"rounded_frame";
+@@ -1137,6 +1139,33 @@
+       model && sidebar_width_available
+           ? model->GetSidebarWidth()
+           : tabs::kVerticalTabStripDefaultUncollapsedWidth;
++  const bool collapsed_sidebar_style_available =
++      model && model->HasPreference(
++                   arcium::kCollapsedSidebarStylePref);
++  const bool collapsed_sidebar_style_managed =
++      collapsed_sidebar_style_available &&
++      model->IsManaged(arcium::kCollapsedSidebarStylePref);
++  const int collapsed_sidebar_style =
++      collapsed_sidebar_style_available
++          ? std::clamp(
++                model->GetInteger(arcium::kCollapsedSidebarStylePref),
++                arcium::kCollapsedSidebarStyleMin,
++                arcium::kCollapsedSidebarStyleMax)
++          : arcium::kCollapsedSidebarStyleIconRail;
++  const bool chrome_frame_border_width_available =
++      model && model->HasPreference(
++                   arcium::kChromeFrameBorderWidthPref);
++  const bool chrome_frame_border_width_managed =
++      chrome_frame_border_width_available &&
++      model->IsManaged(arcium::kChromeFrameBorderWidthPref);
++  const int chrome_frame_border_width =
++      chrome_frame_border_width_available
++          ? std::clamp(
++                model->GetInteger(
++                    arcium::kChromeFrameBorderWidthPref),
++                arcium::kChromeFrameBorderWidthMin,
++                arcium::kChromeFrameBorderWidthMax)
++          : arcium::kChromeFrameBorderWidthDefault;
+   const bool home_available =
+       model && model->HasPreference(prefs::kShowHomeButton);
+   const bool back_available =
+@@ -1229,6 +1258,23 @@
+     @"sidebarWidth" : @(sidebar_width),
+     @"sidebarWidthAvailable" : @(sidebar_width_available),
+     @"sidebarWidthManaged" : @(sidebar_width_managed),
++    @"collapsedSidebarStyle" : @(collapsed_sidebar_style),
++    @"collapsedSidebarStyleOptions" : @[
++      @{
++        @"value" : @(arcium::kCollapsedSidebarStyleIconRail),
++        @"label" : @"Icon rail"
++      },
++      @{
++        @"value" : @(arcium::kCollapsedSidebarStyleFullyHidden),
++        @"label" : @"Fully hidden (Arc)"
++      },
++    ],
++    @"collapsedSidebarStyleAvailable" : @(collapsed_sidebar_style_available),
++    @"collapsedSidebarStyleManaged" : @(collapsed_sidebar_style_managed),
++    @"chromeFrameBorderWidth" : @(chrome_frame_border_width),
++    @"chromeFrameBorderWidthAvailable" :
++        @(chrome_frame_border_width_available),
++    @"chromeFrameBorderWidthManaged" : @(chrome_frame_border_width_managed),
+     @"roundedFrame" : @(model && rounded_available &&
+                         model->GetBoolean(prefs::kHeliumRoundedFrame)),
+     @"centeredLocationBar" :
+@@ -1277,6 +1323,8 @@
+                             [shared_palette[@"managed"] boolValue]),
+       kKeyChromeAppearance : @(chrome_appearance_managed),
+       kKeySidebarWidth : @(sidebar_width_managed),
++      kKeyCollapsedSidebarStyle : @(collapsed_sidebar_style_managed),
++      kKeyChromeFrameBorderWidth : @(chrome_frame_border_width_managed),
+       kKeyRoundedFrame : @(model && rounded_available &&
+                            model->IsManaged(prefs::kHeliumRoundedFrame)),
+       kKeyCenteredLocationBar :
+@@ -1326,6 +1374,8 @@
+                             [shared_palette[@"available"] boolValue]),
+       kKeyChromeAppearance : @(chrome_appearance_available),
+       kKeySidebarWidth : @(sidebar_width_available),
++      kKeyCollapsedSidebarStyle : @(collapsed_sidebar_style_available),
++      kKeyChromeFrameBorderWidth : @(chrome_frame_border_width_available),
+       kKeyRoundedFrame : @(rounded_available),
+       kKeyCenteredLocationBar : @(centered_available),
+       kKeyMinimalLocationBar : @(minimal_available),
+@@ -1860,6 +1910,30 @@
+     }
+     return;
+   }
++  if ([key isEqualToString:kKeyCollapsedSidebarStyle] &&
++      GetIntegerObject(value, &integer_value)) {
++    if (integer_value >= arcium::kCollapsedSidebarStyleMin &&
++        integer_value <= arcium::kCollapsedSidebarStyleMax &&
++        model_->HasPreference(arcium::kCollapsedSidebarStylePref) &&
++        !model_->IsManaged(arcium::kCollapsedSidebarStylePref)) {
++      model_->SetInteger(arcium::kCollapsedSidebarStylePref,
++                         integer_value);
++      [self modelDidChange];
++    }
++    return;
++  }
++  if ([key isEqualToString:kKeyChromeFrameBorderWidth] &&
++      GetIntegerObject(value, &integer_value)) {
++    if (integer_value >= arcium::kChromeFrameBorderWidthMin &&
++        integer_value <= arcium::kChromeFrameBorderWidthMax &&
++        model_->HasPreference(arcium::kChromeFrameBorderWidthPref) &&
++        !model_->IsManaged(arcium::kChromeFrameBorderWidthPref)) {
++      model_->SetInteger(arcium::kChromeFrameBorderWidthPref,
++                         integer_value);
++      [self modelDidChange];
++    }
++    return;
++  }
+   if ([key isEqualToString:kKeyAppearance] &&
+       [value isKindOfClass:[NSString class]]) {
+     std::optional<int> mode = AppearanceModeValue((NSString*)value);
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -299,6 +299,11 @@
+ }
+ 
+ struct ArciumAppearanceSnapshot: Equatable {
++    static let defaultCollapsedSidebarStyleOptions = [
++        ArciumChoice(value: 0, label: "Icon rail"),
++        ArciumChoice(value: 1, label: "Fully hidden (Arc)")
++    ]
++
+     var mode = "system"
+     var modeManaged = false
+     var modeAvailable = true
+@@ -324,6 +329,13 @@
+     var sidebarWidth = 200
+     var sidebarWidthAvailable = false
+     var sidebarWidthManaged = false
++    var collapsedSidebarStyle = 0
++    var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
++    var collapsedSidebarStyleAvailable = false
++    var collapsedSidebarStyleManaged = false
++    var chromeFrameBorderWidth = 3
++    var chromeFrameBorderWidthAvailable = false
++    var chromeFrameBorderWidthManaged = false
+     var chromeUIScale = 100
+     var chromeUIScaleIsDefault = true
+     var chromeUIScaleAvailable = false
+@@ -340,6 +352,17 @@
+         sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
+         sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
+         sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
++        collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
++        let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
++            .filter { (0...1).contains($0.value) }
++        if !parsedCollapsedSidebarStyleOptions.isEmpty {
++            collapsedSidebarStyleOptions = parsedCollapsedSidebarStyleOptions
++        }
++        collapsedSidebarStyleAvailable = strictBoolean(dictionary["collapsedSidebarStyleAvailable"]) ?? false
++        collapsedSidebarStyleManaged = strictBoolean(dictionary["collapsedSidebarStyleManaged"]) ?? false
++        chromeFrameBorderWidth = min(max(integerOptional(dictionary["chromeFrameBorderWidth"]) ?? 3, 0), 24)
++        chromeFrameBorderWidthAvailable = strictBoolean(dictionary["chromeFrameBorderWidthAvailable"]) ?? false
++        chromeFrameBorderWidthManaged = strictBoolean(dictionary["chromeFrameBorderWidthManaged"]) ?? false
+         chromeUIScale = min(max(finiteIntegerOptional(dictionary["chromeUIScale"]) ?? 100, 80), 125)
+         chromeUIScaleIsDefault = strictBoolean(dictionary["chromeUIScaleIsDefault"]) ?? true
+         chromeUIScaleAvailable = strictBoolean(dictionary["chromeUIScaleAvailable"]) ?? false
+@@ -719,6 +742,23 @@
+         settingChanged(key: "sidebar_width", value: Int(min(max(width.rounded(), 160), 400)))
+     }
+ 
++    func setCollapsedSidebarStyle(_ style: Int) {
++        guard snapshot.appearance.collapsedSidebarStyleAvailable,
++              !snapshot.appearance.collapsedSidebarStyleManaged,
++              (0...1).contains(style) else {
++            return
++        }
++        settingChanged(key: "collapsed_sidebar_style", value: style)
++    }
++
++    func setChromeFrameBorderWidth(_ width: Double) {
++        guard snapshot.appearance.chromeFrameBorderWidthAvailable,
++              !snapshot.appearance.chromeFrameBorderWidthManaged,
++              width.isFinite else { return }
++        let bounded = min(max(width.rounded(), 0), 24)
++        settingChanged(key: "chrome_frame_border_width", value: Int(bounded))
++    }
++
+     var chromeUIScaleFactor: Double {
+         let factor = Double(snapshot.appearance.chromeUIScale) / 100
+         return factor.isFinite && factor > 0 ? factor : 1
+@@ -728,9 +768,18 @@
+         (Double(snapshot.appearance.sidebarWidth) * chromeUIScaleFactor).rounded()
+     }
+ 
++    var displayedChromeFrameBorderWidth: Double {
++        (Double(snapshot.appearance.chromeFrameBorderWidth) * chromeUIScaleFactor).rounded()
++    }
++
+     func setDisplayedSidebarWidth(_ width: Double) {
+         guard width.isFinite else { return }
+         setSidebarWidth(width / chromeUIScaleFactor)
++    }
++
++    func setDisplayedChromeFrameBorderWidth(_ width: Double) {
++        guard width.isFinite else { return }
++        setChromeFrameBorderWidth(width / chromeUIScaleFactor)
+     }
+ 
+     func setChromeUIScale(_ scale: Double) {
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -552,7 +552,28 @@
+                     help: SHelp(description: "Resize the expanded sidebar in this profile’s browser windows. Its displayed width follows Browser UI scale; webpage zoom stays unchanged."),
+                     commitMode: .onDragEnd)
+                 .disabled(!store.snapshot.appearance.sidebarWidthAvailable || store.snapshot.appearance.sidebarWidthManaged)
++                SPicker("Collapsed sidebar", selection: Binding(
++                    get: { store.snapshot.appearance.collapsedSidebarStyle },
++                    set: { store.setCollapsedSidebarStyle($0) }
++                ), options: store.snapshot.appearance.collapsedSidebarStyleOptions.map {
++                    (value: $0.value, label: $0.label)
++                }, description: "Hide the sidebar and toolbar when collapsed.")
++                .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
++                    || store.snapshot.appearance.collapsedSidebarStyleManaged)
+                 BooleanSetting(title: "Rounded frame", description: "Round the browser frame corners.", enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
++                SSlider("Border width", value: Binding(
++                    get: { store.displayedChromeFrameBorderWidth },
++                    set: { store.setDisplayedChromeFrameBorderWidth($0) }
++                ), range: 0...(24 * store.chromeUIScaleFactor).rounded(), step: 1,
++                    format: { "\(Int($0.rounded())) pt" },
++                    help: SHelp(description: "Adjust the space around page content. Width follows Browser UI scale."),
++                    commitMode: .onDragEnd,
++                    onPreviewChange: { value in
++                        store.setDisplayedChromeFrameBorderWidth(value)
++                    })
++                .disabled(!store.snapshot.appearance.chromeFrameBorderWidthAvailable
++                    || store.snapshot.appearance.chromeFrameBorderWidthManaged
++                    || !store.snapshot.appearance.roundedFrame)
+                 BooleanSetting(title: "Centered address bar", description: "Keep the address bar centered in the toolbar.", enabled: editable("centered_location_bar"), value: booleanBinding("centered_location_bar"))
+                 BooleanSetting(title: "Minimal address bar", description: "Use a compact address bar.", enabled: editable("minimal_location_bar"), value: booleanBinding("minimal_location_bar"))
+                 BooleanSetting(title: "Zen mode", description: "Hide optional browser chrome for a focused workspace.", enabled: editable("zen_mode"), value: booleanBinding("zen_mode"))
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -840,6 +840,68 @@
+ 
+         XCTAssertEqual(delegate.settings.map(\.key), ["sidebar_width", "sidebar_width"])
+         XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [200, 201])
++    }
++
++    @MainActor
++    func testCollapsedSidebarAndFrameBorderUseTypedHostCallbacks() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "collapsedSidebarStyle": 0,
++            "collapsedSidebarStyleAvailable": true,
++            "collapsedSidebarStyleManaged": false,
++            "collapsedSidebarStyleOptions": [
++                ["value": 0, "label": "Icon rail"],
++                ["value": 1, "label": "Fully hidden (Arc)"]
++            ],
++            "chromeFrameBorderWidth": 3,
++            "chromeFrameBorderWidthAvailable": true,
++            "chromeFrameBorderWidthManaged": false,
++            "chromeUIScale": 125,
++            "chromeUIScaleAvailable": true,
++            "chromeUIScaleManaged": false
++        ]], delegate: delegate)
++
++        XCTAssertEqual(store.snapshot.appearance.collapsedSidebarStyleOptions,
++                       [
++                           ArciumChoice(value: 0, label: "Icon rail"),
++                           ArciumChoice(value: 1, label: "Fully hidden (Arc)")
++                       ])
++        XCTAssertEqual(store.displayedChromeFrameBorderWidth, 4)
++
++        store.setCollapsedSidebarStyle(1)
++        store.setDisplayedChromeFrameBorderWidth(12)
++        store.setCollapsedSidebarStyle(99)
++        store.setDisplayedChromeFrameBorderWidth(.infinity)
++
++        XCTAssertEqual(delegate.settings.map(\.key), [
++            "collapsed_sidebar_style", "chrome_frame_border_width"
++        ])
++        XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [1, 10])
++    }
++
++    @MainActor
++    func testCollapsedSidebarAndFrameBorderRespectManagedAndUnavailableGates() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "collapsedSidebarStyle": 1,
++            "collapsedSidebarStyleAvailable": true,
++            "collapsedSidebarStyleManaged": true,
++            "chromeFrameBorderWidth": 3,
++            "chromeFrameBorderWidthAvailable": true,
++            "chromeFrameBorderWidthManaged": true
++        ]], delegate: delegate)
++
++        store.setCollapsedSidebarStyle(0)
++        store.setDisplayedChromeFrameBorderWidth(8)
++        XCTAssertTrue(delegate.settings.isEmpty)
++
++        let unavailable = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "collapsedSidebarStyleAvailable": false,
++            "chromeFrameBorderWidthAvailable": false
++        ]], delegate: delegate)
++        unavailable.setCollapsedSidebarStyle(1)
++        unavailable.setDisplayedChromeFrameBorderWidth(8)
++        XCTAssertTrue(delegate.settings.isEmpty)
+     }
+ 
+     @MainActor

@@ -1,0 +1,1039 @@
+Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.h
+===================================================================
+--- src.orig/chrome/browser/ui/views/frame/browser_native_widget_mac.h
++++ src/chrome/browser/ui/views/frame/browser_native_widget_mac.h
+@@ -8,8 +8,11 @@
+ #include <optional>
+ 
+ #include "base/memory/raw_ptr.h"
++#include "base/memory/weak_ptr.h"
+ #include "chrome/browser/command_observer.h"
+ #include "chrome/browser/ui/views/frame/browser_native_widget.h"
++#include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
++#include "components/prefs/pref_change_registrar.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/base/mojom/window_show_state.mojom-forward.h"
+ #include "ui/color/color_provider_key.h"
+@@ -93,12 +96,20 @@ class BrowserNativeWidgetMac : public vi
+   raw_ptr<BrowserView> browser_view_;  // Weak. Our ClientView.
+   BrowserWindowTouchBarViewsDelegate* __strong touch_bar_delegate_;
+   NSView* __strong background_view_;
++  id __strong accessibility_display_observer_;
+ 
+   std::optional<ui::ColorProviderKey::ColorMode> last_color_mode_;
+   std::optional<SkColor> last_theme_color_;
++  std::optional<bool> last_paints_chrome_transparent_;
++  bool background_view_is_profile_surface_ = false;
+ 
+   void SetGlassFrameWindowState(NSWindow* ns_window, bool enabled);
+   void UpdateBackground();
++  void OnGlassAppearanceChanged();
++  void RemoveGlassAppearanceObserver();
++
++  PrefChangeRegistrar glass_pref_change_registrar_;
++  base::WeakPtrFactory<BrowserNativeWidgetMac> weak_ptr_factory_{this};
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_NATIVE_WIDGET_MAC_H_
+Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
++++ src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+@@ -5,6 +5,7 @@
+ #import "chrome/browser/ui/views/frame/browser_native_widget_mac.h"
+ 
+ #import "base/apple/foundation_util.h"
++#include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/metrics/user_metrics_action.h"
+@@ -23,10 +24,10 @@
+ #include "chrome/browser/ui/browser_command_controller.h"
+ #include "chrome/browser/ui/browser_commands.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+-#include "chrome/browser/ui/color/chrome_color_id.h"
+ #import "chrome/browser/ui/cocoa/browser_window_command_handler.h"
+ #import "chrome/browser/ui/cocoa/chrome_command_dispatcher_delegate.h"
+ #import "chrome/browser/ui/cocoa/touchbar/browser_window_touch_bar_controller.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
+ #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
+ #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
+@@ -143,6 +144,29 @@ BrowserNativeWidgetMac::BrowserNativeWid
+     : views::NativeWidgetMac(browser_widget), browser_view_(browser_view) {
+   CHECK(browser_widget);
+   CHECK(browser_view);
++  if (Profile* profile = browser_view_->GetProfile()) {
++    Profile* appearance_profile = profile->GetOriginalProfile();
++    glass_pref_change_registrar_.Init(
++        (appearance_profile ? appearance_profile : profile)->GetPrefs());
++    glass_pref_change_registrar_.Add(
++        helium::kArciumChromeAppearancePref,
++        base::BindRepeating(&BrowserNativeWidgetMac::OnGlassAppearanceChanged,
++                            weak_ptr_factory_.GetWeakPtr()));
++  }
++
++  base::WeakPtr<BrowserNativeWidgetMac> weak_this =
++      weak_ptr_factory_.GetWeakPtr();
++  accessibility_display_observer_ =
++      [NSWorkspace.sharedWorkspace.notificationCenter
++          addObserverForName:
++              NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
++                      object:nil
++                       queue:[NSOperationQueue mainQueue]
++                  usingBlock:^(NSNotification* notification) {
++                    if (weak_this) {
++                      weak_this->OnGlassAppearanceChanged();
++                    }
++                  }];
+   if (GetRemoteCocoaApplicationHost()) {
+     // Only add observer on PWA.
+     chrome::AddCommandObserver(browser_view_->browser(), IDC_BACK, this);
+@@ -150,7 +174,9 @@ BrowserNativeWidgetMac::BrowserNativeWid
+   }
+ }
+ 
+-BrowserNativeWidgetMac::~BrowserNativeWidgetMac() = default;
++BrowserNativeWidgetMac::~BrowserNativeWidgetMac() {
++  RemoveGlassAppearanceObserver();
++}
+ 
+ BrowserWindowTouchBarController* BrowserNativeWidgetMac::GetTouchBarController()
+     const {
+@@ -213,15 +239,18 @@ void BrowserNativeWidgetMac::OnWindowFul
+ 
+ void BrowserNativeWidgetMac::OnWidgetDestroyed(views::Widget* widget) {
+   CHECK(browser_view_);
++  RemoveGlassAppearanceObserver();
+   if (UsesRemoteCocoaApplicationHost(browser_view_->browser())) {
+     chrome::RemoveCommandObserver(browser_view_->browser(), IDC_BACK, this);
+     chrome::RemoveCommandObserver(browser_view_->browser(), IDC_FORWARD, this);
+   }
+   touch_bar_delegate_ = nullptr;
+   background_view_ = nil;
++  background_view_is_profile_surface_ = false;
+   browser_view_ = nullptr;
+   last_color_mode_.reset();
+   last_theme_color_.reset();
++  last_paints_chrome_transparent_.reset();
+   NativeWidgetMac::OnWidgetDestroyed(widget);
+ }
+ 
+@@ -563,8 +592,7 @@ NativeWidgetMacNSWindow* BrowserNativeWi
+   CHECK(browser_view_);
+   NativeWidgetMacNSWindow* ns_window = NativeWidgetMac::CreateNSWindow(params);
+   SetGlassFrameWindowState(
+-      ns_window,
+-      helium::ShouldUseNativeFrameGlass(browser_view_));
++      ns_window, helium::ShouldUseTranslucentNativeFrameWindow(browser_view_));
+   touch_bar_delegate_ = [[BrowserWindowTouchBarViewsDelegate alloc]
+       initWithBrowser:browser_view_->browser()
+                window:ns_window];
+@@ -605,6 +633,7 @@ void BrowserNativeWidgetMac::OnWidgetThe
+ 
+ void BrowserNativeWidgetMac::OnWindowDestroying(
+     gfx::NativeWindow native_window) {
++  RemoveGlassAppearanceObserver();
+   // Clear delegates set in CreateNSWindow() to prevent objects with a reference
+   // to |window| attempting to validate commands by looking for a Browser*.
+   NativeWidgetMacNSWindow* ns_window =
+@@ -730,17 +759,75 @@ void BrowserNativeWidgetMac::SetGlassFra
+   [ns_window setOpaque:!enabled];
+ }
+ 
++void BrowserNativeWidgetMac::OnGlassAppearanceChanged() {
++  if (!browser_view_) {
++    return;
++  }
++
++  const helium::GlassSurfaceConfiguration configuration =
++      helium::GetNativeFrameGlassConfiguration(browser_view_);
++  const helium::GlassSurfaceResolution resolution =
++      helium::GetNativeFrameGlassResolution(browser_view_);
++  const bool paints_chrome_transparent =
++      configuration.enabled ? resolution.paints_chrome_transparent
++                            : helium::ShouldUseNativeFrameGlass(browser_view_);
++  const bool transparency_gate_changed =
++      !last_paints_chrome_transparent_.has_value() ||
++      *last_paints_chrome_transparent_ != paints_chrome_transparent;
++  last_paints_chrome_transparent_ = paints_chrome_transparent;
++
++  if (views::Widget* widget = GetWidget()) {
++    if (transparency_gate_changed) {
++      // ThemeChanged updates the View layer types used by the existing Chrome
++      // transparency gates. It also reaches OnWidgetThemeChanged, which
++      // applies the native surface once for this widget.
++      widget->ThemeChanged();
++    } else {
++      // Color points and grain are native overlay state. Avoid rebuilding the
++      // entire Chrome Views layer tree for every slider or color-picker tick.
++      UpdateBackground();
++    }
++    return;
++  }
++
++  // Pref writes can race widget initialization. UpdateBackground() is guarded
++  // for a missing native host and will apply the current snapshot at init.
++  UpdateBackground();
++}
++
++void BrowserNativeWidgetMac::RemoveGlassAppearanceObserver() {
++  weak_ptr_factory_.InvalidateWeakPtrs();
++  if (accessibility_display_observer_) {
++    [NSWorkspace.sharedWorkspace.notificationCenter
++        removeObserver:accessibility_display_observer_];
++    accessibility_display_observer_ = nil;
++  }
++  glass_pref_change_registrar_.Reset();
++}
++
+ void BrowserNativeWidgetMac::UpdateBackground() {
+-  NSWindow* ns_window = GetNSWindowHost()->GetInProcessNSWindow();
+-  const bool should_use_native_glass =
+-      helium::ShouldUseNativeFrameGlass(browser_view_);
+-  SetGlassFrameWindowState(ns_window, should_use_native_glass);
++  NSWindow* ns_window =
++      GetNSWindowHost() ? GetNSWindowHost()->GetInProcessNSWindow() : nil;
++  const helium::GlassSurfaceConfiguration configuration =
++      helium::GetNativeFrameGlassConfiguration(browser_view_);
++  const helium::GlassSurfaceResolution resolution =
++      helium::GetNativeFrameGlassResolution(browser_view_);
++  const bool should_paint_native_surface =
++      configuration.enabled ? resolution.paints_chrome_transparent
++                            : helium::ShouldUseNativeFrameGlass(browser_view_);
++  const bool should_use_translucent_window =
++      configuration.enabled
++          ? helium::ShouldUseTranslucentNativeFrameWindow(browser_view_)
++          : helium::ShouldUseNativeFrameGlass(browser_view_);
++  last_paints_chrome_transparent_ = should_paint_native_surface;
++  SetGlassFrameWindowState(ns_window, should_use_translucent_window);
+ 
+-  if (!should_use_native_glass) {
++  if (!should_paint_native_surface) {
+     if (background_view_) {
+       [background_view_ removeFromSuperview];
+     }
+     background_view_ = nil;
++    background_view_is_profile_surface_ = false;
+     last_color_mode_.reset();
+     last_theme_color_.reset();
+     return;
+@@ -755,33 +842,51 @@ void BrowserNativeWidgetMac::UpdateBackg
+   auto color_mode = widget->GetColorMode();
+   auto theme_color = widget->GetColorProvider()->GetColor(kColorToolbar);
+ 
+-  if (background_view_ && last_color_mode_ == color_mode &&
+-      last_theme_color_ == theme_color) {
++  if (!ns_window) {
+     return;
+   }
+ 
+-  last_color_mode_ = color_mode;
+-  last_theme_color_ = theme_color;
++  NSView* content_view = [ns_window contentView];
++  if (!content_view) {
++    return;
++  }
+ 
+-  if (background_view_) {
+-    [background_view_ removeFromSuperview];
++  if (configuration.enabled && background_view_ &&
++      background_view_is_profile_surface_) {
++    // Slider edits update the existing AppKit subtree. The base material is
++    // replaced only when its active backend, color mode, or theme changes.
++    helium::ApplyNativeGlassBackgroundView(
++        background_view_, content_view.bounds, color_mode, theme_color,
++        configuration, resolution);
++    last_color_mode_ = color_mode;
++    last_theme_color_ = theme_color;
++    return;
+   }
+-  background_view_ = nil;
+ 
+-  if (!ns_window) {
++  if (!configuration.enabled && background_view_ &&
++      !background_view_is_profile_surface_ && last_color_mode_ == color_mode &&
++      last_theme_color_ == theme_color) {
+     return;
+   }
+ 
+-  NSView* content_view = [ns_window contentView];
++  if (background_view_) {
++    [background_view_ removeFromSuperview];
++  }
++  background_view_ = nil;
++  background_view_is_profile_surface_ = false;
+ 
+   background_view_ = helium::CreateNativeGlassBackgroundView(
+-      content_view.bounds, color_mode, theme_color);
++      content_view.bounds, color_mode, theme_color, configuration, resolution);
+   if (background_view_) {
+     [content_view addSubview:background_view_
+                   positioned:NSWindowBelow
+                   relativeTo:nil];
++    background_view_is_profile_surface_ = configuration.enabled;
++    last_color_mode_ = color_mode;
++    last_theme_color_ = theme_color;
+   } else {
+     SetGlassFrameWindowState(ns_window, false);
++    background_view_is_profile_surface_ = false;
+     last_color_mode_.reset();
+     last_theme_color_.reset();
+   }
+Index: src/chrome/browser/ui/views/helium/glass_surface_mac.h
+===================================================================
+--- src.orig/chrome/browser/ui/views/helium/glass_surface_mac.h
++++ src/chrome/browser/ui/views/helium/glass_surface_mac.h
+@@ -8,6 +8,7 @@
+ #import <Cocoa/Cocoa.h>
+ 
+ #include "chrome/browser/ui/views/helium/glass_surface.h"
++#include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/color/color_provider_key.h"
+ 
+@@ -18,6 +19,24 @@ NSView* CreateNativeGlassBackgroundView(
+     ui::ColorProviderKey::ColorMode color_mode,
+     SkColor tint_color);
+ 
++// Creates and updates the profile-owned surface. The three-argument overload
++// above deliberately retains the existing command-line-only behavior for
++// profiles whose appearance dictionary is disabled or absent.
++NSView* CreateNativeGlassBackgroundView(
++    NSRect frame,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    const GlassSurfaceConfiguration& configuration,
++    const GlassSurfaceResolution& resolution);
++
++void ApplyNativeGlassBackgroundView(
++    NSView* view,
++    NSRect frame,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    const GlassSurfaceConfiguration& configuration,
++    const GlassSurfaceResolution& resolution);
++
+ }  // namespace helium
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_HELIUM_GLASS_SURFACE_MAC_H_
+Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/helium/glass_surface_mac.mm
++++ src/chrome/browser/ui/views/helium/glass_surface_mac.mm
+@@ -4,7 +4,14 @@
+ 
+ #import "chrome/browser/ui/views/helium/glass_surface_mac.h"
+ 
++#include <algorithm>
++#include <array>
++#include <cstdint>
++#include <cstdlib>
++
++#include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "chrome/browser/ui/views/helium/native_frame_materials_mac.h"
++#import "components/remote_cocoa/app_shim/native_window_background_view.h"
+ 
+ API_AVAILABLE(macos(26.0))
+ @interface ArciumLiquidGlassBackgroundView : NSGlassEffectView
+@@ -16,6 +23,38 @@ API_AVAILABLE(macos(26.0))
+ }
+ @end
+ 
++@interface ArciumGlassTintOverlayView : NSView
++- (void)applyTintColor:(NSColor*)color visible:(BOOL)visible;
++@end
++
++@implementation ArciumGlassTintOverlayView
++
++- (instancetype)initWithFrame:(NSRect)frame {
++  self = [super initWithFrame:frame];
++  if (self) {
++    self.wantsLayer = YES;
++    self.layer.needsDisplayOnBoundsChange = YES;
++    self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  }
++  return self;
++}
++
++- (BOOL)isOpaque {
++  return NO;
++}
++
++- (NSView*)hitTest:(NSPoint)point {
++  return nil;
++}
++
++- (void)applyTintColor:(NSColor*)color visible:(BOOL)visible {
++  self.hidden = !visible;
++  self.layer.backgroundColor =
++      visible && color ? color.CGColor : NSColor.clearColor.CGColor;
++}
++
++@end
++
+ namespace {
+ 
+ NSColor* ColorFromSkColor(SkColor color, CGFloat alpha) {
+@@ -25,8 +64,346 @@ NSColor* ColorFromSkColor(SkColor color,
+                              alpha:alpha];
+ }
+ 
++CGColorRef CGColorFromSkColor4f(const SkColor4f& color, CGFloat alpha) {
++  const CGFloat components[] = {
++      std::clamp<CGFloat>(color.fR, 0.0, 1.0),
++      std::clamp<CGFloat>(color.fG, 0.0, 1.0),
++      std::clamp<CGFloat>(color.fB, 0.0, 1.0),
++      std::clamp<CGFloat>(color.fA * alpha, 0.0, 1.0),
++  };
++  CGColorSpaceRef color_space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++  if (!color_space) {
++    color_space = CGColorSpaceCreateDeviceRGB();
++  }
++  CGColorRef result = CGColorCreate(color_space, components);
++  CGColorSpaceRelease(color_space);
++  return result;
++}
++
++void ReleaseGrainBytes(void*, const void* data, size_t) {
++  free(const_cast<void*>(data));
++}
++
++CGImageRef CreateGrainTile() {
++  constexpr size_t kTileSize = 64;
++  constexpr size_t kBytesPerPixel = 4;
++  constexpr size_t kDataSize = kTileSize * kTileSize * kBytesPerPixel;
++  auto* bytes = static_cast<uint8_t*>(malloc(kDataSize));
++  if (!bytes) {
++    return nullptr;
++  }
++
++  uint32_t state = 0x9e3779b9u;
++  for (size_t index = 0; index < kTileSize * kTileSize; ++index) {
++    // A deterministic tile avoids animation and keeps the profile setting
++    // stable across windows and launches.
++    state = state * 1664525u + 1013904223u;
++    const uint8_t value = static_cast<uint8_t>(state >> 24);
++    bytes[index * kBytesPerPixel + 0] = value;
++    bytes[index * kBytesPerPixel + 1] = value;
++    bytes[index * kBytesPerPixel + 2] = value;
++    bytes[index * kBytesPerPixel + 3] = 255;
++  }
++
++  CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
++  CGDataProviderRef provider = CGDataProviderCreateWithData(
++      nullptr, bytes, kDataSize, &ReleaseGrainBytes);
++  CGImageRef image =
++      provider ? CGImageCreate(kTileSize, kTileSize, 8, 32,
++                               kTileSize * kBytesPerPixel, color_space,
++                               kCGImageAlphaPremultipliedLast, provider,
++                               nullptr, false, kCGRenderingIntentDefault)
++               : nullptr;
++  if (provider) {
++    CGDataProviderRelease(provider);
++  }
++  CGColorSpaceRelease(color_space);
++  if (!provider) {
++    free(bytes);
++  }
++  return image;
++}
++
+ }  // namespace
+ 
++@interface ArciumGlassDecorationView : NSView {
++ @private
++  helium::GlassSurfaceConfiguration configuration_;
++  CGImageRef tile_;
++}
++- (void)applyConfiguration:
++    (const helium::GlassSurfaceConfiguration&)configuration;
++@end
++
++@implementation ArciumGlassDecorationView
++
++- (instancetype)initWithFrame:(NSRect)frame {
++  self = [super initWithFrame:frame];
++  if (self) {
++    tile_ = CreateGrainTile();
++    self.wantsLayer = YES;
++    self.layer.needsDisplayOnBoundsChange = YES;
++  }
++  return self;
++}
++
++- (void)dealloc {
++  if (tile_) {
++    CGImageRelease(tile_);
++  }
++}
++
++- (BOOL)isOpaque {
++  return NO;
++}
++
++- (NSView*)hitTest:(NSPoint)point {
++  return nil;
++}
++
++- (void)applyConfiguration:
++    (const helium::GlassSurfaceConfiguration&)configuration {
++  configuration_ = configuration;
++  [self setNeedsDisplay:YES];
++}
++
++- (void)drawRect:(NSRect)dirtyRect {
++  CGContextRef context = NSGraphicsContext.currentContext.CGContext;
++  CGContextSaveGState(context);
++  CGContextClipToRect(context, self.bounds);
++
++  const CGFloat width = NSWidth(self.bounds);
++  const CGFloat height = NSHeight(self.bounds);
++  const CGFloat radius_scale = std::min(width, height);
++  for (size_t index = 0; index < configuration_.point_count; ++index) {
++    const helium::GlassColorPoint& point = configuration_.points[index];
++    if (point.opacity <= 0.0f || radius_scale <= 0.0) {
++      continue;
++    }
++
++    const CGPoint center = {
++        static_cast<CGFloat>(point.x) * width,
++        (1.0 - static_cast<CGFloat>(point.y)) * height,
++    };
++    const CGFloat radius = std::max<CGFloat>(
++        1.0, static_cast<CGFloat>(point.radius) * radius_scale);
++    const CGFloat point_alpha =
++        static_cast<CGFloat>(point.opacity) *
++        static_cast<CGFloat>(configuration_.tint_strength);
++    CGColorRef start = CGColorFromSkColor4f(point.color, point_alpha);
++    CGColorRef end = CGColorFromSkColor4f(point.color, 0.0);
++    NSArray* colors = @[
++      (__bridge id)start,
++      (__bridge id)end,
++    ];
++    const CGFloat locations[] = {0.0, 1.0};
++    CGColorSpaceRef color_space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++    if (!color_space) {
++      color_space = CGColorSpaceCreateDeviceRGB();
++    }
++    CGGradientRef gradient = CGGradientCreateWithColors(
++        color_space, (__bridge CFArrayRef)colors, locations);
++    if (gradient) {
++      CGContextDrawRadialGradient(context, gradient, center, 0.0, center,
++                                  radius, kCGGradientDrawsAfterEndLocation);
++      CGGradientRelease(gradient);
++    }
++    CGColorSpaceRelease(color_space);
++    CGColorRelease(start);
++    CGColorRelease(end);
++  }
++
++  // Draw the cached grain after the color points in one backing layer.
++  if (tile_ && configuration_.grain > 0.0) {
++    CGContextSetAlpha(context, configuration_.grain);
++    CGContextSetBlendMode(context, kCGBlendModeOverlay);
++    CGContextSetInterpolationQuality(context, kCGInterpolationNone);
++    const CGFloat scale =
++        std::max<CGFloat>(1.0, self.window.backingScaleFactor);
++    const CGFloat grain_scale = std::clamp<CGFloat>(
++        static_cast<CGFloat>(configuration_.grain_scale), 0.5, 2.0);
++    CGContextDrawTiledImage(
++        context,
++        CGRectMake(0, 0, CGImageGetWidth(tile_) / scale * grain_scale,
++                   CGImageGetHeight(tile_) / scale * grain_scale),
++        tile_);
++  }
++
++  CGContextRestoreGState(context);
++}
++
++@end
++
++// NativeWidgetNSWindowBridge keeps views with this marker below the
++// compositor view when it re-sorts the content view's subviews.
++@interface ArciumProfileGlassBackgroundView
++    : NSView <NativeWindowBackgroundView> {
++ @private
++  NSView* base_view_;
++  ArciumGlassTintOverlayView* tint_overlay_view_;
++  ArciumGlassDecorationView* decoration_view_;
++  helium::GlassSurfaceMaterial active_material_;
++  ui::ColorProviderKey::ColorMode color_mode_;
++  BOOL has_base_;
++}
++- (void)applyConfiguration:
++            (const helium::GlassSurfaceConfiguration&)configuration
++                resolution:(const helium::GlassSurfaceResolution&)resolution
++                 colorMode:(ui::ColorProviderKey::ColorMode)colorMode
++                themeColor:(SkColor)themeColor;
++@end
++
++@implementation ArciumProfileGlassBackgroundView
++
++- (instancetype)initWithFrame:(NSRect)frame {
++  self = [super initWithFrame:frame];
++  if (self) {
++    self.wantsLayer = YES;
++    self.layer.needsDisplayOnBoundsChange = YES;
++    self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++    active_material_ = helium::GlassSurfaceMaterial::kAuto;
++    color_mode_ = ui::ColorProviderKey::ColorMode::kLight;
++    has_base_ = NO;
++  }
++  return self;
++}
++
++- (BOOL)isOpaque {
++  return NO;
++}
++
++- (NSView*)hitTest:(NSPoint)point {
++  return nil;
++}
++
++- (void)updateBaseForConfiguration:
++            (const helium::GlassSurfaceConfiguration&)configuration
++                        resolution:
++                            (const helium::GlassSurfaceResolution&)resolution
++                         colorMode:(ui::ColorProviderKey::ColorMode)colorMode
++                        themeColor:(SkColor)themeColor {
++  if (has_base_ && active_material_ == resolution.active &&
++      color_mode_ == colorMode) {
++    return;
++  }
++
++  [base_view_ removeFromSuperview];
++  base_view_ = nil;
++  has_base_ = NO;
++
++  switch (resolution.active) {
++    case helium::GlassSurfaceMaterial::kLiquidGlass:
++      if (@available(macOS 26.0, *)) {
++        NSGlassEffectView* glass_view =
++            [[ArciumLiquidGlassBackgroundView alloc] initWithFrame:self.bounds];
++        glass_view.style = NSGlassEffectViewStyleRegular;
++        glass_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++        base_view_ = glass_view;
++      }
++      break;
++    case helium::GlassSurfaceMaterial::kFrosted:
++      base_view_ = helium::CreateNativeFrameMaterialBackgroundView(
++          self.bounds, colorMode, themeColor, configuration.frosted_style,
++          configuration.frosted_tint_strength);
++      break;
++    case helium::GlassSurfaceMaterial::kSolid: {
++      NSView* solid_view = [[NSView alloc] initWithFrame:self.bounds];
++      solid_view.wantsLayer = YES;
++      solid_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++      base_view_ = solid_view;
++      break;
++    }
++    case helium::GlassSurfaceMaterial::kAuto:
++      break;
++  }
++
++  if (base_view_) {
++    [self addSubview:base_view_ positioned:NSWindowBelow relativeTo:nil];
++    has_base_ = YES;
++  }
++  active_material_ = resolution.active;
++  color_mode_ = colorMode;
++}
++
++- (void)applyConfiguration:
++            (const helium::GlassSurfaceConfiguration&)configuration
++                resolution:(const helium::GlassSurfaceResolution&)resolution
++                 colorMode:(ui::ColorProviderKey::ColorMode)colorMode
++                themeColor:(SkColor)themeColor {
++  [self updateBaseForConfiguration:configuration
++                        resolution:resolution
++                         colorMode:colorMode
++                        themeColor:themeColor];
++
++  if (!decoration_view_) {
++    decoration_view_ =
++        [[ArciumGlassDecorationView alloc] initWithFrame:self.bounds];
++    decoration_view_.autoresizingMask =
++        NSViewWidthSizable | NSViewHeightSizable;
++    [self addSubview:decoration_view_];
++  }
++
++  if (!tint_overlay_view_) {
++    tint_overlay_view_ =
++        [[ArciumGlassTintOverlayView alloc] initWithFrame:self.bounds];
++  }
++  if (base_view_) {
++    [self addSubview:tint_overlay_view_
++          positioned:NSWindowAbove
++          relativeTo:base_view_];
++  } else {
++    [self addSubview:tint_overlay_view_
++          positioned:NSWindowBelow
++          relativeTo:decoration_view_];
++  }
++  [self addSubview:decoration_view_
++        positioned:NSWindowAbove
++        relativeTo:tint_overlay_view_];
++
++  [decoration_view_ applyConfiguration:configuration];
++
++  if (base_view_) {
++    base_view_.alphaValue = std::clamp<CGFloat>(
++        static_cast<CGFloat>(configuration.material_opacity), 0.0, 1.0);
++  }
++
++  // Keep tint independent of the native glass's inactive-window rendering and
++  // material opacity, as in SettingsUI's window chrome color overlay.
++  const bool shows_tint =
++      configuration.enabled && resolution.paints_chrome_transparent &&
++      resolution.active == helium::GlassSurfaceMaterial::kLiquidGlass &&
++      base_view_;
++  [tint_overlay_view_
++      applyTintColor:ColorFromSkColor(
++                         themeColor,
++                         std::clamp<CGFloat>(configuration.glass_tint_opacity,
++                                             0.0, 1.0))
++             visible:shows_tint];
++
++  if (resolution.active == helium::GlassSurfaceMaterial::kLiquidGlass) {
++    if (@available(macOS 26.0, *)) {
++      if ([base_view_ isKindOfClass:[NSGlassEffectView class]]) {
++        NSGlassEffectView* glass_view = (NSGlassEffectView*)base_view_;
++        glass_view.style =
++            configuration.glass_style == helium::GlassSurfaceGlassStyle::kClear
++                ? NSGlassEffectViewStyleClear
++                : NSGlassEffectViewStyleRegular;
++        glass_view.tintColor = nil;
++      }
++    }
++  } else if (resolution.active == helium::GlassSurfaceMaterial::kFrosted) {
++    helium::UpdateNativeFrameMaterialBackgroundView(
++        base_view_, colorMode, themeColor, configuration.frosted_style,
++        configuration.frosted_tint_strength);
++  } else if (resolution.active == helium::GlassSurfaceMaterial::kSolid &&
++             base_view_.wantsLayer) {
++    base_view_.layer.backgroundColor =
++        [ColorFromSkColor(themeColor, 1.0) CGColor];
++  }
++}
++
++@end
++
+ namespace helium {
+ 
+ bool GlassReduceTransparency() {
+@@ -66,4 +443,44 @@ NSView* CreateNativeGlassBackgroundView(
+   return nil;
+ }
+ 
++NSView* CreateNativeGlassBackgroundView(
++    NSRect frame,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    const GlassSurfaceConfiguration& configuration,
++    const GlassSurfaceResolution& resolution) {
++  if (!configuration.enabled || !resolution.paints_chrome_transparent) {
++    return CreateNativeGlassBackgroundView(frame, color_mode, theme_color);
++  }
++
++  auto* view = [[ArciumProfileGlassBackgroundView alloc] initWithFrame:frame];
++  [view applyConfiguration:configuration
++                resolution:resolution
++                 colorMode:color_mode
++                themeColor:theme_color];
++  return view;
++}
++
++void ApplyNativeGlassBackgroundView(
++    NSView* view,
++    NSRect frame,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    const GlassSurfaceConfiguration& configuration,
++    const GlassSurfaceResolution& resolution) {
++  ArciumProfileGlassBackgroundView* profile_view =
++      [view isKindOfClass:[ArciumProfileGlassBackgroundView class]]
++          ? (ArciumProfileGlassBackgroundView*)view
++          : nil;
++  if (!profile_view || !configuration.enabled ||
++      !resolution.paints_chrome_transparent) {
++    return;
++  }
++  [profile_view setFrame:frame];
++  [profile_view applyConfiguration:configuration
++                        resolution:resolution
++                         colorMode:color_mode
++                        themeColor:theme_color];
++}
++
+ }  // namespace helium
+Index: src/components/remote_cocoa/app_shim/BUILD.gn
+===================================================================
+--- src.orig/components/remote_cocoa/app_shim/BUILD.gn
++++ src/components/remote_cocoa/app_shim/BUILD.gn
+@@ -53,6 +53,7 @@ component("app_shim") {
+     "native_widget_mac_nswindow_headless.mm",
+     "native_widget_mac_overlay_nswindow.h",
+     "native_widget_mac_overlay_nswindow.mm",
++    "native_window_background_view.h",
+     "native_widget_ns_window_bridge.h",
+     "native_widget_ns_window_bridge.mm",
+     "native_widget_ns_window_fullscreen_controller.h",
+Index: src/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
+===================================================================
+--- src.orig/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
++++ src/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm
+@@ -38,6 +38,7 @@
+ #import "components/remote_cocoa/app_shim/native_widget_mac_nswindow.h"
+ #import "components/remote_cocoa/app_shim/native_widget_mac_overlay_nswindow.h"
+ #import "components/remote_cocoa/app_shim/native_widget_ns_window_host_helper.h"
++#import "components/remote_cocoa/app_shim/native_window_background_view.h"
+ #include "components/remote_cocoa/app_shim/select_file_dialog_bridge.h"
+ #import "components/remote_cocoa/app_shim/views_nswindow_delegate.h"
+ #import "components/remote_cocoa/app_shim/window_move_loop.h"
+@@ -92,6 +93,10 @@ display::Display GetDisplayForWindow(NSW
+ }
+ 
+ bool IsBackgroundEffectView(NSView* view) {
++  if ([view conformsToProtocol:@protocol(NativeWindowBackgroundView)]) {
++    return true;
++  }
++
+   if ([view isKindOfClass:[NSVisualEffectView class]]) {
+     return true;
+   }
+Index: src/components/remote_cocoa/app_shim/native_window_background_view.h
+===================================================================
+--- /dev/null
++++ src/components/remote_cocoa/app_shim/native_window_background_view.h
+@@ -0,0 +1,15 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_REMOTE_COCOA_APP_SHIM_NATIVE_WINDOW_BACKGROUND_VIEW_H_
++#define COMPONENTS_REMOTE_COCOA_APP_SHIM_NATIVE_WINDOW_BACKGROUND_VIEW_H_
++
++#import <Foundation/Foundation.h>
++
++// Marks native background containers that must remain below the Chromium
++// compositor when the content view sorts its subviews. This adds no material.
++@protocol NativeWindowBackgroundView <NSObject>
++@end
++
++#endif  // COMPONENTS_REMOTE_COCOA_APP_SHIM_NATIVE_WINDOW_BACKGROUND_VIEW_H_
+Index: src/chrome/browser/ui/views/helium/native_frame_materials_mac.h
+===================================================================
+--- src.orig/chrome/browser/ui/views/helium/native_frame_materials_mac.h
++++ src/chrome/browser/ui/views/helium/native_frame_materials_mac.h
+@@ -7,6 +7,7 @@
+ 
+ #import <Cocoa/Cocoa.h>
+ 
++#include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "third_party/skia/include/core/SkColor.h"
+ #include "ui/color/color_provider_key.h"
+ 
+@@ -17,6 +18,25 @@ NSView* CreateNativeFrameMaterialBackgro
+     ui::ColorProviderKey::ColorMode color_mode,
+     SkColor theme_color);
+ 
++// Creates the configurable frosted base used by the profile-owned appearance
++// path. The three-argument overload above retains the existing automatic
++// material and tint behavior for command-line/native callers.
++NSView* CreateNativeFrameMaterialBackgroundView(
++    NSRect frame,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    GlassSurfaceFrostedStyle frosted_style,
++    double frosted_tint_strength);
++
++// Updates the semantic material and theme tint on an existing configurable
++// frosted base without walking its subviews or recreating the view.
++void UpdateNativeFrameMaterialBackgroundView(
++    NSView* view,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    GlassSurfaceFrostedStyle frosted_style,
++    double frosted_tint_strength);
++
+ }  // namespace helium
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_HELIUM_NATIVE_FRAME_MATERIALS_MAC_H_
+Index: src/chrome/browser/ui/views/helium/native_frame_materials_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/helium/native_frame_materials_mac.mm
++++ src/chrome/browser/ui/views/helium/native_frame_materials_mac.mm
+@@ -4,6 +4,8 @@
+ 
+ #import "chrome/browser/ui/views/helium/native_frame_materials_mac.h"
+ 
++#include <algorithm>
++
+ namespace helium {
+ namespace {
+ 
+@@ -13,8 +15,24 @@ constexpr CGFloat kFrameMaterialNeutralO
+ // Menu material is slightly brighter and more translucent in light mode,
+ // so we use it for the light theme instead of Sidebar.
+ NSVisualEffectMaterial GetFrameMaterial(bool is_dark) {
+-  return is_dark ? NSVisualEffectMaterialSidebar
+-                 : NSVisualEffectMaterialMenu;
++  return is_dark ? NSVisualEffectMaterialSidebar : NSVisualEffectMaterialMenu;
++}
++
++NSVisualEffectMaterial GetFrameMaterial(GlassSurfaceFrostedStyle style,
++                                        bool is_dark) {
++  switch (style) {
++    case GlassSurfaceFrostedStyle::kAutomatic:
++      return GetFrameMaterial(is_dark);
++    case GlassSurfaceFrostedStyle::kSidebar:
++      return NSVisualEffectMaterialSidebar;
++    case GlassSurfaceFrostedStyle::kMenu:
++      return NSVisualEffectMaterialMenu;
++    case GlassSurfaceFrostedStyle::kPopover:
++      return NSVisualEffectMaterialPopover;
++    case GlassSurfaceFrostedStyle::kHud:
++      return NSVisualEffectMaterialHUDWindow;
++  }
++  return GetFrameMaterial(is_dark);
+ }
+ 
+ // Light material needs a stronger theme tint than dark material to avoid
+@@ -34,15 +52,17 @@ NSColor* GetFrameMaterialNeutralOverlayC
+ // Applies the browser theme color over the black/white neutral overlay while
+ // keeping enough translucency for AppKit's material effect to show through.
+ NSColor* GetFrameMaterialThemeTintOverlayColor(SkColor theme_color,
+-                                               bool is_dark) {
++                                               bool is_dark,
++                                               double tint_strength) {
+   const CGFloat red = SkColorGetR(theme_color) / 255.0;
+   const CGFloat green = SkColorGetG(theme_color) / 255.0;
+   const CGFloat blue = SkColorGetB(theme_color) / 255.0;
+-  return [NSColor colorWithSRGBRed:red
+-                             green:green
+-                              blue:blue
+-                             alpha:GetFrameMaterialThemeTintOverlayAlpha(
+-                                       is_dark)];
++  const CGFloat clamped_tint_strength =
++      std::clamp<CGFloat>(static_cast<CGFloat>(tint_strength), 0.0, 2.0);
++  const CGFloat tint_alpha = std::clamp<CGFloat>(
++      GetFrameMaterialThemeTintOverlayAlpha(is_dark) * clamped_tint_strength,
++      0.0, 1.0);
++  return [NSColor colorWithSRGBRed:red green:green blue:blue alpha:tint_alpha];
+ }
+ 
+ NSView* CreateFrameMaterialTintView(NSRect frame, NSColor* color) {
+@@ -59,10 +79,50 @@ NSView* CreateFrameMaterialTintView(NSRe
+ // NSVisualEffectView intercepts hit testing even when added below the
+ // WebContents NSViews. Returning nil here lets clicks pass through to the
+ // sibling subviews that are supposed to receive them.
+-@interface HeliumFrameMaterialBackgroundView : NSVisualEffectView
++@interface HeliumFrameMaterialBackgroundView : NSVisualEffectView {
++ @private
++  NSView* neutral_overlay_;
++  NSView* theme_tint_overlay_;
++}
++- (void)updateForColorMode:(ui::ColorProviderKey::ColorMode)colorMode
++                themeColor:(SkColor)themeColor
++              frostedStyle:(helium::GlassSurfaceFrostedStyle)frostedStyle
++       frostedTintStrength:(double)frostedTintStrength;
+ @end
+ 
+ @implementation HeliumFrameMaterialBackgroundView
++- (void)updateForColorMode:(ui::ColorProviderKey::ColorMode)colorMode
++                themeColor:(SkColor)themeColor
++              frostedStyle:(helium::GlassSurfaceFrostedStyle)frostedStyle
++       frostedTintStrength:(double)frostedTintStrength {
++  const bool is_dark = colorMode == ui::ColorProviderKey::ColorMode::kDark;
++  self.material = helium::GetFrameMaterial(frostedStyle, is_dark);
++  self.appearance =
++      [NSAppearance appearanceNamed:is_dark ? NSAppearanceNameVibrantDark
++                                            : NSAppearanceNameVibrantLight];
++
++  if (!neutral_overlay_) {
++    neutral_overlay_ = helium::CreateFrameMaterialTintView(
++        self.bounds, helium::GetFrameMaterialNeutralOverlayColor(is_dark));
++    [self addSubview:neutral_overlay_];
++  }
++  neutral_overlay_.frame = self.bounds;
++  neutral_overlay_.layer.backgroundColor =
++      [helium::GetFrameMaterialNeutralOverlayColor(is_dark) CGColor];
++
++  if (!theme_tint_overlay_) {
++    theme_tint_overlay_ = helium::CreateFrameMaterialTintView(
++        self.bounds, helium::GetFrameMaterialThemeTintOverlayColor(
++                         themeColor, is_dark, frostedTintStrength));
++    [self addSubview:theme_tint_overlay_];
++  } else {
++    theme_tint_overlay_.frame = self.bounds;
++    theme_tint_overlay_.layer.backgroundColor =
++        [helium::GetFrameMaterialThemeTintOverlayColor(
++            themeColor, is_dark, frostedTintStrength) CGColor];
++  }
++}
++
+ - (NSView*)hitTest:(NSPoint)point {
+   return nil;
+ }
+@@ -74,28 +134,46 @@ NSView* CreateNativeFrameMaterialBackgro
+     NSRect frame,
+     ui::ColorProviderKey::ColorMode color_mode,
+     SkColor theme_color) {
++  return CreateNativeFrameMaterialBackgroundView(
++      frame, color_mode, theme_color, GlassSurfaceFrostedStyle::kAutomatic,
++      1.0);
++}
++
++NSView* CreateNativeFrameMaterialBackgroundView(
++    NSRect frame,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    GlassSurfaceFrostedStyle frosted_style,
++    double frosted_tint_strength) {
+   NSVisualEffectView* material_view =
+       [[HeliumFrameMaterialBackgroundView alloc] initWithFrame:frame];
+   material_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+   material_view.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+   material_view.state = NSVisualEffectStateActive;
+ 
+-  const bool is_dark = color_mode == ui::ColorProviderKey::ColorMode::kDark;
+-  material_view.material = GetFrameMaterial(is_dark);
+-  material_view.appearance =
+-      [NSAppearance appearanceNamed:is_dark ? NSAppearanceNameVibrantDark
+-                                            : NSAppearanceNameVibrantLight];
+-
+-  NSView* neutral_overlay = CreateFrameMaterialTintView(
+-      material_view.bounds, GetFrameMaterialNeutralOverlayColor(is_dark));
+-  [material_view addSubview:neutral_overlay];
+-
+-  NSView* theme_tint_overlay = CreateFrameMaterialTintView(
+-      material_view.bounds,
+-      GetFrameMaterialThemeTintOverlayColor(theme_color, is_dark));
+-  [material_view addSubview:theme_tint_overlay];
++  [(HeliumFrameMaterialBackgroundView*)material_view
++       updateForColorMode:color_mode
++               themeColor:theme_color
++             frostedStyle:frosted_style
++      frostedTintStrength:frosted_tint_strength];
+ 
+   return material_view;
+ }
+ 
++void UpdateNativeFrameMaterialBackgroundView(
++    NSView* view,
++    ui::ColorProviderKey::ColorMode color_mode,
++    SkColor theme_color,
++    GlassSurfaceFrostedStyle frosted_style,
++    double frosted_tint_strength) {
++  if (![view isKindOfClass:[HeliumFrameMaterialBackgroundView class]]) {
++    return;
++  }
++  [(HeliumFrameMaterialBackgroundView*)view
++       updateForColorMode:color_mode
++               themeColor:theme_color
++             frostedStyle:frosted_style
++      frostedTintStrength:frosted_tint_strength];
++}
++
+ }  // namespace helium
