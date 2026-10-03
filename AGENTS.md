@@ -23,6 +23,8 @@ change, regardless of which tools helped create it.
 - Normal work uses the canonical `helium-macos/main` checkout. Use a branch or
   isolated worktree only for genuinely parallel or risky work.
 - Keep `helium-chromium/` at the commit recorded by the outer gitlink.
+- Commit shared patches in core before advancing the outer gitlink.
+- Merge feature branches with `--no-ff`.
 - Source `dev.sh` on canonical main. `he arcium` updates and launches
   `/Applications/Arcium.app` from current build output and requires it closed.
   Use `he arcium iterate --approved` to build the full application and gracefully

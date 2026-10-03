@@ -9,17 +9,17 @@
   - [Build and run normal changes](#build-and-run-normal-changes)
   - [Use guarded build commands](#use-guarded-build-commands)
   - [Refresh preparation proof](#refresh-preparation-proof)
-  - [Synchronize generated core patches](#synchronize-generated-core-patches)
+  - [Manage the lane-local patch catalog](#manage-the-lane-local-patch-catalog)
   - [Use an exact development profile](#use-an-exact-development-profile)
   - [Run a scenario contract](#run-a-scenario-contract)
   - [Report proof gates](#report-proof-gates)
-  - [Create or update a patch](#create-or-update-a-patch)
+  - [Update an existing patch](#update-an-existing-patch)
   - [Update for a new Chromium release](#update-for-a-new-chromium-release)
 
 ### Software requirements
 
-* macOS 12+
-* Xcode 26
+* macOS 26+
+* Xcode 26 with Swift 6.2 or newer
 * Homebrew
 * Perl (for creating a `.dmg` package)
 
@@ -39,7 +39,7 @@
 
 ## Official (non-development) build
 
-First, ensure the Xcode application is open.
+Open the Xcode application before preparing an official build.
 
 If you want to notarize the build, you need to have an Apple Developer ID and a valid Apple Developer Program membership. You also need to set the following environment variables:
 
@@ -47,35 +47,74 @@ If you want to notarize the build, you need to have an Apple Developer ID and a 
 - `PROD_MACOS_NOTARIZATION_APPLE_ID`: The email you used to register your Apple Account and Apple Developer Program
 - `PROD_MACOS_NOTARIZATION_TEAM_ID`: Your Apple Developer Team ID, which can be found in the Apple Developer membership page
 - `PROD_MACOS_NOTARIZATION_PWD`: An app-specific password generated in the Apple ID account settings
-- `PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH`: Path to the provisioning profile that allows you to use entitlements which need to be specifically approved by Apple (`com.apple.developer.web-browser.public-key-credential`, `com.apple.developer.associated-domains.applinks.read-write`).
 
-If you don't have an Apple Developer ID to sign the build (or you don't want to sign it), you can simply not specify MACOS_CERTIFICATE_NAME.
+Set `PROD_MACOS_SPECIAL_ENTITLEMENTS_PROFILE_PATH` only when using a provisioning
+profile for the additional Apple-approved entitlements
+`com.apple.developer.web-browser.public-key-credential` and
+`com.apple.developer.associated-domains.applinks.read-write`. Without it, the
+packaging script uses the standard app entitlements.
+
+For an ad hoc signature without notarization, leave `MACOS_CERTIFICATE_NAME` unset.
 
 ```sh
 git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git
 cd Arcium-macOS
 ```
 
-to switch to the desired release or development branch.
+Check out the intended release or development branch before building.
 
-Finally, run the following (if you are building for the same architecture as your Mac, i.e. x86_64 for Intel Macs or arm64 for Apple Silicon Macs, or if you are building for arm64 on an Intel Mac and you set the appropriate build flag):
+For an Apple Silicon release, run:
 
 ```sh
-./build.sh
+./build.sh arm64
 ```
 
-or, if you want to build for x86_64 on an Apple Silicon Mac:
+For an Intel release, run:
 
 ```sh
 ./build.sh x86_64
 ```
 
-Once it's complete, a `.dmg` should appear in `build/`.
+The script defaults to `arm64` when the architecture is omitted, including on
+an Intel host. Pass the architecture explicitly for release validation.
 
-**NOTE**: If the build fails, you must take additional steps before re-running the build:
+A successful build produces `arcium_*.dmg` in `build/`. Packaging copies
+the compiled `Helium.app` into a temporary `Arcium.app`, rewrites its bundle
+identifiers and profile directory, then signs that copy before making the disk
+image. The original GN output stays intact. The disk image contains Arcium;
+internal executable and framework filenames remain those expected by Chromium.
 
-* If the build fails while downloading the Chromium source code, it can be fixed by removing `build/downloads_cache` and re-running the build instructions.
-* If the build fails at any other point after downloading, it can be fixed by removing `build/src` and re-running the build instructions.
+Run this official build in a dedicated checkout with enough storage for fresh
+source and output. `build.sh` prepares `<checkout>/build/src` and resets its
+output directory. It does not select or protect a development lane through the
+`he` command's transaction lock. It refuses a prepared development lane and
+binds source retrieval to this checkout's build directory, overriding ambient
+development paths. Use a dedicated checkout for an official build.
+
+The official configuration uses `is_official_build=true` and PGO phase 2, and
+builds both `chrome` and `chromedriver`. A passing component development build
+does not establish that this configuration builds, signs, or runs correctly.
+The legacy `build.sh -d` option downloads source instead of cloning it and keeps
+PGO phase 0. Use the commands above for release configuration validation.
+
+Automatic updates are disabled by default. To enable them in GitHub Actions,
+configure the `PROD_MACOS_SPARKLE_ED_PUB_KEY` secret and the
+`PROD_MACOS_SPARKLE_FEED_BASE_URL` repository variable together. The key must
+encode a 32-byte Ed25519 public key in base64. The HTTPS base URL must serve
+`mac/appcast-arm64.xml` and `mac/appcast-x86_64.xml`. Partial configuration fails
+the build setup. Building release assets does not publish these appcasts.
+
+For a manual build, enabling `enable_sparkle` also requires
+`sparkle_ed_key` and the complete `sparkle_feed_url` in the GN
+configuration. Validate that each feed serves the intended Arcium release and
+that its signatures match the configured key before distributing an
+update-enabled build. The app retains the existing update-consent and
+automatic-check preferences.
+
+After a failed official build, reset its incomplete inputs before trying again:
+
+* If the build fails while downloading Chromium source, remove `build/download_cache` and run the build again.
+* If the build fails after the download, remove `build/src` and run the build again.
 
 ## Development build and environment
 
@@ -351,6 +390,10 @@ The later receipts form one chain:
 4. `he run` and `he restart` refuse to launch when any earlier receipt or
    artifact is missing or stale.
 
+Installed Arcium packaging also requires current replay and execution proof.
+Use `he arcium status --json` to inspect the installed runtime. A Dev package
+receipt does not identify the installed Arcium bundle or its persistent profile.
+
 Replay attempts, builds, complete Dev workflows, setup, configuration, and
 stable Arcium updates share one nonblocking lane transaction lock. If another
 process owns the lane, the command stops without changing state. Retry after
@@ -420,8 +463,8 @@ dry run, requires a current replay receipt, and enforces the pending-edge
 budget. If the plan exceeds the budget, inspect it before you pass a larger
 `--edge-budget N` value.
 
-Use `he dev` for normal changes. Broad builds require the explicit
-`he build-full --approved` path.
+Use `he arcium iterate --approved` for a full build and installed-app restart.
+Use `he build-full --approved` for a broad build without launching an app.
 
 ### Refresh preparation proof
 
@@ -474,21 +517,24 @@ and build receipts through their producers.
 
 ### Use an exact development profile
 
-Run only `Helium Dev.app` for development proof. The development commands own
-the executable path, profile path, `--use-mock-keychain`, `--no-first-run`, and
-session-crash flags. Do not pass a release profile or a manual
-`--user-data-dir` override.
+Prove the bundle, executable, browser library, resources, profile, and flags
+used for each runtime check. `he arcium status --json` reports installed-app
+state. An installed-app check uses the persistent Arcium profile and real
+Keychain; an isolated Dev check uses its named profile and mock Keychain.
 
-Use the persistent development profile for ongoing Spaces and Pins work:
+Use the persistent installed app for the normal workflow:
 
 ```sh
-he run
+he arcium status --json
 ```
 
-Use a named isolated profile when a test must survive quit and restart:
+For requested isolated testing, create a named Dev bundle and profile. The
+development commands own its executable path, mock Keychain, first-run flags,
+and session-crash flags. Do not substitute an existing production profile or
+pass a manual `--user-data-dir` override.
 
 ```sh
-he run --isolated pins-drag-return-home
+he dev --isolated pins-drag-return-home
 he status --isolated pins-drag-return-home
 he restart --isolated pins-drag-return-home
 he stop --isolated pins-drag-return-home
@@ -501,6 +547,9 @@ The executable inside `Helium Dev.app` is still named `Helium`. `he status`
 matches both its full bundle path and its exact development data directory.
 
 ### Run a scenario contract
+
+For executable model, service, and browser invariant suites, see
+[Tab invariant tests](tab-invariants.md).
 
 For MRU preview latency and custom glass cost, follow
 [Compare MRU preview and glass performance](feature-performance.md).
@@ -534,20 +583,22 @@ he compile helium_persistent_item_model_tests
   --gtest_filter='SidebarNativeTabDragSessionTest.CommitsSameWindowSameSpacePinDrop:PersistentItemClosePolicyTest.LegacyAnchorStaysLiveAtHome'
 ```
 
-Then launch the selected Dev profile and follow the recorded steps. A passing
-unit test does not replace the visible behavior, persistence, or teardown
-checks.
+Then launch the selected runtime and profile required by the contract. Follow
+the recorded steps. A passing unit test does not replace the visible behavior,
+persistence, or teardown checks.
 
 ### Report proof gates
 
 Report these gates separately:
 
 - **Inspected:** You read the selected source, patch ownership, and current lane.
-- **Packaged:** The intended patches recreate the source with zero fuzz and pass
-  whitespace checks.
+- **Replayed:** The complete intended patches recreate the source with zero
+  fuzz and pass whitespace checks.
 - **Compiled:** Name each focused target, relink, or full browser target that
   completed.
-- **Launched:** Name the exact Dev bundle, lane, and profile that ran.
+- **Packaged:** Name the exact app bundle, browser library, resources, and
+  signature checks produced from the recorded build.
+- **Launched:** Name the exact app bundle, lane, flags, and profile that ran.
 - **Behavior-tested:** State the user interaction and visible result.
 - **Persistence-tested:** State what survived a normal quit and restart with the
   same profile.
@@ -627,51 +678,79 @@ For Quilt details, run `man quilt`.
 
 ### Update for a new Chromium release
 
-Use a cold lane for a version update. Expect a broad rebuild.
+Use a new, unused lane for a version update. Preserve the previous lane until
+the new product passes acceptance. Expect a broad rebuild and use full source
+when the planned tests require Chromium's test data.
 
-1. Select the lane and prepare the source:
+1. Update the Chromium version and dependency declarations in their owning
+   repositories. Select the source worktree and a new lane as described in
+   [Select a build lane](#select-a-build-lane). Source `dev.sh` from canonical
+   main, then inspect the selected source and volume:
 
    ```sh
-   HELIUM_DEV_LANE=heavy source dev.sh
+   he context
+   he lane
    he presetup
    ```
 
-2. Change to the generated source tree:
+   `he presetup` retrieves source and tools. It does not prepare the merged
+   patch catalog or establish replay proof. Do not reset the previous lane or
+   reuse a lane whose `src/out` already exists for this cold preparation.
+
+2. Prepare the lane-local catalog while Quilt is fully popped, then apply it:
 
    ```sh
-   cd "$HELIUM_DEV_BUILD_ROOT/src"
+   he prepare-patches
+   he push
    ```
 
-3. Apply and refresh the patch stack:
+3. Capture each patch that needs a source repair at its own series position.
+   Follow [Update an existing patch](#update-an-existing-patch) and run
+   `he save-patch` while that owner is the applied top patch. Review its
+   exported bytes in core or the outer repository before continuing.
+
+   If application fails, stop at that patch. Any forced application belongs in
+   a reviewed Quilt recovery session under the selected lane's transaction
+   lock, and must be limited to that one patch. Repair its owned files and
+   rejects before capturing it. A forced application or refresh does not
+   establish replay proof. Never force the complete stack or leave repairs
+   only in the generated catalog.
+
+4. Once all repairs have authoritative owners, fully pop and regenerate the
+   lane catalog. Replay the complete stack from its preimages with zero fuzz:
 
    ```sh
-   quilt push -a --refresh
+   he pop
+   he prepare-patches
+   he replay
+   he check
    ```
 
-4. If a patch fails, force only that patch, repair its owned files, and refresh
-   it. Continue until the complete series applies with zero fuzz.
+   `he check` inspects catalog and applied state. The successful `he replay`
+   supplies the source proof required by the guarded build commands.
 
-5. Regenerate the version and build configuration:
+5. Regenerate resources, version metadata, and the build configuration, then
+   inspect the broad plan:
 
    ```sh
+   he resources
    he version
    he configure
-   ```
-
-6. Run patch checks and inspect the broad build plan:
-
-   ```sh
-   he check
    he build-plan chrome
    ```
 
-7. After you review the plan, build and launch the Dev product:
+6. After reviewing the plan, build the product without launching it:
 
    ```sh
    he build-full --approved
-   he dev-bundle
-   he run --isolated chromium-update
    ```
 
-8. Validate the configuration and series. Pop and replay the complete stack
-   once more before you commit the owning patches.
+   Run the applicable focused and full executable regressions against this
+   lane. Select installed-app or isolated testing explicitly before packaging
+   and launch. Verify the exact bundle and profile, visible behavior,
+   persistence, and teardown. Report a development build separately from the
+   [official release configuration](#official-non-development-build).
+
+7. Commit core changes first, then advance the outer gitlink. Revalidate replay,
+   build, package, and runtime proof against those final integrated revisions.
+   Keep the previous lane and recovery references until acceptance passes.

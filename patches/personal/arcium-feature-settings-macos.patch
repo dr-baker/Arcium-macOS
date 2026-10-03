@@ -1,0 +1,673 @@
+Index: src/chrome/browser/app_controller_mac.mm
+===================================================================
+--- src.orig/chrome/browser/app_controller_mac.mm
++++ src/chrome/browser/app_controller_mac.mm
+@@ -2236,8 +2236,16 @@ class AppControllerProfileObserver : pub
+ - (NSMenu*)applicationDockMenu:(NSApplication*)sender {
+   NSMenu* dockMenu = [[NSMenu alloc] initWithTitle:@""];
+ 
+-  // Helium Spaces: always list Spaces so dock can open the Space window.
+-  if (g_browser_process->profile_manager()) {
++  PrefService* local_state =
++      g_browser_process ? g_browser_process->local_state() : nullptr;
++  const bool show_spaces =
++      !local_state ||
++      !local_state->FindPreference(prefs::kArciumShowSpacesInDockMenu) ||
++      local_state->GetBoolean(prefs::kArciumShowSpacesInDockMenu);
++
++  if (show_spaces && g_browser_process &&
++      g_browser_process->profile_manager()) {
++    // Helium Spaces: list Spaces so the Dock can open their windows.
+     ProfileAttributesStorage& storage =
+         g_browser_process->profile_manager()->GetProfileAttributesStorage();
+     std::vector<ProfileAttributesEntry*> entries =
+@@ -2296,6 +2304,14 @@ class AppControllerProfileObserver : pub
+         [dockMenu addItem:[NSMenuItem separatorItem]];
+       }
+     }
++  } else if (!show_spaces) {
++    // Preserve Chromium's profile shortcuts when the Spaces section is hidden.
++    BOOL profilesAdded = [_profileMenuController insertItemsIntoMenu:dockMenu
++                                                             atOffset:0
++                                                             fromDock:YES];
++    if (profilesAdded) {
++      [dockMenu addItem:[NSMenuItem separatorItem]];
++    }
+   }
+ 
+   NSString* titleStr = l10n_util::GetNSStringWithFixup(IDS_NEW_WINDOW_MAC);
+Index: src/chrome/browser/prefs/browser_prefs.cc
+===================================================================
+--- src.orig/chrome/browser/prefs/browser_prefs.cc
++++ src/chrome/browser/prefs/browser_prefs.cc
+@@ -1614,6 +1614,7 @@ void RegisterLocalState(PrefRegistrySimp
+ 
+ #if BUILDFLAG(IS_MAC)
+   confirm_quit::RegisterLocalState(registry);
++  registry->RegisterBooleanPref(prefs::kArciumShowSpacesInDockMenu, true);
+   QuitWithAppsController::RegisterPrefs(registry);
+   system_media_permissions::RegisterSystemMediaPermissionStatesPrefs(registry);
+   AppShimRegistry::Get()->RegisterLocalPrefs(registry);
+Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_model.cc
++++ src/chrome/browser/ui/cocoa/arcium_settings_model.cc
+@@ -45,12 +45,15 @@ constexpr char kSharedPaletteDarkChromeC
+ constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
+ constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
+ 
+-constexpr std::array<std::string_view, 32> kProfilePreferences = {
++constexpr std::array<std::string_view, 35> kProfilePreferences = {
+     prefs::kRestoreOnStartup,
+     prefs::kPromptForDownload,
+     prefs::kHeliumLittleArcExternalLinks,
++    prefs::kHeliumPeekEnabled,
++    prefs::kArciumOmniboxPersistentItemsEnabled,
+     prefs::kNewTabNextToActive,
+     prefs::kTabCyclingMRU,
++    prefs::kArciumAutoPictureInPictureEnabled,
+     prefs::kShiftRightClickContextMenu,
+     prefs::kHeliumLayout,
+     prefs::kVerticalTabsUncollapsedWidth,
+@@ -380,11 +383,14 @@ ArciumSettingsModel::ArciumSettingsModel
+   }
+   if (local_state_) {
+     local_pref_change_registrar_.Init(local_state_);
+-    if (local_state_->FindPreference(prefs::kConfirmToQuitEnabled)) {
+-      local_pref_change_registrar_.Add(
+-          prefs::kConfirmToQuitEnabled,
+-          base::BindRepeating(&ArciumSettingsModel::OnLocalPreferenceChanged,
+-                              base::Unretained(this)));
++    for (std::string_view name : {prefs::kConfirmToQuitEnabled,
++                                  prefs::kArciumShowSpacesInDockMenu}) {
++      if (local_state_->FindPreference(name)) {
++        local_pref_change_registrar_.Add(
++            name,
++            base::BindRepeating(&ArciumSettingsModel::OnLocalPreferenceChanged,
++                                base::Unretained(this)));
++      }
+     }
+   }
+ }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -53,7 +53,11 @@ struct ArciumGeneralSnapshot: Equatable
+     var startupOptions: [ArciumChoice] = []
+     var promptForDownload = false
+     var littleArcExternalLinks = false
++    var peekEnabled = false
++    var persistentItemsEnabled = false
++    var autoPictureInPictureEnabled = false
+     var confirmToQuit = false
++    var showSpacesInDockMenu = false
+     var managed: [String: Bool] = [:]
+     var available: [String: Bool] = [:]
+     var isAvailable = true
+@@ -66,7 +70,11 @@ struct ArciumGeneralSnapshot: Equatable
+         startupOptions = choices(dictionary["startupOptions"])
+         promptForDownload = boolean(dictionary["promptForDownload"])
+         littleArcExternalLinks = boolean(dictionary["littleArcExternalLinks"])
++        peekEnabled = boolean(dictionary["peekEnabled"])
++        persistentItemsEnabled = boolean(dictionary["persistentItemsEnabled"])
++        autoPictureInPictureEnabled = boolean(dictionary["autoPictureInPictureEnabled"])
+         confirmToQuit = boolean(dictionary["confirmToQuit"])
++        showSpacesInDockMenu = boolean(dictionary["showSpacesInDockMenu"])
+         managed = booleanMap(dictionary["managed"])
+         available = booleanMap(dictionary["available"])
+         isAvailable = boolean(dictionary["availableSection"], defaultValue: !dictionary.isEmpty)
+@@ -74,8 +82,14 @@ struct ArciumGeneralSnapshot: Equatable
+ }
+ 
+ struct ArciumTabsSnapshot: Equatable {
++    // These values match `HeliumLayoutType` in
++    // chrome/browser/ui/helium/helium_layout_state_controller.h.
++    static let verticalLayoutValue = 2
++    static let dynamicLayoutValue = 3
++
+     var layout = 0
+     var layoutOptions: [ArciumChoice] = []
++    var verticalTabsFeatureEnabled = false
+     var newTabNextToActive = false
+     var tabCyclingMRU = false
+     var shiftRightClickContextMenu = false
+@@ -85,10 +99,13 @@ struct ArciumTabsSnapshot: Equatable {
+ 
+     func isManaged(_ key: String) -> Bool { managed[key] ?? false }
+     func hasValue(_ key: String) -> Bool { available[key] ?? false }
++    var isVerticalLayout: Bool { layout == Self.verticalLayoutValue }
++    var isDynamicLayout: Bool { layout == Self.dynamicLayoutValue }
+ 
+     init(_ dictionary: [String: Any]) {
+         layout = integer(dictionary["layout"])
+         layoutOptions = choices(dictionary["layoutOptions"])
++        verticalTabsFeatureEnabled = boolean(dictionary["verticalTabsFeatureEnabled"])
+         newTabNextToActive = boolean(dictionary["newTabNextToActive"])
+         tabCyclingMRU = boolean(dictionary["tabCyclingMRU"])
+         shiftRightClickContextMenu = boolean(dictionary["shiftRightClickContextMenu"])
+@@ -490,6 +507,19 @@ struct ArciumSettingsSnapshot: Equatable
+     var appearance: ArciumAppearanceSnapshot
+     var shortcuts: ArciumShortcutsSnapshot
+ 
++    var canEditShowVerticalTabsCollapseButton: Bool {
++        appearance.hasValue("show_vertical_tabs_collapse_button")
++            && !appearance.isManaged("show_vertical_tabs_collapse_button")
++            && tabs.verticalTabsFeatureEnabled
++            && tabs.isVerticalLayout
++    }
++
++    var canEditShowDynamicNewTabButton: Bool {
++        appearance.hasValue("show_dynamic_new_tab_button")
++            && !appearance.isManaged("show_dynamic_new_tab_button")
++            && tabs.isDynamicLayout
++    }
++
+     init(dictionary: NSDictionary) {
+         let values = dictionaryValues(dictionary)
+         available = boolean(values["available"], defaultValue: false)
+@@ -843,13 +873,21 @@ final class ArciumSettingsStore: Observa
+         switch key {
+         case "prompt_for_download": snapshot.general.promptForDownload
+         case "little_arc_external_links": snapshot.general.littleArcExternalLinks
++        case "peek_enabled": snapshot.general.peekEnabled
++        case "persistent_items_enabled": snapshot.general.persistentItemsEnabled
++        case "auto_picture_in_picture_enabled": snapshot.general.autoPictureInPictureEnabled
+         case "confirm_to_quit": snapshot.general.confirmToQuit
++        case "show_spaces_in_dock_menu": snapshot.general.showSpacesInDockMenu
+         default: false
+         }
+     }
+ 
+     func setGeneralBoolean(_ key: String, value: Bool) {
+-        guard ["prompt_for_download", "little_arc_external_links", "confirm_to_quit"].contains(key) else {
++        guard [
++            "prompt_for_download", "little_arc_external_links", "peek_enabled",
++            "persistent_items_enabled", "auto_picture_in_picture_enabled",
++            "confirm_to_quit", "show_spaces_in_dock_menu"
++        ].contains(key) else {
+             return
+         }
+         settingChanged(key: key, value: value)
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -305,6 +305,29 @@ private struct GeneralSettingsPage: View
+                         )
+                     )
+                     BooleanSetting(
++                        title: "Confirm before quitting Arcium",
++                        description: "Applies to all Arcium profiles.",
++                        enabled: store.snapshot.general.hasValue("confirm_to_quit")
++                            && !store.snapshot.general.isManaged("confirm_to_quit"),
++                        value: Binding(
++                            get: { store.snapshot.general.confirmToQuit },
++                            set: { store.setGeneralBoolean("confirm_to_quit", value: $0) }
++                        )
++                    )
++                    BooleanSetting(
++                        title: "Show Spaces in Dock menu",
++                        description: "List Spaces from all profiles. Off shows profiles instead of Spaces.",
++                        enabled: store.snapshot.general.hasValue("show_spaces_in_dock_menu")
++                            && !store.snapshot.general.isManaged("show_spaces_in_dock_menu"),
++                        value: Binding(
++                            get: { store.snapshot.general.showSpacesInDockMenu },
++                            set: { store.setGeneralBoolean("show_spaces_in_dock_menu", value: $0) }
++                        )
++                    )
++                }
++
++                SSectionCard(title: "Links and address bar") {
++                    BooleanSetting(
+                         title: "Open external links in Little Arc",
+                         description: "Open links from other apps in a compact Little Arc window.",
+                         enabled: store.snapshot.general.hasValue("little_arc_external_links")
+@@ -315,13 +338,38 @@ private struct GeneralSettingsPage: View
+                         )
+                     )
+                     BooleanSetting(
+-                        title: "Confirm before quitting Arcium",
+-                        description: "Applies to all Arcium profiles.",
+-                        enabled: store.snapshot.general.hasValue("confirm_to_quit")
+-                            && !store.snapshot.general.isManaged("confirm_to_quit"),
++                        title: "Enable Peek",
++                        description: "Preview links without leaving the current tab.",
++                        enabled: store.snapshot.general.hasValue("peek_enabled")
++                            && !store.snapshot.general.isManaged("peek_enabled"),
+                         value: Binding(
+-                            get: { store.snapshot.general.confirmToQuit },
+-                            set: { store.setGeneralBoolean("confirm_to_quit", value: $0) }
++                            get: { store.snapshot.general.peekEnabled },
++                            set: { store.setGeneralBoolean("peek_enabled", value: $0) }
++                        )
++                    )
++                    BooleanSetting(
++                        title: "Suggest Favorites and Pins in the address bar",
++                        description: "Include saved Favorites and Pins in address-bar suggestions.",
++                        enabled: store.snapshot.general.hasValue("persistent_items_enabled")
++                            && !store.snapshot.general.isManaged("persistent_items_enabled"),
++                        value: Binding(
++                            get: { store.snapshot.general.persistentItemsEnabled },
++                            set: { store.setGeneralBoolean("persistent_items_enabled", value: $0) }
++                        )
++                    )
++                }
++
++                SSectionCard(title: "Picture-in-Picture") {
++                    BooleanSetting(
++                        title: "Enter Picture-in-Picture automatically",
++                        description: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
++                            ? "Keep a playing video in a floating Picture-in-Picture window when you switch tabs."
++                            : "The experimental browser-initiated Picture-in-Picture feature is unavailable in this browser configuration.",
++                        enabled: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
++                            && !store.snapshot.general.isManaged("auto_picture_in_picture_enabled"),
++                        value: Binding(
++                            get: { store.snapshot.general.autoPictureInPictureEnabled },
++                            set: { store.setGeneralBoolean("auto_picture_in_picture_enabled", value: $0) }
+                         )
+                     )
+                 }
+@@ -589,6 +637,27 @@ private struct AppearanceSettingsPage: V
+                     }
+                 }
+             }
++
++            SSectionCard(title: "Layout-specific toolbar buttons") {
++                BooleanSetting(
++                    title: "Show sidebar collapse button",
++                    description: "Show the toolbar button for collapsing the sidebar. Available with Vertical tabs.",
++                    enabled: store.snapshot.canEditShowVerticalTabsCollapseButton,
++                    value: Binding(
++                        get: { store.appearanceBoolean("show_vertical_tabs_collapse_button") },
++                        set: { store.setAppearanceBoolean("show_vertical_tabs_collapse_button", value: $0) }
++                    )
++                )
++                BooleanSetting(
++                    title: "Show New Tab button",
++                    description: "Show the Dynamic-layout New Tab button. Available with Dynamic tabs.",
++                    enabled: store.snapshot.canEditShowDynamicNewTabButton,
++                    value: Binding(
++                        get: { store.appearanceBoolean("show_dynamic_new_tab_button") },
++                        set: { store.setAppearanceBoolean("show_dynamic_new_tab_button", value: $0) }
++                    )
++                )
++            }
+         }
+     }
+ 
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -852,6 +852,166 @@ final class ArciumSettingsUIContractTest
+         }
+     }
+ 
++    @MainActor
++    func testNativeFeatureSettingsReadWriteAndRefreshUseStableKeys() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(
++            snapshot: NSDictionary(dictionary: [
++                "available": true,
++                "general": [
++                    "availableSection": true,
++                    "peekEnabled": true,
++                    "persistentItemsEnabled": true,
++                    "autoPictureInPictureEnabled": true,
++                    "showSpacesInDockMenu": true,
++                    "available": [
++                        "peek_enabled": true,
++                        "persistent_items_enabled": true,
++                        "auto_picture_in_picture_enabled": true,
++                        "show_spaces_in_dock_menu": true
++                    ]
++                ],
++                "tabs": ["availableSection": true, "tabCyclingMRU": true]
++            ]),
++            delegate: delegate
++        )
++
++        XCTAssertTrue(store.snapshot.general.peekEnabled)
++        XCTAssertTrue(store.snapshot.general.persistentItemsEnabled)
++        XCTAssertTrue(store.snapshot.general.autoPictureInPictureEnabled)
++        XCTAssertTrue(store.snapshot.general.showSpacesInDockMenu)
++
++        store.setGeneralBoolean("peek_enabled", value: false)
++        store.setGeneralBoolean("persistent_items_enabled", value: false)
++        store.setGeneralBoolean("auto_picture_in_picture_enabled", value: false)
++        store.setGeneralBoolean("show_spaces_in_dock_menu", value: false)
++        store.setGeneralBoolean("unknown_setting", value: false)
++
++        XCTAssertEqual(delegate.settings.map(\.key), [
++            "peek_enabled", "persistent_items_enabled",
++            "auto_picture_in_picture_enabled", "show_spaces_in_dock_menu"
++        ])
++        XCTAssertEqual(delegate.settings.map { $0.value as? Bool },
++                       [false, false, false, false])
++
++        store.updateSnapshot(NSDictionary(dictionary: [
++            "available": true,
++            "general": [
++                "availableSection": true,
++                "peekEnabled": false,
++                "persistentItemsEnabled": false,
++                "autoPictureInPictureEnabled": false,
++                "showSpacesInDockMenu": false
++            ],
++            "tabs": ["availableSection": true, "tabCyclingMRU": false]
++        ]))
++        XCTAssertFalse(store.snapshot.general.peekEnabled)
++        XCTAssertFalse(store.snapshot.general.persistentItemsEnabled)
++        XCTAssertFalse(store.snapshot.general.autoPictureInPictureEnabled)
++        XCTAssertFalse(store.snapshot.general.showSpacesInDockMenu)
++        XCTAssertFalse(store.snapshot.tabs.tabCyclingMRU)
++    }
++
++    @MainActor
++    func testUnavailableAutoPiPPrefRetainsStoredValueAndManagedState() {
++        let general = ArciumGeneralSnapshot([
++            "autoPictureInPictureEnabled": true,
++            "available": ["auto_picture_in_picture_enabled": false],
++            "managed": ["auto_picture_in_picture_enabled": true]
++        ])
++
++        XCTAssertTrue(general.autoPictureInPictureEnabled)
++        XCTAssertFalse(general.hasValue("auto_picture_in_picture_enabled"))
++        XCTAssertTrue(general.isManaged("auto_picture_in_picture_enabled"))
++    }
++
++    @MainActor
++    func testLayoutSpecificToolbarSettingsRespectEffectiveLayoutAndAvailability() {
++        func snapshot(
++            layout: Int,
++            verticalTabsFeatureEnabled: Bool = true,
++            collapseAvailable: Bool = true,
++            newTabAvailable: Bool = true,
++            managedCollapse: Bool = false,
++            managedNewTab: Bool = false
++        ) -> ArciumSettingsSnapshot {
++            ArciumSettingsSnapshot(dictionary: NSDictionary(dictionary: [
++                "available": true,
++                "tabs": [
++                    "availableSection": true,
++                    "layout": layout,
++                    "verticalTabsFeatureEnabled": verticalTabsFeatureEnabled
++                ],
++                "appearance": [
++                    "availableSection": true,
++                    "showVerticalTabsCollapseButton": true,
++                    "showDynamicNewTabButton": true,
++                    "available": [
++                        "show_vertical_tabs_collapse_button": collapseAvailable,
++                        "show_dynamic_new_tab_button": newTabAvailable
++                    ],
++                    "managed": [
++                        "show_vertical_tabs_collapse_button": managedCollapse,
++                        "show_dynamic_new_tab_button": managedNewTab
++                    ]
++                ]
++            ]))
++        }
++
++        let vertical = snapshot(layout: ArciumTabsSnapshot.verticalLayoutValue)
++        XCTAssertTrue(vertical.canEditShowVerticalTabsCollapseButton)
++        XCTAssertFalse(vertical.canEditShowDynamicNewTabButton)
++        XCTAssertTrue(vertical.appearance.showVerticalTabsCollapseButton)
++
++        let persistedVerticalWithFeatureDisabled = snapshot(
++            layout: ArciumTabsSnapshot.verticalLayoutValue,
++            verticalTabsFeatureEnabled: false
++        )
++        XCTAssertEqual(
++            persistedVerticalWithFeatureDisabled.tabs.layout,
++            ArciumTabsSnapshot.verticalLayoutValue
++        )
++        XCTAssertTrue(
++            persistedVerticalWithFeatureDisabled.appearance.showVerticalTabsCollapseButton
++        )
++        XCTAssertFalse(
++            persistedVerticalWithFeatureDisabled.canEditShowVerticalTabsCollapseButton
++        )
++
++        let verticalManaged = snapshot(
++            layout: ArciumTabsSnapshot.verticalLayoutValue,
++            managedCollapse: true
++        )
++        XCTAssertTrue(verticalManaged.appearance.showVerticalTabsCollapseButton)
++        XCTAssertFalse(verticalManaged.canEditShowVerticalTabsCollapseButton)
++
++        let dynamic = snapshot(
++            layout: ArciumTabsSnapshot.dynamicLayoutValue
++        )
++        XCTAssertFalse(dynamic.canEditShowVerticalTabsCollapseButton)
++        XCTAssertTrue(dynamic.canEditShowDynamicNewTabButton)
++        XCTAssertTrue(dynamic.appearance.showDynamicNewTabButton)
++
++        let dynamicManaged = snapshot(
++            layout: ArciumTabsSnapshot.dynamicLayoutValue,
++            managedNewTab: true
++        )
++        XCTAssertTrue(dynamicManaged.appearance.showDynamicNewTabButton)
++        XCTAssertFalse(dynamicManaged.canEditShowDynamicNewTabButton)
++
++        let missingCollapsePref = snapshot(
++            layout: ArciumTabsSnapshot.verticalLayoutValue,
++            collapseAvailable: false
++        )
++        XCTAssertFalse(missingCollapsePref.canEditShowVerticalTabsCollapseButton)
++
++        let missingNewTabPref = snapshot(
++            layout: ArciumTabsSnapshot.dynamicLayoutValue,
++            newTabAvailable: false
++        )
++        XCTAssertFalse(missingNewTabPref.canEditShowDynamicNewTabButton)
++    }
++
+ 
+     @MainActor
+     func testControlAccentPendingDraftClearsOnEveryFreshSnapshot() throws {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -18,6 +18,7 @@
+ #include <string_view>
+ #include <utility>
+ 
++#include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
+ #include "base/strings/sys_string_conversions.h"
+@@ -37,8 +38,10 @@
+ #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
+ #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
+@@ -47,6 +50,7 @@
+ #include "chrome/browser/ui/views/helium/glass_surface_mac.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/prefs/pref_service.h"
++#include "third_party/blink/public/common/features.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/views/widget/widget.h"
+ 
+@@ -80,7 +84,12 @@ bool LoadSettingsUIModule() {
+ NSString* const kKeyStartupType = @"startup_type";
+ NSString* const kKeyPromptForDownload = @"prompt_for_download";
+ NSString* const kKeyLittleArcExternalLinks = @"little_arc_external_links";
++NSString* const kKeyPeekEnabled = @"peek_enabled";
++NSString* const kKeyPersistentItemsEnabled = @"persistent_items_enabled";
++NSString* const kKeyAutoPictureInPictureEnabled =
++    @"auto_picture_in_picture_enabled";
+ NSString* const kKeyConfirmToQuit = @"confirm_to_quit";
++NSString* const kKeyShowSpacesInDockMenu = @"show_spaces_in_dock_menu";
+ NSString* const kKeyLayout = @"helium_layout";
+ NSString* const kKeyNewTabNextToActive = @"new_tab_next_to_active";
+ NSString* const kKeyTabCyclingMRU = @"tab_cycling_mru";
+@@ -952,8 +961,27 @@ void SettingsModelProfileWillBeDestroyed
+       model && model->HasPreference(prefs::kPromptForDownload);
+   const bool little_arc_available =
+       model && model->HasPreference(prefs::kHeliumLittleArcExternalLinks);
++  const bool peek_available =
++      model && model->HasPreference(prefs::kHeliumPeekEnabled);
++  const bool persistent_items_pref_available =
++      model &&
++      model->HasPreference(prefs::kArciumOmniboxPersistentItemsEnabled);
++  const bool persistent_items_available =
++      persistent_items_pref_available &&
++      helium::IsHeliumFavoritesAndPinsEnabled() &&
++      !model->profile()->IsGuestSession();
++  const bool auto_picture_in_picture_pref_available =
++      model &&
++      model->HasPreference(prefs::kArciumAutoPictureInPictureEnabled);
++  const bool auto_picture_in_picture_available =
++      auto_picture_in_picture_pref_available &&
++      base::FeatureList::IsEnabled(
++          blink::features::kBrowserInitiatedAutomaticPictureInPicture);
+   const bool confirm_available =
+       model && model->HasLocalPreference(prefs::kConfirmToQuitEnabled);
++  const bool show_spaces_in_dock_menu_available =
++      model &&
++      model->HasLocalPreference(prefs::kArciumShowSpacesInDockMenu);
+ 
+   NSDictionary* general = @{
+     @"availableSection" : @(available),
+@@ -982,8 +1010,19 @@ void SettingsModelProfileWillBeDestroyed
+     @"littleArcExternalLinks" :
+         @(model && little_arc_available &&
+           model->GetBoolean(prefs::kHeliumLittleArcExternalLinks)),
++    @"peekEnabled" : @(model && peek_available &&
++                        model->GetBoolean(prefs::kHeliumPeekEnabled)),
++    @"persistentItemsEnabled" :
++        @(model && persistent_items_pref_available &&
++          model->GetBoolean(prefs::kArciumOmniboxPersistentItemsEnabled)),
++    @"autoPictureInPictureEnabled" :
++        @(model && auto_picture_in_picture_pref_available &&
++          model->GetBoolean(prefs::kArciumAutoPictureInPictureEnabled)),
+     @"confirmToQuit" : @(model && confirm_available &&
+                          model->GetLocalBoolean(prefs::kConfirmToQuitEnabled)),
++    @"showSpacesInDockMenu" :
++        @(model && show_spaces_in_dock_menu_available &&
++          model->GetLocalBoolean(prefs::kArciumShowSpacesInDockMenu)),
+     @"managed" : @{
+       kKeyStartupType : @(model && startup_available &&
+                           model->IsManaged(prefs::kRestoreOnStartup)),
+@@ -992,15 +1031,31 @@ void SettingsModelProfileWillBeDestroyed
+       kKeyLittleArcExternalLinks :
+           @(model && little_arc_available &&
+             model->IsManaged(prefs::kHeliumLittleArcExternalLinks)),
++      kKeyPeekEnabled : @(model && peek_available &&
++                          model->IsManaged(prefs::kHeliumPeekEnabled)),
++      kKeyPersistentItemsEnabled :
++          @(model && persistent_items_pref_available &&
++            model->IsManaged(prefs::kArciumOmniboxPersistentItemsEnabled)),
++      kKeyAutoPictureInPictureEnabled :
++          @(model && auto_picture_in_picture_pref_available &&
++            model->IsManaged(prefs::kArciumAutoPictureInPictureEnabled)),
+       kKeyConfirmToQuit :
+           @(model && confirm_available &&
+             model->IsLocalManaged(prefs::kConfirmToQuitEnabled)),
++      kKeyShowSpacesInDockMenu :
++          @(model && show_spaces_in_dock_menu_available &&
++            model->IsLocalManaged(prefs::kArciumShowSpacesInDockMenu)),
+     },
+     @"available" : @{
+       kKeyStartupType : @(startup_available),
+       kKeyPromptForDownload : @(prompt_available),
+       kKeyLittleArcExternalLinks : @(little_arc_available),
++      kKeyPeekEnabled : @(peek_available),
++      kKeyPersistentItemsEnabled : @(persistent_items_available),
++      kKeyAutoPictureInPictureEnabled :
++          @(auto_picture_in_picture_available),
+       kKeyConfirmToQuit : @(confirm_available),
++      kKeyShowSpacesInDockMenu : @(show_spaces_in_dock_menu_available),
+     },
+   };
+ 
+@@ -1026,6 +1081,7 @@ void SettingsModelProfileWillBeDestroyed
+     @"layout" : @(model && layout_available
+                       ? model->GetInteger(prefs::kHeliumLayout)
+                       : static_cast<int>(HeliumLayoutType::kClassic)),
++    @"verticalTabsFeatureEnabled" : @(tabs::IsVerticalTabsFeatureEnabled()),
+     @"layoutOptions" : @[
+       @{
+         @"value" : @(static_cast<int>(HeliumLayoutType::kClassic)),
+@@ -1663,6 +1719,39 @@ void SettingsModelProfileWillBeDestroyed
+     }
+     return;
+   }
++  if ([key isEqualToString:kKeyPeekEnabled] &&
++      GetBooleanObject(value, &boolean_value)) {
++    if (model_->HasPreference(prefs::kHeliumPeekEnabled) &&
++        !model_->IsManaged(prefs::kHeliumPeekEnabled)) {
++      model_->SetBoolean(prefs::kHeliumPeekEnabled, boolean_value);
++      [self modelDidChange];
++    }
++    return;
++  }
++  if ([key isEqualToString:kKeyPersistentItemsEnabled] &&
++      GetBooleanObject(value, &boolean_value)) {
++    if (helium::IsHeliumFavoritesAndPinsEnabled() &&
++        !model_->profile()->IsGuestSession() &&
++        model_->HasPreference(prefs::kArciumOmniboxPersistentItemsEnabled) &&
++        !model_->IsManaged(prefs::kArciumOmniboxPersistentItemsEnabled)) {
++      model_->SetBoolean(prefs::kArciumOmniboxPersistentItemsEnabled,
++                         boolean_value);
++      [self modelDidChange];
++    }
++    return;
++  }
++  if ([key isEqualToString:kKeyAutoPictureInPictureEnabled] &&
++      GetBooleanObject(value, &boolean_value)) {
++    if (base::FeatureList::IsEnabled(
++            blink::features::kBrowserInitiatedAutomaticPictureInPicture) &&
++        model_->HasPreference(prefs::kArciumAutoPictureInPictureEnabled) &&
++        !model_->IsManaged(prefs::kArciumAutoPictureInPictureEnabled)) {
++      model_->SetBoolean(prefs::kArciumAutoPictureInPictureEnabled,
++                         boolean_value);
++      [self modelDidChange];
++    }
++    return;
++  }
+   if ([key isEqualToString:kKeyConfirmToQuit] &&
+       GetBooleanObject(value, &boolean_value)) {
+     if (model_->HasLocalPreference(prefs::kConfirmToQuitEnabled) &&
+@@ -1671,6 +1760,16 @@ void SettingsModelProfileWillBeDestroyed
+       [self modelDidChange];
+     }
+     return;
++  }
++  if ([key isEqualToString:kKeyShowSpacesInDockMenu] &&
++      GetBooleanObject(value, &boolean_value)) {
++    if (model_->HasLocalPreference(prefs::kArciumShowSpacesInDockMenu) &&
++        !model_->IsLocalManaged(prefs::kArciumShowSpacesInDockMenu)) {
++      model_->SetLocalBoolean(prefs::kArciumShowSpacesInDockMenu,
++                              boolean_value);
++      [self modelDidChange];
++    }
++    return;
+   }
+ 
+   if ([key isEqualToString:kKeyNewTabNextToActive] &&
+Index: src/chrome/common/pref_names.h
+===================================================================
+--- src.orig/chrome/common/pref_names.h
++++ src/chrome/common/pref_names.h
+@@ -762,6 +762,10 @@ inline constexpr char kShowVerticalTabsC
+ inline constexpr char kShowDynamicNewTabButton[] =
+     "helium.browser.show_dynamic_new_tab_button";
+ 
++// When true, the macOS Dock menu includes Spaces from all browser profiles.
++inline constexpr char kArciumShowSpacesInDockMenu[] =
++    "arcium.dock_menu.show_spaces";
++
+ // A boolean pref set to true if Gemini integration be enabled. This is managed
+ // by enterprise policy.
+ inline constexpr char kGeminiSettings[] = "browser.gemini_settings";

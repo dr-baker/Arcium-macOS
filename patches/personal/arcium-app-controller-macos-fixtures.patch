@@ -1,0 +1,269 @@
+# Requires arcium-little-arc-macos and arcium-spaces-macos.
+# Verify native Dock/window behavior after skipped first run and opt-in Handoff prerendering.
+--- a/chrome/browser/app_controller_mac_browsertest.mm
++++ b/chrome/browser/app_controller_mac_browsertest.mm
+@@ -44,6 +44,7 @@
+ #include "chrome/browser/lifetime/application_lifetime.h"
+ #include "chrome/browser/lifetime/application_lifetime_desktop.h"
+ #include "chrome/browser/prefs/incognito_mode_prefs.h"
++#include "chrome/browser/preloading/preloading_prefs.h"
+ #include "chrome/browser/profiles/delete_profile_helper.h"
+ #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+@@ -64,7 +65,11 @@
+ #include "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
+ #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
+ #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
++#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "chrome/browser/ui/helium/helium_little_arc.h"
++#include "chrome/browser/ui/helium/helium_space.h"
++#include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/helium/helium_space_service_factory.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/profiles/profile_picker.h"
+ #include "chrome/browser/ui/profiles/profile_ui_test_utils.h"
+@@ -88,6 +93,7 @@
+ #include "components/signin/public/base/signin_switches.h"
+ #include "content/public/browser/navigation_controller.h"
+ #include "content/public/browser/web_contents.h"
++#include "content/public/browser/web_contents_delegate.h"
+ #include "content/public/test/browser_test.h"
+ #include "content/public/test/browser_test_utils.h"
+ #include "content/public/test/no_renderer_crashes_assertion.h"
+@@ -101,6 +107,7 @@
+ #include "net/base/filename_util.h"
+ #include "net/dns/mock_host_resolver.h"
+ #include "net/test/embedded_test_server/embedded_test_server.h"
++#include "testing/gtest_mac.h"
+ #include "third_party/blink/public/common/features.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
+@@ -272,6 +279,16 @@ class ScopedMockConfirmQuitPanel {
+ 
+ using AppControllerBrowserTest = InProcessBrowserTest;
+ 
++class AppControllerHeliumSpacesBrowserTest : public InProcessBrowserTest {
++ public:
++  AppControllerHeliumSpacesBrowserTest() {
++    feature_list_.InitAndEnableFeature(helium::kHeliumFavoritesAndPins);
++  }
++
++ private:
++  base::test::ScopedFeatureList feature_list_;
++};
++
+ // Returns whether a window's pixels are actually on the screen, which is the
+ // case when it and all of its parents are marked visible.
+ bool IsReallyVisible(NSWindow* window) {
+@@ -351,6 +368,65 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+   EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
+ }
+ 
++IN_PROC_BROWSER_TEST_F(AppControllerHeliumSpacesBrowserTest,
++                       DockMenuListsLoadedSpaceIdentities) {
++  ASSERT_TRUE(helium::IsHeliumFavoritesAndPinsEnabled());
++
++  Profile* profile = browser()->profile();
++  helium::HeliumSpaceService* space_service =
++      helium::HeliumSpaceServiceFactory::GetInstance()
++          ->SetTestingSubclassFactoryAndUse<helium::HeliumSpaceService>(
++              profile,
++              base::BindOnce(
++                  [](content::BrowserContext* context)
++                      -> std::unique_ptr<helium::HeliumSpaceService> {
++                    return std::make_unique<helium::HeliumSpaceService>(
++                        static_cast<Profile*>(context));
++                  }));
++  ASSERT_TRUE(space_service);
++
++  constexpr char kWorkSpaceID[] = "dock-work";
++  constexpr char kResearchSpaceID[] = "dock-research";
++  ASSERT_TRUE(space_service->GetOrCreateSpace(kWorkSpaceID, u"Work"));
++  ASSERT_TRUE(space_service->GetOrCreateSpace(kResearchSpaceID, u"Research"));
++
++  NSMenu* menu = [AppController.sharedController applicationDockMenu:NSApp];
++  ASSERT_TRUE(menu);
++
++  NSString* expected_profile_path =
++      base::SysUTF8ToNSString(profile->GetPath().AsUTF8Unsafe());
++  NSString* expected_work_id = base::SysUTF8ToNSString(kWorkSpaceID);
++  NSString* expected_research_id = base::SysUTF8ToNSString(kResearchSpaceID);
++  bool found_work = false;
++  bool found_research = false;
++  NSUInteger space_item_count = 0;
++
++  for (NSMenuItem* item in menu.itemArray) {
++    if (item.action != @selector(openSpaceFromDock:)) {
++      continue;
++    }
++
++    ++space_item_count;
++    NSDictionary* identity = item.representedObject;
++    ASSERT_TRUE(identity);
++    EXPECT_NSEQ(expected_profile_path, identity[@"profilePath"]);
++
++    NSString* space_id = identity[@"spaceID"];
++    ASSERT_TRUE(space_id);
++    if ([space_id isEqualToString:expected_work_id]) {
++      EXPECT_NSEQ(@"Work", item.title);
++      found_work = true;
++    } else if ([space_id isEqualToString:expected_research_id]) {
++      EXPECT_NSEQ(@"Research", item.title);
++      found_research = true;
++    }
++  }
++
++  EXPECT_EQ(space_service->GetSpaces().size(), space_item_count);
++  EXPECT_TRUE(found_work);
++  EXPECT_TRUE(found_research);
++}
++
+ // Test browser shutdown with a command in the message queue.
+ IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, CommandDuringShutdown) {
+   EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
+@@ -775,32 +851,102 @@ class AppControllerFirstRunBrowserTest :
+   }
+ };
+ 
++// Arcium skips the first-run picker even without --no-first-run. The Dock
++// commands must still operate on normal browser windows.
+ IN_PROC_BROWSER_TEST_F(AppControllerFirstRunBrowserTest,
+-                       OpenNewWindowWhileFreIsRunning) {
+-  EXPECT_TRUE(ProfilePicker::IsFirstRunOpen());
+-  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(), 0u);
++                       OpenNewWindowAfterFirstRunIsSkipped) {
++  ASSERT_FALSE(ProfilePicker::IsOpen());
++  ASSERT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
++  ASSERT_TRUE(browser()->is_type_normal());
++  ASSERT_TRUE(IsReallyVisible(
++      browser()->GetWindow()->GetNativeWindow().GetNativeNSWindow()));
++  ASSERT_EQ(1u, CountVisibleWindows());
+   AppController* app_controller = AppController.sharedController;
+   NSMenu* menu = [app_controller applicationDockMenu:NSApp];
+   ASSERT_TRUE(menu);
++  EXPECT_TRUE(menu.autoenablesItems);
++  [menu update];
++  NSMenuItem* space_item = nil;
++  for (NSMenuItem* candidate in menu.itemArray) {
++    if (candidate.action == NSSelectorFromString(@"openSpaceFromDock:")) {
++      EXPECT_EQ(app_controller, candidate.target);
++      EXPECT_TRUE(candidate.enabled);
++      EXPECT_TRUE([app_controller validateUserInterfaceItem:candidate]);
++      space_item = candidate;
++    }
++  }
++  ASSERT_TRUE(space_item);
++  NSDictionary* identity = space_item.representedObject;
++  NSMenuItem* rejected_item = [space_item copy];
++  rejected_item.representedObject = @"malformed-space-target";
++  EXPECT_FALSE([app_controller validateUserInterfaceItem:rejected_item]);
++  rejected_item.representedObject = @{
++    @"profilePath" : identity[@"profilePath"],
++    @"spaceID" : @"missing-space-id"
++  };
++  EXPECT_FALSE([app_controller validateUserInterfaceItem:rejected_item]);
++  rejected_item.representedObject =
++      @{@"profilePath" : @"missing-profile", @"spaceID" : identity[@"spaceID"]};
++  EXPECT_FALSE([app_controller validateUserInterfaceItem:rejected_item]);
+ 
+   NSMenuItem* item = [menu itemWithTag:IDC_NEW_WINDOW];
+   ASSERT_TRUE(item);
++  ui_test_utils::BrowserCreatedObserver browser_created_observer;
+   [app_controller commandDispatch:item];
+ 
+-  profiles::testing::WaitForPickerClosed();
+-  EXPECT_FALSE(ProfilePicker::IsFirstRunOpen());
+-  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(), 1u);
++  Browser* new_browser = browser_created_observer.Wait();
++  ASSERT_TRUE(new_browser);
++  EXPECT_NE(browser(), new_browser);
++  EXPECT_EQ(browser()->profile(), new_browser->profile());
++  EXPECT_TRUE(new_browser->is_type_normal());
++  EXPECT_EQ(2u, GlobalBrowserCollection::GetInstance()->GetSize());
++  ASSERT_TRUE(base::test::RunUntil([] { return CountVisibleWindows() == 2u; }));
++  EXPECT_TRUE(IsReallyVisible(
++      new_browser->GetWindow()->GetNativeWindow().GetNativeNSWindow()));
++  EXPECT_FALSE(ProfilePicker::IsOpen());
+ }
+ 
+ IN_PROC_BROWSER_TEST_F(AppControllerFirstRunBrowserTest,
+-                       ClickingChromeDockIconDoesNotOpenBrowser) {
+-  EXPECT_TRUE(ProfilePicker::IsFirstRunOpen());
+-  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(), 0u);
+-  [AppController.sharedController applicationShouldHandleReopen:NSApp
+-                                              hasVisibleWindows:NO];
++                       ClickingDockIconReopensBrowserAfterFirstRunIsSkipped) {
++  ASSERT_FALSE(ProfilePicker::IsOpen());
++  ASSERT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
++  ASSERT_TRUE(browser()->is_type_normal());
++  ASSERT_TRUE(IsReallyVisible(
++      browser()->GetWindow()->GetNativeWindow().GetNativeNSWindow()));
++  ASSERT_EQ(1u, CountVisibleWindows());
++  const base::FilePath profile_path = browser()->profile()->GetPath();
++  AppController* app_controller = AppController.sharedController;
++  NSMenu* menu = [app_controller applicationDockMenu:NSApp];
++  ASSERT_TRUE(menu);
++  ASSERT_TRUE(menu.autoenablesItems);
+ 
+-  EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(), 0u);
+-  ProfilePicker::Hide();
++  // Close the actual browser before reporting that no native windows remain.
++  CloseBrowserSynchronously(browser());
++  ASSERT_EQ(0u, GlobalBrowserCollection::GetInstance()->GetSize());
++  ASSERT_TRUE(base::test::RunUntil([] { return CountVisibleWindows() == 0u; }));
++  [menu update];
++  bool has_space_item = false;
++  for (NSMenuItem* item in menu.itemArray) {
++    if (item.action == NSSelectorFromString(@"openSpaceFromDock:")) {
++      has_space_item = true;
++      EXPECT_TRUE(item.enabled);
++      EXPECT_TRUE([app_controller validateUserInterfaceItem:item]);
++    }
++  }
++  EXPECT_TRUE(has_space_item);
++  ui_test_utils::BrowserCreatedObserver browser_created_observer;
++  EXPECT_FALSE([app_controller applicationShouldHandleReopen:NSApp
++                                           hasVisibleWindows:NO]);
++
++  Browser* reopened_browser = browser_created_observer.Wait();
++  ASSERT_TRUE(reopened_browser);
++  EXPECT_EQ(profile_path, reopened_browser->profile()->GetPath());
++  EXPECT_TRUE(reopened_browser->is_type_normal());
++  EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
++  ASSERT_TRUE(base::test::RunUntil([] { return CountVisibleWindows() == 1u; }));
++  EXPECT_TRUE(IsReallyVisible(
++      reopened_browser->GetWindow()->GetNativeWindow().GetNativeNSWindow()));
++  EXPECT_FALSE(ProfilePicker::IsOpen());
+ }
+ 
+ class AppControllerOpenShortcutBrowserTest : public InProcessBrowserTest {
+@@ -1754,6 +1900,15 @@ class AppControllerHandoffPrerenderBrows
+     : public AppControllerHandoffBrowserTest {
+  public:
+   void SetUpOnMainThread() override {
++    // Arcium disables preloading by default. This fixture exercises Handoff
++    // during prerendering, so opt in only for its disposable test profile.
++    PrefService* prefs = browser()->profile()->GetPrefs();
++    prefetch::SetPreloadPagesState(
++        prefs, prefetch::PreloadPagesState::kStandardPreloading);
++    ASSERT_EQ(prefetch::PreloadPagesState::kStandardPreloading,
++              prefetch::GetPreloadPagesState(*prefs));
++    ASSERT_EQ(content::PreloadingEligibility::kEligible,
++              prefetch::IsSomePreloadingEnabled(*prefs));
+     prerender_helper_.RegisterServerRequestMonitor(embedded_test_server());
+     host_resolver()->AddRule("*", "127.0.0.1");
+     embedded_test_server()->ServeFilesFromDirectory(
+@@ -1790,6 +1945,13 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+   GURL url = embedded_test_server()->GetURL("/empty.html");
+   ASSERT_TRUE(content::NavigateToURL(GetActiveWebContents(), url));
+ 
++  // Check the actual browser delegate before the helper waits for a host.
++  ASSERT_TRUE(GetActiveWebContents()->GetDelegate());
++  ASSERT_EQ(content::PreloadingEligibility::kEligible,
++            GetActiveWebContents()->GetDelegate()->IsPrerender2Supported(
++                *GetActiveWebContents(),
++                content::PreloadingTriggerType::kSpeculationRule));
++
+   // Start a prerender.
+   GURL prerender_url = embedded_test_server()->GetURL("/simple.html");
+   prerender_helper().AddPrerender(prerender_url);

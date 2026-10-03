@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "id": "native-settings",
+  "description": "Native Settings behavior, live feature switches, appearance, shortcut editing, Arc preset restoration, and profile lifetime.",
+  "profile": {
+    "policy": "isolated",
+    "name": "native-settings"
+  },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "HeliumSpaceServiceTest.DisablingOmniboxItemsPreservesPersistentFavorites",
+        "RenderViewContextMenuPrefsTest.PeekIsAvailableOnlyForHttpLinks",
+        "RenderViewContextMenuPrefsTest.PeekCanBeDisabled",
+        "PrefsUtilTest.ArciumFeatureSettingsAreAllowlistedAndWritable",
+        "PrefsUtilTest.ArciumAutoPictureInPicturePrefIsAllowlisted",
+        "ChromeContentBrowserClientTestWithWebContents.IsBrowserInitiatedAutomaticPictureInPictureEnabled_UsesProfilePref"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_browser_tests",
+      "filters": ["PeekControllerBrowserTest.*", "SidePanelCustomizeChromeTest.Appearance"]
+    },
+    {
+      "target": "//content/test:arcium_media_session_impl_unittests",
+      "filters": ["MediaSessionImplTest.*BrowserInitiatedAutoPip*"]
+    },
+    {
+      "target": "//chrome/test:browser_tests",
+      "filters": ["ThemeServiceBrowserTest.ArciumPalettePreservesActiveExtensionTheme"]
+    }
+  ],
+  "preconditions": [
+    "Use an explicitly authorized isolated profile and the exact newly built Arcium bundle.",
+    "Record the source commit, core commit, active patch series, build receipt, bundle path, and profile path.",
+    "Treat every check as unverified until the selected bundle produces the recorded result.",
+    "Run the native ArciumSettingsUI Swift package tests separately; the GN tests above do not execute Swift contracts.",
+    "Capture preference values before changing them and restore them after testing. Prepare disposable Favorites, Pins, and normal tabs with distinguishable nonprivate URLs.",
+    "Verify the baseline Auto Picture-in-Picture feature is disabled. Exercise automatic entry separately with the native-settings-auto-pip-enabled contract; an unavailable row is not automatic-entry proof."
+  ],
+  "steps": [
+    "Open Settings with Command-Comma and the application menu; confirm that each action opens the native AppKit window without creating a settings tab.",
+    "Open Settings twice for one profile and then for a second profile; confirm that each profile reuses its own window and does not write to the other profile.",
+    "Visit General, Tabs & Spaces, Appearance, and Keyboard Shortcuts; resize and use keyboard navigation.",
+    "Change one native preference and verify the same value in Advanced browser settings; change it there and verify the native control updates.",
+    "Open an eligible link in Peek, then turn Enable Peek off. Confirm the preview closes, its context-menu action disappears, and eligible link clicks navigate normally. Re-enable and confirm Peek returns without removing the saved item.",
+    "Search for a Favorite and a Pin in the address bar. Disable their suggestions and repeat; confirm only the persistent-item results disappear, ordinary suggestions remain, and saved sidebar items remain. Re-enable and confirm the results return.",
+    "Toggle Show Spaces in Dock menu, requesting the Dock menu after each change. Confirm it switches between Space and profile shortcuts while retaining New Window and New Incognito Window.",
+    "Select Vertical layout and toggle Show sidebar collapse button. Confirm its visibility changes and the collapse shortcut still works. Select another layout and confirm the row disables while retaining its saved value.",
+    "Select Dynamic layout and toggle Show New Tab button. Confirm its visibility changes and other New Tab commands still work. Select another layout and confirm the row disables while retaining its saved value.",
+    "With the automatic Picture-in-Picture feature disabled, confirm the row is unavailable. In the separate feature-enabled run, exercise eligible automatic entry with the preference on and off, manual entry with the preference off, and an already-open PiP window during the preference change.",
+    "With an extension theme active, verify the accent control explains why it cannot be edited. Change an available window background color and confirm the theme and its control accent remain active.",
+    "Find a command, record a new shortcut, cancel a second recording with Escape, exercise conflict confirmation, and reset one command.",
+    "Begin recording a shortcut and move keyboard focus to another control. Begin a separate recording and switch to another app. Confirm both recordings cancel without changing the binding or intercepting later key presses.",
+    "Select a locked or managed command; confirm the editor reports that it cannot be changed and leaves its binding unchanged.",
+    "Send an unknown action ID through the native shortcut path; confirm the request is rejected and creates no command, binding, or menu item.",
+    "Capture the complete shortcut state, apply the Arc preset, inspect unsupported actions, and verify supported bindings, menu labels, and actual command behavior.",
+    "Restore the captured shortcut state; confirm custom, default, and unassigned bindings exactly match the pre-preset state.",
+    "Close the browser window that opened Settings and continue editing a harmless preference; confirm no callback reaches a destroyed browser or shortcut service.",
+    "Close Settings, quit normally, and relaunch the same profile; verify preferences and shortcuts persist and the window opens safely."
+  ],
+  "observables": [
+    "Settings opens a native AppKit window without creating a settings tab.",
+    "Each profile reuses its own settings window, with no cross-profile writes.",
+    "Native controls and Chromium preferences show the same value in both directions.",
+    "Turning Peek or persistent-item suggestions off stops the corresponding behavior while retaining Favorites and Pins.",
+    "The Dock menu changes on its next opening, and its ordinary window commands remain available.",
+    "Layout-specific button controls affect the correct layout and retain their values when unavailable.",
+    "Auto Picture-in-Picture availability follows the browser feature. The preference blocks automatic entry without blocking manual entry or closing an existing PiP window.",
+    "An active extension theme prevents native accent editing and survives changes to available window background controls.",
+    "Managed preferences are read-only, and a missing shortcut service produces a clear disabled state.",
+    "Shortcut recording affects only the active recorder in the native Settings window.",
+    "Moving focus away from the recorder or switching to another app cancels recording, preserves the binding, and leaves later key presses available to their normal recipient.",
+    "Conflicts require acceptance before reassignment, and cancellation preserves the previous bindings.",
+    "Locked or managed commands stay unchanged when an edit is attempted.",
+    "Unknown action IDs are rejected without creating commands, bindings, or menu items.",
+    "The Arc preset uses real command equivalents and lists unsupported actions.",
+    "Full restore returns custom, default, and unassigned bindings to the captured state.",
+    "Native controls, Chromium preferences, actual shortcuts, and menu labels agree.",
+    "Profile teardown does not leave callbacks into destroyed browser or shortcut services.",
+    "Preferences and shortcuts persist after a normal quit and relaunch."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

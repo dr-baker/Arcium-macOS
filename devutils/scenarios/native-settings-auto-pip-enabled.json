@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "id": "native-settings-auto-pip-enabled",
+  "description": "Native automatic Picture-in-Picture preference with the underlying browser feature enabled.",
+  "profile": {
+    "policy": "isolated",
+    "name": "native-settings-auto-pip-enabled"
+  },
+  "feature_flags": ["BrowserInitiatedAutomaticPictureInPicture"],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": ["ChromeContentBrowserClientTestWithWebContents.IsBrowserInitiatedAutomaticPictureInPictureEnabled_UsesProfilePref"]
+    },
+    {
+      "target": "//content/test:arcium_media_session_impl_unittests",
+      "filters": ["MediaSessionImplTest.*BrowserInitiatedAutoPip*"]
+    }
+  ],
+  "preconditions": [
+    "Use an explicitly authorized isolated profile. Launch the current packaged development bundle with he run --isolated native-settings-auto-pip-enabled --enable-features=BrowserInitiatedAutomaticPictureInPicture.",
+    "Record the exact source commits, bundle, profile, command line, and fresh build/package receipts.",
+    "First establish baseline row unavailability through the native-settings contract without this feature override.",
+    "Prepare a media page meeting the current automatic-entry eligibility conditions. Prove automatic entry works with the preference enabled before attributing a later lack of entry to the preference.",
+    "Save the original preference and restore it after testing. Do not treat failure to establish eligible automatic entry as a passing off-switch test."
+  ],
+  "steps": [
+    "Open native Settings and confirm Enter Picture-in-Picture automatically is editable.",
+    "Enable the preference, start eligible media playback, and trigger the browser's automatic-entry condition. Confirm a PiP window appears.",
+    "Turn the preference off while that PiP window is open. Confirm the existing window stays open.",
+    "Close the PiP window, restore the same eligible playback state, and trigger the same automatic-entry condition with the preference off. Confirm no automatic window appears.",
+    "Use the page or browser's manual PiP command with the preference off. Confirm manual entry succeeds.",
+    "Re-enable the preference, restore the eligible state, and confirm automatic entry returns.",
+    "Quit normally and relaunch the same profile with the same feature flag. Confirm the preference persists and the row remains editable.",
+    "Restore the original preference, close the media and browser windows, and inspect fresh crash reports."
+  ],
+  "observables": [
+    "The feature-enabled native row is editable while the baseline row is unavailable.",
+    "The preference changes automatic entry under otherwise identical, proven eligible conditions.",
+    "Turning the preference off neither closes an existing PiP window nor blocks manual entry.",
+    "The preference persists across a normal relaunch with the same feature configuration.",
+    "Closing media and quitting the app completes without a new crash."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

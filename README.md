@@ -4,6 +4,10 @@ macOS build, packaging, signing, and platform integration for
 [Arcium](https://github.com/dr-baker/Arcium). This repository pins one exact
 Arcium core commit through its nested checkout.
 
+Coming from Arc? Start with the [quickstart and feature list](docs/arc-quickstart.md).
+For source ownership and the development workflow, read
+[Arcium for Helium maintainers](docs/helium-maintainer-onboarding.md).
+
 ## Building and development
 Use this repository for macOS builds and macOS-only changes. Put shared browser
 features in the Arcium core repository.
@@ -17,10 +21,9 @@ Before contributing, read Arcium's
 ## Credits
 
 ### Depot
-Big thank you to [Depot](https://depot.dev/) for sponsoring our runners,
-which handle the macOS builds of Arcium. Their high-performance infrastructure
-lets us compile, package, and release new builds of Arcium within hours,
-not days.
+The upstream Helium macOS project credits [Depot](https://depot.dev/) for
+sponsoring its build runners. This acknowledgment comes from the upstream
+project and does not imply sponsorship of Arcium.
 
 ### ungoogled-chromium-macos
 Arcium-macOS descends from

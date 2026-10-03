@@ -1,3 +1,4 @@
+upstream-fixes/fix-xcode27-seatbelt.patch
 ungoogled-chromium/macos/fix-disabling-safebrowsing.patch
 ungoogled-chromium/macos/fix-dsymutil.patch
 ungoogled-chromium/macos/no-unknown-warnings.patch
@@ -19,4 +20,14 @@ helium/macos/open-shortcuts-settings-action.patch
 
 helium/macos/native-translation-context-option.patch
 
+personal/arcium-little-arc-macos.patch
 personal/arcium-spaces-macos.patch
+personal/arcium-app-controller-macos-fixtures.patch
+personal/arcium-chrome-appearance-macos.patch
+personal/arcium-native-settings-macos.patch
+personal/arcium-settingsui-production.patch
+personal/arcium-background-effects-macos.patch
+personal/arcium-collapsed-sidebar-frame-macos.patch
+personal/arcium-arc-default-full-collapse-macos.patch
+personal/arcium-feature-settings-macos.patch
+personal/arcium-update-feed.patch
