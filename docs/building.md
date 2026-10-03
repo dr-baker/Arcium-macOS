@@ -470,10 +470,11 @@ Use `he build-full --approved` for a broad build without launching an app.
 
 Preparation receipts bind the selected recipes, their producer code, and the
 outputs consumed by configuration and compilation. Resources, version stamping,
-GN defaults, the generated graph, and full-source test assets have separate
-receipts. Changes to `dev.sh`, `build_preparation.py`, or `build_receipt.py`
-invalidate every non-acquisition stage. Run the producer commands again instead
-of editing receipt hashes to adopt existing outputs.
+GN defaults, the Siso backend, the generated graph, and full-source test assets
+have separate receipts. Changes to `dev.sh`, `build_preparation.py`,
+`build_backend.py`, or `build_receipt.py` invalidate every non-acquisition stage.
+Run the producer commands again instead of editing receipt hashes to adopt
+existing outputs.
 
 The acquisition receipt has separate inputs. It verifies recipe lineage and the
 architecture and source-mode markers. It does not hash the mutable Chromium tree
@@ -500,6 +501,29 @@ Reapply any intended adjustments after reviewing the new defaults, then run
 default-fragment lineage. Full-source configuration also regenerates stale
 test-asset proof. Later build and package commands require fresh evidence tied
 to the resulting arguments, graph, replay, inputs, and artifacts.
+
+Custom NativeLink execution is optional. Set `SISO_REAPI_ADDRESS` to your endpoint
+and optionally set `SISO_REAPI_INSTANCE`, which defaults to `main`, then run
+`he configure --refresh-defaults`. Configuration downloads the pinned Linux Clang
+toolchain and selects `nativelink.star`. The selected core must include
+`helium/core/rbe-nativelink-config.patch`. NativeLink GN defaults enable
+`use_remoteexec` and omit the local compiler cache wrapper.
+
+Compile, relink, and approved full builds consume the same prepared backend.
+Backend identity participates in material evidence, and the preparation receipt
+verifies `.sisoenv`, `backend.star`, and the Linux compiler and revision. An
+endpoint, instance, or transport change requires configuration again. To return
+to local execution, unset `SISO_REAPI_ADDRESS` and `SISO_REAPI_INSTANCE`, then run
+`he configure --refresh-defaults`. Configuration replaces the prior Siso files
+with Chromium's normal developer configuration and retains local cache selection.
+The NativeLink wrapper activates only when `use_remoteexec` is true.
+
+TLS and authentication remain enabled by default. A plaintext server requires
+an explicit `RBE_service_no_security=true` before configuration. The setting
+accepts only `true` or `false` and participates in backend evidence.
+`SISO_REAPI_CAS_ADDRESS` overrides are unsupported and removed from command
+environments. These preparation checks do not prove endpoint compatibility or
+successful remote execution.
 
 Build evidence appears under `.arcium/build-evidence/<invocation-id>/` for each
 autoninja plan and build. It retains bounded output, starting arguments and

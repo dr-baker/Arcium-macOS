@@ -117,7 +117,13 @@ class BuildExecutionTests(unittest.TestCase):
                 out = build_root / "src/out/Default"
                 (out / "gn").write_bytes(b"fake gn")
                 (out / "build.ninja").write_text("graph\n", encoding="utf-8")
-                for stage in ("acquisition", "resources", "version", "gn-defaults", "configured"):
+                siso = build_root / "src/build/config/siso"
+                (siso / "backend_config").mkdir(parents=True)
+                (siso / "configure_siso.py").write_text("# synthetic pinned producer\n")
+                (siso / "backend_config/google.star").write_text("# synthetic Google backend\n")
+                (siso / "backend_config/backend.star").write_text("# synthetic Google backend\n")
+                (siso / ".sisoenv").write_text("SISO_PROJECT=rbe-chrome-untrusted\nSISO_REAPI_INSTANCE=default_instance\n")
+                for stage in ("acquisition", "resources", "version", "gn-defaults", "backend", "configured"):
                     record_stage(worktree, build_root, stage, input_digest(worktree, build_root, stage))
                 preparation_at_entry = prepared_build_digest(worktree, build_root)
                 record_execution(

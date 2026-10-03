@@ -24,6 +24,14 @@ from build_receipt import (
 )
 
 from replay_contract import ReplayError, require_current_replay_proof
+from build_backend import (
+    BackendError,
+    output_paths,
+    recipe_paths,
+    selected_backend,
+    validate_gn_backend,
+    validate_outputs,
+)
 
 
 _REPAIR = {
@@ -31,6 +39,7 @@ _REPAIR = {
     "resources": "he resources",
     "version": "he version",
     "gn-defaults": "he configure --refresh-defaults (deliberately rewrites args.gn)",
+    "backend": "he configure (preserves args.gn)",
     "test-assets": "he configure",
     "configured": "he configure (preserves args.gn)",
 }
@@ -60,6 +69,7 @@ def _producer_digest() -> str:
         "shell": sha256_file(script),
         "preparation-helper": sha256_file(Path(__file__)),
         "receipt-helper": sha256_file(helper_root / "devutils/build_receipt.py"),
+        "backend-helper": sha256_file(helper_root / "devutils/build_backend.py"),
     })
 
 
@@ -124,11 +134,19 @@ def input_digest(worktree: Path, build_root: Path, stage: str) -> str:
     elif stage == "gn-defaults":
         inputs["core"] = _declared_inputs_sha256(core, ("flags.gn",))
         inputs["platform"] = _declared_inputs_sha256(worktree, ("flags.macos.gn",))
+        inputs["backend-mode"] = selected_backend().name
+    elif stage == "backend":
+        backend = selected_backend()
+        inputs["backend"] = _json_digest(backend.identity())
+        inputs["recipes"] = _json_digest({name: sha256_file(path)
+                                          for name, path in recipe_paths(build_root / "src", backend).items()})
     elif stage == "configured":
         if acquisition["acquisition"]["source_mode"] == "full":
             inputs["test-assets"] = require_stage(worktree, build_root, "test-assets")["receipt_id"]
         defaults = require_stage(worktree, build_root, "gn-defaults", check_outputs=False)
         inputs["default-fragment-lineage"] = defaults["receipt_id"]
+        inputs["backend"] = require_stage(worktree, build_root, "backend")["receipt_id"]
+        validate_gn_backend(build_root / "src", selected_backend())
         out = build_root / "src/out/Default"
         inputs["args"] = sha256_file(out / "args.gn")
         inputs["gn"] = sha256_file(out / "gn")
@@ -179,6 +197,11 @@ def output_digests(worktree: Path, build_root: Path, stage: str) -> dict[str, st
         paths["chrome/VERSION"] = source / "chrome/VERSION"
     elif stage == "gn-defaults":
         paths["args.gn"] = out / "args.gn"
+    elif stage == "backend":
+        backend = selected_backend()
+        validate_gn_backend(source, backend)
+        validate_outputs(source, backend)
+        paths = output_paths(source, backend)
     elif stage == "configured":
         paths = {path.relative_to(out).as_posix(): path for path in out.rglob("*.ninja")}
         if "build.ninja" not in paths:
@@ -202,6 +225,8 @@ def record_stage(worktree: Path, build_root: Path, stage: str, expected: str) ->
             "source_mode": (build_root / ".arcium/source-mode").read_text().strip(),
             "target_cpu": acquisition_target(),
         }
+    elif stage == "backend":
+        payload["backend"] = selected_backend().identity()
     payload["receipt_id"] = _json_digest(payload)
     destination = _receipt_path(build_root, stage)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +250,8 @@ def require_stage(worktree: Path, build_root: Path, stage: str, *, check_outputs
         if payload.get("schema") != 1 or payload.get("stage") != stage or _json_digest(payload) != identity:
             raise ValueError("invalid preparation receipt")
         payload["receipt_id"] = identity
+        if stage == "backend" and payload.get("backend") != selected_backend().identity():
+            raise ValueError("backend identity changed")
         if stage == "acquisition" and payload.get("acquisition") != {
             "source_mode": (build_root / ".arcium/source-mode").read_text().strip(),
             "target_cpu": acquisition_target(),
@@ -286,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             require_stage(worktree, build_root, arguments.stage,
                           check_outputs=arguments.stage != "gn-defaults")
-    except (ReceiptError, ReplayError, OSError) as error:
+    except (ReceiptError, ReplayError, BackendError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 2
     return 0

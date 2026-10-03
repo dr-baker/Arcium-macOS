@@ -23,7 +23,8 @@ from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
-from build_preparation import prepared_build_digest
+from build_preparation import prepared_build_digest, require_stage
+from build_backend import BackendError
 from build_lane import LaneError, LaneSpec, acquire_lane_lock, heavy_lane_temp, heavy_temp_environment
 from build_execution import ExecutionError, invalidate_execution, material_guard, record_execution, verify_material_inputs
 from build_receipt import ReceiptError, material_inputs_at_entry
@@ -837,7 +838,7 @@ def build_action(
         heavy_lane_temp(temp_spec)
     material_at_entry = (
         material_inputs_at_entry(worktree)
-        if needs_heavy_temp or action == "relink" or (action == "build-full" and namespace.approved)
+        if needs_heavy_temp or action in {"compile", "relink"} or (action == "build-full" and namespace.approved)
         else None
     )
     with acquire_lane_lock(lock_path, owner), (
@@ -848,6 +849,7 @@ def build_action(
             ensure_gclient_identity(build_dir)
             result = builder.build_plan(namespace.targets)
         elif action == "compile":
+            require_stage(worktree, build_dir, "backend")
             ensure_gclient_identity(build_dir)
             result = builder.compile(namespace.targets)
         elif action == "relink":
@@ -857,6 +859,7 @@ def build_action(
                 require_current_replay_proof(worktree, source_dir)
                 preparation_at_entry = prepared_build_digest(worktree, build_dir)
                 invalidate_execution(build_dir)
+            require_stage(worktree, build_dir, "backend")
             ensure_gclient_identity(build_dir)
             result = builder.relink(
                 resources=namespace.resources,
@@ -1121,6 +1124,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             raise RuntimeInputError(f"unknown he command: {action}")
     except (
+        BackendError,
         BundleError,
         ExecutionError,
         GClientIdentityError,

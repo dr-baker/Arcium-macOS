@@ -145,14 +145,6 @@ ___helium_setup_siso() {
         printf '%s\n' "$siso_package $siso_version" |
             "$_depot_tools_dir/cipd" ensure --root "$_siso_dir" --ensure-file - || return
     fi
-
-    local siso_env="$_src_dir/build/config/siso/.sisoenv"
-    if [ ! -f "$siso_env" ]; then
-        # Full-source acquisition intentionally skips gclient hooks. Recreate
-        # the pinned Chromium checkout's normal developer Siso configuration.
-        ___helium_python "$_src_dir/build/config/siso/configure_siso.py" \
-            --rbe_instance projects/rbe-chrome-untrusted/instances/default_instance || return
-    fi
 }
 
 ___helium_preparation() {
@@ -166,7 +158,9 @@ ___helium_setup_gn() {
     local OUT_FILE="$_out_dir/args.gn"
     cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$OUT_FILE" || return
 
-    if command -v sccache 2>&1 >/dev/null; then
+    if [ -n "${SISO_REAPI_ADDRESS:-}" ]; then
+        echo 'use_remoteexec = true' >> "$OUT_FILE" || return
+    elif command -v sccache 2>&1 >/dev/null; then
         echo 'cc_wrapper="sccache"' >> "$OUT_FILE" || return
     elif command -v ccache 2>&1 >/dev/null; then
         echo 'cc_wrapper="env CCACHE_COMPILERCHECK=content CCACHE_SLOPPINESS=time_macros ccache"' >> "$OUT_FILE" || return
@@ -204,6 +198,11 @@ ___helium_configure_inner() {
 
     cd "$_src_dir" || return
     ___helium_setup_siso || return
+    local _backend_entry
+    _backend_entry="$(___helium_preparation begin backend)" || return
+    ___helium_python "$_helium_harness_root/devutils/build_backend.py" \
+        --source-dir "$_src_dir" || return
+    ___helium_preparation finish backend "$_backend_entry" || return
     "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch" || return
     ___helium_python ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles || return
     local _preparation_entry

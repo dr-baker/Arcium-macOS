@@ -22,9 +22,11 @@ from threading import Event, Lock, Thread
 from typing import Callable, Mapping, Protocol, Sequence
 
 if __package__:
+    from .build_backend import BuildBackend, selected_backend
     from .build_diagnostics import BuildEvidence
     from .replay_timestamps import has_pending_recovery
 else:
+    from build_backend import BuildBackend, selected_backend
     from build_diagnostics import BuildEvidence
     from replay_timestamps import has_pending_recovery
 
@@ -620,12 +622,13 @@ class HeliumDevBuilder:
     paths: BuildPaths
     runner: CommandRunner = subprocess_runner
     edge_budget: int = DEFAULT_EDGE_BUDGET
+    backend: BuildBackend = field(default_factory=selected_backend)
     _commands: list[tuple[str, ...]] = field(default_factory=list, init=False)
     _evidence_paths: list[str] = field(default_factory=list, init=False)
     _evidence_warnings: list[str] = field(default_factory=list, init=False)
 
     def _environment(self) -> dict[str, str]:
-        environment = dict(os.environ)
+        environment = self.backend.environment(os.environ)
         environment["SISO_PATH"] = str(self.paths.siso_path)
         environment.setdefault("LC_ALL", "C")
         return environment
