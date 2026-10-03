@@ -22,7 +22,15 @@
  #include "chrome/browser/ui/navigator/browser_navigator_params.h"
  #include "chrome/browser/ui/profiles/profile_picker.h"
  #include "chrome/browser/ui/profiles/profile_ui_test_utils.h"
-@@ -88,6 +93,7 @@
+@@ -80,6 +85,7 @@
+ #include "chrome/common/pref_names.h"
+ #include "chrome/common/url_constants.h"
+ #include "chrome/test/base/in_process_browser_test.h"
++#include "chrome/test/base/interactive_test_utils.h"
+ #include "chrome/test/base/ui_test_utils.h"
+ #include "components/account_id/account_id.h"
+ #include "components/bookmarks/browser/bookmark_model.h"
+@@ -88,6 +94,7 @@
  #include "components/signin/public/base/signin_switches.h"
  #include "content/public/browser/navigation_controller.h"
  #include "content/public/browser/web_contents.h"
@@ -30,7 +38,7 @@
  #include "content/public/test/browser_test.h"
  #include "content/public/test/browser_test_utils.h"
  #include "content/public/test/no_renderer_crashes_assertion.h"
-@@ -101,6 +107,7 @@
+@@ -101,6 +108,7 @@
  #include "net/base/filename_util.h"
  #include "net/dns/mock_host_resolver.h"
  #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -38,7 +46,7 @@
  #include "third_party/blink/public/common/features.h"
  #include "ui/color/color_id.h"
  #include "ui/color/color_provider.h"
-@@ -272,6 +279,16 @@ class ScopedMockConfirmQuitPanel {
+@@ -272,6 +280,16 @@ class ScopedMockConfirmQuitPanel {
  
  using AppControllerBrowserTest = InProcessBrowserTest;
  
@@ -55,7 +63,7 @@
  // Returns whether a window's pixels are actually on the screen, which is the
  // case when it and all of its parents are marked visible.
  bool IsReallyVisible(NSWindow* window) {
-@@ -351,6 +368,65 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -351,6 +369,65 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
  }
  
@@ -121,7 +129,7 @@
  // Test browser shutdown with a command in the message queue.
  IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, CommandDuringShutdown) {
    EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
-@@ -775,32 +851,102 @@ class AppControllerFirstRunBrowserTest :
+@@ -775,32 +852,102 @@ class AppControllerFirstRunBrowserTest :
    }
  };
  
@@ -237,7 +245,41 @@
  }
  
  class AppControllerOpenShortcutBrowserTest : public InProcessBrowserTest {
-@@ -1754,6 +1900,15 @@ class AppControllerHandoffPrerenderBrows
+@@ -1674,6 +1821,10 @@ class AppControllerHandoffBrowserTest :
+ // Handoff.
+ IN_PROC_BROWSER_TEST_F(AppControllerHandoffBrowserTest, TestHandoffURLs) {
+   ASSERT_TRUE(embedded_test_server()->Start());
++  // Begin with a key window so later switches deliver native activation.
++  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
++  ASSERT_EQ(browser(),
++            GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser());
+   EXPECT_EQ(g_handoff_url, GURL(url::kAboutBlankURL));
+   EXPECT_EQ(g_handoff_title, u"about:blank");
+ 
+@@ -1728,6 +1879,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+       browser(), GURL(test_url4), WindowOpenDisposition::OFF_THE_RECORD,
+       ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
+   Browser* const browser3 = browser_created_observer->Wait();
++  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser3));
++  ASSERT_EQ(browser3,
++            GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser());
+   EXPECT_EQ(g_handoff_url, GURL());
+   EXPECT_EQ(g_handoff_title, u"");
+ 
+@@ -1744,8 +1898,10 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+   EXPECT_EQ(g_handoff_url, GURL());
+   EXPECT_EQ(g_handoff_title, u"");
+ 
+-  // Activate the original browser window.
+-  browser()->GetWindow()->Show();
++  // Wait for native activation before checking the regular-window handoff.
++  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
++  ASSERT_EQ(browser(),
++            GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser());
+   EXPECT_EQ(g_handoff_url, test_url2);
+   EXPECT_EQ(g_handoff_title, u"Title Of Awesomeness");
+ }
+@@ -1754,6 +1910,15 @@ class AppControllerHandoffPrerenderBrows
      : public AppControllerHandoffBrowserTest {
   public:
    void SetUpOnMainThread() override {
@@ -253,7 +295,7 @@
      prerender_helper_.RegisterServerRequestMonitor(embedded_test_server());
      host_resolver()->AddRule("*", "127.0.0.1");
      embedded_test_server()->ServeFilesFromDirectory(
-@@ -1790,6 +1945,13 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+@@ -1790,6 +1955,13 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
    GURL url = embedded_test_server()->GetURL("/empty.html");
    ASSERT_TRUE(content::NavigateToURL(GetActiveWebContents(), url));
  
