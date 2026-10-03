@@ -82,6 +82,7 @@ EXECUTOR_BUILD_INPUTS = (
     "entitlements/helper-gpu-entitlements.plist",
     "entitlements/helper-renderer-entitlements.plist",
     "devutils/arcium_app.py",
+    "devutils/build_backend.py",
     "devutils/build_diagnostics.py",
     "devutils/build_execution.py",
     "devutils/build_lane.py",
@@ -302,11 +303,20 @@ def executor_inputs_sha256(worktree: Path) -> str:
 def material_inputs_sha256(worktree: Path) -> str:
     """Bind selected source inputs and actual executor inputs independently."""
     root = worktree.expanduser().resolve()
+    if __package__:
+        from .build_backend import BackendError, selected_backend
+    else:
+        from build_backend import BackendError, selected_backend
+    try:
+        backend = hashlib.sha256(_canonical_json(selected_backend().identity())).hexdigest()
+    except BackendError as error:
+        raise ReceiptError(str(error)) from error
     digest = hashlib.sha256()
     for origin, value in (
         (b"selected-source", _declared_inputs_sha256(root, MATERIAL_BUILD_INPUTS)),
         (b"selected-core-preparation", core_preparation_inputs_sha256(root)),
         (b"actual-executors", executor_inputs_sha256(root)),
+        (b"selected-backend", backend),
     ):
         digest.update(origin + b":" + value.encode("ascii") + b"\n")
     return digest.hexdigest()

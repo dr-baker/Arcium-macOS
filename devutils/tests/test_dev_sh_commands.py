@@ -782,7 +782,7 @@ class DevShellCommandsTests(unittest.TestCase):
             self.assertEqual(result.returncode, 8, result.stderr)
             self.assertEqual(result.stdout.splitlines(), ["python", "test-assets", "siso"])
 
-    def test_siso_setup_recreates_marker_omitted_by_full_source_clone(self) -> None:
+    def test_siso_binary_setup_leaves_backend_configuration_to_prepared_stage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "src"
             configure = source / "build/config/siso/configure_siso.py"
@@ -800,11 +800,8 @@ class DevShellCommandsTests(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                result.stdout.strip(),
-                f"{configure} --rbe_instance "
-                "projects/rbe-chrome-untrusted/instances/default_instance",
-            )
+            self.assertEqual(result.stdout, "")
+            self.assertFalse((configure.parent / ".sisoenv").exists())
 
     def test_source_retrieval_stops_when_archive_and_git_fallback_fail(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

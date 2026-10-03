@@ -255,6 +255,8 @@ class HeliumDevCliTests(unittest.TestCase):
         ), patch(
             "helium_dev.prepared_build_digest", return_value="c" * 64
         ), patch(
+            "helium_dev.require_stage"
+        ), patch(
             "helium_dev.invalidate_execution"
         ), patch(
             "helium_dev.resolve_dev_identity", wraps=helium_dev.resolve_dev_identity

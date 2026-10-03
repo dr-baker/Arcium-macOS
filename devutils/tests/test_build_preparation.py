@@ -61,7 +61,7 @@ class BuildPreparationTests(unittest.TestCase):
         self.write(self.acquisition_script, "#!/bin/sh\n# synthetic acquisition producer\n")
         self.receipt_helper = self.helpers / "devutils/build_receipt.py"
         original_helpers = Path(preparation.__file__).parent
-        for name in ("build_receipt.py", "build_preparation.py", "prepare_test_assets.py"):
+        for name in ("build_receipt.py", "build_preparation.py", "build_backend.py", "prepare_test_assets.py"):
             self.write(self.helpers / "devutils" / name, (original_helpers / name).read_bytes())
         environment = patch.dict(os.environ, {
             HARNESS_SCRIPT_ENV: str(self.helpers / "dev.sh"),
@@ -115,6 +115,8 @@ class BuildPreparationTests(unittest.TestCase):
             "src/third_party/depot_tools": "synthetic-depot@" + "b" * 40,
         }}
         self.write(self.source / "DEPS", json.dumps(deps))
+        self.write(self.source / "build/config/siso/configure_siso.py", "# pinned fixture configure producer\n")
+        self.write(self.source / "build/config/siso/backend_config/google.star", "# fixture Google backend\n")
 
     def write(self, path: Path, content: str | bytes) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,12 +185,21 @@ class BuildPreparationTests(unittest.TestCase):
         self.write(self.out / "obj/fixture.ninja", f"# synthetic subgraph for {expected}\n")
         return preparation.record_stage(self.worktree, self.build_root, "configured", expected)
 
+    def produce_backend(self) -> dict[str, object]:
+        expected = preparation.input_digest(self.worktree, self.build_root, "backend")
+        self.write(self.source / "build/config/siso/.sisoenv",
+                   "SISO_PROJECT=rbe-chrome-untrusted\nSISO_REAPI_INSTANCE=default_instance\n")
+        self.write(self.source / "build/config/siso/backend_config/backend.star",
+                   (self.source / "build/config/siso/backend_config/google.star").read_bytes())
+        return preparation.record_stage(self.worktree, self.build_root, "backend", expected)
+
     def prepare(self, mode: str = "lite") -> list[str]:
         self.produce_acquisition(mode)
         self.produce_resources()
         self.produce_version()
         self.produce_defaults()
-        stages = ["acquisition", "resources", "version", "gn-defaults"]
+        self.produce_backend()
+        stages = ["acquisition", "resources", "version", "gn-defaults", "backend"]
         if mode == "full":
             self.produce_assets()
             stages.append("test-assets")
@@ -217,13 +228,15 @@ class BuildPreparationTests(unittest.TestCase):
         self.assertNotEqual(producer_digest, preparation._producer_digest())
         self.assertEqual(before["acquisition"], self.require("acquisition")["receipt_id"])
         for stage, repair in (("resources", "he resources"), ("version", "he version"),
-                              ("gn-defaults", "--refresh-defaults"), ("configured", "--refresh-defaults")):
+                              ("gn-defaults", "--refresh-defaults"), ("backend", "he configure"),
+                              ("configured", "--refresh-defaults")):
             self.assert_stale(stage, repair)
         if mode == "full":
             self.assert_stale("test-assets", "he configure")
         self.produce_resources()
         self.produce_version()
         self.produce_defaults()
+        self.produce_backend()
         if mode == "full":
             self.produce_assets()
         self.produce_configured()
