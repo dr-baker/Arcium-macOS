@@ -18,6 +18,7 @@ from devutils.helium_dev_build import (
     normalize_targets,
     subprocess_runner,
 )
+from devutils.build_backend import BuildBackend
 
 
 class FakeRunner:
@@ -241,6 +242,44 @@ class HeliumDevBuildTest(unittest.TestCase):
         self.assertNotIn("-n", self.runner.calls[-1])
         self.assertIsNone(self.runner.progress_totals[-2])
         self.assertEqual(self.runner.progress_totals[-1], 2)
+        self.assertEqual(self.runner.calls[-1], (
+            "python3", str(self.builder.paths.autoninja_path), "-k", "0", "-C", str(self.builder.paths.out_dir), "chrome",
+        ))
+
+    def test_job_limit_uses_the_local_scheduler_for_plan_and_build(self) -> None:
+        # An inert depot_tools boundary supplies parsed GN arguments. The real
+        # coordinator must select the scheduler before issuing either command.
+        self.autoninja.with_name("gn_helper.py").write_text('''
+from pathlib import Path
+def exists(output):
+    return (Path(output) / 'args.gn').exists()
+def args(output):
+    return (line.strip().split('=') for line in (Path(output) / 'args.gn').read_text().splitlines())
+''')
+        for scheduler, backend, flags in (
+            ("true", BuildBackend("local", "", "default_instance", "google.star"), ("-local_jobs=2",)),
+            ("true", BuildBackend("nativelink", "localhost:50051", "main", "nativelink.star"), ("-local_jobs=2",)),
+            ("false", BuildBackend("local", "", "default_instance", "google.star"), ("-j", "2")),
+        ):
+            with self.subTest(scheduler=scheduler, backend=backend.name):
+                (self.output / "args.gn").write_text("use_siso=" + scheduler + "\n")
+                self.builder.jobs = 2
+                self.builder.backend = backend
+                self.runner.calls.clear()
+                result = self.builder.build_full(approved=True)
+                self.assertTrue(result.ok, result.error)
+                prefix = ("python3", str(self.builder.paths.autoninja_path), "-k", "0", "-C", str(self.builder.paths.out_dir), *flags)
+                self.assertEqual(self.runner.calls[-2], (*prefix, "-n", "chrome"))
+                self.assertEqual(self.runner.calls[-1], (*prefix, "chrome"))
+
+        for invalid in (0, -1, 1.5, True):
+            with self.subTest(jobs=invalid):
+                self.builder.jobs = invalid
+                self.runner.calls.clear()
+                result = self.builder.compile(("obj/chrome/foo.o",))
+                self.assertFalse(result.ok)
+                self.assertIn("positive integer", result.error)
+                self.assertEqual(self.runner.calls, [])
 
     def test_zero_edge_plan_never_executes_a_broad_build(self) -> None:
         self.runner.edge_count = 0

@@ -297,6 +297,29 @@ class HeliumDevCliTests(unittest.TestCase):
         self.assertFalse(json.loads(stdout.getvalue())["ok"])
         self.assertIn("invalid int value", stderr.getvalue())
 
+        for args in (("--jobs",), ("--jobs", "0"), ("--jobs", "-1"),
+                     ("--jobs", "1.5"), ("--jobs", "many"), ("--jobs", "٢")):
+            with self.subTest(args=args):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    code = helium_dev.main(["--root", "/unused", "compile", "--json", *args])
+                self.assertEqual(code, 2)
+                self.assertFalse(json.loads(stdout.getvalue())["ok"])
+                self.assertIn("--jobs", stderr.getvalue())
+
+    def test_build_plan_accepts_job_limit_between_targets(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "helium_dev.HeliumDevBuilder"
+        ) as builder, patch("helium_dev.ensure_gclient_identity"):
+            material_fixture(Path(temporary))
+            builder.return_value.build_plan.return_value.as_dict.return_value = {"ok": True}
+            result = helium_dev.build_action(
+                "build-plan", temporary, ("obj/a.o", "--jobs", "2", "obj/b.o", "--json"),
+            )
+        self.assertTrue(result["ok"])
+        self.assertEqual(builder.call_args.kwargs["jobs"], 2)
+        builder.return_value.build_plan.assert_called_once_with(["obj/a.o", "obj/b.o"])
+
     def test_ambiguous_runtime_status_is_not_reported_as_ok(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

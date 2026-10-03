@@ -680,7 +680,7 @@ ___helium_arcium_inner() {
         return
     fi
     if [ -n "$1" ]; then
-        echo "use he arcium or he arcium iterate --approved [--edge-budget N] [--allow-internal]" >&2
+        echo "use he arcium or he arcium iterate --approved [--edge-budget N] [--jobs N] [--allow-internal]" >&2
         return 2
     fi
     ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
@@ -698,8 +698,20 @@ ___helium_arcium_iterate_inner() {
     # or silently refresh/reorder/replay a developer's applied stack.
     local _approved=0
     local _expect_budget=0
+    local _expect_jobs=0
     local _argument
     for _argument in "$@"; do
+        if [ "$_expect_jobs" = 1 ]; then
+            case "$_argument" in
+                ''|*[!0-9]*) echo "jobs must be a positive integer" >&2; return 2;;
+            esac
+            case "$_argument" in
+                *[1-9]*) ;;
+                *) echo "jobs must be a positive integer" >&2; return 2;;
+            esac
+            _expect_jobs=0
+            continue
+        fi
         if [ "$_expect_budget" = 1 ]; then
             case "$_argument" in
                 ''|*[!0-9]*) echo "edge budget must be a nonnegative integer" >&2; return 2;;
@@ -711,11 +723,12 @@ ___helium_arcium_iterate_inner() {
             --approved) _approved=1;;
             --allow-internal) ;;
             --edge-budget) _expect_budget=1;;
+            --jobs) _expect_jobs=1;;
             *) echo "unknown iterate option: $_argument" >&2; return 2;;
         esac
     done
-    if [ "$_approved" != 1 ] || [ "$_expect_budget" = 1 ]; then
-        echo "use he arcium iterate --approved [--edge-budget N] [--allow-internal]" >&2
+    if [ "$_approved" != 1 ] || [ "$_expect_budget" = 1 ] || [ "$_expect_jobs" = 1 ]; then
+        echo "use he arcium iterate --approved [--edge-budget N] [--jobs N] [--allow-internal]" >&2
         return 2
     fi
     local _started=$SECONDS
@@ -986,7 +999,7 @@ __helium_menu() {
             echo "usage: he <command>" >&2
             echo "\tarcium - update, install, and launch the stable personal browser" >&2
             echo "\tarcium status [--json] - inspect the installed app and persistent profile without a build lane" >&2
-            echo "\tarcium iterate --approved [--edge-budget N] [--allow-internal] - build, prepare, and gracefully restart Arcium" >&2
+            echo "\tarcium iterate --approved [--edge-budget N] [--jobs N] [--allow-internal] - build, prepare, and gracefully restart Arcium" >&2
             echo "\tbootstrap --approved [--full-source] [--allow-internal] - one-time cold browser build" >&2
             echo "\tcheck - validate the active patch catalog and applied state" >&2
             echo "\tcontext [--json] - show source, lane, proof, bundle, and limitations" >&2
@@ -1036,10 +1049,10 @@ __helium_menu() {
             echo "\trun [--isolated NAME|--fresh NAME] [--seed-from installed|dev|empty] [--preflight] [--json] [browser flags...] - runs or checks the exact labeled Dev bundle" >&2
             echo "\tdev-bundle [profile options] [--json] - clones Helium.app into the selected signed Dev app" >&2
             echo "\tstatus|activate|stop|restart [profile options] [--json] - manage one exact Dev profile" >&2
-            echo "\tbuild-plan TARGET... - graph-validate and dry-run explicit targets" >&2
-            echo "\tcompile TARGET... - compile explicit focused targets within the edge budget" >&2
+            echo "\tbuild-plan [--jobs N] TARGET... - graph-validate and dry-run explicit targets" >&2
+            echo "\tcompile [--jobs N] TARGET... - compile explicit focused targets within the edge budget" >&2
             echo "\trelink [--resources] - relink the component, optionally repackage resources" >&2
-            echo "\tbuild-full --approved [--allow-internal] - explicitly permit a broad browser build" >&2
+            echo "\tbuild-full --approved [--jobs N] [--allow-internal] - explicitly permit a broad browser build" >&2
             echo "\tbuild - disabled; cannot accidentally start a broad Chromium build" >&2
             echo "\treset --warm-output --approved - deliberately remove prepared source and output" >&2
             ;;

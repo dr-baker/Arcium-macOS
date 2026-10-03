@@ -19,6 +19,7 @@ import signal
 import subprocess
 import sys
 from threading import Event, Lock, Thread
+from types import ModuleType
 from typing import Callable, Mapping, Protocol, Sequence
 
 if __package__:
@@ -232,6 +233,43 @@ class BuildPaths:
             self.out_dir.relative_to(self.source_dir)
         except ValueError as error:
             raise BuildInputError("output directory must be inside the source directory") from error
+
+    def uses_siso(self) -> bool:
+        """Match autoninja's scheduler selection in the verified source lane."""
+
+        # Reuse its pure GN parser, including imported args. Importing autoninja
+        # itself would initialize telemetry configuration before a build starts.
+        helper_path = self.autoninja_path.with_name("gn_helper.py")
+        helper = ModuleType("_helium_gn_helper")
+        try:
+            exec(compile(helper_path.read_bytes(), str(helper_path), "exec"), helper.__dict__)
+            use_siso = None
+            has_args = helper.exists(str(self.out_dir))
+            if has_args:
+                for key, value in helper.args(str(self.out_dir)):
+                    if key == "use_siso" and value in {"true", "false"}:
+                        use_siso = value == "true"
+            if use_siso is not None:
+                return use_siso
+
+            # Same defaults as depot_tools/autoninja.py._get_use_siso_default.
+            # ensure_gclient_identity has already verified the primary solution.
+            enabled = False
+            if (self.source_dir / "build/config/siso/.sisoenv").exists():
+                dot_gn = self.source_dir / ".gn"
+                gclient_args = self.source_dir / "build/config/gclient_args.gni"
+                enabled = (
+                    dot_gn.exists() and any(
+                        re.match(r"(^|\s*)use_siso\s*=\s*true\s*$", line)
+                        for line in dot_gn.read_text().splitlines()
+                    )
+                ) or (
+                    gclient_args.exists()
+                    and "build_with_chromium = true" in gclient_args.read_text()
+                ) or (self.out_dir / ".siso_deps").exists()
+            return bool(enabled and not (has_args and (self.out_dir / ".ninja_deps").exists()))
+        except Exception as error:
+            raise BuildInputError(f"cannot determine autoninja scheduler: {error}") from error
 
 
 @dataclass(frozen=True)
@@ -623,6 +661,7 @@ class HeliumDevBuilder:
     runner: CommandRunner = subprocess_runner
     edge_budget: int = DEFAULT_EDGE_BUDGET
     backend: BuildBackend = field(default_factory=selected_backend)
+    jobs: int | None = None
     _commands: list[tuple[str, ...]] = field(default_factory=list, init=False)
     _evidence_paths: list[str] = field(default_factory=list, init=False)
     _evidence_warnings: list[str] = field(default_factory=list, init=False)
@@ -717,6 +756,8 @@ class HeliumDevBuilder:
         self.paths.validate()
         if self.edge_budget < 0:
             raise BuildInputError("edge budget must be zero or greater")
+        if self.jobs is not None and (type(self.jobs) is not int or self.jobs <= 0):
+            raise BuildInputError("jobs must be a positive integer")
         return normalize_targets(targets)
 
     def _siso_query(self, kind: str, target: str) -> CommandResult:
@@ -764,6 +805,11 @@ class HeliumDevBuilder:
             "-C",
             str(self.paths.out_dir),
         ]
+        if self.jobs is not None:
+            if self.paths.uses_siso():
+                args.append(f"-local_jobs={self.jobs}")
+            else:
+                args.extend(("-j", str(self.jobs)))
         if dry_run:
             args.append("-n")
         args.extend(targets)

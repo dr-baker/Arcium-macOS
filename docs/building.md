@@ -466,6 +466,25 @@ budget. If the plan exceeds the budget, inspect it before you pass a larger
 Use `he arcium iterate --approved` for a full build and installed-app restart.
 Use `he build-full --approved` for a broad build without launching an app.
 
+Pass `--jobs 2` to `he build-plan`, `he compile`, `he build-full`, or
+`he arcium iterate` to cap concurrently scheduled local build jobs at two:
+
+```sh
+he build-plan --jobs 2 chrome
+he compile --jobs 2 helium_persistent_item_model_tests
+he build-full --approved --jobs 2 --edge-budget 4000
+he arcium iterate --approved --jobs 2 --edge-budget 4000
+```
+
+`--jobs` requires a positive integer. Omitting it preserves the build tool's
+defaults. Siso receives `-local_jobs=N`, including with NativeLink or other
+remote execution enabled; remote concurrency keeps its existing setting.
+Ninja receives `-j N`. The limit belongs to this command and applies to its
+dry run and build. It changes neither GN arguments nor global configuration.
+Each graph action can start its own subprocesses or threads. The native
+SettingsUI action uses a separate SwiftPM limit of two jobs, so this option
+does not impose a process count or memory limit inside that action.
+
 ### Refresh preparation proof
 
 Preparation receipts bind the selected recipes, their producer code, and the

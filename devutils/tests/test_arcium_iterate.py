@@ -40,13 +40,13 @@ ___helium_arcium "$@"
         self.assertEqual(result.stdout.splitlines(), ["python --root /fixture status --json"])
 
     def test_iteration_retains_lock_and_full_build_options(self):
-        result = self.run_workflow("iterate", "--approved", "--edge-budget", "123", "--allow-internal")
+        result = self.run_workflow("iterate", "--approved", "--edge-budget", "123", "--jobs", "2", "--allow-internal")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [
-            "lane-lock arcium iterate --approved --edge-budget 123 --allow-internal",
+            "lane-lock arcium iterate --approved --edge-budget 123 --jobs 2 --allow-internal",
             "python --root /fixture --build-root /fixture/build preflight --restart",
             "check", "replay-proof", "configure",
-            "build-full --approved --edge-budget 123 --allow-internal",
+            "build-full --approved --edge-budget 123 --jobs 2 --allow-internal",
             "python --root /fixture --build-root /fixture/build update --restart",
         ])
 
@@ -62,7 +62,10 @@ ___helium_arcium "$@"
     def test_invalid_options_and_missing_approval_do_no_work(self):
         for args in ((), ("--edge-budget", "10"), ("--approved", "--edge-budget"),
                      ("--approved", "--edge-budget", "-1"), ("--approved", "chrome"),
-                     ("--approved", "--force")):
+                     ("--approved", "--force"), ("--approved", "--jobs"),
+                     ("--approved", "--jobs", "0"), ("--approved", "--jobs", "000"),
+                     ("--approved", "--jobs", "-1"), ("--approved", "--jobs", "1.5"),
+                     ("--approved", "--jobs", "many")):
             with self.subTest(args=args):
                 result = self.run_workflow("iterate", *args)
                 self.assertEqual(result.returncode, 2)

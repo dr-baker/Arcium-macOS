@@ -84,6 +84,12 @@ class HarnessArgumentParser(argparse.ArgumentParser):
         raise RuntimeInputError(message)
 
 
+def _positive_job_count(value: str) -> int:
+    if not value.isascii() or not value.isdecimal() or int(value) <= 0:
+        raise argparse.ArgumentTypeError("jobs must be a positive integer")
+    return int(value)
+
+
 @dataclass(frozen=True)
 class WorktreePaths:
     worktree: Path
@@ -793,13 +799,14 @@ def build_action(
     parser = HarnessArgumentParser(prog=f"he {action}", add_help=False)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--edge-budget", type=int, default=_edge_budget_from_environment())
+    parser.add_argument("--jobs", type=_positive_job_count)
     parser.add_argument("--approved", action="store_true")
     parser.add_argument("--resources", action="store_true")
     profile_group = parser.add_mutually_exclusive_group()
     profile_group.add_argument("--isolated")
     profile_group.add_argument("--fresh")
     parser.add_argument("targets", nargs="*")
-    namespace = parser.parse_args(list(arguments))
+    namespace = parser.parse_intermixed_args(list(arguments))
     profile_mode = "normal"
     profile_name = None
     if namespace.isolated is not None:
@@ -825,6 +832,7 @@ def build_action(
             source_dir / "third_party" / "depot_tools" / "autoninja.py",
         ),
         edge_budget=namespace.edge_budget,
+        jobs=namespace.jobs,
     )
     lock_path = build_dir / ".arcium" / "lane.lock"
     owner = {
@@ -1077,7 +1085,8 @@ def _usage() -> str:
         "build-plan|compile|relink|build-full|dev-bundle|replay> [options]\n"
         "runtime profiles: --isolated NAME | --fresh NAME; "
         "--seed-from installed|dev|empty; run --preflight; --json\n"
-        "build: --edge-budget N; relink --resources; build-full --approved; "
+        "build: --edge-budget N; --jobs N (positive local job limit); "
+        "relink --resources; build-full --approved; "
         "dev-bundle: clone and sign the selected labeled Dev app"
     )
 
