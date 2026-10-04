@@ -202,3 +202,71 @@ the Personal profile's Appearance page and confirmed enabled controls and
 unchanged saved colors, positions, and Size 0.72. The
 [verification notes](/Users/daniel/Library/Logs/Arcium/sidebar-transition-styling-20261003/verification-notes.md)
 record the initial budget refusal, recovery, bundle proof, and acceptance gaps.
+
+### Optional sidebar navigation and Zen controls
+
+- Group Zen mode, **Keep top bar visible in Zen mode**, and **Keep sidebar
+  visible in Zen mode** in one Appearance section. The top-bar choice continues
+  to apply to Fully hidden sidebar style with standard navigation.
+- Add **Navigation placement** with Top bar as the default. Sidebar places the
+  real address bar and browser commands in a compact header above sidebar tabs,
+  allowing pages to use the full window height. It is available in regular
+  windows with left Vertical tabs outside fullscreen. Private and guest windows
+  keep standard navigation.
+- Add an optional **Show Extensions button** for Sidebar navigation, default off.
+  It opens the existing extensions menu. Compact navigation hides pinned
+  extension icons, bookmark star, profile and media controls, and the horizontal
+  bookmark bar while preserving their saved preferences and data.
+- Let Command-L temporarily reveal collapsed sidebar navigation for editing.
+  Keep navigation revealed during focused controls, menus, and anchored popups;
+  retain the saved collapsed state. Use navigation overflow at narrow widths.
+- Explain the unavailable top-bar pin while navigation lives in the sidebar,
+  and keep its saved value for standard navigation.
+
+### Sidebar collapse crash
+
+- Fix an abort reached while collapsing Sidebar navigation through its overflow
+  menu. Explicit animation resets now stop the old sampler, and terminal
+  callbacks retain their outgoing animation state before a replacement starts.
+- Preserve the existing missing-motion check. New animation requests and clears
+  are serialized through terminal callbacks, including reduced-motion paths.
+
+### Sidebar navigation validation and remaining gaps
+
+- The full 464-patch series passed zero-fuzz replay, source and whitespace checks.
+  The installed product is macOS `6678d92d25e7aa27408126b1bff09af526f25d97`,
+  selecting core `3e8023851de98f75f9648723a120313a6524fc61`. Package and installed
+  files match, signatures pass, and the app uses the persistent profile with
+  real Keychain. No new unit tests were added for this follow-up.
+- GPT-6.1 Sol medium computer use reproduced the original collapse abort, then
+  passed the same action on the corrected build without changing the browser
+  process. Icon rail and confirmed Fully hidden both passed Command-L overlay
+  reveal and page-focus release; the saved width remained intact.
+- Actual Extensions menus and uBlock Origin popups opened from expanded and
+  collapsed navigation, with the saved pin retained. Zen sidebar pin on/off,
+  its grouped controls and top-pin guidance passed. Minimum sidebar widths
+  remained usable at 80%, 100%, and 125% UI scale.
+- Right-side, Classic, private, and fullscreen fallbacks restored the standard
+  toolbar. Private windows retained their Incognito indicator. Sidebar and
+  drawer choices survived Settings reopening and normal quit/relaunch.
+
+The overflow route to the main menu remains inconclusive on the corrected
+build: automation selected its item but did not capture the resulting command
+menu. Cross-call popup hold and precise anchor geometry, hidden-toolbar focus
+transitions, guest windows, folder connectors, intermediate animation frames,
+and Reduce Motion remain unverified. Glow edge discoloration is still unresolved.
+
+Test-profile restoration is incomplete. Navigation returned to Top bar, drawer
+and Zen pins were turned off, and Icon rail, 100% scale, 200 pt width, and expanded
+state were restored. Classic layout, bookmark-bar cleanup, fixture cleanup, and
+owned glow colors remain pending. The automation stopped when Settings no
+longer matched the owned profile's fingerprint. Personal's styling differs from
+its earlier snapshot; its origin is unresolved, and it was not overwritten.
+The lane lock was released.
+
+The [verification notes](/Users/daniel/Library/Logs/Arcium/sidebar-navigation-20261004/verification-notes.md)
+link exact build proofs and source review. The
+[runtime ledger](/Users/daniel/Library/Logs/Arcium/sidebar-navigation-20261004/runtime-acceptance.md)
+records corrected mode selections, evidence, tool limitations, and restoration
+liabilities. These results establish the listed behaviors on that installed
+snapshot; they do not establish every interaction or a fresh-install result.

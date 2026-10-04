@@ -23,11 +23,13 @@ Historical runtime results and their original source attribution are retained in
 | Cycle tabs by recent use | `prefs::kTabCyclingMRU`; profile | `TabStripModel::SelectRelativeTabCycle` chooses MRU vs sequential selection (`chrome/browser/ui/tabs/tab_strip_model.cc:4229-4238`); ordinary Ctrl+Tab preview behavior uses the setting (`chrome/browser/ui/views/frame/browser_view.cc:6093-6104`). Explicit Recent Tab shortcuts retain their existing preview behavior when this preference is off. |
 | Use Shift+right-click for the context menu | `prefs::kShiftRightClickContextMenu`; profile | The pref is copied to renderer WebPreferences (`chrome/browser/chrome_content_browser_client.cc:4754-4755`) and watched for renderer updates (`chrome/browser/ui/prefs/pref_watcher.cc:165-170`). Blink applies it to WebSettings (`third_party/blink/renderer/core/exported/web_view_impl.cc:1871-1873`) and checks Shift+secondary-click in `event_handler.cc:2167-2177`. This is not a macOS-only no-op. |
 | Place the sidebar on the right | `prefs::kHeliumVerticalRightAligned`; profile | Vertical tab controller reads/writes the pref and observes mode changes (`chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc:61-70,182-189`). |
-| Keep sidebar visible in Zen mode | `prefs::kHeliumZenModeSidebarPinned`; profile | The control remains in Tabs & Spaces. `BrowserView::IsZenModeSideChromePinned` applies the saved value in Zen mode. |
-| Keep top bar visible | `prefs::kHeliumZenModeTopChromePinned`; profile | Appearance reuses the existing Zen top-pin preference. `BrowserView::IsZenModeTopChromePinned` applies it in Zen mode and Fully hidden sidebar style. `GetTopChromeRevealRatio` gives the pin precedence over collapse motion, and `OnZenModeTopChromePinnedPrefChanged` updates the live layout. |
+| Keep sidebar visible in Zen mode | `prefs::kHeliumZenModeSidebarPinned`; profile | Moved from Tabs & Spaces into Appearance's Zen card beside Zen mode and the top-bar pin. `BrowserView::IsZenModeSideChromePinned` applies the saved value in Zen mode, including the Sidebar navigation header. |
+| Keep top bar visible in Zen mode | `prefs::kHeliumZenModeTopChromePinned`; profile | The same saved preference also applies to Fully hidden sidebar style, as the Zen card's help explains. `BrowserView::IsZenModeTopChromePinned` and `GetTopChromeRevealRatio` consume it. Sidebar navigation makes the control unavailable with a reason and retains its value. |
+| Navigation placement | `arcium.appearance.sidebar_navigation` / `kArcSidebarNavigationEnabledPref`; profile boolean, default `false` for Top bar | `BrowserView::IsSidebarNavigationAvailable` checks the window contract. `IsSidebarNavigationActive` combines availability with the saved Sidebar choice, independently of ordinary toolbar visibility. The feature patch relocates the real `ToolbarView` and omnibox into the sidebar header. |
+| Show Extensions button | `arcium.appearance.sidebar_extensions_drawer` / `kSidebarExtensionsDrawerEnabledPref`; profile boolean, default `false` | The sidebar navigation feature patch connects the optional header button to the existing Extensions menu. It is independent of `prefs::kShowExtensionsButton`. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
-| Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` registers the pref, invalidates layout on change, and uses it in centered bounds calculation (`chrome/browser/ui/views/toolbar/toolbar_view.cc:808-811,2367-2380`). This is the Views toolbar used by the desktop browser, including macOS. |
-| Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it and refreshes on focus changes (`chrome/browser/ui/omnibox/chrome_omnibox_client.cc:200-206,500-507`); `OmniboxViewViews` observes it and changes steady-state alignment (`chrome/browser/ui/views/omnibox/omnibox_view_views.cc:251-259,933-945`). |
+| Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
+| Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
 | Show Home / Back / Forward / Reload buttons | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`; profile | `ToolbarView` binds each pref and updates the corresponding button visibility (`chrome/browser/ui/views/toolbar/toolbar_view.cc:725-757,2327-2346`). |
 | Show profile / Extensions / menu / media controls | `prefs::kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton`; profile | `ToolbarView` binds each pref and updates the matching view/controller (`toolbar_view.cc:769-806,2348-2365`). Extensions has an additional pref/command-line visibility gate (`chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc:478-483,1002-1010`); avatar is intentionally always visible for incognito/guest (`toolbar_view.cc:774-780`). |
 | Show sidebar collapse button | `prefs::kShowVerticalTabsCollapseButton`; profile | `ToolbarView` observes the pref and changes visibility of the vertical-tabs collapse button (`chrome/browser/ui/views/toolbar/toolbar_view.cc:778-780`). The native row is editable only when Vertical tabs is the effective layout and its feature is enabled; turning it off hides the button but keeps the keyboard and other collapse controls. |
@@ -118,17 +120,18 @@ and window traffic lights retain their system sizing.
 
 **Collapsed sidebar** preserves the existing **Icon rail** default. **Fully
 hidden (Arc)** removes the collapsed vertical sidebar in normal windows. With
-**Keep top bar visible** off, it also hides the top browser chrome. The top edge
-and Command-L reveal the toolbar; the sidebar button or configured shortcut
-expands the sidebar again. Its saved expanded width is preserved. Fullscreen
-uses its existing layout, and selecting a collapse style does not rewrite Zen
-mode preferences.
+Top bar navigation and **Keep top bar visible in Zen mode** off, it also hides
+the top browser chrome. The top edge and Command-L reveal the toolbar; the
+sidebar button or configured shortcut expands the sidebar again. Its saved
+expanded width is preserved. Fullscreen uses its existing layout, and selecting
+a collapse style does not rewrite Zen mode preferences.
 
-**Keep top bar visible** is in Appearance and writes the existing
-`helium.browser.zen_mode_top_chrome_pinned` preference. The value now applies to
-Fully hidden and Zen mode. The separate
-`helium.browser.zen_mode_sidebar_pinned` control remains in Tabs & Spaces and
-applies to Zen mode.
+Appearance's Zen card groups **Zen mode**, **Keep top bar visible in Zen mode**,
+and **Keep sidebar visible in Zen mode**. The pins keep the existing
+`helium.browser.zen_mode_top_chrome_pinned` and
+`helium.browser.zen_mode_sidebar_pinned` preferences. The top pin also applies
+to Fully hidden. Active Sidebar navigation disables the top-pin row with a
+reason and preserves its saved value.
 
 The macOS collapse and expand sequences use a 320 ms sampled approximation of
 a critically damped response on the existing animation clock. A reversal
@@ -152,6 +155,25 @@ bridge and respects managed/unavailable preferences. **Border width** updates
 while dragging, displays scaled points, and is disabled when Rounded frame is
 off. The stored width remains available when Rounded frame is enabled again.
 The border controls page-content insets independently of webpage zoom.
+
+Navigation placement defaults to Top bar. Sidebar is available in regular
+browser windows with left Vertical tabs outside fullscreen. The
+real `ToolbarView` and omnibox occupy two compact rows above the sidebar tabs,
+and page content uses the full height. Private, guest, and other ineligible
+windows use the standard top bar and retain the saved placement and drawer
+preferences.
+
+The header follows normal and Zen sidebar visibility. The Zen sidebar pin
+keeps the header visible. Command-L temporarily reveals a hidden sidebar while
+the address bar has focus or a navigation popup, menu, or bubble remains open,
+then restores the saved collapse state. Mode activation does not depend on
+whether the standard toolbar is shown.
+
+Sidebar mode suppresses pinned extension icons, the bookmark star, profile and
+media buttons, and the horizontal bookmarks bar without rewriting their
+preferences. Returning to Top bar restores the standard presentation. Its
+optional Extensions button uses the existing Extensions menu and a separate
+saved preference from the standard toolbar's Extensions button.
 
 ## Browser window chrome
 
@@ -325,6 +347,9 @@ menu item, including its Close Tab and Close Window behavior.
 
 This reference identifies saved values and runtime consumers. It does not claim
 that every row, policy, layout, or device interaction was live-tested. The
+sidebar navigation follow-up passed build checks and the bounded live checks
+recorded in the [changelog](changelog-2026-10-03.md#sidebar-navigation-validation-and-remaining-gaps).
+That record also identifies unverified behavior and incomplete fixture cleanup. The
 [feature settings acceptance plan](feature-settings-audit.md#acceptance-checks)
 contains reusable checks. Historical observations retain their original bundle
 and profile in the [implementation history](audits/settings-implementation-history.md).

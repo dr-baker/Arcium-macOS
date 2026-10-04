@@ -12,9 +12,10 @@ The current macOS product requires macOS 26 or later.
 1. Open Settings with Command-Comma. In Tabs & Spaces, choose Vertical tabs for
    a sidebar layout and choose its side. In Appearance, adjust Sidebar width.
 2. In Appearance, choose how a collapsed sidebar behaves. Icon rail keeps
-   compact tab access; Fully hidden hides the sidebar. **Keep top bar visible**
-   keeps the address bar visible in Fully hidden and Zen mode. The separate
-   sidebar pin remains in Tabs & Spaces and applies to Zen mode.
+   compact tab access; Fully hidden hides the sidebar. The Zen card groups
+   **Zen mode**, **Keep top bar visible in Zen mode**, and **Keep sidebar visible
+   in Zen mode**. The top-bar pin also applies to Fully hidden, as its help
+   explains.
 3. In Keyboard Shortcuts, review the Arc-inspired preset. It applies supported
    actions and reports unsupported ones. It saves the prior shortcut state so
    you can restore it. Applying the preset also selects Fully hidden; you can
@@ -72,7 +73,9 @@ require a new sign-in even after cookie migration.
 | Enable Peek | Previews eligible links while keeping the saved item's home anchored. Turning it off requests closure of an active Peek and returns eligible link clicks to ordinary navigation. If you cancel the page's unsaved-change prompt, the same document stays open as an ordinary tab and Peek remains off. |
 | Suggest Favorites and Pins in the address bar | Includes saved sidebar items among address-bar results. Turning it off preserves the items and ordinary suggestions. |
 | Open external links in Little Arc | Routes links opened from other apps through Little Arc. Turning it off uses the ordinary browser window or tab path. |
-| Keep top bar visible | Keeps the address bar visible in Zen mode and when the collapsed sidebar is Fully hidden. Turning it off lets those modes hide the top bar. The sidebar pin remains a separate Zen control in Tabs & Spaces. |
+| Keep top bar visible in Zen mode | Keeps the address bar visible in Zen mode and when the collapsed sidebar is Fully hidden. Appearance's Zen card retains the existing saved value. The row explains why it is unavailable while Sidebar navigation is active. |
+| Navigation placement | Top bar is the default. Sidebar places navigation and the address bar above the tabs in an eligible left sidebar, leaving the page at full height. Other window layouts use the standard top bar and retain the saved choice. |
+| Show Extensions button | Adds an optional button to Sidebar navigation that opens the existing Extensions menu. It defaults to off and is independent of the standard toolbar's Extensions setting. |
 | Show Spaces in Dock menu | Shows Spaces in the app's Dock menu. Turning it off shows profile shortcuts when there are multiple profiles. A single profile keeps the ordinary window commands. New Incognito Window remains available when permitted. This setting applies across profiles. |
 | Show sidebar collapse button | Shows the collapse button in Vertical layout. Other collapse commands still work when it is hidden. |
 | Show New Tab button | Shows the New Tab button in Dynamic layout. Other New Tab commands still work when it is hidden. |
@@ -103,6 +106,27 @@ saved colors. Controls accent remains independent, subject to its own theme
 and policy availability.
 
 ## Use the sidebar each day
+
+In Appearance, choose **Sidebar** for **Navigation placement** to use a compact,
+two-row header above the tabs. The header uses the browser's existing navigation
+controls and address bar.
+
+The header is available in regular browser windows with left Vertical tabs
+outside fullscreen. Incognito, guest, right-side, horizontal, and
+fullscreen layouts use the standard top bar without changing the saved choice.
+Centered address bar is unavailable in Sidebar placement because the row has a
+fixed position; Minimal address bar still applies.
+
+The header follows sidebar visibility. In Zen mode, **Keep sidebar visible in
+Zen mode** pins both the sidebar and its header. Command-L temporarily reveals
+a hidden sidebar and focuses its address bar. Focus, popups, menus, and bubbles
+keep that reveal open; releasing them restores the saved collapse state.
+
+Sidebar placement hides pinned extension icons, the bookmark star, profile and
+media buttons, and the horizontal bookmarks bar without changing their saved
+preferences. Returning to Top bar restores the standard presentation. Enable
+**Show Extensions button** for access to the existing Extensions menu in the
+sidebar header.
 
 Review your effective bindings in Keyboard Shortcuts. Arc defaults supplies
 supported Arc-style bindings; the controls below assume that preset where

@@ -38,8 +38,10 @@ it with the corresponding feature flag. Never force-enable it from Settings.
 | Pinned/Favorite link navigation | `HeliumAnchoredNavigationThrottle` and `GetAnchoredPinnedTabHome` | This is a core tab-identity/navigation invariant. Eligible ordinary link clicks can open in Peek while the pinned home stays anchored. The Peek preference controls that diversion; there is no separate “disable linked tabs” switch. |
 | Tab layout and collapsed sidebar | `helium.browser.layout`, `arcium.appearance.collapsed_sidebar_style` | Already in Appearance. The layout picker offers Classic, Compact, Vertical, and Dynamic; the collapse-style picker retains the Icon rail default and offers Fully hidden (Arc). Applying Arc shortcut defaults selects Fully hidden. Later edits take effect, but Restore previous restores the pre-preset collapse style as well as shortcuts. No new default-collapse preference is needed. |
 | Tab ordering and context menu | `helium.browser.new_tab_next_to_active`, `helium.browser.mru_tab_cycling`, `helium.browser.shift_right_click_context_menu` | Already in Tabs & Spaces. Sequential MRU cycling is separate from explicit Recent Tab shortcuts, which retain their existing preview behavior. |
-| Sidebar position and Zen chrome | `helium.browser.vertical_right_aligned`, `helium.browser.zen_mode`, `helium.browser.zen_mode_sidebar_pinned` | The sidebar pin remains in Tabs & Spaces and applies to Zen mode. |
-| Keep top bar visible | Existing `helium.browser.zen_mode_top_chrome_pinned` profile preference | Appearance uses the same saved Zen top-pin value for Zen mode and Fully hidden sidebar style. Pinning keeps the address bar visible; unpinning lets those modes hide it. |
+| Sidebar position and Zen chrome | `helium.browser.vertical_right_aligned`, `helium.browser.zen_mode`, `helium.browser.zen_mode_sidebar_pinned` | Sidebar position stays in Tabs & Spaces. Appearance groups Zen mode with its sidebar and top-bar visibility choices. |
+| Keep top bar visible in Zen mode | Existing `helium.browser.zen_mode_top_chrome_pinned` profile preference | Appearance uses the same saved value for Zen mode and Fully hidden sidebar style. With standard navigation, pinning keeps the top bar visible. Active Sidebar navigation disables this choice with guidance to keep the sidebar visible in Zen mode; its saved value is retained. |
+| Navigation placement | `arcium.appearance.sidebar_navigation` (default `false`) | Top bar is the default. Sidebar moves the actual browser toolbar into a compact header above sidebar tabs and gives pages full height. Available in regular windows with left Vertical tabs outside fullscreen. Private, guest, and other window contexts use the standard toolbar and retain the choice. Command-L temporarily reveals collapsed navigation without rewriting collapse state. |
+| Show Extensions button in sidebar navigation | `arcium.appearance.sidebar_extensions_drawer` (default `false`) | Optional entry to the existing extensions menu. Sidebar presentation hides pinned action icons, the bookmark star, profile/media extras, and the horizontal bookmark bar without rewriting their saved values. Turning Sidebar navigation off restores the standard presentation. |
 | Toolbar controls | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`, `kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton` | Already in Appearance. The two selected rows above fill the existing gap for vertical-collapse and dynamic-New-Tab buttons. |
 | Window material, glass, colors, and frame | `helium::kArciumChromeAppearancePref`, shared ThemeService palette and appearance mode; `arcium.appearance.chrome_ui_scale`, sidebar width, rounded frame, frame border | Already in the native Appearance editor. Do not add a second glass/material switch; the editor already enables/disables effects and preserves saved values when effects are inactive. |
 | Split tabs and browser shortcuts | Existing split-tab commands and `BrowserShortcutService` bindings | Keyboard Shortcuts already exposes bindings for split/focus actions. There is no separate Arcium master preference to expose. |
@@ -135,7 +137,8 @@ checks; do not infer a runtime mode from branch ancestry.
    snapshot tracks external changes. Relaunch using the runtime mode already
    authorized for this session and confirm profile/app preference values
    persist without changing Space, Pin, Favorite, tab, or session data.
-8. Select Fully hidden sidebar style. With **Keep top bar visible** off,
+8. Choose Top bar for Navigation placement, then select Fully hidden sidebar
+   style. With **Keep top bar visible in Zen mode** off,
    collapse the sidebar and verify the top bar hides. Turn it on and verify the
    collapsed endpoint keeps the top bar visible. Repeat with Zen mode and
    verify the separate sidebar pin remains independent. Return to Icon rail
@@ -147,6 +150,21 @@ checks; do not infer a runtime mode from branch ancestry.
    verify the saved value. Restore the original value. If renderer-override
    guidance is present, select Automatic and relaunch through the authorized
    normal app path before checking effects again.
+
+10. Select left Vertical tabs and Sidebar navigation. Confirm two navigation
+    rows above the tabs and full-height page content. Use Command-L with the
+    sidebar expanded, in Icon rail, and Fully hidden. Confirm suggestions use
+    the visible address field. End the interaction and verify saved collapse
+    state and width return without resizing the page during temporary reveal.
+11. Toggle the sidebar Extensions button off and on. Open its native menu and
+    an extension popup. Confirm visible anchors and a retained sidebar reveal.
+    At narrow widths, open navigation overflow and its main menu. Return to Top
+    bar and verify saved extension pins and bookmark-bar visibility return.
+12. Check Zen with the sidebar pin off and on. Confirm the unavailable top-pin
+    row explains the sidebar setting. Switch to right-side, Classic, private,
+    and fullscreen contexts. Confirm standard navigation and the saved Sidebar
+    choice remain intact. Relaunch the same authorized app and profile to check
+    persistence, then restore the original settings and owned fixtures.
 
 ### Verification scope
 
