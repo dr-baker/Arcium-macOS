@@ -1,0 +1,427 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_model.cc
++++ b/chrome/browser/ui/cocoa/arcium_settings_model.cc
+@@ -24,6 +24,7 @@
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/cocoa/arcium_settings_prefs.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/helium/helium_space.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
+ #include "chrome/browser/ui/helium/helium_space_service_factory.h"
+@@ -45,7 +46,7 @@
+ constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
+ constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
+ 
+-constexpr std::array<std::string_view, 35> kProfilePreferences = {
++constexpr std::array<std::string_view, 37> kProfilePreferences = {
+     prefs::kRestoreOnStartup,
+     prefs::kPromptForDownload,
+     prefs::kHeliumLittleArcExternalLinks,
+@@ -58,6 +59,8 @@
+     prefs::kHeliumLayout,
+     prefs::kVerticalTabsUncollapsedWidth,
+     arcium::kCollapsedSidebarStylePref,
++    arcium::kArcSidebarNavigationEnabledPref,
++    arcium::kSidebarExtensionsDrawerEnabledPref,
+     arcium::kChromeFrameBorderWidthPref,
+     arcium::kChromeUIScalePref,
+     prefs::kHeliumVerticalRightAligned,
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -376,6 +376,10 @@
+     var showVerticalTabsCollapseButton = false
+     var showDynamicNewTabButton = false
+     var verticalRightAligned = false
++    var sidebarNavigationEnabled = false
++    var sidebarNavigationAvailable = false
++    var sidebarNavigationConfigured = false
++    var sidebarExtensionsDrawerEnabled = false
+     var zenMode = false
+     var zenModeSidebarPinned = false
+     var zenModeTopChromePinned = false
+@@ -439,6 +443,10 @@
+         showVerticalTabsCollapseButton = boolean(dictionary["showVerticalTabsCollapseButton"])
+         showDynamicNewTabButton = boolean(dictionary["showDynamicNewTabButton"])
+         verticalRightAligned = boolean(dictionary["verticalRightAligned"])
++        sidebarNavigationEnabled = strictBoolean(dictionary["sidebarNavigationEnabled"]) ?? false
++        sidebarNavigationAvailable = strictBoolean(dictionary["sidebarNavigationAvailable"]) ?? false
++        sidebarNavigationConfigured = strictBoolean(dictionary["sidebarNavigationConfigured"]) ?? false
++        sidebarExtensionsDrawerEnabled = strictBoolean(dictionary["sidebarExtensionsDrawerEnabled"]) ?? false
+         zenMode = boolean(dictionary["zenMode"])
+         zenModeSidebarPinned = boolean(dictionary["zenModeSidebarPinned"])
+         zenModeTopChromePinned = boolean(dictionary["zenModeTopChromePinned"])
+@@ -956,6 +964,8 @@
+         case "show_vertical_tabs_collapse_button": snapshot.appearance.showVerticalTabsCollapseButton
+         case "show_dynamic_new_tab_button": snapshot.appearance.showDynamicNewTabButton
+         case "vertical_right_aligned": snapshot.appearance.verticalRightAligned
++        case "sidebar_navigation_enabled": snapshot.appearance.sidebarNavigationEnabled
++        case "sidebar_extensions_drawer_enabled": snapshot.appearance.sidebarExtensionsDrawerEnabled
+         case "zen_mode": snapshot.appearance.zenMode
+         case "zen_mode_sidebar_pinned": snapshot.appearance.zenModeSidebarPinned
+         case "zen_mode_top_chrome_pinned": snapshot.appearance.zenModeTopChromePinned
+@@ -971,7 +981,8 @@
+             "show_menu_button", "show_media_button",
+             "show_vertical_tabs_collapse_button", "show_dynamic_new_tab_button",
+             "vertical_right_aligned", "zen_mode", "zen_mode_sidebar_pinned",
+-            "zen_mode_top_chrome_pinned"
++            "zen_mode_top_chrome_pinned", "sidebar_navigation_enabled",
++            "sidebar_extensions_drawer_enabled"
+         ].contains(key) else {
+             return
+         }
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -252,11 +252,19 @@
+     let description: String
+     let enabled: Bool
+     @Binding var value: Bool
++    var unavailableReason: String? = nil
+ 
+     var body: some View {
+-        SToggle(title, isOn: $value, description: description)
+-            .disabled(!enabled)
+-            .accessibilityLabel(title)
++        VStack(alignment: .leading, spacing: SettingsSpacing.xs) {
++            SToggle(title, isOn: $value, description: description)
++                .disabled(!enabled)
++                .accessibilityLabel(title)
++            if let unavailableReason {
++                Text(unavailableReason)
++                    .settingsFont(\.caption)
++                    .foregroundStyle(.secondary)
++            }
++        }
+     }
+ }
+ 
+@@ -483,19 +491,6 @@
+                             )
+                         )
+                     }
+-
+-                    SSectionCard(title: "Zen mode") {
+-                        BooleanSetting(
+-                            title: "Keep the Zen sidebar pinned",
+-                            description: "Keep Space and tab navigation visible while Zen mode is active.",
+-                            enabled: store.snapshot.appearance.hasValue("zen_mode_sidebar_pinned")
+-                                && !store.snapshot.appearance.isManaged("zen_mode_sidebar_pinned"),
+-                            value: Binding(
+-                                get: { store.appearanceBoolean("zen_mode_sidebar_pinned") },
+-                                set: { store.setAppearanceBoolean("zen_mode_sidebar_pinned", value: $0) }
+-                            )
+-                        )
+-                    }
+                 } else {
+                     SectionUnavailableView(title: "Tab settings")
+                 }
+@@ -525,6 +520,13 @@
+         ("show_media_button", "Media", "play.rectangle", "Show media controls.")
+     ]
+ 
++    private var toolbarItemsForCurrentLayout: [(key: String, title: String, symbol: String, help: String)] {
++        guard store.snapshot.appearance.sidebarNavigationConfigured else { return toolbarItems }
++        return toolbarItems.filter {
++            !["show_avatar_button", "show_extensions_button", "show_media_button"].contains($0.key)
++        }
++    }
++
+     private var appearanceBinding: Binding<SettingsAppearance> {
+         Binding(get: { store.appearanceMode() }, set: { store.applyAppearanceMode($0) })
+     }
+@@ -567,6 +569,28 @@
+                 ), options: store.snapshot.tabs.layoutOptions.map { (value: $0.value, label: $0.label) },
+                     description: "Choose a compact, classic, or sidebar layout.")
+                 .disabled(!store.snapshot.tabs.hasValue("helium_layout") || store.snapshot.tabs.isManaged("helium_layout"))
++                SPicker("Navigation placement", selection: Binding(
++                    get: { store.snapshot.appearance.sidebarNavigationEnabled ? 1 : 0 },
++                    set: { store.setAppearanceBoolean("sidebar_navigation_enabled", value: $0 == 1) }
++                ), options: [(value: 0, label: "Top bar"), (value: 1, label: "Sidebar")],
++                    description: "Put the address bar and navigation in the sidebar so pages can use the full window height.")
++                .disabled(!editable("sidebar_navigation_enabled")
++                    || !store.snapshot.appearance.sidebarNavigationAvailable)
++                if !store.snapshot.appearance.sidebarNavigationAvailable {
++                    Text("Available in regular windows with Vertical tabs on the left, outside full screen.")
++                        .settingsFont(\.caption).foregroundStyle(.secondary)
++                }
++                if store.snapshot.appearance.sidebarNavigationEnabled {
++                    BooleanSetting(
++                        title: "Show Extensions button",
++                        description: "Open the extensions menu from the sidebar navigation.",
++                        enabled: editable("sidebar_extensions_drawer_enabled")
++                            && store.snapshot.appearance.sidebarNavigationConfigured,
++                        value: booleanBinding("sidebar_extensions_drawer_enabled"),
++                        unavailableReason: store.snapshot.appearance.sidebarNavigationAvailable
++                            ? nil : "Available in regular windows with Vertical tabs on the left, outside full screen."
++                    )
++                }
+                 SSlider("Browser UI scale", value: Binding(
+                     get: { Double(store.snapshot.appearance.chromeUIScale) },
+                     set: { store.setChromeUIScale($0) }
+@@ -600,12 +624,6 @@
+                 }, description: "Choose an icon rail or fully hide the sidebar.")
+                 .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
+                     || store.snapshot.appearance.collapsedSidebarStyleManaged)
+-                BooleanSetting(
+-                    title: "Keep top bar visible",
+-                    description: "Keep the address bar visible in Zen mode and when the sidebar is fully hidden.",
+-                    enabled: editable("zen_mode_top_chrome_pinned"),
+-                    value: booleanBinding("zen_mode_top_chrome_pinned")
+-                )
+                 BooleanSetting(title: "Rounded frame", description: "Round the browser frame corners.", enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
+                 SSlider("Border width", value: Binding(
+                     get: { store.displayedChromeFrameBorderWidth },
+@@ -620,16 +638,50 @@
+                 .disabled(!store.snapshot.appearance.chromeFrameBorderWidthAvailable
+                     || store.snapshot.appearance.chromeFrameBorderWidthManaged
+                     || !store.snapshot.appearance.roundedFrame)
+-                BooleanSetting(title: "Centered address bar", description: "Keep the address bar centered in the toolbar.", enabled: editable("centered_location_bar"), value: booleanBinding("centered_location_bar"))
++                BooleanSetting(
++                    title: "Centered address bar",
++                    description: "Keep the address bar centered in the toolbar.",
++                    enabled: editable("centered_location_bar")
++                        && !store.snapshot.appearance.sidebarNavigationConfigured,
++                    value: booleanBinding("centered_location_bar"),
++                    unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
++                        ? "Sidebar navigation uses a fixed address bar position." : nil
++                )
+                 BooleanSetting(title: "Minimal address bar", description: "Use a compact address bar.", enabled: editable("minimal_location_bar"), value: booleanBinding("minimal_location_bar"))
+-                BooleanSetting(title: "Zen mode", description: "Hide optional browser chrome for a focused workspace.", enabled: editable("zen_mode"), value: booleanBinding("zen_mode"))
++            }
++
++            SSectionCard(title: "Zen mode") {
++                BooleanSetting(
++                    title: "Zen mode",
++                    description: "Hide optional browser chrome for a focused workspace.",
++                    enabled: editable("zen_mode"),
++                    value: booleanBinding("zen_mode")
++                )
++                BooleanSetting(
++                    title: "Keep top bar visible in Zen mode",
++                    description: "Also keeps the top bar visible when the sidebar is fully hidden.",
++                    enabled: editable("zen_mode_top_chrome_pinned")
++                        && !store.snapshot.appearance.sidebarNavigationConfigured,
++                    value: booleanBinding("zen_mode_top_chrome_pinned"),
++                    unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
++                        ? "Navigation is in the sidebar. Keep the sidebar visible in Zen mode to keep navigation visible."
++                        : nil
++                )
++                BooleanSetting(
++                    title: "Keep sidebar visible in Zen mode",
++                    description: "Keep Space and tab navigation visible while Zen mode is active.",
++                    enabled: editable("zen_mode_sidebar_pinned"),
++                    value: booleanBinding("zen_mode_sidebar_pinned")
++                )
+             }
+ 
+             SSectionCard(title: "Toolbar buttons") {
+-                Text("Choose what appears in your browser toolbar.")
++                Text(store.snapshot.appearance.sidebarNavigationConfigured
++                    ? "Choose what appears in your sidebar navigation."
++                    : "Choose what appears in your browser toolbar.")
+                     .settingsFont(\.caption).foregroundStyle(.secondary)
+                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: SettingsSpacing.sm)], spacing: SettingsSpacing.sm) {
+-                    ForEach(toolbarItems, id: \.key) { item in
++                    ForEach(toolbarItemsForCurrentLayout, id: \.key) { item in
+                         SIconToggle(item.title, systemImage: item.symbol, isOn: booleanBinding(item.key), help: item.help)
+                             .disabled(!editable(item.key))
+                     }
+--- a/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ b/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -38,6 +38,7 @@
+ #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
+ #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
+@@ -109,6 +110,9 @@
+ NSString* const kKeyCenteredLocationBar = @"centered_location_bar";
+ NSString* const kKeyMinimalLocationBar = @"minimal_location_bar";
+ NSString* const kKeyZenMode = @"zen_mode";
++NSString* const kKeySidebarNavigationEnabled = @"sidebar_navigation_enabled";
++NSString* const kKeySidebarExtensionsDrawerEnabled =
++    @"sidebar_extensions_drawer_enabled";
+ NSString* const kKeyShowHomeButton = @"show_home_button";
+ NSString* const kKeyShowBackButton = @"show_back_button";
+ NSString* const kKeyShowForwardButton = @"show_forward_button";
+@@ -146,6 +150,15 @@
+   return true;
+ }
+ 
++bool GetStrictBooleanObject(id value, bool* result) {
++  if (!result || ![value isKindOfClass:[NSNumber class]] ||
++      CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()) {
++    return false;
++  }
++  *result = [value boolValue];
++  return true;
++}
++
+ bool GetIntegerObject(id value, int* result) {
+   if (!result || !IsBooleanObject(value)) {
+     return false;
+@@ -382,6 +395,33 @@
+   return browser_view && browser_view->GetIsNormalType();
+ }
+ 
++bool IsSidebarNavigationAvailableForProfile(Profile* profile) {
++  GlobalBrowserCollection* collection = GlobalBrowserCollection::GetInstance();
++  if (!profile || !collection) {
++    return false;
++  }
++
++  bool available = false;
++  collection->ForEach(
++      [&available, profile](BrowserWindowInterface* browser) {
++        if (!IsMatchingNormalBrowser(browser, profile)) {
++          return true;
++        }
++        available = BrowserView::GetBrowserViewForBrowser(browser)
++                        ->IsSidebarNavigationAvailable();
++        return false;
++      },
++      BrowserCollection::Order::kActivation);
++  return available;
++}
++
++bool IsSidebarNavigationConfiguredForProfile(Profile* profile) {
++  const PrefService* prefs = profile ? profile->GetPrefs() : nullptr;
++  return prefs && prefs->FindPreference(arcium::kArcSidebarNavigationEnabledPref) &&
++         prefs->GetBoolean(arcium::kArcSidebarNavigationEnabledPref) &&
++         IsSidebarNavigationAvailableForProfile(profile);
++}
++
+ std::optional<SettingsChromeVisualState> GetBrowserChromeVisualState(
+     Profile* profile) {
+   if (!profile) {
+@@ -1188,6 +1228,15 @@
+       model && model->HasPreference(prefs::kHeliumMinimalLocationBar);
+   const bool zen_available =
+       model && model->HasPreference(prefs::kHeliumZenMode);
++  const bool sidebar_navigation_pref_available =
++      model && model->HasPreference(arcium::kArcSidebarNavigationEnabledPref);
++  const bool sidebar_extensions_drawer_pref_available =
++      model && model->HasPreference(arcium::kSidebarExtensionsDrawerEnabledPref);
++  const bool sidebar_navigation_available =
++      model && IsSidebarNavigationAvailableForProfile(model->profile());
++  const bool sidebar_navigation_configured =
++      sidebar_navigation_pref_available && sidebar_navigation_available &&
++      model->GetBoolean(arcium::kArcSidebarNavigationEnabledPref);
+   const bool sidebar_width_available = model && model->HasSidebarWidth();
+   const bool sidebar_width_managed =
+       sidebar_width_available && model->IsSidebarWidthManaged();
+@@ -1339,6 +1388,14 @@
+     @"minimalLocationBar" :
+         @(model && minimal_available &&
+           model->GetBoolean(prefs::kHeliumMinimalLocationBar)),
++    @"sidebarNavigationEnabled" :
++        @(sidebar_navigation_pref_available &&
++          model->GetBoolean(arcium::kArcSidebarNavigationEnabledPref)),
++    @"sidebarNavigationAvailable" : @(sidebar_navigation_available),
++    @"sidebarNavigationConfigured" : @(sidebar_navigation_configured),
++    @"sidebarExtensionsDrawerEnabled" :
++        @(sidebar_extensions_drawer_pref_available &&
++          model->GetBoolean(arcium::kSidebarExtensionsDrawerEnabledPref)),
+     @"zenMode" :
+         @(model && zen_available && model->GetBoolean(prefs::kHeliumZenMode)),
+     @"showHomeButton" :
+@@ -1389,6 +1446,12 @@
+       kKeyMinimalLocationBar :
+           @(model && minimal_available &&
+             model->IsManaged(prefs::kHeliumMinimalLocationBar)),
++      kKeySidebarNavigationEnabled :
++          @(sidebar_navigation_pref_available &&
++            model->IsManaged(arcium::kArcSidebarNavigationEnabledPref)),
++      kKeySidebarExtensionsDrawerEnabled :
++          @(sidebar_extensions_drawer_pref_available &&
++            model->IsManaged(arcium::kSidebarExtensionsDrawerEnabledPref)),
+       kKeyZenMode :
+           @(model && zen_available && model->IsManaged(prefs::kHeliumZenMode)),
+       kKeyShowHomeButton : @(model && home_available &&
+@@ -1435,6 +1498,9 @@
+       kKeyRoundedFrame : @(rounded_available),
+       kKeyCenteredLocationBar : @(centered_available),
+       kKeyMinimalLocationBar : @(minimal_available),
++      kKeySidebarNavigationEnabled : @(sidebar_navigation_pref_available),
++      kKeySidebarExtensionsDrawerEnabled :
++          @(sidebar_extensions_drawer_pref_available),
+       kKeyZenMode : @(zen_available),
+       kKeyShowHomeButton : @(home_available),
+       kKeyShowBackButton : @(back_available),
+@@ -1599,6 +1665,12 @@
+   [self.window close];
+ }
+ 
++- (void)windowDidBecomeKey:(NSNotification*)notification {
++  // Re-evaluate window-dependent choices after switching browser windows or
++  // returning from full screen. Preference observers cover layout changes.
++  [self modelDidChange];
++}
++
+ - (void)windowWillClose:(NSNotification*)notification {
+   window_closing_ = YES;
+   [content_controller_ setEffectiveAppearanceChangedHandler:nil];
+@@ -1817,10 +1889,32 @@
+     }
+     return;
+   }
++  if ([key isEqualToString:kKeySidebarNavigationEnabled] &&
++      GetStrictBooleanObject(value, &boolean_value)) {
++    if (model_->HasPreference(arcium::kArcSidebarNavigationEnabledPref) &&
++        !model_->IsManaged(arcium::kArcSidebarNavigationEnabledPref) &&
++        IsSidebarNavigationAvailableForProfile(model_->profile())) {
++      model_->SetBoolean(arcium::kArcSidebarNavigationEnabledPref, boolean_value);
++      [self modelDidChange];
++    }
++    return;
++  }
++  if ([key isEqualToString:kKeySidebarExtensionsDrawerEnabled] &&
++      GetStrictBooleanObject(value, &boolean_value)) {
++    if (model_->HasPreference(arcium::kSidebarExtensionsDrawerEnabledPref) &&
++        !model_->IsManaged(arcium::kSidebarExtensionsDrawerEnabledPref) &&
++        IsSidebarNavigationConfiguredForProfile(model_->profile())) {
++      model_->SetBoolean(arcium::kSidebarExtensionsDrawerEnabledPref,
++                         boolean_value);
++      [self modelDidChange];
++    }
++    return;
++  }
+   if ([key isEqualToString:kKeyZenModeTopChromePinned] &&
+       GetBooleanObject(value, &boolean_value)) {
+     if (model_->HasPreference(prefs::kHeliumZenModeTopChromePinned) &&
+-        !model_->IsManaged(prefs::kHeliumZenModeTopChromePinned)) {
++        !model_->IsManaged(prefs::kHeliumZenModeTopChromePinned) &&
++        !IsSidebarNavigationConfiguredForProfile(model_->profile())) {
+       model_->SetBoolean(prefs::kHeliumZenModeTopChromePinned, boolean_value);
+       [self modelDidChange];
+     }
+@@ -1839,7 +1933,8 @@
+   if ([key isEqualToString:kKeyCenteredLocationBar] &&
+       GetBooleanObject(value, &boolean_value)) {
+     if (model_->HasPreference(prefs::kHeliumCenteredLocationBar) &&
+-        !model_->IsManaged(prefs::kHeliumCenteredLocationBar)) {
++        !model_->IsManaged(prefs::kHeliumCenteredLocationBar) &&
++        !IsSidebarNavigationConfiguredForProfile(model_->profile())) {
+       model_->SetBoolean(prefs::kHeliumCenteredLocationBar, boolean_value);
+       [self modelDidChange];
+     }
+--- a/chrome/browser/ui/views/frame/browser_frame_view_mac.mm
++++ b/chrome/browser/ui/views/frame/browser_frame_view_mac.mm
+@@ -213,11 +213,12 @@
+ 
+ BrowserLayoutParams BrowserFrameViewMac::GetBrowserLayoutParams() const {
+   auto params = BrowserFrameView::GetBrowserLayoutParams();
+-  if (GetBrowserView()->IsCollapsedSidebarFullyHiddenForLayout() ||
++  if (GetBrowserView()->IsSidebarNavigationActive() ||
++      GetBrowserView()->IsCollapsedSidebarFullyHiddenForLayout() ||
+       GetBrowserView()->IsCollapsedSidebarRevealAnimationActive()) {
+-    // Fade the native frame exclusion with the top chrome so the content area
+-    // does not jump when the fully hidden sidebar reaches its target.
+-    const float reveal = GetBrowserView()->GetTopChromeRevealRatio();
++    // Keep native frame exclusions aligned with the caption and navigation
++    // header as they reveal or hide, so the content area does not jump.
++    const float reveal = GetBrowserView()->GetCaptionChromeRevealRatio();
+     auto scale_exclusion = [reveal](BrowserLayoutExclusionArea& exclusion) {
+       exclusion.content.set_width(exclusion.content.width() * reveal);
+       exclusion.content.set_height(exclusion.content.height() * reveal);
