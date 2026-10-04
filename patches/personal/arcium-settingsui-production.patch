@@ -2654,7 +2654,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -466,119 +466,59 @@ private struct TabsAndSpacesSettingsPage
+@@ -466,119 +466,61 @@ private struct TabsAndSpacesSettingsPage
      }
  }
  
@@ -2690,7 +2690,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -
  private struct AppearanceSettingsPage: View {
      @ObservedObject var store: ArciumSettingsStore
--    @Environment(\.settingsTheme) private var theme
+     @Environment(\.settingsTheme) private var theme
 -    @State private var colorPaletteExpanded = true
 +    @State private var backgroundMode: BackgroundMode = .everyday
 +
@@ -2804,6 +2804,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                        .foregroundStyle(theme.textPrimary)
                  }
 +                .pickerStyle(.segmented)
++                .tint(theme.selectionStrong)
 +                .labelsHidden()
 +                .frame(width: 210)
              }
@@ -2811,7 +2812,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
              SSectionCard(title: "Browser layout and size") {
                  SPicker("Browser layout", selection: Binding(
-@@ -612,53 +552,126 @@ private struct AppearanceSettingsPage: V
+@@ -612,53 +554,126 @@ private struct AppearanceSettingsPage: V
                      help: SHelp(description: "Resize the expanded sidebar in this profile’s browser windows. Its displayed width follows Browser UI scale; webpage zoom stays unchanged."),
                      commitMode: .onDragEnd)
                  .disabled(!store.snapshot.appearance.sidebarWidthAvailable || store.snapshot.appearance.sidebarWidthManaged)
