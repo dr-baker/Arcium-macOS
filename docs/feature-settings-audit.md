@@ -1,11 +1,11 @@
-# Native feature settings audit
+# Feature settings contracts
 
-This audit maps user-facing Arcium features to their existing or proposed
-settings. The native SettingsUI work in this branch binds the controls to the
-Chromium `PrefService` or app local state. Run the acceptance checks below to
-verify live updates, runtime behavior, and persistence in the exact tested bundle.
+This reference maps user-facing Arcium features to their settings, saved-data
+contracts, and runtime consumers. Native Settings binds the controls to Chromium
+`PrefService` or app local state. The acceptance plan below describes checks to
+perform against an exact bundle and the authorized runtime profile.
 
-## Settings selected for this change
+## Feature controls
 
 The feature preferences are profile-scoped, except for the app-wide Dock menu
 choice. Their default `true` preserves the current product behavior. Switching
@@ -23,9 +23,8 @@ and history intact.
 
 The three new core profile preferences are coordinated with the core feature
 changes. Auto PiP is deliberately gated by the existing Blink feature: in the
-current generated baseline it is disabled by default, though the runtime can
-enable it with the corresponding feature flag. Never force-enable it from the
-Settings page.
+accepted October 3 configuration it is disabled, though the runtime can enable
+it with the corresponding feature flag. Never force-enable it from Settings.
 
 ## Existing controls and notable additions
 
@@ -34,8 +33,8 @@ Settings page.
 | Open external links in Little Arc | `helium.little_arc.external_links` (`prefs::kHeliumLittleArcExternalLinks`) | Already in General. Off routes external links through the ordinary browser window/tab path. This is separate from Peek. |
 | Choose startup and download behavior | `prefs::kRestoreOnStartup`, `prefs::kPromptForDownload` | Already in General; backed by Chromium startup/session and download-target consumers. |
 | Confirm before quitting | `prefs::kConfirmToQuitEnabled` in app local state | Already in General; app-wide, not per profile. |
-| Spaces and default Space | `helium.spaces`, `helium.active_space_id` | The existing Default Space picker chooses the Space for new windows and persistent items; already-open windows keep their assigned Space. No master Spaces switch in this change. |
-| Favorites and Pins | `kHeliumFavoritesAndPins` feature flag plus `helium.favorites`, `helium.spaces` (including each Space’s `pins` tree), tab/session anchor metadata; legacy `prefs::kHeliumPins` remains registered by `PinTabCodec` | Sidebar actions and the one-time Arc import cover creation/migration. No master disable control in this change: this feature spans saved data, active tab ownership, session restore, and anchored-navigation behavior. A future off switch needs a defined hide/restore and migration contract that preserves access to every saved record. |
+| Spaces and default Space | `helium.spaces`, `helium.active_space_id` | The existing Default Space picker chooses the Space for new windows and persistent items; already-open windows keep their assigned Space. No master Spaces switch is exposed. |
+| Favorites and Pins | `kHeliumFavoritesAndPins` feature flag plus `helium.favorites`, `helium.spaces` (including each Space’s `pins` tree), tab/session anchor metadata; legacy `prefs::kHeliumPins` remains registered by `PinTabCodec` | Sidebar actions and the one-time Arc import cover creation/migration. No master disable control is exposed: this feature spans saved data, active tab ownership, session restore, and anchored-navigation behavior. A future off switch needs a defined hide/restore and migration contract that preserves access to every saved record. |
 | Pinned/Favorite link navigation | `HeliumAnchoredNavigationThrottle` and `GetAnchoredPinnedTabHome` | This is a core tab-identity/navigation invariant. Eligible ordinary link clicks can open in Peek while the pinned home stays anchored. The Peek preference controls that diversion; there is no separate “disable linked tabs” switch. |
 | Tab layout and collapsed sidebar | `helium.browser.layout`, `arcium.appearance.collapsed_sidebar_style` | Already in Appearance. The layout picker offers Classic, Compact, Vertical, and Dynamic; the collapse-style picker retains the Icon rail default and offers Fully hidden (Arc). Applying Arc shortcut defaults selects Fully hidden. Later edits take effect, but Restore previous restores the pre-preset collapse style as well as shortcuts. No new default-collapse preference is needed. |
 | Tab ordering and context menu | `helium.browser.new_tab_next_to_active`, `helium.browser.mru_tab_cycling`, `helium.browser.shift_right_click_context_menu` | Already in Tabs & Spaces. Sequential MRU cycling is separate from explicit Recent Tab shortcuts, which retain their existing preview behavior. |
@@ -118,20 +117,65 @@ checks; do not infer a runtime mode from branch ancestry.
    authorized for this session and confirm profile/app preference values
    persist without changing Space, Pin, Favorite, tab, or session data.
 
-### Current verification limit
+### Verification scope
 
-This document is an implementation and acceptance plan, not evidence that the
-new rows have passed a live app test. The generated baseline currently has
-Blink Auto PiP disabled, so that row requires an authorized run with the
-feature flag enabled. Core and native runtime behavior must be verified against
-the same selected core source and exact packaged bundle. Record the approved
-runtime mode, profile, and feature flags with the live evidence.
+These steps are a reusable acceptance plan, not a claim that every listed case
+has passed. Record the selected core source, exact bundle, authorized runtime
+mode, profile, and feature flags with each result. A standalone UI preview does
+not establish installed-browser behavior.
+
+The [October 3 changelog](changelog-2026-10-03.md#validation-and-known-gaps)
+records the accepted product scope. Its final Everyday/Advanced selector-accent
+check passed after the installed restart. Live OS Dock commands, corrected
+Shift-right-click delivery with the setting on and off, and the
+foreground/unoccluded blank-content comparison remain human-waived and
+unverified. No blank-content cause or fix is established.
+
+Blink Auto PiP was disabled in that accepted app configuration. Testing automatic
+entry requires an authorized run with the feature enabled; the unavailable row
+is not evidence that automatic entry was exercised.
 
 ## Deferred preview shutdown option
 
-This change does not add a separate “show tab-switch previews” preference.
+There is no separate “show tab-switch previews” preference.
 The current switcher keeps a Ctrl-held cycle pending until key release; hiding
 its preview rail would leave the selected page visually unchanged during that
 cycle. A separate off mode needs a clear visible selection behavior before it
 can be offered. The existing MRU cycling setting and explicit Recent Tab
 shortcuts retain their current behavior.
+
+## Native window and shortcut checks
+
+Record source, replay, syntax, and runtime results separately. For every runtime
+result, identify the exact bundle and selected authorized profile. Use an isolated
+profile when the test requires it.
+
+- Open Settings with the menu and Command-Comma. Confirm no settings tab opens.
+- Open Settings twice for one profile. Confirm the existing AppKit window comes
+  forward instead of opening a second window.
+- Open Settings for two profiles. Confirm each profile owns a separate window and
+  changing one profile does not change the other.
+- Resize the window and navigate every section with keyboard and pointer.
+- Change a preference in the native window and inspect the Chromium value.
+- Change the same preference in Chromium settings and inspect the native control.
+- Record a shortcut, exercise a conflict, cancel recording with Escape, and reset
+  one command.
+- Select a locked or managed command. Confirm the editor explains that it cannot
+  be changed and leaves its binding unchanged.
+- Send an unknown action ID through the native shortcut path. Confirm the request
+  is rejected and leaves bindings and menu items unchanged.
+- Capture the full shortcut state before applying Arc defaults. Verify supported
+  bindings, affected menu labels, actual command behavior, and listed unsupported
+  actions.
+- Restore the captured state. Confirm custom, default, and unassigned bindings
+  all match the pre-preset state.
+- Close the originating browser window while Settings remains open.
+- Confirm Settings remains usable after the browser window closes, then close
+  Settings, quit, and reopen the same profile.
+- Confirm preferences and shortcuts persist and teardown leaves no callback into a
+  destroyed browser or shortcut service.
+
+The window and service ownership are described in
+[SettingsUI integration](settingsui-integration.md#window-and-profile-behavior).
+The shortcut contracts are in
+[native settings bindings](native-settings-bindings.md#keyboard-shortcuts).

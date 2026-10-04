@@ -1,5 +1,7 @@
 # Arc-inspired color and grain editor
 
+Historical design and calibration notes. Deployment and preview claims retain their original scope. Current browser integration is described in [SettingsUI integration](../settingsui-integration.md).
+
 ## References
 
 - [Arc theme picker recording, March 2023](https://commons.wikimedia.org/wiki/File:Arc_Browser.gif): a compact panel with appearance modes, draggable color dots, swatches, an intensity slider, and a grain dial. Elfanek published the recording under CC0.

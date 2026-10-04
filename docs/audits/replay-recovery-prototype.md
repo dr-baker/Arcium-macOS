@@ -1,5 +1,7 @@
 # Replay recovery and build evidence
 
+Historical prototype and fixture record. Its selected commits and pending integration gates describe that earlier snapshot. Current recovery and capture behavior is documented in [the build guide](../building.md#recover-replay-timestamps).
+
 This tooling preserves unchanged source timestamps across a
 failed replay and subsequent recovery. It also retains bounded evidence for
 each autoninja invocation. Verification uses synthetic and disposable fixtures.
@@ -80,7 +82,7 @@ inputs in `build_receipt.py`; another selected source worktree does not need an
 unused module copy. That receipt helper also participates in the
 preparation-producer digest, so this integration invalidates every
 non-acquisition preparation receipt. Follow
-[Refresh preparation proof](building.md#refresh-preparation-proof), including
+[Refresh preparation proof](../building.md#refresh-preparation-proof), including
 deliberate review of GN defaults and intended custom arguments.
 
 Synthetic checks cannot establish freshness of existing shared-lane outputs.

@@ -1,5 +1,7 @@
 # Private patch validation
 
+Historical validation ledger. Stack counts, queues, failures, and pending gates below describe their original snapshots. Use the [maintainer quickstart](../helium-maintainer-quickstart.md) and [build guide](../building.md) for current procedures.
+
 This ledger records the selected Arcium patch stack and its proof gates. Source
 replay, compilation, packaging, and runtime behavior are separate gates.
 

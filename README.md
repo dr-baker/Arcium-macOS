@@ -4,15 +4,39 @@ macOS build, packaging, signing, and platform integration for
 [Arcium](https://github.com/dr-baker/Arcium). This repository pins one exact
 Arcium core commit through its nested checkout.
 
-Coming from Arc? Start with the [quickstart and feature list](docs/arc-quickstart.md).
-For source ownership and the development workflow, read
-[Arcium for Helium maintainers](docs/helium-maintainer-onboarding.md).
+## Start here
 
-## Building and development
-Use this repository for macOS builds and macOS-only changes. Put shared browser
-features in the Arcium core repository.
+- Use Arcium: [Arc quickstart and feature list](docs/arc-quickstart.md).
+- Develop Arcium: [maintainer quickstart](docs/helium-maintainer-quickstart.md).
 
-[> See docs/building.md](docs/building.md)
+Use this repository for macOS builds and macOS-only changes. Shared browser
+features belong in Arcium core.
+
+## Read more when needed
+
+| Question | Read |
+| --- | --- |
+| How do I migrate an existing profile and recover if it fails? | [Daily-driver migration](docs/arc-daily-driver-migration.md) |
+| Why are source ownership and build lanes separate? | [Maintainer onboarding](docs/helium-maintainer-onboarding.md) |
+| What are the build, patch, replay, and packaging commands? | [Build guide](docs/building.md) |
+| How does native Settings integrate with the browser and renderer? | [SettingsUI integration](docs/settingsui-integration.md) |
+| Which saved preference and runtime consumer backs each control? | [Native settings bindings](docs/native-settings-bindings.md) |
+| What happens when a feature is turned off or unavailable? | [Feature settings contracts](docs/feature-settings-audit.md) |
+| How do I validate tab ownership or measure performance? | [Tab invariants](docs/tab-invariants.md) and [feature performance](docs/feature-performance.md) |
+| What changed in the October delivery? | [Branch changelog](docs/changelog-2026-10-03.md) |
+
+## Working notes and evidence
+
+Keep reusable instructions and current references in `docs/`. Dated design,
+implementation, and validation records belong in [docs/audits/](docs/audits/).
+Their queues and proof claims describe the original snapshot; current procedures
+come from the guides above.
+
+Keep local run plans, screenshots, logs, and exact acceptance records outside the
+repository, under the run's build lane or `~/Library/Logs/Arcium/`. Give each run
+one readable summary that links its detailed evidence and unresolved checks.
+Recorded evidence retains its original paths and source commits when the guides
+are reorganized.
 
 ## Contributing
 Before contributing, read Arcium's

@@ -7,8 +7,10 @@
   - [Select a build lane](#select-a-build-lane)
   - [Prepare a cold build](#prepare-a-cold-build)
   - [Build and run normal changes](#build-and-run-normal-changes)
+  - [Recover replay timestamps](#recover-replay-timestamps)
   - [Use guarded build commands](#use-guarded-build-commands)
   - [Refresh preparation proof](#refresh-preparation-proof)
+  - [Inspect build evidence](#inspect-build-evidence)
   - [Manage the lane-local patch catalog](#manage-the-lane-local-patch-catalog)
   - [Use an exact development profile](#use-an-exact-development-profile)
   - [Run a scenario contract](#run-a-scenario-contract)
@@ -336,6 +338,8 @@ receipt code do. Run `he replay` again before `he dev`, `he build-full
 --approved`, or packaging. `he check` remains a read-only patch catalog and
 applied-state check and does not create replay proof.
 
+### Recover replay timestamps
+
 Replay preserves access and modification timestamps for unchanged, patch-owned
 regular source files so Quilt does not make unchanged headers look newer than
 compiled outputs. It snapshots the currently applied stack under the lane lock,
@@ -358,6 +362,19 @@ recovery context blocks replay until the lane state is inspected and the
 snapshot is deliberately removed.
 This optimization does not retain old build or execution receipts, bypass a
 build check, or change packaging and signing requirements.
+
+The snapshot belongs to one source directory, worktree, patch catalog, and
+Chromium version. Patch corrections and core commit changes can recover within
+that context. Corruption, a replaced source directory, or a different context
+blocks recovery instead of replacing the original snapshot. Compilation and
+relinking remain blocked while recovery is pending; queries and dry-run plans
+remain available for diagnosis.
+
+Timestamp recovery applies to changes made through `replay_contract.replay`.
+Popping patches outside that transaction cannot recover timestamps that it did
+not capture. The temporary-directory and Quilt/Ninja copy-rule fixtures exercise
+recovery failures and unchanged edges. They do not establish freshness of an
+existing browser build or prove runtime behavior.
 
 ### Manage the lane-local patch catalog
 
@@ -544,11 +561,31 @@ accepts only `true` or `false` and participates in backend evidence.
 environments. These preparation checks do not prove endpoint compatibility or
 successful remote execution.
 
-Build evidence appears under `.arcium/build-evidence/<invocation-id>/` for each
-autoninja plan and build. It retains bounded output, starting arguments and
-available Siso metrics. Missing, stale, malformed or truncated data remains
-explicit. Diagnostics participate in the actual-executor material hash;
-collecting evidence does not preserve an old build receipt.
+### Inspect build evidence
+
+`HeliumDevBuilder` archives each autoninja plan and build under
+`.arcium/build-evidence/<invocation-id>/`, including failures and no-work plans.
+Graph queries and commands rejected before autoninja do not create an archive.
+`BuildResult.evidence_paths` lists the completed archives.
+
+Each archive retains command arguments, starting `args.gn`, command wall time,
+bounded output, and available Siso rebuild explanations and metrics. Capture is
+limited to 16 Siso files and 64 KiB per file. Large metrics retain a bounded head
+and tail. Missing, stale, malformed, and truncated data remains explicit.
+
+Unchanged Siso files are marked stale. Cumulative metrics are attributed only
+when their build ID matches changed metadata. The final cumulative duration is
+used without summing earlier progress records. Cache deltas remain unknown
+because the runner supplies no scoped counters. Capture starts no extra
+subprocesses and changes no cache settings.
+
+Archive writes and evidence reads use pinned lane-relative directory descriptors.
+Symlinked state directories are refused; replaced directories produce unavailable
+evidence. Parser recursion failures remain explicit. Diagnostic I/O failures add
+warnings without replacing the build result.
+
+Diagnostics participate in the actual-executor material hash. Collecting evidence
+does not preserve an old build receipt.
 
 When `HELIUM_DEV_WORKTREE` selects another source worktree, the sourced canonical
 `dev.sh` executes its own diagnostics module. The selected worktree supplies its
