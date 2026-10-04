@@ -1,15 +1,15 @@
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -557,7 +557,7 @@
+@@ -549,7 +549,7 @@ private struct AppearanceSettingsPage: V
                      set: { store.setCollapsedSidebarStyle($0) }
                  ), options: store.snapshot.appearance.collapsedSidebarStyleOptions.map {
                      (value: $0.value, label: $0.label)
 -                }, description: "Hide the sidebar and toolbar when collapsed.")
-+                }, description: "Choose an icon rail or hide the sidebar and toolbar completely.")
++                }, description: "Choose an icon rail or fully hide the sidebar.")
                  .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
                      || store.snapshot.appearance.collapsedSidebarStyleManaged)
-                 BooleanSetting(title: "Rounded frame", description: "Round the browser frame corners.", enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
-@@ -731,6 +731,7 @@
+                 BooleanSetting(
+@@ -740,6 +740,7 @@ private struct ShortcutPageHeader: View
                  Button("Apply Arc defaults") {
                      store.actionInvoked(name: "apply_arc_defaults")
                  }
@@ -17,7 +17,7 @@
                  .buttonStyle(.borderedProminent)
                  .tint(theme.accent)
                  .disabled(!store.snapshot.shortcuts.canModify || store.isRecordingShortcut)
-@@ -739,6 +740,7 @@
+@@ -748,6 +749,7 @@ private struct ShortcutPageHeader: View
                      Button("Restore previous shortcuts") {
                          store.actionInvoked(name: "restore_previous")
                      }

@@ -1,6 +1,6 @@
 --- a/chrome/browser/ui/cocoa/arcium_settings_model.cc
 +++ b/chrome/browser/ui/cocoa/arcium_settings_model.cc
-@@ -43,7 +43,7 @@
+@@ -45,7 +45,7 @@ constexpr char kSharedPaletteDarkChromeC
  constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
  constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
  
@@ -9,7 +9,7 @@
      prefs::kRestoreOnStartup,
      prefs::kPromptForDownload,
      prefs::kHeliumLittleArcExternalLinks,
-@@ -52,6 +52,8 @@
+@@ -54,6 +54,8 @@ constexpr std::array<std::string_view, 3
      prefs::kShiftRightClickContextMenu,
      prefs::kHeliumLayout,
      prefs::kVerticalTabsUncollapsedWidth,
@@ -20,7 +20,7 @@
      prefs::kHeliumZenMode,
 --- a/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +++ b/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
-@@ -92,6 +92,8 @@
+@@ -92,6 +92,8 @@ NSString* const kKeyZenModeTopChromePinn
  NSString* const kKeyAppearance = @"settings_appearance";
  NSString* const kKeyChromeAppearance = @"chrome_appearance";
  NSString* const kKeySidebarWidth = @"sidebar_width";
@@ -29,7 +29,7 @@
  NSString* const kKeyChromeUIScale = @"chrome_ui_scale";
  NSString* const kKeySharedPalette = @"shared_palette";
  NSString* const kKeyRoundedFrame = @"rounded_frame";
-@@ -1137,6 +1139,33 @@
+@@ -1137,6 +1139,33 @@ void SettingsModelProfileWillBeDestroyed
        model && sidebar_width_available
            ? model->GetSidebarWidth()
            : tabs::kVerticalTabStripDefaultUncollapsedWidth;
@@ -63,7 +63,7 @@
    const bool home_available =
        model && model->HasPreference(prefs::kShowHomeButton);
    const bool back_available =
-@@ -1229,6 +1258,23 @@
+@@ -1229,6 +1258,23 @@ void SettingsModelProfileWillBeDestroyed
      @"sidebarWidth" : @(sidebar_width),
      @"sidebarWidthAvailable" : @(sidebar_width_available),
      @"sidebarWidthManaged" : @(sidebar_width_managed),
@@ -87,7 +87,7 @@
      @"roundedFrame" : @(model && rounded_available &&
                          model->GetBoolean(prefs::kHeliumRoundedFrame)),
      @"centeredLocationBar" :
-@@ -1277,6 +1323,8 @@
+@@ -1277,6 +1323,8 @@ void SettingsModelProfileWillBeDestroyed
                              [shared_palette[@"managed"] boolValue]),
        kKeyChromeAppearance : @(chrome_appearance_managed),
        kKeySidebarWidth : @(sidebar_width_managed),
@@ -96,7 +96,7 @@
        kKeyRoundedFrame : @(model && rounded_available &&
                             model->IsManaged(prefs::kHeliumRoundedFrame)),
        kKeyCenteredLocationBar :
-@@ -1326,6 +1374,8 @@
+@@ -1326,6 +1374,8 @@ void SettingsModelProfileWillBeDestroyed
                              [shared_palette[@"available"] boolValue]),
        kKeyChromeAppearance : @(chrome_appearance_available),
        kKeySidebarWidth : @(sidebar_width_available),
@@ -105,10 +105,11 @@
        kKeyRoundedFrame : @(rounded_available),
        kKeyCenteredLocationBar : @(centered_available),
        kKeyMinimalLocationBar : @(minimal_available),
-@@ -1860,6 +1910,30 @@
+@@ -1859,6 +1909,30 @@ void SettingsModelProfileWillBeDestroyed
+       [self modelDidChange];
      }
      return;
-   }
++  }
 +  if ([key isEqualToString:kKeyCollapsedSidebarStyle] &&
 +      GetIntegerObject(value, &integer_value)) {
 +    if (integer_value >= arcium::kCollapsedSidebarStyleMin &&
@@ -132,13 +133,12 @@
 +      [self modelDidChange];
 +    }
 +    return;
-+  }
+   }
    if ([key isEqualToString:kKeyAppearance] &&
        [value isKindOfClass:[NSString class]]) {
-     std::optional<int> mode = AppearanceModeValue((NSString*)value);
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -299,6 +299,11 @@
+@@ -337,6 +337,11 @@ struct ArciumSharedPaletteSnapshot: Equa
  }
  
  struct ArciumAppearanceSnapshot: Equatable {
@@ -150,7 +150,7 @@
      var mode = "system"
      var modeManaged = false
      var modeAvailable = true
-@@ -324,6 +329,13 @@
+@@ -362,6 +367,13 @@ struct ArciumAppearanceSnapshot: Equatab
      var sidebarWidth = 200
      var sidebarWidthAvailable = false
      var sidebarWidthManaged = false
@@ -164,7 +164,7 @@
      var chromeUIScale = 100
      var chromeUIScaleIsDefault = true
      var chromeUIScaleAvailable = false
-@@ -340,6 +352,17 @@
+@@ -378,6 +390,17 @@ struct ArciumAppearanceSnapshot: Equatab
          sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
          sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
          sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
@@ -182,7 +182,7 @@
          chromeUIScale = min(max(finiteIntegerOptional(dictionary["chromeUIScale"]) ?? 100, 80), 125)
          chromeUIScaleIsDefault = strictBoolean(dictionary["chromeUIScaleIsDefault"]) ?? true
          chromeUIScaleAvailable = strictBoolean(dictionary["chromeUIScaleAvailable"]) ?? false
-@@ -719,6 +742,23 @@
+@@ -764,6 +787,23 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "sidebar_width", value: Int(min(max(width.rounded(), 160), 400)))
      }
  
@@ -206,7 +206,7 @@
      var chromeUIScaleFactor: Double {
          let factor = Double(snapshot.appearance.chromeUIScale) / 100
          return factor.isFinite && factor > 0 ? factor : 1
-@@ -728,9 +768,18 @@
+@@ -773,11 +813,20 @@ final class ArciumSettingsStore: Observa
          (Double(snapshot.appearance.sidebarWidth) * chromeUIScaleFactor).rounded()
      }
  
@@ -217,17 +217,36 @@
      func setDisplayedSidebarWidth(_ width: Double) {
          guard width.isFinite else { return }
          setSidebarWidth(width / chromeUIScaleFactor)
-+    }
-+
+     }
+ 
 +    func setDisplayedChromeFrameBorderWidth(_ width: Double) {
 +        guard width.isFinite else { return }
 +        setChromeFrameBorderWidth(width / chromeUIScaleFactor)
-     }
- 
++    }
++
      func setChromeUIScale(_ scale: Double) {
+         guard snapshot.appearance.chromeUIScaleAvailable,
+               !snapshot.appearance.chromeUIScaleManaged,
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -552,7 +552,28 @@
+@@ -447,16 +447,6 @@ private struct TabsAndSpacesSettingsPage
+                                 set: { store.setAppearanceBoolean("zen_mode_sidebar_pinned", value: $0) }
+                             )
+                         )
+-                        BooleanSetting(
+-                            title: "Keep the top chrome pinned in Zen mode",
+-                            description: "Keep the address bar visible while Zen mode is active.",
+-                            enabled: store.snapshot.appearance.hasValue("zen_mode_top_chrome_pinned")
+-                                && !store.snapshot.appearance.isManaged("zen_mode_top_chrome_pinned"),
+-                            value: Binding(
+-                                get: { store.appearanceBoolean("zen_mode_top_chrome_pinned") },
+-                                set: { store.setAppearanceBoolean("zen_mode_top_chrome_pinned", value: $0) }
+-                            )
+-                        )
+                     }
+                 } else {
+                     SectionUnavailableView(title: "Tab settings")
+@@ -554,7 +544,34 @@ private struct AppearanceSettingsPage: V
                      help: SHelp(description: "Resize the expanded sidebar in this profile’s browser windows. Its displayed width follows Browser UI scale; webpage zoom stays unchanged."),
                      commitMode: .onDragEnd)
                  .disabled(!store.snapshot.appearance.sidebarWidthAvailable || store.snapshot.appearance.sidebarWidthManaged)
@@ -239,6 +258,12 @@
 +                }, description: "Hide the sidebar and toolbar when collapsed.")
 +                .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
 +                    || store.snapshot.appearance.collapsedSidebarStyleManaged)
++                BooleanSetting(
++                    title: "Keep top bar visible",
++                    description: "Keep the address bar visible in Zen mode and when the sidebar is fully hidden.",
++                    enabled: editable("zen_mode_top_chrome_pinned"),
++                    value: booleanBinding("zen_mode_top_chrome_pinned")
++                )
                  BooleanSetting(title: "Rounded frame", description: "Round the browser frame corners.", enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
 +                SSlider("Border width", value: Binding(
 +                    get: { store.displayedChromeFrameBorderWidth },
@@ -258,13 +283,10 @@
                  BooleanSetting(title: "Zen mode", description: "Hide optional browser chrome for a focused workspace.", enabled: editable("zen_mode"), value: booleanBinding("zen_mode"))
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -840,6 +840,68 @@
+@@ -928,6 +928,68 @@ final class ArciumSettingsUIContractTest
+     }
  
-         XCTAssertEqual(delegate.settings.map(\.key), ["sidebar_width", "sidebar_width"])
-         XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [200, 201])
-+    }
-+
-+    @MainActor
+     @MainActor
 +    func testCollapsedSidebarAndFrameBorderUseTypedHostCallbacks() {
 +        let delegate = TestDelegate()
 +        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
@@ -324,6 +346,9 @@
 +        unavailable.setCollapsedSidebarStyle(1)
 +        unavailable.setDisplayedChromeFrameBorderWidth(8)
 +        XCTAssertTrue(delegate.settings.isEmpty)
-     }
- 
-     @MainActor
++    }
++
++    @MainActor
+     func testSharedPaletteManagedSnapshotAndResetClearPendingDraft() throws {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: [

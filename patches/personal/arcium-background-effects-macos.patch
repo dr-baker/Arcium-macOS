@@ -2,9 +2,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/ui/views/helium/glass_surface_mac.mm
 +++ src/chrome/browser/ui/views/helium/glass_surface_mac.mm
-@@ -128,21 +128,27 @@
- 
- @interface ArciumGlassDecorationView : NSView {
+@@ -130,9 +130,13 @@ CGImageRef CreateGrainTile() {
   @private
    helium::GlassSurfaceConfiguration configuration_;
    CGImageRef tile_;
@@ -19,8 +17,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
  @end
  
  @implementation ArciumGlassDecorationView
- 
- - (instancetype)initWithFrame:(NSRect)frame {
+@@ -141,6 +145,8 @@ CGImageRef CreateGrainTile() {
    self = [super initWithFrame:frame];
    if (self) {
      tile_ = CreateGrainTile();
@@ -29,11 +26,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
      self.wantsLayer = YES;
      self.layer.needsDisplayOnBoundsChange = YES;
    }
-   return self;
- }
-@@ -160,12 +166,16 @@
- - (NSView*)hitTest:(NSPoint)point {
-   return nil;
+@@ -162,8 +168,12 @@ CGImageRef CreateGrainTile() {
  }
  
  - (void)applyConfiguration:
@@ -47,11 +40,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
    [self setNeedsDisplay:YES];
  }
  
- - (void)drawRect:(NSRect)dirtyRect {
-   CGContextRef context = NSGraphicsContext.currentContext.CGContext;
-@@ -187,11 +197,12 @@
-     };
-     const CGFloat radius = std::max<CGFloat>(
+@@ -189,7 +199,8 @@ CGImageRef CreateGrainTile() {
          1.0, static_cast<CGFloat>(point.radius) * radius_scale);
      const CGFloat point_alpha =
          static_cast<CGFloat>(point.opacity) *
@@ -61,11 +50,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
      CGColorRef start = CGColorFromSkColor4f(point.color, point_alpha);
      CGColorRef end = CGColorFromSkColor4f(point.color, 0.0);
      NSArray* colors = @[
-       (__bridge id)start,
-       (__bridge id)end,
-@@ -211,14 +222,18 @@
-     CGColorSpaceRelease(color_space);
-     CGColorRelease(start);
+@@ -213,10 +224,14 @@ CGImageRef CreateGrainTile() {
      CGColorRelease(end);
    }
  
@@ -84,11 +69,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
      CGContextSetInterpolationQuality(context, kCGInterpolationNone);
      const CGFloat scale =
          std::max<CGFloat>(1.0, self.window.backingScaleFactor);
-     const CGFloat grain_scale = std::clamp<CGFloat>(
-         static_cast<CGFloat>(configuration_.grain_scale), 0.5, 2.0);
-@@ -240,10 +255,11 @@
-     : NSView <NativeWindowBackgroundView> {
-  @private
+@@ -242,6 +257,7 @@ CGImageRef CreateGrainTile() {
    NSView* base_view_;
    ArciumGlassTintOverlayView* tint_overlay_view_;
    ArciumGlassDecorationView* decoration_view_;
@@ -96,11 +77,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
    helium::GlassSurfaceMaterial active_material_;
    ui::ColorProviderKey::ColorMode color_mode_;
    BOOL has_base_;
- }
- - (void)applyConfiguration:
-@@ -274,19 +290,19 @@
- 
- - (NSView*)hitTest:(NSPoint)point {
+@@ -276,7 +292,7 @@ CGImageRef CreateGrainTile() {
    return nil;
  }
  
@@ -109,7 +86,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
              (const helium::GlassSurfaceConfiguration&)configuration
                          resolution:
                              (const helium::GlassSurfaceResolution&)resolution
-                          colorMode:(ui::ColorProviderKey::ColorMode)colorMode
+@@ -284,7 +300,7 @@ CGImageRef CreateGrainTile() {
                          themeColor:(SkColor)themeColor {
    if (has_base_ && active_material_ == resolution.active &&
        color_mode_ == colorMode) {
@@ -118,11 +95,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
    }
  
    [base_view_ removeFromSuperview];
-   base_view_ = nil;
-   has_base_ = NO;
-@@ -303,10 +319,16 @@
-       break;
-     case helium::GlassSurfaceMaterial::kFrosted:
+@@ -305,6 +321,12 @@ CGImageRef CreateGrainTile() {
        base_view_ = helium::CreateNativeFrameMaterialBackgroundView(
            self.bounds, colorMode, themeColor, configuration.frosted_style,
            configuration.frosted_tint_strength);
@@ -135,11 +108,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
        break;
      case helium::GlassSurfaceMaterial::kSolid: {
        NSView* solid_view = [[NSView alloc] initWithFrame:self.bounds];
-       solid_view.wantsLayer = YES;
-       solid_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-@@ -321,48 +343,82 @@
-     [self addSubview:base_view_ positioned:NSWindowBelow relativeTo:nil];
-     has_base_ = YES;
+@@ -323,6 +345,7 @@ CGImageRef CreateGrainTile() {
    }
    active_material_ = resolution.active;
    color_mode_ = colorMode;
@@ -147,7 +116,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
  }
  
  - (void)applyConfiguration:
-             (const helium::GlassSurfaceConfiguration&)configuration
+@@ -330,10 +353,11 @@ CGImageRef CreateGrainTile() {
                  resolution:(const helium::GlassSurfaceResolution&)resolution
                   colorMode:(ui::ColorProviderKey::ColorMode)colorMode
                  themeColor:(SkColor)themeColor {
@@ -163,7 +132,7 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
  
    if (!decoration_view_) {
      decoration_view_ =
-         [[ArciumGlassDecorationView alloc] initWithFrame:self.bounds];
+@@ -341,26 +365,58 @@ CGImageRef CreateGrainTile() {
      decoration_view_.autoresizingMask =
          NSViewWidthSizable | NSViewHeightSizable;
      [self addSubview:decoration_view_];
@@ -182,16 +151,15 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
    if (!tint_overlay_view_) {
      tint_overlay_view_ =
          [[ArciumGlassTintOverlayView alloc] initWithFrame:self.bounds];
--  }
++    needs_reorder = true;
+   }
 -  if (base_view_) {
 -    [self addSubview:tint_overlay_view_
-+    needs_reorder = true;
-+  }
 +
-+  // A solid fallback is opaque and has no material for a rear glow to pass
-+  // through, so keep the derived layer hidden in that mode.
++  // Keep Liquid Glass color decoration above the material; retain the
++  // derived rear glow for Frosted. Solid has no translucent material to sample.
 +  rear_decoration_view_.hidden =
-+      resolution.active == helium::GlassSurfaceMaterial::kSolid;
++      resolution.active != helium::GlassSurfaceMaterial::kFrosted;
 +
 +  if (needs_reorder) {
 +    // The rear glow stays below native material; front glow and grain stay
@@ -222,11 +190,10 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
 -  [self addSubview:decoration_view_
 -        positioned:NSWindowAbove
 -        relativeTo:tint_overlay_view_];
--
--  [decoration_view_ applyConfiguration:configuration];
 +          relativeTo:tint_overlay_view_];
 +  }
-+
+ 
+-  [decoration_view_ applyConfiguration:configuration];
 +  [rear_decoration_view_ applyConfiguration:configuration
 +                                opacityScale:0.5
 +                                  drawsGrain:NO];
@@ -236,5 +203,3 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
  
    if (base_view_) {
      base_view_.alphaValue = std::clamp<CGFloat>(
-         static_cast<CGFloat>(configuration.material_opacity), 0.0, 1.0);
-   }
