@@ -38,7 +38,8 @@ it with the corresponding feature flag. Never force-enable it from Settings.
 | Pinned/Favorite link navigation | `HeliumAnchoredNavigationThrottle` and `GetAnchoredPinnedTabHome` | This is a core tab-identity/navigation invariant. Eligible ordinary link clicks can open in Peek while the pinned home stays anchored. The Peek preference controls that diversion; there is no separate “disable linked tabs” switch. |
 | Tab layout and collapsed sidebar | `helium.browser.layout`, `arcium.appearance.collapsed_sidebar_style` | Already in Appearance. The layout picker offers Classic, Compact, Vertical, and Dynamic; the collapse-style picker retains the Icon rail default and offers Fully hidden (Arc). Applying Arc shortcut defaults selects Fully hidden. Later edits take effect, but Restore previous restores the pre-preset collapse style as well as shortcuts. No new default-collapse preference is needed. |
 | Tab ordering and context menu | `helium.browser.new_tab_next_to_active`, `helium.browser.mru_tab_cycling`, `helium.browser.shift_right_click_context_menu` | Already in Tabs & Spaces. Sequential MRU cycling is separate from explicit Recent Tab shortcuts, which retain their existing preview behavior. |
-| Sidebar position and Zen chrome | `helium.browser.vertical_right_aligned`, `helium.browser.zen_mode`, `helium.browser.zen_mode_sidebar_pinned`, `helium.browser.zen_mode_top_chrome_pinned` | Already exposed in Tabs & Spaces and Appearance. |
+| Sidebar position and Zen chrome | `helium.browser.vertical_right_aligned`, `helium.browser.zen_mode`, `helium.browser.zen_mode_sidebar_pinned` | The sidebar pin remains in Tabs & Spaces and applies to Zen mode. |
+| Keep top bar visible | Existing `helium.browser.zen_mode_top_chrome_pinned` profile preference | Appearance uses the same saved Zen top-pin value for Zen mode and Fully hidden sidebar style. Pinning keeps the address bar visible; unpinning lets those modes hide it. |
 | Toolbar controls | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`, `kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton` | Already in Appearance. The two selected rows above fill the existing gap for vertical-collapse and dynamic-New-Tab buttons. |
 | Window material, glass, colors, and frame | `helium::kArciumChromeAppearancePref`, shared ThemeService palette and appearance mode; `arcium.appearance.chrome_ui_scale`, sidebar width, rounded frame, frame border | Already in the native Appearance editor. Do not add a second glass/material switch; the editor already enables/disables effects and preserves saved values when effects are inactive. |
 | Split tabs and browser shortcuts | Existing split-tab commands and `BrowserShortcutService` bindings | Keyboard Shortcuts already exposes bindings for split/focus actions. There is no separate Arcium master preference to expose. |
@@ -52,6 +53,24 @@ runtime consumer for each existing row. Key implementation seams are
 the Objective-C snapshot/action bridge in
 `chrome/browser/ui/cocoa/arcium_settings_window_controller.mm`, and the Swift
 snapshot/store/views in `chrome/browser/ui/cocoa/arcium_settings_swift`.
+
+### Appearance availability and sidebar motion
+
+Everyday and Advanced share the availability decision and explanation for
+decorative edits. When customization is off, the guidance points to Advanced
+to enable it. Renderer-override guidance points to the Automatic backend and a
+normal Arcium relaunch. Managed or unavailable settings remain saved.
+
+A disabled color canvas keeps its markers visible but sends no selection,
+color-edit, or movement actions. Re-enabling customization restores saved
+colors. Controls accent has its own availability and remains independent of
+decorative editing.
+
+The macOS collapse and expand source uses a 320 ms critically damped
+approximation. Folder presentation stays expanded during the slide, and
+connector painters suppress collapse and expand motion. Runtime acceptance
+currently covers endpoints, without frame, reversal, duration, Reduce Motion,
+or folder-connector proof.
 
 ## State and ownership rules
 
@@ -116,6 +135,18 @@ checks; do not infer a runtime mode from branch ancestry.
    snapshot tracks external changes. Relaunch using the runtime mode already
    authorized for this session and confirm profile/app preference values
    persist without changing Space, Pin, Favorite, tab, or session data.
+8. Select Fully hidden sidebar style. With **Keep top bar visible** off,
+   collapse the sidebar and verify the top bar hides. Turn it on and verify the
+   collapsed endpoint keeps the top bar visible. Repeat with Zen mode and
+   verify the separate sidebar pin remains independent. Return to Icon rail
+   and verify its settled endpoint. Restore the original values.
+9. Disable backdrop customization and check Everyday and Advanced guidance.
+   Try selecting, editing, and dragging a saved canvas marker. Verify no
+   decorative action changes saved data. Enable customization in Advanced and
+   confirm saved colors return. Change Size, close and reopen Settings, and
+   verify the saved value. Restore the original value. If renderer-override
+   guidance is present, select Automatic and relaunch through the authorized
+   normal app path before checking effects again.
 
 ### Verification scope
 
@@ -130,6 +161,15 @@ check passed after the installed restart. Live OS Dock commands, corrected
 Shift-right-click delivery with the setting on and off, and the
 foreground/unoccluded blank-content comparison remain human-waived and
 unverified. No blank-content cause or fix is established.
+
+The separate [October 4 follow-up](changelog-2026-10-03.md#october-4-follow-up)
+records passed Fully hidden and Zen top-pin endpoints, the Icon rail endpoint,
+guidance in both appearance presentations, disabled-marker behavior, and the
+return of saved colors. Size changed from 0.80 to 0.81, survived closing and
+reopening Settings, and was restored. These checks establish Settings-reopen
+persistence. A folder fixture was unavailable, and motion frames, reversal,
+duration, and Reduce Motion remain unverified. Glow edge discoloration remains
+unresolved.
 
 Blink Auto PiP was disabled in that accepted app configuration. Testing automatic
 entry requires an authorized run with the feature enabled; the unavailable row

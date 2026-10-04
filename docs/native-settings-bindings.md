@@ -23,7 +23,8 @@ Historical runtime results and their original source attribution are retained in
 | Cycle tabs by recent use | `prefs::kTabCyclingMRU`; profile | `TabStripModel::SelectRelativeTabCycle` chooses MRU vs sequential selection (`chrome/browser/ui/tabs/tab_strip_model.cc:4229-4238`); ordinary Ctrl+Tab preview behavior uses the setting (`chrome/browser/ui/views/frame/browser_view.cc:6093-6104`). Explicit Recent Tab shortcuts retain their existing preview behavior when this preference is off. |
 | Use Shift+right-click for the context menu | `prefs::kShiftRightClickContextMenu`; profile | The pref is copied to renderer WebPreferences (`chrome/browser/chrome_content_browser_client.cc:4754-4755`) and watched for renderer updates (`chrome/browser/ui/prefs/pref_watcher.cc:165-170`). Blink applies it to WebSettings (`third_party/blink/renderer/core/exported/web_view_impl.cc:1871-1873`) and checks Shift+secondary-click in `event_handler.cc:2167-2177`. This is not a macOS-only no-op. |
 | Place the sidebar on the right | `prefs::kHeliumVerticalRightAligned`; profile | Vertical tab controller reads/writes the pref and observes mode changes (`chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc:61-70,182-189`). |
-| Keep sidebar/top chrome pinned in Zen mode | `prefs::kHeliumZenModeSidebarPinned`, `prefs::kHeliumZenModeTopChromePinned`; profile | `BrowserView` registers both prefs and computes pinned state (`chrome/browser/ui/views/frame/browser_view.cc:1408-1420,1925-1951`). Zen enablement/layout is also observed by the layout controller (`helium_layout_state_controller.cc:20-25,52-54`). |
+| Keep sidebar visible in Zen mode | `prefs::kHeliumZenModeSidebarPinned`; profile | The control remains in Tabs & Spaces. `BrowserView::IsZenModeSideChromePinned` applies the saved value in Zen mode. |
+| Keep top bar visible | `prefs::kHeliumZenModeTopChromePinned`; profile | Appearance reuses the existing Zen top-pin preference. `BrowserView::IsZenModeTopChromePinned` applies it in Zen mode and Fully hidden sidebar style. `GetTopChromeRevealRatio` gives the pin precedence over collapse motion, and `OnZenModeTopChromePinnedPrefChanged` updates the live layout. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` registers the pref, invalidates layout on change, and uses it in centered bounds calculation (`chrome/browser/ui/views/toolbar/toolbar_view.cc:808-811,2367-2380`). This is the Views toolbar used by the desktop browser, including macOS. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it and refreshes on focus changes (`chrome/browser/ui/omnibox/chrome_omnibox_client.cc:200-206,500-507`); `OmniboxViewViews` observes it and changes steady-state alignment (`chrome/browser/ui/views/omnibox/omnibox_view_views.cc:251-259,933-945`). |
@@ -116,11 +117,27 @@ and window traffic lights retain their system sizing.
 ## Collapsed sidebar and frame border
 
 **Collapsed sidebar** preserves the existing **Icon rail** default. **Fully
-hidden (Arc)** removes the collapsed vertical sidebar and hides the top browser
-chrome in normal windows. The top edge and Command-L reveal the toolbar;
-the sidebar button or the configured sidebar shortcut expands the sidebar
-again. Its saved expanded width is preserved. Fullscreen uses its existing
-layout, and this choice does not rewrite Zen mode preferences.
+hidden (Arc)** removes the collapsed vertical sidebar in normal windows. With
+**Keep top bar visible** off, it also hides the top browser chrome. The top edge
+and Command-L reveal the toolbar; the sidebar button or configured shortcut
+expands the sidebar again. Its saved expanded width is preserved. Fullscreen
+uses its existing layout, and selecting a collapse style does not rewrite Zen
+mode preferences.
+
+**Keep top bar visible** is in Appearance and writes the existing
+`helium.browser.zen_mode_top_chrome_pinned` preference. The value now applies to
+Fully hidden and Zen mode. The separate
+`helium.browser.zen_mode_sidebar_pinned` control remains in Tabs & Spaces and
+applies to Zen mode.
+
+The macOS collapse and expand sequences use a 320 ms sampled approximation of
+a critically damped response on the existing animation clock. A reversal
+preserves position, without preserving spring velocity. Top chrome and content
+insets follow the reveal ratio. Folder rows keep expanded presentation during
+the slide, and connector painting is suppressed during collapse and expand.
+These are source-reviewed contracts. The October 4 runtime checks cover settled
+endpoints; frame timing, reversal, Reduce Motion, and live folder connectors
+remain unverified.
 
 Applying Arc shortcut defaults selects Fully hidden and binds Command-S to the
 existing sidebar toggle. Later changes to the collapse style remain authoritative.
@@ -194,6 +211,17 @@ Advanced retains independent intensity editing. Background Effects provides
 Reflective Glass, normalized opacity, saturation, and a two-axis grain control.
 Advanced exposes the material and individual rendering values. The segmented
 Everyday/Advanced selector uses the shared saved controls accent.
+
+Everyday and Advanced use the same decorative-editing availability and reason.
+When customization is off, both explain that Advanced enables backdrop
+customization. A renderer override can also make color effects unavailable;
+the guidance directs the user to the Automatic backend and a normal relaunch.
+Managed and unavailable settings retain their saved values.
+
+The disabled canvas displays saved markers but blocks selection, color editing,
+and movement callbacks. Re-enabling customization restores the visible saved
+colors. Controls accent uses its own availability and remains independent of
+decorative editing.
 
 Arcium owns its fitted Clear-glass opacity curve:
 
@@ -302,4 +330,7 @@ contains reusable checks. Historical observations retain their original bundle
 and profile in the [implementation history](audits/settings-implementation-history.md).
 The [October 3 changelog](changelog-2026-10-03.md#validation-and-known-gaps)
 records the accepted product scope, including the completed selector-accent
-check and three human-waived live checks that remain unverified.
+check and three human-waived live checks that remain unverified. Its separate
+[October 4 follow-up](changelog-2026-10-03.md#october-4-follow-up) records the
+top-pin, decorative-availability, and Size-reopen checks. Glow edge
+discoloration remains unresolved.

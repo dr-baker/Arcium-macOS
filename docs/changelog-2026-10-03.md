@@ -141,3 +141,64 @@ during landing. The scope ends before this changelog's documentation-only commit
 The principal change groups are core `308bcc94`, `df9e9a66`, `55b97e34`, and
 `35633aa1`; macOS `ef50c313`, `0cd6afb8`, `8be81b43`, `09cb4d07`, and `cd67ab2a`;
 and the job-limit, fixture, and accent follow-ups through `83aa0e1a`.
+
+## October 4 follow-up
+
+4 October 2026. The initial built and installed snapshot for these checks is
+Arcium-macOS `a32c53e222411cfdcb66656f19d1809e6d8195aa`, selecting core
+`2f3fd8793975adf0c0f347d5d36d7b5130860f1e`. This is separate from the October 3
+acceptance snapshot above.
+
+### Sidebar and appearance changes
+
+- Add **Keep top bar visible** to Appearance. It reuses the existing Zen
+  top-pin preference and applies to Fully hidden sidebar style and Zen mode.
+  The separate Zen sidebar pin remains in Tabs & Spaces.
+- Share decorative-editing availability and explanations between Everyday and
+  Advanced. Explain how Advanced enables customization, and how to return a
+  renderer override to Automatic before a normal relaunch.
+- Keep saved color markers visible while decorative editing is disabled and
+  block their selection, color editing, and movement actions. Preserve
+  independent Controls accent availability.
+- Use a 320 ms critically damped approximation for macOS collapse and expand
+  motion. The source keeps expanded folder presentation during the slide and
+  suppresses connector painting during collapse and expand.
+
+### Build and observed behavior
+
+- Zero-fuzz replay and `he check` passed. The warm application build completed
+  seven planned actions, and `he arcium iterate --approved` installed and
+  launched `/Applications/Arcium.app` with the persistent Arcium profile and
+  real Keychain. No new tests were added; the existing SettingsUI checks
+  passed all 178 tests for the reusable editor changes.
+- Computer use passed Fully hidden endpoints with top pin off and on, Zen
+  endpoints with top pin off and on, and the Icon rail endpoint.
+- Both appearance presentations showed customization guidance. Disabled canvas
+  markers exposed no editing actions, and saved colors returned after customization
+  was enabled.
+- Size changed from 0.80 to 0.81 and survived closing and reopening Settings.
+  The original value was restored. This check covers Settings-reopen
+  persistence.
+
+The [iteration log](/Users/daniel/Library/Logs/Arcium/sidebar-transition-styling-20261003/canonical-arcium-iterate.log)
+records the successful build and installed handoff. A folder fixture was
+unavailable, so live connector behavior remains unverified. The checks do not
+establish intermediate-frame motion, reversal, duration, or Reduce Motion
+behavior.
+
+Glow edge discoloration was investigated against the original commits and the
+saved profile colors. The saved tuning was unchanged, and before/after
+screenshots did not establish an edge correction. The discoloration remains
+unresolved; no renderer fix is confirmed. The speculative removal of the rear
+glow was reverted in `ba17b6175aa76348dd6204cca9906a851103c184`.
+
+The final installed snapshot is macOS
+`ba17b6175aa76348dd6204cca9906a851103c184`, selecting the same core commit.
+The [recovery iteration log](/Users/daniel/Library/Logs/Arcium/sidebar-transition-styling-20261003/glass-revert-recovery-arcium-iterate.log)
+records the successful rebuild and installed restart after the revert. Patch
+replay changed timestamps on unchanged files, requiring 559 build actions.
+Compilation took 296 seconds; the full iteration took 559 seconds. Root reopened
+the Personal profile's Appearance page and confirmed enabled controls and
+unchanged saved colors, positions, and Size 0.72. The
+[verification notes](/Users/daniel/Library/Logs/Arcium/sidebar-transition-styling-20261003/verification-notes.md)
+record the initial budget refusal, recovery, bundle proof, and acceptance gaps.

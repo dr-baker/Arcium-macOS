@@ -11,9 +11,10 @@ The current macOS product requires macOS 26 or later.
 
 1. Open Settings with Command-Comma. In Tabs & Spaces, choose Vertical tabs for
    a sidebar layout and choose its side. In Appearance, adjust Sidebar width.
-2. Choose how a collapsed sidebar behaves. Icon rail keeps compact tab access;
-   Fully hidden hides the sidebar. Zen controls separately govern whether the
-   sidebar and top controls stay visible.
+2. In Appearance, choose how a collapsed sidebar behaves. Icon rail keeps
+   compact tab access; Fully hidden hides the sidebar. **Keep top bar visible**
+   keeps the address bar visible in Fully hidden and Zen mode. The separate
+   sidebar pin remains in Tabs & Spaces and applies to Zen mode.
 3. In Keyboard Shortcuts, review the Arc-inspired preset. It applies supported
    actions and reports unsupported ones. It saves the prior shortcut state so
    you can restore it. Applying the preset also selects Fully hidden; you can
@@ -71,6 +72,7 @@ require a new sign-in even after cookie migration.
 | Enable Peek | Previews eligible links while keeping the saved item's home anchored. Turning it off requests closure of an active Peek and returns eligible link clicks to ordinary navigation. If you cancel the page's unsaved-change prompt, the same document stays open as an ordinary tab and Peek remains off. |
 | Suggest Favorites and Pins in the address bar | Includes saved sidebar items among address-bar results. Turning it off preserves the items and ordinary suggestions. |
 | Open external links in Little Arc | Routes links opened from other apps through Little Arc. Turning it off uses the ordinary browser window or tab path. |
+| Keep top bar visible | Keeps the address bar visible in Zen mode and when the collapsed sidebar is Fully hidden. Turning it off lets those modes hide the top bar. The sidebar pin remains a separate Zen control in Tabs & Spaces. |
 | Show Spaces in Dock menu | Shows Spaces in the app's Dock menu. Turning it off shows profile shortcuts when there are multiple profiles. A single profile keeps the ordinary window commands. New Incognito Window remains available when permitted. This setting applies across profiles. |
 | Show sidebar collapse button | Shows the collapse button in Vertical layout. Other collapse commands still work when it is hidden. |
 | Show New Tab button | Shows the New Tab button in Dynamic layout. Other New Tab commands still work when it is hidden. |
@@ -86,6 +88,19 @@ initiated automatic picture in picture** defaults to off, which disables the
 native setting. When the flag is enabled, audible video from an HTTPS or local
 file page can qualify. Site permissions still apply. Switching away from the
 playing tab triggers entry; turning the setting on alone does not open a window.
+
+## Adjust window colors and effects
+
+Appearance offers Everyday and Advanced views of the same saved colors and
+effects. Both show why decorative controls are unavailable. To enable those
+controls, switch to Advanced and enable backdrop customization. If a renderer
+override prevents color effects, select the Automatic backend and relaunch
+Arcium normally as the guidance describes.
+
+While decorative editing is disabled, the color canvas keeps its saved markers
+but does not select, edit, or move them. Enabling customization restores the
+saved colors. Controls accent remains independent, subject to its own theme
+and policy availability.
 
 ## Use the sidebar each day
 
