@@ -156,10 +156,10 @@ Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
 -  if (base_view_) {
 -    [self addSubview:tint_overlay_view_
 +
-+  // Keep Liquid Glass color decoration above the material; retain the
-+  // derived rear glow for Frosted. Solid has no translucent material to sample.
++  // A solid fallback is opaque and has no material for a rear glow to pass
++  // through, so keep the derived layer hidden in that mode.
 +  rear_decoration_view_.hidden =
-+      resolution.active != helium::GlassSurfaceMaterial::kFrosted;
++      resolution.active == helium::GlassSurfaceMaterial::kSolid;
 +
 +  if (needs_reorder) {
 +    // The rear glow stays below native material; front glow and grain stay
