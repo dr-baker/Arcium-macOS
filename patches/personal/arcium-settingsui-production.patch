@@ -2812,7 +2812,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
              SSectionCard(title: "Browser layout and size") {
                  SPicker("Browser layout", selection: Binding(
-@@ -612,53 +554,126 @@ private struct AppearanceSettingsPage: V
+@@ -612,53 +554,125 @@ private struct AppearanceSettingsPage: V
                      help: SHelp(description: "Resize the expanded sidebar in this profile’s browser windows. Its displayed width follows Browser UI scale; webpage zoom stays unchanged."),
                      commitMode: .onDragEnd)
                  .disabled(!store.snapshot.appearance.sidebarWidthAvailable || store.snapshot.appearance.sidebarWidthManaged)
@@ -2842,8 +2842,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    @ViewBuilder
 +    private var backgroundEditor: some View {
 +        if let chrome = store.currentChromeAppearance, store.snapshot.appearance.chrome.isAvailable {
++            paletteEditabilityNote
 +            if backgroundMode == .everyday {
-+                paletteEditabilityNote
 +                SBackdropEditor(
 +                    configuration: chromeBinding,
 +                    controlAccent: controlAccentBinding,
@@ -2878,7 +2878,6 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                    }
 +                }
 +            } else {
-+                paletteEditabilityNote
 +                SBackdropEditor(
 +                    configuration: chromeBinding,
 +                    controlAccent: controlAccentBinding,
@@ -7041,7 +7040,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SBackdropEditor.swift
-@@ -0,0 +1,1029 @@
+@@ -0,0 +1,1054 @@
 +import SwiftUI
 +
 +/// A compact backdrop editor that writes normalized typed values through the
@@ -7110,6 +7109,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +
 +    public var body: some View {
 +        VStack(alignment: .leading, spacing: SettingsSpacing.lg) {
++            availabilityNote
 +            if !colorsOnly {
 +                SToggle(
 +                    "Customize backdrop",
@@ -7271,10 +7271,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +                    }
 +                    .disabled(!isDecorativeEditingEnabled)
 +
-+                    if let fallbackStatus {
++                    if editable && effectsAvailable && !isForcedFallback, let fallbackStatus {
 +                        HStack(alignment: .firstTextBaseline, spacing: SettingsSpacing.xs) {
-+                            Image(systemName: isForcedFallback ? "exclamationmark.triangle" : "checkmark.circle")
-+                                .foregroundStyle(isForcedFallback ? theme.warning : theme.success)
++                            Image(systemName: "checkmark.circle")
++                                .foregroundStyle(theme.success)
 +                                .accessibilityHidden(true)
 +                            Text(fallbackStatus)
 +                                .settingsFont(\.caption)
@@ -7282,19 +7282,6 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +                                .fixedSize(horizontal: false, vertical: true)
 +                        }
 +                        .accessibilityElement(children: .combine)
-+                    }
-+
-+                    if draft.enabled && isForcedFallback && !effectsAvailable {
-+                        Text("Color effects are unavailable while this window material is active.")
-+                            .settingsFont(\.caption)
-+                            .foregroundStyle(theme.textSecondary)
-+                            .fixedSize(horizontal: false, vertical: true)
-+                    }
-+                    if !editable {
-+                        Text("Backdrop settings are unavailable for editing.")
-+                            .settingsFont(\.caption)
-+                            .foregroundStyle(theme.textSecondary)
-+                            .fixedSize(horizontal: false, vertical: true)
 +                    }
 +                }
 +            }
@@ -7335,18 +7322,46 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +        .onChange(of: draft.grain) { _, _ in observeEditorRanges() }
 +    }
 +
++    @ViewBuilder private var availabilityNote: some View {
++        if let message = availabilityMessage {
++            Text(message)
++                .settingsFont(\.caption)
++                .foregroundStyle(theme.textSecondary)
++                .fixedSize(horizontal: false, vertical: true)
++                .accessibilityIdentifier("backdrop-availability-note")
++        }
++    }
++
++    private var availabilityMessage: String? {
++        if !editable { return "Backdrop settings are unavailable for editing." }
++        if !draft.enabled {
++            return colorsOnly
++                ? "In Advanced, turn on Customize backdrop to edit window colors and effects."
++                : "Turn on Customize backdrop to edit window colors and effects."
++        }
++        if !effectsAvailable {
++            return userFacingFallbackReason ?? "Color effects are unavailable while this window material is active."
++        }
++        return isForcedFallback ? fallbackStatus : nil
++    }
++
 +    @ViewBuilder private var colorsSectionContent: some View {
 +        SettingsBackdropEditorPreview(
 +            configuration: draft,
 +            selectedGlowID: selectedGlowID,
 +            editable: isDecorativeEditingEnabled,
 +            effectsAvailable: effectsAvailable,
-+            selectGlow: { selectedGlowID = $0 },
++            selectGlow: { id in
++                guard isDecorativeEditingEnabled else { return }
++                selectedGlowID = id
++            },
 +            editGlow: openColorPicker,
 +            moveGlow: moveGlow,
 +            moveGlowByAccessibility: moveGlowByAccessibility
 +        )
-+        Text("Drag to place a color. Double-click a point to choose its color.")
++        Text(isDecorativeEditingEnabled
++            ? "Drag to place a color. Double-click a point to choose its color."
++            : "Saved color locations are shown. Placement is unavailable.")
 +            .settingsFont(\.caption)
 +            .foregroundStyle(theme.textSecondary)
 +
@@ -8015,6 +8030,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +        .frame(height: 190)
 +        .accessibilityElement(children: .contain)
 +        .accessibilityLabel("Window color placement")
++        .disabled(!editable)
 +    }
 +}
 +
@@ -8030,7 +8046,37 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +    let moveByAccessibility: (String, Double, Double) -> Void
 +    @Environment(\.settingsTheme) private var theme
 +
-+    var body: some View {
++    @ViewBuilder var body: some View {
++        if editable {
++            marker
++                .focusable(true)
++                .onKeyPress(.return) { select(); return .handled }
++                .onKeyPress(.space) { select(); return .handled }
++                .accessibilityHint("Drag to move this color point. Double-click to open the color picker.")
++                .accessibilityAction { select() }
++                .accessibilityAction(named: "Choose color", edit)
++                .accessibilityAction(named: "Move left") { moveByAccessibility(glow.id, -0.05, 0) }
++                .accessibilityAction(named: "Move right") { moveByAccessibility(glow.id, 0.05, 0) }
++                .accessibilityAction(named: "Move up") { moveByAccessibility(glow.id, 0, -0.05) }
++                .accessibilityAction(named: "Move down") { moveByAccessibility(glow.id, 0, 0.05) }
++                .gesture(
++                    TapGesture(count: 2)
++                        .onEnded(edit)
++                        .exclusively(before: TapGesture().onEnded(select))
++                )
++                .highPriorityGesture(
++                    DragGesture(minimumDistance: 3, coordinateSpace: .named("settings-backdrop-editor-preview"))
++                        .onChanged { value in move(glow.id, value.location, size, false) }
++                        .onEnded { value in move(glow.id, value.location, size, true) }
++                )
++                .help("Drag to move color point \(index + 1). Double-click to open the color picker.")
++        } else {
++            marker
++                .disabled(true)
++        }
++    }
++
++    private var marker: some View {
 +        ZStack {
 +            Circle().fill(glow.color.color)
 +            Circle().strokeBorder(isSelected ? theme.selectionText : .white.opacity(0.85), lineWidth: isSelected ? 3 : 1)
@@ -8041,32 +8087,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +        }
 +        .frame(width: 30, height: 30)
 +        .contentShape(Circle())
-+        .disabled(!editable)
-+        .focusable(editable)
-+        .onKeyPress(.return) { select(); return .handled }
-+        .onKeyPress(.space) { select(); return .handled }
 +        .accessibilityElement(children: .ignore)
 +        .accessibilityAddTraits(.isButton)
 +        .accessibilityLabel("Color point \(index + 1)")
 +        .accessibilityValue("Position \(percent(glow.x)), \(percent(glow.y))")
-+        .accessibilityHint("Drag to move this color point. Double-click to open the color picker.")
-+        .accessibilityAction { select() }
-+        .accessibilityAction(named: "Choose color", edit)
-+        .accessibilityAction(named: "Move left") { moveByAccessibility(glow.id, -0.05, 0) }
-+        .accessibilityAction(named: "Move right") { moveByAccessibility(glow.id, 0.05, 0) }
-+        .accessibilityAction(named: "Move up") { moveByAccessibility(glow.id, 0, -0.05) }
-+        .accessibilityAction(named: "Move down") { moveByAccessibility(glow.id, 0, 0.05) }
-+        .gesture(
-+            TapGesture(count: 2)
-+                .onEnded(edit)
-+                .exclusively(before: TapGesture().onEnded(select))
-+        )
-+        .highPriorityGesture(
-+            DragGesture(minimumDistance: 3, coordinateSpace: .named("settings-backdrop-editor-preview"))
-+                .onChanged { value in move(glow.id, value.location, size, false) }
-+                .onEnded { value in move(glow.id, value.location, size, true) }
-+        )
-+        .help("Drag to move color point \(index + 1). Double-click to open the color picker.")
 +    }
 +
 +    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
