@@ -824,11 +824,8 @@ ___helium_quilt_pop_inner() {
         echo "usage: he pop [PATCH]" >&2
         return 2
     fi
-    if [ "$#" -eq 1 ]; then
-        cd "$_src_dir" && quilt pop "$1"
-    else
-        cd "$_src_dir" && quilt pop -a
-    fi
+    ___helium_python "$_helium_harness_root/devutils/replay_contract.py" \
+        pop --worktree "$_root_dir" --source "$_src_dir" -- "$@"
 }
 
 ___helium_quilt_pop() {

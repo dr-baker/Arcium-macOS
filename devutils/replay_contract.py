@@ -386,6 +386,52 @@ def _run_quilt(
     )
 
 
+def pop(worktree: Path, source_dir: Path, target: str | None = None) -> int:
+    """Preserve the complete-stack baseline before popping under the lane lock.
+
+    Subsequent pops may start with a prefix, but must reuse the original
+    journal. Patch additions that vanish when popped cannot be recovered from
+    a new snapshot of that prefix.
+    """
+    try:
+        state = inspect_quilt_state(source_dir, _patch_root(worktree))
+        state.comparison.require_valid_prefix()
+    except QuiltStateError as error:
+        raise ReplayError(f"could not inspect Quilt state before pop: {error}") from error
+    if target is not None and (target.startswith("-") or target not in state.comparison.declared):
+        raise ReplayError(f"pop target is not a declared patch in the selected Quilt series: {target}")
+    arguments = ("pop", target) if target is not None else ("pop", "-a")
+    if not state.comparison.applied and not has_pending_recovery(source_dir):
+        # Quilt reports its normal no-op result. There is no mutation to guard.
+        return _run_quilt(source_dir, _quilt_environment(worktree), *arguments).returncode
+    before = current_source_identity(worktree, source_dir)
+
+    def complete_paths():
+        try:
+            state.comparison.require_complete()
+        except QuiltStateError as error:
+            raise ReplayError(
+                "cannot preserve timestamps from a partially applied Quilt stack without "
+                "its original recovery snapshot; finish he replay before starting he pop"
+            ) from error
+        if state.comparison.applied:
+            yield from _patch_owned_paths(worktree, source_dir)
+
+    try:
+        records = recovery_timestamps(
+            source_dir, worktree=worktree, patch_root=_patch_root(worktree),
+            source_receipt_id=before.receipt_id,
+            source_identity={"chromium_version": before.chromium_version},
+            paths=complete_paths(),
+        )
+    except TimestampRecoveryError as error:
+        raise ReplayError(str(error)) from error
+    print(f"timestamp baseline: {len(records)} files in "
+          f"{source_dir.parent / '.arcium' / 'replay-timestamps.json'}", flush=True)
+    invalidate_downstream_receipts(source_dir.parent)
+    return _run_quilt(source_dir, _quilt_environment(worktree), *arguments).returncode
+
+
 def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
     """Replay and publish proof. The caller must hold the selected lane lock."""
     _require_core_patch_copies(worktree)
@@ -438,22 +484,28 @@ def replay(worktree: Path, source_dir: Path) -> ReplayReceipt:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("replay", "check"))
+    parser.add_argument("action", choices=("replay", "check", "pop"))
     parser.add_argument("--worktree", type=Path, required=True)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("target", nargs="?")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    arguments = _parser().parse_args(argv)
+    parser = _parser()
+    arguments = parser.parse_args(argv)
+    if arguments.target is not None and arguments.action != "pop":
+        parser.error("a patch target is only valid with pop")
     worktree = arguments.worktree.expanduser().resolve()
     source_dir = arguments.source.expanduser().resolve()
     try:
-        if arguments.action == "replay":
+        if arguments.action in {"replay", "pop"}:
             with acquire_lane_lock(
                 source_dir.parent / ".arcium" / "lane.lock",
-                {"action": "replay", "worktree": str(worktree)},
+                {"action": arguments.action, "worktree": str(worktree)},
             ):
+                if arguments.action == "pop":
+                    return pop(worktree, source_dir, arguments.target)
                 result = replay(worktree, source_dir)
         else:
             result = require_current_replay_proof(worktree, source_dir)
