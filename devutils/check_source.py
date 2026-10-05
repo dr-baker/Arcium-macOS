@@ -22,6 +22,29 @@ class SourceCheckError(RuntimeError):
     """The source could not be checked or contains a checked-in error."""
 
 
+def first_patch_reject(source_dir: Path) -> Path | None:
+    """Find a source reject without scanning top-level output or metadata.
+
+    Nested directories with these names remain source and must be checked.
+    Match any entry named *.rej without descending through directory symlinks.
+    Unreadable source fails the check.
+    """
+    root = os.fspath(source_dir)
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    for directory, directories, files in os.walk(root, topdown=True, onerror=fail,
+                                                 followlinks=False):
+        if directory == root:
+            directories[:] = [name for name in directories if name not in {"out", ".git", ".pc"}]
+        for names in (directories, files):
+            for name in names:
+                if name.endswith(".rej"):
+                    return Path(directory) / name
+    return None
+
+
 def _run_git_diff_check(source_dir: Path) -> None:
     result = subprocess.run(
         ["git", "-C", str(source_dir), "diff", "--check"],
@@ -164,6 +187,9 @@ def check_source(source_dir: Path) -> None:
     source_dir = source_dir.expanduser().resolve()
     if not source_dir.is_dir():
         raise SourceCheckError(f"source directory is missing: {source_dir}")
+    rejected = first_patch_reject(source_dir)
+    if rejected is not None:
+        raise SourceCheckError(f"patch rejects remain in the development source: {rejected}")
     if _is_source_git_root(source_dir):
         _run_git_diff_check(source_dir)
     else:

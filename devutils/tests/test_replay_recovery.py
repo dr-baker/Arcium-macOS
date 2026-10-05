@@ -294,6 +294,18 @@ class ActualRecoverySmokeTests(unittest.TestCase):
             os.utime(changed, ns=(3_000_000_000, 4_000_000_000))
             modes = {path.name: path.stat().st_mode for path in (header, changed)}
             self.assertEqual(cli('replay').returncode, 0)
+            for name in ('out', '.git', '.pc'):
+                ignored = source / name / 'generated.rej'
+                ignored.parent.mkdir(exist_ok=True)
+                ignored.write_text('ignored output or metadata\n')
+            self.assertEqual(cli('replay').returncode, 0)
+            actual_reject = source / 'chrome' / 'actual.rej'
+            actual_reject.write_text('failed source patch\n')
+            refused = cli('replay')
+            self.assertEqual(refused.returncode, 2, refused.stderr)
+            self.assertIn(str(actual_reject), refused.stderr)
+            actual_reject.unlink()
+            self.assertEqual(cli('replay').returncode, 0)
             ninja()
             self.assertIn('no work to do', ninja('-n'))
 
