@@ -18,7 +18,7 @@ features belong in Arcium core.
 | --- | --- |
 | How do I migrate an existing profile and recover if it fails? | [Daily-driver migration](docs/arc-daily-driver-migration.md) |
 | Why are source ownership and build lanes separate? | [Maintainer onboarding](docs/helium-maintainer-onboarding.md) |
-| What are the build, patch, replay, and packaging commands? | [Build guide](docs/building.md) |
+| How do I author patches, coordinate parallel work, and build the product? | [Build guide](docs/building.md) |
 | How does native Settings integrate with the browser and renderer? | [SettingsUI integration](docs/settingsui-integration.md) |
 | Which saved preference and runtime consumer backs each control? | [Native settings bindings](docs/native-settings-bindings.md) |
 | What happens when a feature is turned off or unavailable? | [Feature settings contracts](docs/feature-settings-audit.md) |

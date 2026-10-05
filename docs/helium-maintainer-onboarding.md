@@ -41,11 +41,13 @@ directory for each small change loses useful compiled output. A build lane is
 one stable directory containing the source tree, its applied patches, generated
 build graph, and output. A checkout can select a lane without moving those files.
 
-The lane is one mutable integration state. A transaction lock prevents two
-checkouts from replaying patches, compiling, packaging, or launching from it at
-the same time. The lock does not make divergent source states interchangeable.
-Do not copy or symlink generated source or output between lanes; generated build
-files contain absolute paths.
+The lane is one mutable integration state. A transaction lock excludes
+concurrent commands, while one integrator owns the combined source and its
+validation through acceptance. Alternating divergent checkouts between commands
+can invalidate the previous stage's evidence even when every command acquired
+the lock. Follow [Coordinate parallel work](building.md#coordinate-parallel-work)
+when several workers own source branches. Generated files contain absolute paths,
+so source and output stay in their original lane.
 
 The `he` commands wrap the existing build tools and record what each step used.
 Those records address a common local failure: inspecting one checkout while
@@ -91,26 +93,11 @@ explicit build directory appropriate to the machine and inspect `he lane`
 before starting a cold or broad build. Do not treat Daniel's local receipts as
 evidence for a different machine or revision.
 
-For a different external disk, the heavy lane requires a writable,
-case-sensitive APFS volume. Read its Volume UUID with `diskutil info`, then
-replace the example values below. The UUID check prevents a build from silently
-using a different disk mounted at the same path.
-
-```sh
-export HELIUM_DEV_LANE=heavy
-export HELIUM_DEV_BUILD_ROOT='/Volumes/YourBuildDisk/ArciumBuild/full-source'
-export HELIUM_DEV_HEAVY_VOLUME_UUID='YOUR-VOLUME-UUID'
-source dev.sh
-he lane
-```
-
-After installing the dependencies in the build guide, a cold full-source lane
-can be prepared with `he bootstrap --approved --full-source`. The command
-downloads source, applies patches, generates the build graph, builds the
-browser, and packages the development app. It requires at least 80 GiB free
-before starting. Keep additional free space on the system disk for macOS and
-swap. Use full source when the planned browser tests need test data omitted by
-the smaller Chromium archive.
+For a different external disk or an APFS disk image, follow
+[Select a build lane](building.md#select-a-build-lane). Saved lane selection keeps
+source worktrees on the same chosen storage. Lane diagnostics describe both the
+mounted build volume and its backing storage. Use full source when the planned
+browser tests require test data omitted by the smaller archive.
 
 ## Patch editing and review
 
@@ -152,9 +139,12 @@ and loads the library.
 2. Read the affected personal patches and their series dependencies.
 3. Select a build directory and inspect `he context` and `he lane`.
 4. Recreate the complete patch stack with zero fuzz.
-5. Run focused tests, then the applicable full build and regression suites.
-6. Verify the exact bundle and profile before behavior, persistence, and teardown
-   testing. Choose installed-app or isolated testing explicitly.
+5. Compile changed files and representative header consumers. Run applicable
+   focused executable checks. Batch reviewed source fixes before the final
+   application build.
+6. Verify the exact bundle and profile, then follow the affected contract's
+   behavior, persistence, and teardown steps. Preserve the session's runtime
+   choice or establish it before the handoff.
 
 Use [the build guide](building.md) for dependencies and commands,
 [tab invariants](tab-invariants.md) for model and browser tests, and
