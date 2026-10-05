@@ -112,8 +112,9 @@ class LaneTransactionTests(unittest.TestCase):
                 if ambient is not None:
                     environment["HELIUM_DEV_HEAVY_VOLUME_UUID"] = ambient
                 (root / "fake-tools/python3").symlink_to(sys.executable)
-                for helper in ("setup_python.sh", "helium_acquisition.sh"):
+                for helper in ("setup_python.sh", "helium_acquisition.sh", "lane_selection.py"):
                     (root / "devutils" / helper).write_bytes((ROOT / "devutils" / helper).read_bytes())
+                subprocess.run(["git", "init", "-q", str(root)], check=True, env=environment)
                 observed = root / "observed-pin.json"
                 environment["OBSERVED_PIN"] = str(observed)
                 script = root / "dev.sh"

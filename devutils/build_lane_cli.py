@@ -22,6 +22,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-volume-uuid")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--select-temp", action="store_true")
+    parser.add_argument("--selection-origin")
+    parser.add_argument("--selection-config")
     return parser
 
 
@@ -58,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     document = {
         "ok": report.ok,
+        "selection": {"origin": arguments.selection_origin, "config_path": arguments.selection_config},
         "lane": report.spec.name,
         "root": str(report.spec.root.expanduser().resolve(strict=False)),
         "mount_point": str(report.volume.mount_point),
@@ -87,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in report.diagnostics:
             stream = sys.stderr if item.severity == "error" else sys.stdout
             print(f"{item.severity}: {item.message}", file=stream)
-    return 0 if report.ok else 2
+    return 0 if document["ok"] else 2
 
 
 if __name__ == "__main__":

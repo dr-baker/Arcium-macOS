@@ -62,6 +62,7 @@ MATERIAL_BUILD_INPUTS = (
     "devutils/helium_dev_build.py",
     "devutils/helium_dev_bundle.py",
     "devutils/lane_transaction.py",
+    "devutils/lane_selection.py",
     "devutils/patch_workspace.py",
     "devutils/profile_clone.py",
     "devutils/quilt_state.py",
@@ -99,6 +100,7 @@ EXECUTOR_BUILD_INPUTS = (
     "devutils/helium_dev_bundle.py",
     "devutils/helium_dev_runtime.py",
     "devutils/lane_transaction.py",
+    "devutils/lane_selection.py",
     "devutils/patch_workspace.py",
     "devutils/profile_clone.py",
     "devutils/quilt_state.py",
@@ -297,6 +299,11 @@ def executor_inputs_sha256(worktree: Path) -> str:
     if sourced is not None and sourced != sha256_file(setup):
         raise ReceiptError("Python setup helper changed after sourcing; re-source dev.sh before retrying")
     digest.update(sha256_file(setup).encode("ascii"))
+    selection = Path(os.environ.get("HELIUM_DEV_SELECTION_SCRIPT", str(root / "devutils/lane_selection.py"))).expanduser().resolve()
+    sourced_selection = os.environ.get("HELIUM_DEV_SELECTION_SHA256")
+    if sourced_selection is not None and sourced_selection != sha256_file(selection):
+        raise ReceiptError("lane selection helper changed after sourcing; re-source dev.sh before retrying")
+    digest.update(sha256_file(selection).encode("ascii"))
     return digest.hexdigest()
 
 

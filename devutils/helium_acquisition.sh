@@ -24,6 +24,9 @@ ___helium_info_pull() {
     mv "${_source_mode_marker}.tmp.$$" "$_source_mode_marker" || return
     _source_mode="$_resolved_source_mode"
     export HELIUM_DEV_SOURCE_MODE="$_source_mode"
+    case " ${HELIUM_DEV_MANAGED_VARIABLES:-} " in
+        *" SOURCE_MODE "*) export HELIUM_DEV_RESOLVED_SOURCE_MODE="$_source_mode" ;;
+    esac
 
     mkdir -p "$_out_dir" || return
     cd "$_src_dir" || return
