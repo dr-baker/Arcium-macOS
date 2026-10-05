@@ -110,6 +110,25 @@ def run_zsh(
 
 
 class DevShellCommandsTests(unittest.TestCase):
+    def test_locate_reads_authoritative_catalogs_without_a_lane_or_producer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ShellFixture(Path(temporary))
+            for root, name in ((fixture.worktree / "helium-chromium/patches", "core"), (fixture.worktree / "patches", "native")):
+                root.mkdir(parents=True)
+                (root / "series").write_text(f"{name}.patch\n")
+                (root / f"{name}.patch").write_text("--- /dev/null\n+++ b/chrome/pref.h\n@@ -0,0 +1 @@\n+const char kPinned[] = \"pinned\";\n")
+            result = run_zsh(
+                "___helium_lane_preflight(){ return 99; }; "
+                "___helium_lane_transaction(){ return 99; }; "
+                "he locate kPinned --json",
+                fixture=fixture,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual(report["lane"]["generated_catalog"], "missing")
+            self.assertEqual([owner["owner"] for owner in report["groups"][0]["owners"]], ["core", "outer"])
+            self.assertFalse(fixture.build_root.exists())
+
     def test_external_harness_checks_preparation_without_source_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = ShellFixture(Path(temporary))

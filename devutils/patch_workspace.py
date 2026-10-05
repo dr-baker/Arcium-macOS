@@ -322,8 +322,13 @@ def validate(worktree: Path, build_root: Path) -> Path:
     """Require a byte-identical generated view of both authoritative catalogs."""
     worktree = worktree.expanduser().resolve()
     root = generated_root(build_root)
-    manifest = _load_manifest(root)
     authoritative = _authoritative_state(worktree)
+    return validate_catalog_snapshot(root, authoritative)
+
+
+def validate_catalog_snapshot(root: Path, authoritative: dict[str, object]) -> Path:
+    """Compare a generated catalog with one already captured authoritative state."""
+    manifest = _load_manifest(root)
     if manifest != _manifest(authoritative):
         raise PatchWorkspaceError(
             "generated patch workspace is stale; fully pop Quilt and run "

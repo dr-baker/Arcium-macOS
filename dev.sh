@@ -474,6 +474,12 @@ ___helium_context() {
         "$@"
 }
 
+___helium_locate() {
+    ___helium_python "$_helium_harness_root/devutils/patch_lookup.py" \
+        --worktree "$_root_dir" --build-root "$_build_dir" --source "$_src_dir" \
+        "$@"
+}
+
 ___helium_run() {
     ___helium_lane_preflight 0 || return
     ___helium_harness run "$@"
@@ -949,6 +955,7 @@ __helium_menu() {
         arcium) shift; ___helium_arcium "$@";;
         check) shift; ___helium_check "$@";;
         context) shift; ___helium_context "$@";;
+        locate) shift; ___helium_locate "$@";;
         dev) shift; ___helium_dev "$@";;
         lane) shift; ___helium_lane "$@";;
         setup) ___helium_setup;;
@@ -1000,6 +1007,7 @@ __helium_menu() {
             echo "\tbootstrap --approved [--full-source] [--allow-internal] - one-time cold browser build" >&2
             echo "\tcheck - validate the active patch catalog and applied state" >&2
             echo "\tcontext [--json] - show source, lane, proof, bundle, and limitations" >&2
+            echo "\tlocate QUERY [--mode auto|text|path|glob] [--json] [--limit N] - find authoritative patch owners without preparing a lane" >&2
             echo "\treplay - pop and strictly replay the complete patch stack" >&2
             echo "\tdev [profile options] - rebuild and run a labeled Dev app; named profiles seed from installed Helium" >&2
             echo "\tlane - show the selected build lane and storage preflight" >&2
