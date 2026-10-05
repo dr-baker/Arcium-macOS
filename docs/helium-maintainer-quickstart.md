@@ -40,8 +40,12 @@ he replay
 he check
 ```
 
-Keep replay, compilation, packaging, and launch on the same serialized lane.
-Review all source fixes before starting an expensive build.
+Follow the patch procedure's focused compilation gate before an application
+build. For parallel source work, name one integrator and follow
+[Coordinate parallel work](building.md#coordinate-parallel-work). Review and
+combine independent changes before that integrator validates the shared lane.
+Commit shared patches in core, then advance the outer gitlink before the final
+application build and runtime validation.
 
 ## Build and verify the intended runtime
 
@@ -52,19 +56,19 @@ and real Keychain. `he arcium` updates and launches current build output when
 Arcium is already closed.
 
 For explicitly selected isolated testing, use `he dev --isolated NAME`.
-That run uses a named Dev profile and mock Keychain. Establish the intended
-mode once before handing off a runtime check.
+That run uses a named Dev profile and mock Keychain. Clarify the intended mode
+before a runtime handoff only if this session has not established it.
 
-Record the exact bundle, executable, browser library, resources, profile, and
-flags. Exercise the real user action, both enabled and disabled behavior,
-normal quit and relaunch, and teardown. Restore temporary settings and records.
-Use existing focused executable regressions where they cover the behavior.
-Report incomplete checks separately from successful ones.
+Select checks from the affected feature's existing contract or
+[scenario](building.md#run-a-scenario-contract). Record the exact runtime and
+follow its real user actions, including disabled behavior, persistence, and
+teardown when relevant. Restore temporary settings and records. Use focused
+executable regressions where they cover the change, and report incomplete checks
+and unrelated suite failures separately.
 
 ## Land and publish the verified change
 
-Commit shared patches in core first. Advance the outer gitlink afterward and
-verify the combined product. Keep feature branches coherent and merge them
+Land the verified final source. Keep feature branches coherent and merge them
 with `--no-ff`.
 
 Retain the established warm lane, compiled output, and deliberate `args.gn`

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import itertools
+import json
 import plistlib
 import shutil
 import stat
@@ -330,11 +331,121 @@ class ArciumAppTests(unittest.TestCase):
             arcium_app.initialize_profile(source, destination)
         self.assertFalse(destination.exists())
 
+    def test_launch_keeps_stub_stderr_and_private_identity(self) -> None:
+        app = self._app("Arcium.app")
+        arcium_app.rewrite_arcium_metadata(app)
+        executable = arcium_app.installed_executable(app)
+        executable.write_text("#!/bin/sh\necho startup-out\necho startup-error >&2\n")
+        executable.chmod(0o755)
+        root = self.temporary / "Library/Logs/Arcium"
+        evidence = {}
+        profile = self.temporary / "Arcium-profile"
+        spawn = subprocess.Popen
+        children = []
+        def retained_spawn(*args, **kwargs):
+            child = spawn(*args, **kwargs)
+            children.append(child)
+            return child
+        with patch("arcium_app.subprocess.Popen", side_effect=retained_spawn):
+            pid = arcium_app.launch_arcium(app, profile, log_root=root, evidence=evidence)
+        # Reap the exact inert child; never open a browser.
+        children[0].wait(timeout=5)
+        log = Path(evidence["log_path"])
+        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+        self.assertIn("startup-error", log.read_text())
+        self.assertIn("startup-out", log.read_text())
+        metadata = Path(evidence["launch_metadata_path"])
+        self.assertEqual(metadata.stat().st_mode & 0o777, 0o400)
+        document = json.loads(metadata.read_text())
+        self.assertEqual(document["pid"], pid)
+        self.assertEqual(document["profile"], str(profile))
+        self.assertFalse(document["mock_keychain"])
+        self.assertNotIn("argv", document)
+        self.assertEqual(root.stat().st_mode & 0o777, 0o700)
+
+    def test_launch_prunes_completed_logs_and_preserves_active_logs(self) -> None:
+        app = self._app("Arcium.app")
+        arcium_app.rewrite_arcium_metadata(app)
+        root = self.temporary / "Library/Logs/Arcium"
+        root.mkdir(parents=True)
+        for index in range(12):
+            stem = f"launch-{index:032x}"
+            (root / (stem + ".json")).write_text(json.dumps({"pid": None}))
+            (root / (stem + ".log")).write_bytes(b"x" * (arcium_app.COMPLETED_LOG_BYTES + 5))
+        active = "launch-" + "f" * 32
+        (root / (active + ".json")).write_text(json.dumps({"pid": os.getpid()}))
+        (root / (active + ".log")).write_bytes(b"active")
+        with patch("arcium_app.subprocess.Popen", return_value=FakeProcess()):
+            arcium_app.launch_arcium(app, self.temporary / "profile", log_root=root)
+        completed = [path for path in root.glob("*.log") if path.stem != active]
+        self.assertEqual(len(completed), arcium_app.LAUNCH_LOG_RETENTION)
+        self.assertTrue(all(path.stat().st_size <= arcium_app.COMPLETED_LOG_BYTES for path in completed))
+        self.assertEqual((root / (active + ".log")).read_text(), "active")
+
+    def test_bad_previous_log_entries_do_not_stop_a_new_launch(self) -> None:
+        app = self._app("Arcium.app")
+        arcium_app.rewrite_arcium_metadata(app)
+        root = self.temporary / "Library/Logs/Arcium"
+        root.mkdir(parents=True)
+        (root / ("launch-" + "a" * 32 + ".json")).symlink_to("missing")
+        os.mkfifo(root / ("launch-" + "b" * 32 + ".json"))
+        (root / ("launch-" + "c" * 32 + ".json")).write_text("bad-json")
+        huge_pid = "launch-" + "d" * 32
+        (root / (huge_pid + ".json")).write_text(json.dumps({"pid": 10 ** 100}))
+        (root / (huge_pid + ".log")).write_text("prior diagnostic")
+        with patch("arcium_app.subprocess.Popen", return_value=FakeProcess()) as spawn:
+            self.assertEqual(arcium_app.launch_arcium(app, self.temporary / "profile", log_root=root), 4242)
+        spawn.assert_called_once()
+
+    def test_launch_refuses_symlinked_log_directory_before_spawning(self) -> None:
+        app = self._app("Arcium.app")
+        arcium_app.rewrite_arcium_metadata(app)
+        external = self.temporary / "other"
+        external.mkdir()
+        root = self.temporary / "Library/Logs/Arcium"
+        root.parent.mkdir(parents=True)
+        root.symlink_to(external, target_is_directory=True)
+        with patch("arcium_app.subprocess.Popen") as spawn:
+            with self.assertRaises(OSError):
+                arcium_app.launch_arcium(app, self.temporary / "profile", log_root=root)
+        spawn.assert_not_called()
+        self.assertEqual(list(external.iterdir()), [])
+
+    def test_installed_receipt_requires_exact_package_and_current_execution(self) -> None:
+        app = self._app("Arcium.app")
+        arcium_app.rewrite_arcium_metadata(app)
+        signature = app / "Contents/_CodeSignature/CodeResources"
+        signature.parent.mkdir()
+        signature.write_text("sealed resources")
+        home = self.temporary / "home"
+        home.mkdir()
+        execution = SimpleNamespace(receipt_id="e" * 64, material_inputs_sha256="m" * 64, lane="worktree")
+        kwargs = dict(lane="worktree", install_path=app, home=home)
+        with patch("arcium_app.verify_installed_arcium"), patch("arcium_app.require_current_execution", return_value=execution):
+            missing = arcium_app.inspect_installed_arcium(self.temporary, self.temporary / "build", **kwargs)
+            self.assertEqual(missing["freshness"], "unproven")
+            self.assertFalse((home / "Library").exists())
+            arcium_app.record_installed_arcium(app, execution, home=home)
+            current = arcium_app.inspect_installed_arcium(self.temporary, self.temporary / "build", **kwargs)
+            self.assertEqual(current["freshness"], "current")
+            self.assertTrue(current["exact"])
+            self.assertEqual(current["execution_receipt_id"], execution.receipt_id)
+            for error in (arcium_app.ExecutionError("rebuild required"), arcium_app.ReplayError("replay proof is missing")):
+                with self.subTest(error=type(error).__name__), patch("arcium_app.require_current_execution", side_effect=error):
+                    stale = arcium_app.inspect_installed_arcium(self.temporary, self.temporary / "build", **kwargs)
+                    self.assertEqual(stale["freshness"], "stale")
+                    self.assertEqual(stale["error"], str(error))
+                    self.assertTrue(stale["exact"])
+            signature.write_text("changed sealed resources")
+            changed = arcium_app.inspect_installed_arcium(self.temporary, self.temporary / "build", **kwargs)
+            self.assertEqual(changed["freshness"], "stale")
+            self.assertFalse(changed["exact"])
+
     def test_launch_uses_real_keychain_path_without_mock_switch(self) -> None:
         app = self._app("Arcium.app")
         arcium_app.rewrite_arcium_metadata(app)
         with patch("arcium_app.subprocess.Popen", return_value=FakeProcess()) as spawn:
-            pid = arcium_app.launch_arcium(app, Path("/profiles/arcium"))
+            pid = arcium_app.launch_arcium(app, Path("/profiles/arcium"), log_root=self.temporary / "Library/Logs/Arcium")
         self.assertEqual(pid, 4242)
         spawn.assert_called_once()
         arguments = spawn.call_args.args[0]
@@ -345,7 +456,7 @@ class ArciumAppTests(unittest.TestCase):
         app = self._app("Arcium.app")
         arcium_app.rewrite_arcium_metadata(app)
         with patch("arcium_app.subprocess.Popen", return_value=FakeProcess()) as spawn:
-            arcium_app.launch_arcium(app, Path("/profiles/arcium"))
+            arcium_app.launch_arcium(app, Path("/profiles/arcium"), log_root=self.temporary / "Library/Logs/Arcium")
         args = spawn.call_args.args[0]
         self.assertFalse(any(arg.startswith("--profile-directory") for arg in args))
         self.assertNotIn("--disable-session-crashed-bubble", args)
@@ -363,7 +474,7 @@ class ArciumAppTests(unittest.TestCase):
                     with self.assertRaisesRegex(arcium_app.ArciumError, "default profile"):
                         arcium_app.verify_installed_arcium(app)
                     with self.assertRaisesRegex(arcium_app.ArciumError, "default profile"):
-                        arcium_app.launch_arcium(app, Path("/profiles/arcium"))
+                        arcium_app.launch_arcium(app, Path("/profiles/arcium"), log_root=self.temporary / "Library/Logs/Arcium")
                 run.assert_not_called()
                 spawn.assert_not_called()
 
@@ -644,7 +755,8 @@ class ArciumAppTests(unittest.TestCase):
         paths = SimpleNamespace(worktree=self.temporary, source_dir=self.temporary / "build/src")
         mocks = {}
         for name, values in {
-            "require_current_execution": {},
+            "require_current_execution": {"return_value": SimpleNamespace(
+                receipt_id="e" * 64, material_inputs_sha256="m" * 64, lane="worktree")},
             "resolve_signing_identity": {"return_value": "Developer ID Application: Test"},
             "_package_arcium_locked": {"return_value": {"app_path": str(candidate)}},
             "verify_installed_arcium": {},
@@ -652,6 +764,7 @@ class ArciumAppTests(unittest.TestCase):
             "quit_for_restart": {},
             "launch_arcium": {"return_value": 4242},
             "verify_arcium_launch": {},
+            "record_installed_arcium": {"return_value": home / "Library/Logs/Arcium/installed.json"},
         }.items():
             mocks[name] = stack.enter_context(patch("arcium_app." + name, **values))
         return paths, home, destination, mocks
@@ -686,6 +799,23 @@ class ArciumAppTests(unittest.TestCase):
             self.assertEqual((destination / "version").read_text(), "new")
             self.assertFalse(list(destination.parent.glob(".installed.app.previous-*")))
 
+    def test_failed_installation_receipt_retains_previous_bundle_and_launch_log(self) -> None:
+        with ExitStack() as stack:
+            paths, home, destination, mocks = self._update_fixture(stack)
+            log_path = home / "Library/Logs/Arcium/launch-fixture.log"
+            def launch(*args, **kwargs):
+                kwargs["evidence"].update(log_path=str(log_path))
+                return 4242
+            mocks["launch_arcium"].side_effect = launch
+            mocks["record_installed_arcium"].side_effect = OSError("receipt disk full")
+            with self.assertRaisesRegex(arcium_app.ArciumError, "receipt disk full") as failure:
+                arcium_app._update_action_locked(paths, home=home, install_path=destination, restart=True)
+            self.assertIn("Previous bundle retained", str(failure.exception))
+            self.assertIn(str(log_path), str(failure.exception))
+            self.assertIn("Profile was not rolled back", str(failure.exception))
+            self.assertTrue(list(destination.parent.glob(".installed.app.previous-*")))
+            self.assertEqual((destination / "version").read_text(), "new")
+
     def test_failed_handoff_retains_previous_bundle_without_profile_rollback(self) -> None:
         for failure in ("verify_installed_arcium", "launch_arcium", "verify_arcium_launch"):
             for error in (OSError, KeyboardInterrupt):
@@ -696,7 +826,7 @@ class ArciumAppTests(unittest.TestCase):
                         paths, home, destination, mocks = self._update_fixture(stack)
                         profile_data = arcium_app.arcium_profile_path(home) / "new-data"
 
-                        def fail(*arguments) -> None:
+                        def fail(*arguments, **keywords) -> None:
                             if failure == "verify_installed_arcium" and arguments[0] != destination:
                                 return
                             profile_data.write_text("new profile schema")

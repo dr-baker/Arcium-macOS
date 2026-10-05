@@ -312,6 +312,47 @@ class IntegrationTests(unittest.TestCase):
     setUp = build_fixtures.HeliumDevBuildTest.setUp
     tearDown = build_fixtures.HeliumDevBuildTest.tearDown
 
+    def test_operation_report_points_to_current_result_and_protects_evidence(self):
+        from devutils.build_diagnostics import publish_result
+        root = self.source.parent / ".arcium" / "build-evidence"
+        result = self.builder.compile(("obj/example.o",))
+        path = publish_result(root, result.as_dict())
+        pointer = json.loads((root / "latest-result.json").read_text())
+        self.assertEqual(pointer["result_path"], str(path))
+        document = json.loads(path.read_text())
+        self.assertEqual(document["outcome"], "compiled")
+        self.assertEqual(set(document["stage_seconds"]), {"graph", "plan", "build"})
+        self.assertTrue(all(value >= 0 for value in document["stage_seconds"].values()))
+        self.assertEqual(path.stat().st_mode & 0o777, 0o400)
+        self.assertIn("compiled", path.with_name("summary.txt").read_text())
+        refused = publish_result(root, {"ok": False, "action": "compile", "outcome": "refused", "error": "edge budget"})
+        self.assertEqual(json.loads((root / "latest-result.json").read_text())["result_path"], str(refused))
+        self.assertTrue(path.is_file())
+
+    def test_failure_and_timeout_are_separate_from_guard_refusal(self):
+        original = self.runner
+        for timeout in (False, True):
+            def failed(args, **kwargs):
+                if "query" not in args and "-n" not in args:
+                    return CommandResult(args=tuple(args), returncode=1, stderr="error: fixture", timed_out=timeout)
+                return original(args, **kwargs)
+            self.builder.runner = failed
+            result = self.builder.compile(("obj/example.o",))
+            self.assertEqual(result.outcome, "timed-out" if timeout else "failed")
+            self.assertNotIn("focused-compile", result.proof_gates)
+        self.builder.runner = original
+        self.builder.edge_budget = 0
+        refused = self.builder.compile(("obj/example.o",))
+        self.assertEqual(refused.outcome, "refused")
+        self.assertNotIn("build", refused.stage_seconds)
+        self.assertIn("generated-graph-validated", refused.proof_gates)
+        self.assertIn("autoninja-dry-run", refused.proof_gates)
+        self.assertNotIn("edge-budget-checked", refused.proof_gates)
+        self.runner.edge_count = 0
+        no_work = self.builder.compile(("obj/example.o",))
+        self.assertEqual(no_work.outcome, "no-work")
+        self.assertNotIn("focused-compile", no_work.proof_gates)
+
     def test_no_work_archives_only_dry_run_without_added_calls(self):
         self.runner.edge_count = 0
         result = self.builder.compile(("obj/example.o",))

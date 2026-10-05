@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# Cached functions must refuse commands if any later source attempt fails.
+_helium_dev_shell_ready=0
+
 # This file is normally sourced.  $0 points at the caller in both Bash and
 # zsh, so resolve the source file first.  HELIUM_DEV_WORKTREE lets a landed
 # harness safely operate on another worktree without copying tooling into its
@@ -23,65 +26,43 @@ _root_dir="$(cd -P "$_root_dir" && pwd)"
 
 _git_common_dir="$(git -C "$_root_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)"
 _canonical_root="$(dirname "$_git_common_dir")"
-# A previous source call may have left auto-selected values in the shell.  They
-# must not turn into explicit approval on the next source call.
-if [ "${HELIUM_DEV_AUTO_SELECTED:-0}" = 1 ] && \
-   [ "${HELIUM_DEV_LANE:-}" = "${HELIUM_DEV_AUTO_LANE:-}" ] && \
-   [ "${HELIUM_DEV_BUILD_ROOT:-}" = "${HELIUM_DEV_AUTO_BUILD_ROOT:-}" ]; then
-    unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT
+# Discard only values published by our last source call. Independent caller
+# changes remain explicit overrides, including source mode and volume UUID.
+for _selection_variable in LANE BUILD_ROOT SOURCE_MODE HEAVY_VOLUME_UUID; do
+    case " ${HELIUM_DEV_MANAGED_VARIABLES:-} " in
+        *" $_selection_variable "*) ;;
+        *) continue ;;
+    esac
+    eval '_selection_current="${HELIUM_DEV_'"$_selection_variable"':-}"'
+    eval '_selection_previous="${HELIUM_DEV_RESOLVED_'"$_selection_variable"':-}"'
+    if [ -n "$_selection_previous" ] && [ "$_selection_current" = "$_selection_previous" ]; then
+        unset "HELIUM_DEV_$_selection_variable"
+    fi
+done
+# Accept snapshots from shells that sourced the previous harness version.
+if [ "${HELIUM_DEV_AUTO_SELECTED:-0}" = 1 ]; then
+    [ "${HELIUM_DEV_LANE:-}" = "${HELIUM_DEV_AUTO_LANE:-}" ] && unset HELIUM_DEV_LANE
+    [ "${HELIUM_DEV_BUILD_ROOT:-}" = "${HELIUM_DEV_AUTO_BUILD_ROOT:-}" ] && unset HELIUM_DEV_BUILD_ROOT
 fi
-_lane_was_explicit=0
-if [ -n "${HELIUM_DEV_BUILD_ROOT:-}" ] && [ -z "${HELIUM_DEV_LANE:-}" ]; then
-    echo "error: HELIUM_DEV_BUILD_ROOT requires an explicit HELIUM_DEV_LANE" >&2
+unset HELIUM_DEV_AUTO_SELECTED HELIUM_DEV_AUTO_LANE HELIUM_DEV_AUTO_BUILD_ROOT
+export HELIUM_DEV_SELECTION_SCRIPT="$_helium_harness_root/devutils/lane_selection.py"
+if ! _selection_digest="$(/usr/bin/shasum -a 256 "$HELIUM_DEV_SELECTION_SCRIPT")"; then
+    echo "error: could not fingerprint lane selection helper" >&2
     return 2 2>/dev/null || exit 2
 fi
-if [ -n "${HELIUM_DEV_LANE:-}" ] || [ -n "${HELIUM_DEV_BUILD_ROOT:-}" ]; then
-    _lane_was_explicit=1
+export HELIUM_DEV_SELECTION_SHA256="${_selection_digest%% *}"
+if ! _selection_shell="$(PYTHONDONTWRITEBYTECODE=1 python3 "$HELIUM_DEV_SELECTION_SCRIPT" --worktree "$_root_dir" resolve --shell)"; then
+    return 2 2>/dev/null || exit 2
 fi
-_local_build_dir="$_canonical_root/build"
-_heavy_build_dir="${HELIUM_DEV_HEAVY_ROOT:-/Volumes/T9/ArciumBuild/build}"
-if [ -n "${HELIUM_DEV_LANE:-}" ]; then
-    _dev_lane="$HELIUM_DEV_LANE"
-elif [ -f "$_heavy_build_dir/src/out/Default/build.ninja" ]; then
-    _dev_lane="heavy"
-elif [ -f "$_local_build_dir/src/out/Default/build.ninja" ]; then
-    _dev_lane="local"
-else
-    _dev_lane="local"
-fi
-case "$_dev_lane" in
-    local) _default_build_dir="$_local_build_dir";;
-    heavy) _default_build_dir="$_heavy_build_dir";;
-    worktree) _default_build_dir="$_root_dir/build";;
-    *)
-        echo "error: HELIUM_DEV_LANE must be local, heavy, or worktree" >&2
-        return 2 2>/dev/null || exit 2
-        ;;
-esac
-_build_dir="${HELIUM_DEV_BUILD_ROOT:-$_default_build_dir}"
+eval "$_selection_shell"
 _source_mode_marker="$_build_dir/.arcium/source-mode"
-_source_mode="${HELIUM_DEV_SOURCE_MODE:-}"
-if [ -z "$_source_mode" ] && [ -f "$_source_mode_marker" ]; then
-    _source_mode="$(head -1 "$_source_mode_marker")"
-fi
-_source_mode="${_source_mode:-lite}"
-case "$_source_mode" in
-    lite|full) ;;
-    *)
-        echo "error: HELIUM_DEV_SOURCE_MODE must be lite or full" >&2
-        return 2 2>/dev/null || exit 2
-        ;;
-esac
-_heavy_volume_uuid="${HELIUM_DEV_HEAVY_VOLUME_UUID:-75279EDB-CF1D-4EBF-8C7C-FD7249DCBCAF}"
-export HELIUM_DEV_HEAVY_VOLUME_UUID="$_heavy_volume_uuid"
-export HELIUM_DEV_LANE="$_dev_lane"
-export HELIUM_DEV_BUILD_ROOT="$_build_dir"
-export HELIUM_DEV_SOURCE_MODE="$_source_mode"
-if [ "$_lane_was_explicit" = 0 ]; then
-    export HELIUM_DEV_AUTO_SELECTED=1 HELIUM_DEV_AUTO_LANE="$_dev_lane" HELIUM_DEV_AUTO_BUILD_ROOT="$_build_dir"
-else
-    unset HELIUM_DEV_AUTO_SELECTED HELIUM_DEV_AUTO_LANE HELIUM_DEV_AUTO_BUILD_ROOT
-fi
+export HELIUM_DEV_LANE="$_dev_lane" HELIUM_DEV_BUILD_ROOT="$_build_dir"
+export HELIUM_DEV_SOURCE_MODE="$_source_mode" HELIUM_DEV_HEAVY_VOLUME_UUID="$_heavy_volume_uuid"
+export HELIUM_DEV_RESOLVED_LANE="$_dev_lane" HELIUM_DEV_RESOLVED_BUILD_ROOT="$_build_dir"
+export HELIUM_DEV_RESOLVED_SOURCE_MODE="$_source_mode" HELIUM_DEV_RESOLVED_HEAVY_VOLUME_UUID="$_heavy_volume_uuid"
+export HELIUM_DEV_LANE_SELECTION_ORIGIN="$_lane_selection_origin"
+export HELIUM_DEV_LANE_SELECTION_CONFIG="$_lane_selection_config"
+export HELIUM_DEV_MANAGED_VARIABLES="$_lane_selection_managed"
 _patches_dir="$_build_dir/.arcium/patches"
 export HELIUM_DEV_GENERATED_PATCH_ROOT="$_patches_dir"
 
@@ -442,23 +423,43 @@ ___helium_prepare_lane_temp() {
 }
 
 ___helium_lane() {
-    local _json_args=()
-    if [ "$1" = "--json" ] && [ -z "$2" ]; then
-        _json_args=(--json)
-    elif [ -n "$1" ]; then
-        echo "he lane accepts only --json" >&2
-        return 2
-    fi
-    local _uuid_args=()
-    if [ "$_dev_lane" = "heavy" ]; then
-        _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
-    fi
-    ___helium_python "$_helium_harness_root/devutils/build_lane_cli.py" \
-        --name "$_dev_lane" \
-        --root "$_build_dir" \
-        --minimum-free-gib 0 \
-        "${_uuid_args[@]}" \
-        "${_json_args[@]}"
+    local _command="${1:-show}"
+    case "$_command" in
+        select|clear)
+            ___helium_python "$_helium_harness_root/devutils/lane_selection.py" \
+                --worktree "$_root_dir" "$@" || return
+            source "$_helium_harness_root/dev.sh" || return
+            if [ "$_lane_selection_origin" = environment ]; then
+                echo "saved selection updated; explicit environment overrides are still active" >&2
+            fi
+            ___helium_lane show
+            ;;
+        show|probe|--json)
+            [ "$_command" = --json ] || { [ "$#" -eq 0 ] || shift; }
+            local _json_args=()
+            if [ "${1:-}" = --json ] && [ "$#" -eq 1 ]; then
+                _json_args=(--json)
+            elif [ "$#" -gt 0 ]; then
+                echo "usage: he lane [show|probe] [--json]" >&2
+                return 2
+            fi
+            local _uuid_args=()
+            if [ "$_dev_lane" = heavy ]; then
+                _uuid_args=(--expected-volume-uuid "$_heavy_volume_uuid")
+            fi
+            if [ "${#_json_args[@]}" -eq 0 ]; then
+                echo "selection: $_lane_selection_origin · $_lane_selection_config"
+            fi
+            ___helium_python "$_helium_harness_root/devutils/build_lane_cli.py" \
+                --name "$_dev_lane" --root "$_build_dir" --minimum-free-gib 0 \
+                "${_uuid_args[@]}" "${_json_args[@]}" \
+                --topology --selection-origin "$_lane_selection_origin" --selection-config "$_lane_selection_config"
+            ;;
+        *)
+            echo "usage: he lane [show|probe] [--json] | select local|heavy|worktree [--root PATH] [--source-mode lite|full] [--expected-volume-uuid UUID] | clear" >&2
+            return 2
+            ;;
+    esac
 }
 
 ___helium_context() {
@@ -471,6 +472,12 @@ ___helium_context() {
         --build-root "$_build_dir" \
         --lane "$_dev_lane" \
         "${_uuid_args[@]}" \
+        "$@"
+}
+
+___helium_locate() {
+    ___helium_python "$_helium_harness_root/devutils/patch_lookup.py" \
+        --worktree "$_root_dir" --build-root "$_build_dir" --source "$_src_dir" \
         "$@"
 }
 
@@ -732,19 +739,35 @@ ___helium_arcium_iterate_inner() {
         return 2
     fi
     local _started=$SECONDS
-    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" --build-root "$_build_dir" preflight --restart || return
-    ___helium_check || return
-    ___helium_require_replay_proof || return
-    echo "arcium iterate: validation took $((SECONDS - _started))s" >&2
-    local _stage_started=$SECONDS
-    ___helium_configure_inner || return
-    echo "arcium iterate: configuration took $((SECONDS - _stage_started))s" >&2
-    _stage_started=$SECONDS
-    ___helium_build_full "$@" || return
-    echo "arcium iterate: build took $((SECONDS - _stage_started))s" >&2
-    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" --build-root "$_build_dir" update --restart || return
+    local _stage_started _stage _code
+    local -a _timings
+    for _stage in validation configure build update; do
+        _stage_started=$SECONDS
+        echo "arcium iterate: starting $_stage" >&2
+        case "$_stage" in
+            validation)
+                ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+                    --root "$_root_dir" --build-root "$_build_dir" preflight --restart &&
+                ___helium_check && ___helium_require_replay_proof
+                _code=$?;;
+            configure) ___helium_configure_inner; _code=$?;;
+            build) ___helium_build_full "$@"; _code=$?;;
+            update)
+                ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+                    --root "$_root_dir" --build-root "$_build_dir" update --restart
+                _code=$?;;
+        esac
+        _timings+=(--stage "$_stage=$((SECONDS - _stage_started))")
+        echo "arcium iterate: $_stage took $((SECONDS - _stage_started))s" >&2
+        if [ "$_code" != 0 ]; then
+            echo "arcium iterate: $_stage failed (exit $_code); later stages were not started" >&2
+            ___helium_python "$_helium_harness_root/devutils/build_diagnostics.py" \
+                --build-root "$_build_dir" --root "$_root_dir" --lane "${HELIUM_DEV_LANE:-worktree}" --outcome failed --failed-stage "$_stage" "${_timings[@]}"
+            return "$_code"
+        fi
+    done
+    ___helium_python "$_helium_harness_root/devutils/build_diagnostics.py" \
+        --build-root "$_build_dir" --root "$_root_dir" --lane "${HELIUM_DEV_LANE:-worktree}" --outcome completed "${_timings[@]}"
     echo "arcium iterate: completed in $((SECONDS - _started))s" >&2
 }
 
@@ -824,11 +847,8 @@ ___helium_quilt_pop_inner() {
         echo "usage: he pop [PATCH]" >&2
         return 2
     fi
-    if [ "$#" -eq 1 ]; then
-        cd "$_src_dir" && quilt pop "$1"
-    else
-        cd "$_src_dir" && quilt pop -a
-    fi
+    ___helium_python "$_helium_harness_root/devutils/replay_contract.py" \
+        pop --worktree "$_root_dir" --source "$_src_dir" -- "$@"
 }
 
 ___helium_quilt_pop() {
@@ -952,6 +972,7 @@ __helium_menu() {
         arcium) shift; ___helium_arcium "$@";;
         check) shift; ___helium_check "$@";;
         context) shift; ___helium_context "$@";;
+        locate) shift; ___helium_locate "$@";;
         dev) shift; ___helium_dev "$@";;
         lane) shift; ___helium_lane "$@";;
         setup) ___helium_setup;;
@@ -1003,6 +1024,7 @@ __helium_menu() {
             echo "\tbootstrap --approved [--full-source] [--allow-internal] - one-time cold browser build" >&2
             echo "\tcheck - validate the active patch catalog and applied state" >&2
             echo "\tcontext [--json] - show source, lane, proof, bundle, and limitations" >&2
+            echo "\tlocate QUERY [--mode auto|text|path|glob] [--json] [--limit N] - find authoritative patch owners without preparing a lane" >&2
             echo "\treplay - pop and strictly replay the complete patch stack" >&2
             echo "\tdev [profile options] - rebuild and run a labeled Dev app; named profiles seed from installed Helium" >&2
             echo "\tlane - show the selected build lane and storage preflight" >&2
@@ -1065,7 +1087,18 @@ __helium_menu() {
 }
 
 he() {
-    (__helium_menu "$@")
+    if [ "${_helium_dev_shell_ready:-0}" != 1 ]; then
+        echo "error: dev.sh did not finish sourcing; repair lane selection and re-source dev.sh before running he" >&2
+        return 2
+    fi
+    # Selection changes must update the caller's shell. Build commands keep
+    # their directory changes and transient state inside the existing subshell.
+    if [ "${1:-}" = lane ]; then
+        shift
+        ___helium_lane "$@"
+    else
+        (__helium_menu "$@")
+    fi
 }
 
 if ! (return 0 2>/dev/null); then
@@ -1077,3 +1110,5 @@ else
         PS1="🎈 $PS1"
     fi
 fi
+
+_helium_dev_shell_ready=1

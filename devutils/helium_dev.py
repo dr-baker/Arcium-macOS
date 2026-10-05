@@ -18,12 +18,13 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from contextlib import ExitStack, nullcontext
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
 from build_preparation import prepared_build_digest, require_stage
+from build_diagnostics import publish_result
 from build_backend import BackendError
 from build_lane import LaneError, LaneSpec, acquire_lane_lock, heavy_lane_temp, heavy_temp_environment
 from build_execution import ExecutionError, invalidate_execution, material_guard, record_execution, verify_material_inputs
@@ -849,6 +850,7 @@ def build_action(
         if needs_heavy_temp or action in {"compile", "relink"} or (action == "build-full" and namespace.approved)
         else None
     )
+    execution_receipt = None
     with acquire_lane_lock(lock_path, owner), (
         material_guard(worktree, build_dir, expected=material_at_entry)
         if material_at_entry is not None else nullcontext()
@@ -876,15 +878,19 @@ def build_action(
                 ),
             )
             if result.ok and namespace.resources:
-                record_execution(
-                    worktree,
-                    build_dir,
-                    lane=str(owner["lane"]),
-                    action="relink-resources",
-                    targets=result.targets,
-                    material_inputs_at_entry=material_at_entry,
-                    prepared_inputs_at_entry=preparation_at_entry,
-                )
+                try:
+                    execution_receipt = record_execution(
+                        worktree,
+                        build_dir,
+                        lane=str(owner["lane"]),
+                        action="relink-resources",
+                        targets=result.targets,
+                        material_inputs_at_entry=material_at_entry,
+                        prepared_inputs_at_entry=preparation_at_entry,
+                    )
+                except (ExecutionError, ReplayError) as error:
+                    result = replace(result, ok=False, outcome="failed", error=str(error),
+                                     warnings=result.warnings + ("build finished; runnable build proof was not established",))
         elif action == "build-full":
             if namespace.targets:
                 raise RuntimeInputError("build-full takes no graph targets")
@@ -898,18 +904,32 @@ def build_action(
                 ensure_gclient_identity(build_dir)
             result = builder.build_full(approved=namespace.approved)
             if result.ok and namespace.approved:
-                record_execution(
-                    worktree,
-                    build_dir,
-                    lane=str(owner["lane"]),
-                    action="build-full",
-                    targets=result.targets,
-                    material_inputs_at_entry=material_at_entry,
-                    prepared_inputs_at_entry=preparation_at_entry,
-                )
+                try:
+                    execution_receipt = record_execution(
+                        worktree,
+                        build_dir,
+                        lane=str(owner["lane"]),
+                        action="build-full",
+                        targets=result.targets,
+                        material_inputs_at_entry=material_at_entry,
+                        prepared_inputs_at_entry=preparation_at_entry,
+                    )
+                except (ExecutionError, ReplayError) as error:
+                    result = replace(result, ok=False, outcome="failed", error=str(error),
+                                     warnings=result.warnings + ("build finished; runnable build proof was not established",))
         else:
             raise HarnessError(f"unknown build action: {action}")
-    return result.as_dict()
+        document = result.as_dict()
+        document.update(source_worktree=str(worktree), build_root=str(build_dir), lane=str(owner["lane"]))
+        if execution_receipt is not None:
+            document.update(execution_receipt_id=execution_receipt.receipt_id,
+                            replay_receipt_id=execution_receipt.replay_receipt_id,
+                            source_receipt_id=execution_receipt.source_receipt_id)
+        try:
+            document["result_path"] = str(publish_result(build_dir / ".arcium" / "build-evidence", document))
+        except OSError as error:
+            document["warnings"].append(f"build result report unavailable: {type(error).__name__}")
+    return document
 
 
 def dev_bundle_action(
@@ -1055,7 +1075,17 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
         print(f"{document['action']}: pid {pid if pid is not None else '-'} · {document['profile_mode']} · {state}")
         return
     if "proof_gates" in document:
-        state = "ok" if document.get("ok") else "refused"
+        state = document.get("outcome") or ("ok" if document.get("ok") else "refused")
+        for name, seconds in document.get("stage_seconds", {}).items():
+            print(f"{name}: {seconds:.3f}s measured wall time")
+        if document.get("error"):
+            print("error: " + str(document["error"])[:1200])
+        for warning in document.get("warnings", ()):
+            print("warning: " + str(warning)[:1200])
+        if document.get("result_path"):
+            print(f"result: {document['result_path']}")
+        for path in document.get("evidence_paths", ()):
+            print(f"evidence: {path}")
         gates = ", ".join(str(gate) for gate in document.get("proof_gates", ())) or "none"
         if document.get("action") == "dev-bundle":
             print(
@@ -1071,7 +1101,8 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
             return
         edges = document.get("edge_count")
         artifact = document.get("artifact_state")
-        print(f"{document['action']}: {state} · {edges if edges is not None else '-'} edges · {artifact} · proof {gates}")
+        runtime = f" · runtime artifact {artifact}" if document.get("action") == "relink" else ""
+        print(f"{document['action']}: {state} · {edges if edges is not None else '-'} edges{runtime} · proof {gates}")
         return
     state = "ok" if document.get("ok") else "refused"
     detail = document.get("error") or document.get("action")

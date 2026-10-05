@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only source, lane, Quilt, receipt, and Dev-bundle preflight.
+"""Read-only source, lane, Quilt, and product package preflight.
 
 This module is the small inspection boundary for ``he context``.  It owns no
 build state and deliberately delegates validation to the existing lane,
@@ -31,14 +31,14 @@ if _DEVUTILS_DIR not in sys.path:
     sys.path.insert(0, _DEVUTILS_DIR)
 
 try:
-    from .build_lane import LaneError, LaneReport, LaneSpec, inspect_lane
+    from .build_lane import LaneError, LaneReport, LaneSpec, inspect_lane, probe_storage_topology
     from .build_execution import ExecutionError, require_current_execution
     from .build_receipt import ReceiptError
     from .build_receipt_cli import require_current_packaged_build
     from .quilt_state import QuiltStateError, QuiltStateReport, inspect_quilt_state
     from .replay_contract import ReplayError, require_current_replay_proof
 except ImportError:  # pragma: no cover - exercised by the direct CLI entry point
-    from build_lane import LaneError, LaneReport, LaneSpec, inspect_lane
+    from build_lane import LaneError, LaneReport, LaneSpec, inspect_lane, probe_storage_topology
     from build_execution import ExecutionError, require_current_execution
     from build_receipt import ReceiptError
     from build_receipt_cli import require_current_packaged_build
@@ -268,6 +268,7 @@ def inspect_selected_lane(
     *,
     expected_volume_uuid: str | None = None,
     lane_inspector: Callable[[LaneSpec], LaneReport] | None = None,
+    storage_probe: Callable[..., dict] | None = None,
 ) -> dict[str, object]:
     """Inspect only the selected lane; never create it or reserve its lock."""
 
@@ -288,6 +289,9 @@ def inspect_selected_lane(
         }
 
     volume = report.volume
+    storage = (storage_probe or probe_storage_topology)(paths.build_root, volume)
+    if not report.ok:
+        storage["available"] = False
     diagnostics = [
         {
             "severity": item.severity,
@@ -299,8 +303,9 @@ def inspect_selected_lane(
     return {
         "name": lane,
         "root": root,
-        "available": report.ok,
-        "ok": report.ok,
+        "available": report.ok and storage.get("available") is not False,
+        "ok": report.ok and storage.get("available") is not False,
+        "storage": storage,
         "volume": {
             "mount_point": str(volume.mount_point),
             "volume_uuid": volume.volume_uuid,
@@ -443,6 +448,7 @@ def inspect_receipts(
     replay_checker: Callable[[Path, Path], object] | None = None,
     execution_checker: Callable[..., object] | None = None,
     package_checker: Callable[..., object] | None = None,
+    require_package: bool = True,
 ) -> dict[str, dict[str, object]]:
     """Check replay, build-execution, and package proof in dependency order."""
 
@@ -461,7 +467,7 @@ def inspect_receipts(
     # A package receipt is the strongest existing proof: its validator checks
     # the source, replay, execution, and copied bundle contracts.  Reusing one
     # successful result avoids rehashing those trees for each upstream line.
-    if package_path.is_file() or package_checker is not None:
+    if require_package and (package_path.is_file() or package_checker is not None):
         try:
             package = package_check(paths.worktree, paths.build_root, lane=lane)
         except (ExecutionError, ReplayError, ReceiptError, QuiltStateError, OSError) as error:
@@ -574,6 +580,10 @@ def inspect_receipts(
         )
         return {"replay": replay_status, "build": build_status, "package": package_status}
 
+    if not require_package:
+        return {"replay": replay_status, "build": build_status,
+                "package": _receipt_status("unavailable", path=package_path, detail="installed product proof checked separately")}
+
     try:
         package = package_check(paths.worktree, paths.build_root, lane=lane)
     except (ExecutionError, ReplayError, ReceiptError, QuiltStateError, OSError) as error:
@@ -673,9 +683,12 @@ def _limits_for(
         name = str(lane.get("name") or "selected")
         detail = lane.get("error")
         if name == "heavy":
-            _append_limit(limits, f"T9 heavy lane unavailable; use the local or worktree lane ({detail or 'storage preflight failed'})")
+            _append_limit(limits, f"selected heavy lane unavailable: {detail or 'storage preflight failed'}; restore its volume or explicitly select another lane")
         else:
             _append_limit(limits, f"{name} lane unavailable: {detail or 'storage preflight failed'}")
+    storage = lane.get("storage") or {}
+    if storage.get("available") is False:
+        _append_limit(limits, storage.get("error") or "selected lane backing storage is unavailable")
     for diagnostic in lane.get("diagnostics", ()):
         if isinstance(diagnostic, Mapping) and diagnostic.get("severity") == "error":
             _append_limit(limits, diagnostic.get("message"))
@@ -696,7 +709,7 @@ def _limits_for(
         if bundle.get("freshness") in {"missing", "unproven", "stale"}:
             _append_limit(
                 limits,
-                "exact current Helium Dev.app is unavailable; run he dev-bundle after a current build",
+                "exact current product package is unavailable; complete its supported package/install flow after a current build",
             )
     return limits
 
@@ -712,6 +725,9 @@ def collect_context(
     replay_checker: Callable[[Path, Path], object] | None = None,
     execution_checker: Callable[..., object] | None = None,
     package_checker: Callable[..., object] | None = None,
+    product: str = "arcium",
+    installed_checker: Callable[..., dict] | None = None,
+    storage_probe: Callable[..., dict] | None = None,
 ) -> dict[str, object]:
     """Collect one complete, read-only development context document."""
 
@@ -724,7 +740,9 @@ def collect_context(
         lane,
         expected_volume_uuid=expected_volume_uuid,
         lane_inspector=lane_inspector,
+        storage_probe=storage_probe,
     )
+    lane_state["selection"] = {"origin": os.environ.get("HELIUM_DEV_LANE_SELECTION_ORIGIN", "unknown"), "config_path": os.environ.get("HELIUM_DEV_LANE_SELECTION_CONFIG")}
     quilt = inspect_quilt(paths, quilt_inspector=quilt_inspector)
     receipts = inspect_receipts(
         paths,
@@ -732,18 +750,36 @@ def collect_context(
         replay_checker=replay_checker,
         execution_checker=execution_checker,
         package_checker=package_checker,
+        require_package=product in ("dev", "both"),
     )
     bundle = inspect_dev_bundle(paths, receipts["package"])
+    installed = None
+    if product in ("arcium", "both"):
+        if installed_checker is None:
+            from arcium_app import inspect_installed_arcium
+            installed_checker = inspect_installed_arcium
+        installed = installed_checker(paths.worktree, paths.build_root, lane=lane)
+    selected_bundle = installed if product == "arcium" else bundle
+    if product == "arcium":
+        receipts["package"] = {
+            "state": installed["freshness"], "fresh": installed["freshness"] == "current",
+            "receipt_id": installed.get("receipt_id"), "path": installed.get("receipt_path"),
+            "detail": installed.get("error"),
+        }
     limits = _limits_for(
         core=core,
         lane=lane_state,
         quilt=quilt,
         receipts=receipts,
-        bundle=bundle,
+        bundle=selected_bundle,
     )
+    if product == "both" and installed.get("freshness") != "current":
+        _append_limit(limits, installed.get("error") or "installed Arcium proof is unavailable")
     return {
         "ok": not limits,
         "action": "context",
+        "product": product,
+        "installed_arcium": installed,
         "source": {
             "worktree": str(paths.worktree),
             "build_root": str(paths.build_root),
@@ -769,6 +805,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--lane", choices=("local", "heavy", "worktree"), default="local")
     parser.add_argument("--expected-volume-uuid")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--product", choices=("arcium", "dev", "both"), default="arcium")
     return parser
 
 
@@ -785,7 +822,7 @@ def _emit_human(document: Mapping[str, object]) -> None:
     assert isinstance(quilt, Mapping)
     assert isinstance(receipts, Mapping)
     assert isinstance(bundle, Mapping)
-    print(f"context: {'ready' if document.get('ok') else 'not ready'}")
+    print(f"context: {document.get('product', 'dev')} · {'ready' if document.get('ok') else 'not ready'}")
     branch = outer.get("branch") or "detached"
     cleanliness = "dirty" if outer.get("dirty") else "clean"
     head = str(outer.get("head") or "-")[:12]
@@ -793,7 +830,23 @@ def _emit_human(document: Mapping[str, object]) -> None:
     core_state = "match" if core.get("match") else "mismatch"
     print(f"core: {core_state} · {str(core.get('head') or '-')[:12]} · gitlink {str(core.get('gitlink') or '-')[:12]}")
     lane_state = "available" if lane.get("available") else "unavailable"
+    selection = lane.get("selection") or {}
+    print(f"selection: {selection.get('origin', 'unknown')} · {selection.get('config_path') or 'unknown'}")
     print(f"lane: {lane.get('name')} · {lane.get('root')} · {lane_state}")
+    volume = lane.get("volume") or {}
+    if volume:
+        print(f"volume: {volume.get('mount_point')} · UUID {volume.get('volume_uuid') or 'unknown'} · {volume.get('filesystem') or 'unknown filesystem'} · {volume.get('free_bytes')} free bytes")
+    storage = lane.get("storage") or {}
+    storage_available = storage.get("available")
+    effective_free = storage.get("effective_free_bytes")
+    print(f"storage: {storage.get('kind', 'unknown')} · effective available {storage_available if storage_available is not None else 'unknown'} · effective free bytes {effective_free if effective_free is not None else 'unknown'}")
+    if storage.get("image_path"):
+        print(f"backing image: {storage['image_path']}")
+    if storage.get("host"):
+        host = storage["host"]
+        print(f"backing host: {host.get('mount_point')} · UUID {host.get('volume_uuid') or 'unknown'} · {host.get('filesystem') or 'unknown filesystem'} · {host.get('free_bytes')} free bytes")
+    if storage.get("error"):
+        print(f"storage detail: {storage['error']}")
     if quilt.get("available"):
         print(
             f"quilt: {quilt.get('applied_count')}/{quilt.get('declared_count')} · "
@@ -806,7 +859,11 @@ def _emit_human(document: Mapping[str, object]) -> None:
         for kind in _RECEIPT_KINDS
     )
     print(f"proof: {proof}")
-    print(f"dev: {bundle.get('path')} · {bundle.get('freshness')}" )
+    installed = document.get("installed_arcium")
+    if isinstance(installed, Mapping):
+        print(f"arcium: {installed.get('path')} · {installed.get('freshness')}")
+    if document.get("product", "dev") in ("dev", "both"):
+        print(f"dev: {bundle.get('path')} · {bundle.get('freshness')}")
     for limit in document.get("limits", ()):
         print(f"limit: {limit}")
 
@@ -820,6 +877,7 @@ def main(argv: list[str] | None = None) -> int:
             build_root=arguments.build_root,
             lane=arguments.lane,
             expected_volume_uuid=arguments.expected_volume_uuid,
+            product=arguments.product,
         )
     except (ContextError, OSError) as error:
         document = {"ok": False, "action": "context", "error": str(error)}

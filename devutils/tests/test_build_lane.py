@@ -5,6 +5,9 @@ import unittest
 import os
 import socket
 import stat
+import plistlib
+import subprocess
+from types import SimpleNamespace
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +23,7 @@ from devutils.build_lane import (
     heavy_temp_environment,
     MACOS_UNIX_PATH_BYTES,
     SCCACHE_SOCKET_SUFFIX,
+    probe_storage_topology,
 )
 
 
@@ -52,6 +56,37 @@ class BuildLaneTest(unittest.TestCase):
             warn_if_unencrypted=True,
             warn_if_ownership_disabled=True,
         )
+
+    def test_image_topology_uses_actual_mounted_entity_and_host_space(self):
+        image = self.mount / "build.sparseimage"
+        image.touch()
+        document = {"images": [{"image-path": str(image), "system-entities": [
+            {"dev-entry": "/dev/disk20", "content-hint": "GUID_partition_scheme"},
+            {"dev-entry": "/dev/disk21s1", "mount-point": str(self.mount)},
+        ]}]}
+        calls = []
+        def runner(command, **kwargs):
+            calls.append((command, kwargs))
+            return SimpleNamespace(returncode=0, stdout=plistlib.dumps(document))
+        host = replace(self.volume, volume_uuid="physical-host", free_bytes=40,
+                       filesystem_name="ExFAT", filesystem_type="exfat")
+        result = probe_storage_topology(self.root, self.volume, runner=runner, volume_probe=lambda p: host)
+        self.assertEqual(result["kind"], "image")
+        self.assertEqual(result["host"]["filesystem"], "ExFAT")
+        self.assertEqual(result["host"]["volume_uuid"], "physical-host")
+        self.assertEqual(result["effective_free_bytes"], 40)
+        self.assertTrue(result["available"])
+        self.assertEqual(calls[0][0], ["hdiutil", "info", "-plist"])
+        self.assertEqual(calls[0][1]["timeout"], 10)
+
+    def test_topology_timeout_is_explicit_unknown(self):
+        def timeout(*a, **k):
+            raise subprocess.TimeoutExpired("hdiutil", 10)
+        result = probe_storage_topology(self.root, self.volume, runner=timeout)
+        self.assertEqual(result["kind"], "unknown")
+        self.assertIsNone(result["effective_free_bytes"])
+        self.assertIsNone(result["available"])
+        self.assertIn("timed out", result["error"])
 
     def test_healthy_external_lane_passes(self) -> None:
         report = diagnose_lane(self.spec, self.volume)

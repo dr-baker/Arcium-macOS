@@ -120,6 +120,7 @@ class DevelopmentContextTest(unittest.TestCase):
 
         document = development_context.collect_context(
             self.worktree,
+            product="dev",
             build_root=self.build_root,
             lane="local",
             lane_inspector=self._lane_inspector,
@@ -159,6 +160,7 @@ class DevelopmentContextTest(unittest.TestCase):
 
         document = development_context.collect_context(
             self.worktree,
+            product="dev",
             build_root=self.build_root,
             lane="heavy",
             lane_inspector=unavailable,
@@ -167,7 +169,7 @@ class DevelopmentContextTest(unittest.TestCase):
         )
 
         self.assertFalse(document["ok"])
-        self.assertIn("T9 heavy lane unavailable", "\n".join(document["limits"]))
+        self.assertIn("selected heavy lane unavailable", "\n".join(document["limits"]))
         self.assertEqual(calls, ["replay"])
         self.assertEqual(document["receipts"]["build"]["state"], "blocked")
         self.assertEqual(document["receipts"]["package"]["state"], "blocked")
@@ -182,6 +184,49 @@ class DevelopmentContextTest(unittest.TestCase):
                 )
         self.assertEqual(code, 0)
         self.assertEqual(output.getvalue(), '{"action":"context","limits":[],"ok":true}\n')
+
+    def test_arcium_context_cli_uses_installed_proof_without_dev_bundle(self) -> None:
+        options = dict(
+            build_root=self.build_root, lane_inspector=self._lane_inspector,
+            quilt_inspector=self._quilt_inspector,
+            replay_checker=lambda *_: SimpleNamespace(receipt_id="replay"),
+            execution_checker=lambda *a, **k: SimpleNamespace(receipt_id="execution"),
+            package_checker=lambda *a, **k: self.fail("Arcium context required Dev packaging"),
+            installed_checker=lambda *a, **k: {
+                "path": "/Applications/Arcium.app", "exists": True,
+                "exact": True, "freshness": "current", "error": None,
+                "receipt_id": "installed",
+            },
+            storage_probe=lambda *a: {"kind": "image", "image_path": "/disk/build.sparseimage", "host": {"mount_point": "/disk", "volume_uuid": "host-uuid", "filesystem": "APFS", "free_bytes": 50}, "available": True, "effective_free_bytes": 50},
+        )
+        real_collect = development_context.collect_context
+        with patch.object(development_context, "collect_context", side_effect=lambda worktree, **kw: real_collect(worktree, **{**options, **kw})):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                code = development_context.main(["--worktree", str(self.worktree), "--build-root", str(self.build_root)])
+        self.assertEqual(code, 0)
+        self.assertIn("context: arcium", output.getvalue())
+        self.assertIn("arcium: /Applications/Arcium.app · current", output.getvalue())
+        self.assertIn("backing image: /disk/build.sparseimage", output.getvalue())
+        self.assertIn("UUID host-uuid", output.getvalue())
+        self.assertNotIn("dev:", output.getvalue())
+
+    def test_conclusive_backing_host_failure_prevents_ready_context(self):
+        document = development_context.collect_context(
+            self.worktree, build_root=self.build_root,
+            lane_inspector=self._lane_inspector, quilt_inspector=self._quilt_inspector,
+            replay_checker=lambda *_: SimpleNamespace(receipt_id="replay"),
+            execution_checker=lambda *a, **k: SimpleNamespace(receipt_id="execution"),
+            product="arcium", installed_checker=lambda *a, **k: {
+                "path": "/Applications/Arcium.app", "exact": True,
+                "freshness": "current", "error": None,
+            },
+            storage_probe=lambda *a: {"kind": "image", "available": False,
+                                      "error": "backing image host is not writable"},
+        )
+        self.assertFalse(document["ok"])
+        self.assertFalse(document["lane"]["available"])
+        self.assertIn("backing image host is not writable", document["limits"])
 
     def test_selector_prefers_first_verified_candidate_and_rejects_unready(self) -> None:
         candidates = [

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import sys
 
-from build_lane import LaneError, LaneSpec, heavy_lane_temp, inspect_lane
+from build_lane import LaneError, LaneSpec, heavy_lane_temp, inspect_lane, probe_storage_topology
 
 
 GIB = 1024**3
@@ -22,6 +22,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-volume-uuid")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--select-temp", action="store_true")
+    parser.add_argument("--topology", action="store_true")
+    parser.add_argument("--selection-origin")
+    parser.add_argument("--selection-config")
     return parser
 
 
@@ -58,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     document = {
         "ok": report.ok,
+        "selection": {"origin": arguments.selection_origin, "config_path": arguments.selection_config},
         "lane": report.spec.name,
         "root": str(report.spec.root.expanduser().resolve(strict=False)),
         "mount_point": str(report.volume.mount_point),
@@ -75,6 +79,12 @@ def main(argv: list[str] | None = None) -> int:
             for item in report.diagnostics
         ],
     }
+    if arguments.topology:
+        document["storage"] = probe_storage_topology(spec.root, report.volume)
+        if not report.ok:
+            document["storage"]["available"] = False
+        if document["storage"].get("available") is False:
+            document["ok"] = False
     if arguments.json:
         json.dump(document, sys.stdout, sort_keys=True, separators=(",", ":"))
         sys.stdout.write("\n")
@@ -84,10 +94,22 @@ def main(argv: list[str] | None = None) -> int:
             f"lane {report.spec.name}: {document['root']} "
             f"({gib:.1f} GiB free on {report.volume.filesystem_name or 'unknown filesystem'})"
         )
+        if arguments.topology:
+            storage = document["storage"]
+            storage_available = storage.get("available")
+            effective_free = storage.get("effective_free_bytes")
+            print(f"storage: {storage['kind']} · effective available {storage_available if storage_available is not None else 'unknown'} · effective free bytes {effective_free if effective_free is not None else 'unknown'}")
+            if storage.get("image_path"):
+                print(f"backing image: {storage['image_path']}")
+            if storage.get("host"):
+                host = storage["host"]
+                print(f"backing host: {host['mount_point']} · UUID {host['volume_uuid'] or 'unknown'} · {host['filesystem'] or 'unknown filesystem'} · {host['free_bytes']} free bytes")
+            if storage.get("error"):
+                print(f"storage detail: {storage['error']}")
         for item in report.diagnostics:
             stream = sys.stderr if item.severity == "error" else sys.stdout
             print(f"{item.severity}: {item.message}", file=stream)
-    return 0 if report.ok else 2
+    return 0 if document["ok"] else 2
 
 
 if __name__ == "__main__":

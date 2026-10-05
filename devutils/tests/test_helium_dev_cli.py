@@ -31,6 +31,27 @@ class HeliumDevCliTests(unittest.TestCase):
         self.addCleanup(packaged.stop)
         self.packaged_build = packaged.start()
 
+    def test_human_build_output_retains_failure_evidence_and_measured_timings(self) -> None:
+        document = {"ok": False, "action": "compile", "outcome": "failed",
+                    "proof_gates": ["autoninja-dry-run"], "edge_count": 2,
+                    "artifact_state": "unverified", "error": "compiler error: missing declaration",
+                    "warnings": ["diagnostics truncated"], "evidence_paths": ["/lane/build-evidence/current"],
+                    "result_path": "/lane/build-evidence/results/current/result.json", "stage_seconds": {"build": 1.25}}
+        output = io.StringIO()
+        with redirect_stdout(output):
+            helium_dev._emit(document, json_mode=False)
+        text = output.getvalue()
+        self.assertIn("compile: failed", text)
+        self.assertNotIn("refused", text)
+        self.assertIn(document["error"], text)
+        self.assertIn("diagnostics truncated", text)
+        self.assertIn("evidence: /lane/build-evidence/current", text)
+        self.assertIn("build: 1.250s measured wall time", text)
+        json_output = io.StringIO()
+        with redirect_stdout(json_output):
+            helium_dev._emit(document, json_mode=True)
+        self.assertEqual(json.loads(json_output.getvalue()), document)
+
     def test_cli_passes_external_build_root_to_runtime(self) -> None:
         with patch(
             "helium_dev.runtime_action",
@@ -306,6 +327,33 @@ class HeliumDevCliTests(unittest.TestCase):
                 self.assertEqual(code, 2)
                 self.assertFalse(json.loads(stdout.getvalue())["ok"])
                 self.assertIn("--jobs", stderr.getvalue())
+
+    def test_build_receipt_failure_preserves_completed_build_evidence(self) -> None:
+        from helium_dev_build import BuildResult
+        actions = (("build-full", ("--approved",), "full-build"),
+                   ("relink", ("--resources",), "bundle-resources-relinked"))
+        for action, arguments, gate in actions:
+            for error_type in (helium_dev.ExecutionError, ReplayError):
+                with self.subTest(action=action, error=error_type.__name__), tempfile.TemporaryDirectory() as temporary, \
+                     patch("helium_dev.HeliumDevBuilder") as builder, patch("helium_dev.require_stage"), \
+                     patch("helium_dev.ensure_gclient_identity"), patch("helium_dev.require_current_replay_proof"), \
+                     patch("helium_dev.prepared_build_digest", return_value="p" * 64), \
+                     patch("helium_dev.invalidate_execution"), \
+                     patch("helium_dev.record_execution", side_effect=error_type("receipt proof failed")):
+                    material_fixture(Path(temporary))
+                    completed = BuildResult(
+                        ok=True, action=action, targets=("chrome",), outcome="compiled",
+                        proof_gates=(gate,), evidence_paths=("/fixture/current-build",), stage_seconds={"build": 1.25})
+                    builder.return_value.build_full.return_value = completed
+                    builder.return_value.relink.return_value = completed
+                    result = helium_dev.build_action(action, temporary, arguments)
+                    self.assertFalse(result["ok"])
+                    self.assertEqual(result["outcome"], "failed")
+                    self.assertEqual(result["error"], "receipt proof failed")
+                    self.assertEqual(result["proof_gates"], [gate])
+                    self.assertEqual(result["evidence_paths"], ["/fixture/current-build"])
+                    self.assertEqual(result["stage_seconds"], {"build": 1.25})
+                    self.assertTrue(Path(result["result_path"]).is_file())
 
     def test_build_plan_accepts_job_limit_between_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, patch(

@@ -66,6 +66,14 @@ def workflow_environment(
     """Bind child tools and temporary traffic to the selected lane."""
 
     environment = dict(current)
+    # A transaction already owns one lane lock. Re-sourcing its child must
+    # treat these selected values as explicit, even if another shell changes
+    # the shared saved selection while this transaction waits for the lock.
+    for key in ("HELIUM_DEV_MANAGED_VARIABLES", "HELIUM_DEV_AUTO_SELECTED", "HELIUM_DEV_AUTO_LANE", "HELIUM_DEV_AUTO_BUILD_ROOT"):
+        environment.pop(key, None)
+    for key in tuple(environment):
+        if key.startswith("HELIUM_DEV_RESOLVED_"):
+            environment.pop(key)
     environment.update(
         {
             "HELIUM_DEV_BUILD_ROOT": str(build_root),
@@ -126,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
     # the executing lane_transaction.py checkout.
     previous_script = os.environ.get(HARNESS_SCRIPT_ENV)
     previous_digest = os.environ.get(HARNESS_SHA256_ENV)
-    previous_sourced_helpers = {key: os.environ.get(key) for key in (ACQUISITION_SCRIPT_ENV, ACQUISITION_SHA256_ENV, PYTHON_SETUP_SCRIPT_ENV, PYTHON_SETUP_SHA256_ENV)}
+    previous_sourced_helpers = {key: os.environ.get(key) for key in (ACQUISITION_SCRIPT_ENV, ACQUISITION_SHA256_ENV, PYTHON_SETUP_SCRIPT_ENV, PYTHON_SETUP_SHA256_ENV, "HELIUM_DEV_SELECTION_SCRIPT", "HELIUM_DEV_SELECTION_SHA256")}
     prior_path = Path(previous_script or Path(__file__).resolve().parents[1] / "dev.sh")
     if prior_path.expanduser().resolve() != script:
         # A custom --script will be freshly sourced in the child. Keep the

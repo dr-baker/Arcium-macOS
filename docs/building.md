@@ -5,6 +5,7 @@
 - [Official (non-development) build](#official-non-development-build)
 - [Development build and environment](#development-build-and-environment)
   - [Select a build lane](#select-a-build-lane)
+  - [Coordinate parallel work](#coordinate-parallel-work)
   - [Prepare a cold build](#prepare-a-cold-build)
   - [Build and run normal changes](#build-and-run-normal-changes)
   - [Recover replay timestamps](#recover-replay-timestamps)
@@ -15,6 +16,7 @@
   - [Use an exact development profile](#use-an-exact-development-profile)
   - [Run a scenario contract](#run-a-scenario-contract)
   - [Report proof gates](#report-proof-gates)
+  - [Find the owning patch](#find-the-owning-patch)
   - [Update an existing patch](#update-an-existing-patch)
   - [Update for a new Chromium release](#update-for-a-new-chromium-release)
 
@@ -147,11 +149,13 @@ Use one of these values:
 | `heavy` | `/Volumes/T9/ArciumBuild/build` | Cold downloads and broad builds on the T9 SSD. |
 | `worktree` | `<source-worktree>/build` | An intentionally isolated or temporary lane. |
 
-Without an explicit lane, `he dev` prefers a structurally warm T9 lane, then a
-structurally warm local lane. It never creates cold state or silently redirects
-cold/broad work to internal storage. Choose `local` explicitly for cold or
-broad work and grant the separate capability below; use a worktree lane only
-for intentional isolation.
+Explicit `HELIUM_DEV_LANE` or `HELIUM_DEV_BUILD_ROOT` values take precedence
+over saved selection. Without either, commands use the saved lane. When no
+selection is saved, automatic selection prefers a structurally warm T9 lane,
+then a structurally warm local lane. It never creates cold state or silently
+redirects cold or broad work to internal storage. Choose `local` explicitly for
+cold or broad work and grant the separate capability below. Use a worktree lane
+only for intentional isolation.
 
 Selecting `local` does not authorize a broad internal-disk build. After checking
 free space, approve internal storage on that command only:
@@ -161,11 +165,45 @@ HELIUM_DEV_LANE=local source dev.sh
 he build-full --approved --allow-internal
 ```
 
-To ask for automatic selection again after explicitly selecting a lane in the
-same shell, clear both selections before sourcing the script:
+Save a lane once for the repository's source worktrees. For a custom external
+volume, read its Volume UUID with `diskutil info`, then replace these example
+values:
+
+```sh
+he lane select heavy \
+  --root '/Volumes/YourBuildDisk/ArciumBuild/full-source' \
+  --expected-volume-uuid YOUR-VOLUME-UUID \
+  --source-mode full
+```
+
+The selection lives at `<common-git-dir>/arcium/lane-selection.json` and is
+shared by the repository's source worktrees. `he lane select` updates the current
+shell immediately. `local` and `worktree` also accept `--root ABS` and optional
+`--source-mode full|lite`. A custom heavy root requires its expected volume UUID.
+An unavailable selected external volume stops the command instead of selecting
+another lane.
+
+The selector reports whether its choice came from the environment, saved
+selection, or automatic selection. Independently set environment overrides
+remain in force. To activate a saved choice after an explicit shell override,
+clear the overrides and source canonical `dev.sh` again:
 
 ```sh
 unset HELIUM_DEV_LANE HELIUM_DEV_BUILD_ROOT
+source dev.sh
+```
+
+`HELIUM_DEV_SOURCE_MODE` and `HELIUM_DEV_HEAVY_VOLUME_UUID` can independently
+override saved values. Inspect those variables if the mode or UUID differs
+from the saved selection. To return to automatic lane selection, clear explicit
+lane overrides and run `he lane clear`. That command removes saved selection
+and refreshes the current shell.
+
+If corrupt saved selection prevents sourcing `dev.sh`, clear it directly from
+the source checkout, then source the script again:
+
+```sh
+python3 devutils/lane_selection.py --worktree "$PWD" clear
 source dev.sh
 ```
 
@@ -176,45 +214,29 @@ free space before a build:
 he lane
 ```
 
-`he context` is an optional diagnostic view and supports `--json`; it is not a
-required step before `he dev`.
+`he lane show --json` and `he lane probe --json` provide the same read-only
+storage probe. Bare `he lane` remains supported. For a heavy lane, the probe
+checks the selected external volume against its expected UUID. A different
+device at the mount path fails the check.
 
-For the heavy lane, `he lane` also checks that `/Volumes/T9` has the expected
-volume UUID. A different device mounted at that path fails the check.
+For a lane inside a mounted disk image, the probe reports the image path and
+its host volume, including filesystem, UUID, writability, and free space. Its
+effective free space is the smaller of the mounted volume and host free space.
+Unavailable backing storage remains explicit. Inspect this topology before
+cold preparation or a broad build.
 
-Heavy-lane transactions route temporary files and Siso logs to a short directory
-on the verified external volume: `<mount>/.arcium-tmp-<uid>/<lane-hash>`. The
-selector reserves 19 bytes for sccache's `/sccacheXXXXXX/sock` suffix and rejects
-paths that would reach macOS's 104-byte Unix-socket path limit. This prevents a
-long lane name from failing compiler-cache startup before Clang runs.
+Use `he context` for optional orientation or diagnosis. It defaults to installed
+Arcium. Select `--product dev` for a Dev runtime or `--product both` to inspect
+both, and add `--json` for structured output. Source, replay, compilation, and
+runtime readiness remain separate. Installed process identity does not alone
+prove that its bundle contains the current source. Installed freshness uses
+`~/Library/Logs/Arcium/installed.json`, current execution evidence, artifact
+digests, and signature checks. Missing proof remains unproven; context does not
+adopt an existing installed bundle automatically.
 
-The selector checks the pinned volume UUID, writable case-sensitive APFS, every
-existing path component without following symlinks, and matching device IDs.
-Scratch directories must report the caller's UID and mode `0700`; their
-`lane.json` identity binds the full lane path, UID and volume UUID. An existing
-unrelated identity or directory is rejected. Volume ownership-disabled remains
-an advisory warning, as reported by `he lane`. Per-user names separate scratch
-namespaces; they provide no cross-user privacy guarantee when ownership is
-ignored. Keep profiles, Keychain data and other private data out of compiler
-scratch.
-
-`build_lane.heavy_lane_temp(spec)` selects and validates the path without creating
-storage. `build_lane_cli.py --select-temp` exposes that same read-only selection
-and prints only the path on stdout, with advisory warnings on stderr. Shell build
-commands select first; their locked Python transaction creates and revalidates
-the directory before invoking build tools.
-External drivers must use the same API inside their existing lane lock and
-material guard:
-
-```python
-import os
-
-from build_lane import heavy_lane_temp
-
-# spec is the already-selected heavy LaneSpec with the pinned volume UUID.
-# The lane lock and material guard are already held here.
-os.environ["TMPDIR"] = str(heavy_lane_temp(spec, create=True))
-```
+Heavy-lane commands keep temporary files and Siso logs on the verified external
+volume. For scratch path limits, identity checks, and the API used by external
+build drivers, read [Build-lane scratch reference](build-lane-scratch.md).
 
 Keep several GiB free internally for macOS and swap even though build traffic
 belongs to the external volume. Source, output, compiler caches and receipts keep
@@ -226,6 +248,48 @@ named lane, confirm its absolute path with `he lane`, and report that path.
 Keep each lane intact. Do not copy or symlink `build/src`, `out/Default`, the
 Siso state, or generated build files between lanes. Absolute paths are part of
 the generated graph. A local lane and a heavy lane warm independently.
+
+### Coordinate parallel work
+
+Name one integrator before dispatching parallel source tasks. Record the
+integration source checkout, its core pin, the selected warm lane, and the
+requested runtime mode. Canonical `helium-macos/main` remains the default
+integration source and installed Arcium remains the normal runtime.
+
+Give each worker full ownership of a bounded change on its source branch or
+worktree, including related patch authoring and review fixes. Applied-source
+patch authoring uses that worker's scratch source or private lane. Workers never
+edit the shared warm source, including while its command lock is free. Workers
+run cheap local fixtures, patch checks, and relevant source inspection. Their
+handoffs name the commits, owning patches, completed checks, and remaining
+acceptance steps. Keep unrelated suite repair separate from the feature task.
+
+The integrator reviews each handoff and reconciles it with current integration
+source before selecting that source for the lane. Resolve conflicts and batch
+independent source fixes before replay. Workers retain source ownership while
+the integrator alone mutates the shared warm lane.
+
+The integrator owns the entire replay, focused compilation, application build,
+packaging, launch, and acceptance transaction. The lane lock excludes concurrent
+commands; it does not authorize alternating divergent worktrees between stages.
+Keep the selected source and tools stable until that transaction finishes.
+Behavior acceptance also remains with the integrator after a command releases
+its lock. The integrator can delegate an exclusive UI operator while retaining
+lane ownership and preventing another runtime handoff. Transfer lane ownership
+explicitly only after completion or a documented blocker. Include the exact
+source, lane, pending recovery state, and evidence in that handoff.
+
+After review, run one batched runtime validation for the combined changes.
+Follow [Update an existing patch](#update-an-existing-patch) for capture and
+compilation order. Select acceptance from the existing feature contract,
+scenario, or affected behavior. A feature does not require every broad unit
+suite. Add focused regression coverage when it protects the changed contract.
+
+Use completion and blocker notifications for worker coordination. Event-aware
+waits should return on a meaningful update. Poll only when a changed result can
+determine the next action, choose an interval suited to the expected runtime,
+and back off after unchanged results. Keep routine monitoring outside the model
+where practical and batch checks across active jobs.
 
 ### Prepare a cold build
 
@@ -340,12 +404,20 @@ applied-state check and does not create replay proof.
 
 ### Recover replay timestamps
 
+`he pop` captures the original fully applied stack's timestamps under the lane
+lock before changing Quilt state. It reports the file count and journal path.
+Later pops reuse that compatible journal. A partially applied stack without a
+journal, or a corrupt or mismatched journal, blocks public pop before mutation.
+A fully popped stack without a journal keeps Quilt's normal no-op result and
+creates no journal. `he pop PATCH` accepts an exact declared patch name.
+Preserve a blocked journal and inspect the lane before resolving its error.
+
 Replay preserves access and modification timestamps for unchanged, patch-owned
 regular source files so Quilt does not make unchanged headers look newer than
-compiled outputs. It snapshots the currently applied stack under the lane lock,
-performs the full zero-fuzz replay, verifies the complete stack and source
-identity, then restores timestamps only where content and permissions still
-match. The snapshot persists in the lane's `.arcium/replay-timestamps.json`.
+compiled outputs. It uses that baseline or snapshots the currently applied stack
+under the lane lock. Replay applies the full stack with zero fuzz and verifies
+its source identity, then restores timestamps only where content and permissions
+still match. The snapshot persists in the lane's `.arcium/replay-timestamps.json`.
 Failed attempts retain the original snapshot for recovery, including when the
 applied stack is empty. Replay publishes verified proof, retires the snapshot,
 then restores timestamps. Pending recovery prevents proof acceptance and
@@ -354,12 +426,13 @@ contents, independently of timestamps.
 
 Changed files, new files, deleted files, unreadable or unstable files, symlinks,
 and hard links receive no timestamp restoration. Generated roots `out`, `gen`,
-and `obj`, plus Git, Quilt, and lane metadata, are excluded. A partial stack
-preserves only its already-applied paths; a fully popped stack has no timestamp
-records unless it is recovering from a failed attempt. A failed pop, push, or
-replay validation does not restore timestamps. A corrupt snapshot or a changed
-recovery context blocks replay until the lane state is inspected and the
-snapshot is deliberately removed.
+and `obj`, plus Git, Quilt, and lane metadata, are excluded. If replay captures
+a new baseline from a partial stack, it records only the already-applied paths.
+An existing journal retains its original paths across partial and fully popped
+states. A fully popped stack with no journal has no timestamps to recover.
+A failed pop, push, or replay validation does not restore timestamps. A corrupt
+snapshot or a changed recovery context blocks replay until the lane state is
+inspected and the snapshot is deliberately removed.
 This optimization does not retain old build or execution receipts, bypass a
 build check, or change packaging and signing requirements.
 
@@ -370,10 +443,12 @@ blocks recovery instead of replacing the original snapshot. Compilation and
 relinking remain blocked while recovery is pending; queries and dry-run plans
 remain available for diagnosis.
 
-Timestamp recovery applies to changes made through `replay_contract.replay`.
-Popping patches outside that transaction cannot recover timestamps that it did
-not capture. The temporary-directory and Quilt/Ninja copy-rule fixtures exercise
-recovery failures and unchanged edges. They do not establish freshness of an
+Timestamp recovery covers public `he pop` authoring and
+`replay_contract.replay`. Direct Quilt mutation outside those transactions
+cannot recover a baseline the workflow did not capture. A completed journal is
+retired. Historical evidence must never be revived as active recovery state.
+The temporary-directory and Quilt/Ninja copy-rule fixtures exercise recovery
+failures and unchanged edges. They do not establish freshness of an
 existing browser build or prove runtime behavior.
 
 ### Manage the lane-local patch catalog
@@ -563,6 +638,39 @@ successful remote execution.
 
 ### Inspect build evidence
 
+Start with the selected lane's latest result, then follow its evidence paths:
+
+- `.arcium/build-evidence/latest-result.json` points to the latest build or plan
+  result and its readable summary.
+- `.arcium/iteration-evidence/latest-result.json` points to the latest installed
+  iteration result, including completed stages and the stopping stage on failure.
+
+Each pointer names a retained per-operation `results/<id>/result.json` and
+`summary.txt`. These reports are diagnostics. Replay, preparation, execution,
+and package receipts remain the authority for source and artifact freshness.
+Inspect the recorded invocation and source identity before comparing runs from
+different dates, targets, or lanes.
+
+Human build output distinguishes `planned`, `no-work`, `compiled`, `refused`,
+`failed`, and `timed-out`. It includes a bounded error, warnings, and retained
+result and evidence paths. JSON reports `outcome`, measured `stage_seconds`,
+and `result_path`. A refusal occurs before compilation; a failed build reports
+the compiler or tool failure. Diagnose that retained error before changing
+budgets or retrying.
+
+`he arcium iterate` reports validation, configuration, build, and update starts
+and elapsed wall time. Installed updates measure packaging, installation,
+restart, and launch verification separately. Use those measured stages to
+identify the next optimization. A small action count alone does not explain
+total iteration time.
+
+Installed launches retain stdout and stderr in a private
+`~/Library/Logs/Arcium/launch-<id>.log`. The reported `log_path` and
+`launch_metadata_path` identify the output and metadata for the exact PID,
+bundle, executable, profile, and real Keychain. Completed logs are trimmed and
+pruned at the next launch. Logs for active PIDs remain intact and have no size
+cap. Launch output does not replace visible behavior or crash-report checks.
+
 `HeliumDevBuilder` archives each autoninja plan and build under
 `.arcium/build-evidence/<invocation-id>/`, including failures and no-work plans.
 Graph queries and commands rejected before autoninja do not create an archive.
@@ -689,6 +797,36 @@ Report these gates separately:
 Source inspection, a clean patch replay, compilation, and a successful launch
 prove different things. Do not report them as one "tested" result.
 
+### Find the owning patch
+
+Use `he locate` to search authoritative core and macOS patches without preparing
+source or changing the lane:
+
+```sh
+he locate zen_mode_top_chrome_pinned
+he locate kHeliumZenModeTopChromePinned
+he locate chrome/common/pref_names.h --mode path
+he locate 'chrome/browser/ui/cocoa/*' --mode glob --json
+```
+
+Results group source paths and order matching patches by the merged series.
+Each match reports its owning repository, authoritative patch path, counts of
+added, context, and removed lines, and up to three matching excerpts. Context
+and removed lines can mention a symbol without implementing its current behavior;
+inspect the later additions and affected consumer before editing.
+
+Auto mode treats a query containing `*`, `?`, or `[` as a path glob, a query
+containing `/` as an exact source path, and other queries as literal text.
+Use `--mode text` for labels or preferences containing those characters. Paths
+are relative to Chromium `src` with no `a/`, `b/`, or `src/` prefix. Quote globs.
+Globs match the whole path and `*` can cross directory separators.
+
+Search is case-sensitive unless you pass `--ignore-case`. Results default to
+40 patch and file matches. Use `--limit N`, up to 200, for a larger bounded view.
+Omitted counts remain explicit. The command also reports the selected lane's
+catalog and Quilt state when available. A missing or stale lane does not prevent
+authoritative patch lookup.
+
 ### Update an existing patch
 
 Select the source worktree and lane before you edit generated Chromium source.
@@ -714,25 +852,35 @@ complete series with zero fuzz.
    quilt add <path-to-file>
    ```
 
-3. Edit the source and build focused targets. When a header contract changes,
-   include representative consumer translation units instead of compiling only
-   the file that defines the changed type.
-
-4. Format the owning patch, export it through the guarded boundary, and check
-   the complete stack:
+3. Edit and format the source. Export the owning patch, replay the complete
+   stack, then check it:
 
    ```sh
    he save-patch
-   he check
    he replay
+   he check
    ```
 
    `he save-patch` handles existing catalog entries and preserves the patch's
    established diff style. It refuses concurrent authoritative edits rather
-   than overwriting them.
+   than overwriting them. Replay resolves the pending timestamp journal before
+   real compilation. `he check` requires the complete applied stack.
 
-5. Commit shared Chromium patches in `helium-chromium` first. Then advance the
-   outer gitlink and verify the combined macOS product.
+4. Compile explicit graph outputs for the changed translation units. Inspect
+   their plan with `he build-plan`, then use `he compile`. When a header contract
+   changes, include representative consumers of that header. Compiling only the
+   type's defining file can miss caller errors. Use the existing focused
+   executable tests when they cover the changed contract.
+
+5. Review and combine independent changes. Commit shared Chromium patches in
+   `helium-chromium` first, then advance the outer gitlink. Reconcile the final
+   integrated source and refresh its replay and preparation proof as needed.
+
+6. Build the final combined application once, then package and validate the
+   selected runtime using
+   [Build and run normal changes](#build-and-run-normal-changes). Follow the
+   affected feature's acceptance steps, including persistence and teardown when
+   relevant. Report unrelated test failures as separate work.
 
 `$HELIUM_DEV_BUILD_ROOT/.arcium/patches/series.merged` is generated build
 state. Do not commit it as the source of a shared Chromium feature.
@@ -819,7 +967,9 @@ when the planned tests require Chromium's test data.
    he build-plan chrome
    ```
 
-6. After reviewing the plan, build the product without launching it:
+6. Commit core changes first, then advance the outer gitlink. Refresh replay and
+   preparation proof against those final integrated revisions. Review the plan,
+   then build the product without launching it:
 
    ```sh
    he build-full --approved
@@ -831,6 +981,6 @@ when the planned tests require Chromium's test data.
    persistence, and teardown. Report a development build separately from the
    [official release configuration](#official-non-development-build).
 
-7. Commit core changes first, then advance the outer gitlink. Revalidate replay,
-   build, package, and runtime proof against those final integrated revisions.
-   Keep the previous lane and recovery references until acceptance passes.
+7. Record build, package, and runtime results for those final integrated
+   revisions. Keep the previous lane and recovery references until acceptance
+   passes.
