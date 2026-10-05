@@ -121,7 +121,11 @@ def probe_volume(path: Path) -> VolumeInfo:
     stat = os.statvfs(existing)
     stat_free = stat.f_bavail * stat.f_frsize
     container_free = info.get("APFSContainerFree")
-    free_bytes = int(container_free) if isinstance(container_free, int) else stat_free
+    # APFS image/container capacity can exceed space actually available to
+    # this mounted filesystem. Respect both limits and ignore malformed plist
+    # values, including booleans, which Python otherwise treats as integers.
+    valid_container_free = type(container_free) is int and container_free >= 0
+    free_bytes = min(container_free, stat_free) if valid_container_free else stat_free
     return VolumeInfo(
         mount_point=mount_point,
         volume_uuid=info.get("VolumeUUID") or info.get("DiskUUID"),
