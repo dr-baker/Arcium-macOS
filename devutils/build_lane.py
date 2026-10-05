@@ -92,12 +92,14 @@ def probe_volume(path: Path) -> VolumeInfo:
             ["diskutil", "info", "-plist", str(existing)],
             check=False,
             capture_output=True,
+            timeout=10,
         )
         if completed.returncode:
             filesystem = subprocess.run(
                 ["df", "-P", str(existing)],
                 check=True,
                 capture_output=True,
+                timeout=10,
                 text=True,
             )
             rows = [line for line in filesystem.stdout.splitlines() if line.strip()]
@@ -108,9 +110,10 @@ def probe_volume(path: Path) -> VolumeInfo:
                 ["diskutil", "info", "-plist", device],
                 check=True,
                 capture_output=True,
+                timeout=10,
             )
         info = plistlib.loads(completed.stdout)
-    except (OSError, subprocess.CalledProcessError, plistlib.InvalidFileException) as error:
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired, plistlib.InvalidFileException) as error:
         raise LaneError(f"could not inspect volume for {path}") from error
     if not isinstance(info, dict):
         raise LaneError(f"diskutil returned invalid volume metadata for {path}")
@@ -136,6 +139,56 @@ def probe_volume(path: Path) -> VolumeInfo:
         solid_state=info.get("SolidState") if isinstance(info.get("SolidState"), bool) else None,
         bus_protocol=info.get("BusProtocol"),
     )
+
+
+def probe_storage_topology(path: Path, volume: VolumeInfo, *, runner=subprocess.run, volume_probe=probe_volume) -> dict[str, object]:
+    """Match an attached image by mounted entity and inspect its backing host.
+
+    APFS alone does not imply an image. Missing topology metadata remains unknown.
+    This diagnostic never attaches an image or creates a lane directory.
+    """
+    result: dict[str, object] = {
+        "kind": "unknown", "image_path": None, "host": None,
+        "effective_free_bytes": None, "available": None, "error": None,
+    }
+    try:
+        completed = runner(["hdiutil", "info", "-plist"], check=False, capture_output=True, timeout=10)
+        if completed.returncode:
+            raise LaneError("hdiutil could not inspect attached images")
+        document = plistlib.loads(completed.stdout)
+        images = document.get("images") if isinstance(document, dict) else None
+        if not isinstance(images, list):
+            raise LaneError("hdiutil returned invalid attached-image metadata")
+        matched = [image for image in images if isinstance(image, dict) and any(
+            isinstance(entity, dict) and entity.get("mount-point") == str(volume.mount_point)
+            for entity in image.get("system-entities", [])
+        )]
+        if len(matched) > 1:
+            raise LaneError("mounted lane matches multiple backing images")
+        if not matched:
+            if (volume.bus_protocol or "").lower() in ("disk image", "virtual interface"):
+                raise LaneError("virtual lane volume has no identifiable attached backing image")
+            result.update(kind="direct", available=volume.writable, effective_free_bytes=volume.free_bytes)
+            return result
+        image_path = matched[0].get("image-path")
+        if not isinstance(image_path, str) or not Path(image_path).is_absolute():
+            raise LaneError("mounted image has no absolute backing path")
+        result.update(kind="image", image_path=image_path)
+        if not Path(image_path).exists():
+            result["available"] = False
+            raise LaneError("backing image path is unavailable")
+        host = volume_probe(Path(image_path))
+        result["host"] = {
+            "mount_point": str(host.mount_point), "volume_uuid": host.volume_uuid,
+            "filesystem": host.filesystem_name, "free_bytes": host.free_bytes,
+            "writable": host.writable, "external": host.external,
+        }
+        result.update(available=host.writable, effective_free_bytes=min(volume.free_bytes, host.free_bytes))
+        if not host.writable:
+            result["error"] = "backing image host is not writable"
+    except (LaneError, OSError, subprocess.TimeoutExpired, plistlib.InvalidFileException) as error:
+        result["error"] = str(error)
+    return result
 
 
 def diagnose_lane(spec: LaneSpec, volume: VolumeInfo) -> LaneReport:

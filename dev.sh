@@ -453,7 +453,7 @@ ___helium_lane() {
             ___helium_python "$_helium_harness_root/devutils/build_lane_cli.py" \
                 --name "$_dev_lane" --root "$_build_dir" --minimum-free-gib 0 \
                 "${_uuid_args[@]}" "${_json_args[@]}" \
-                --selection-origin "$_lane_selection_origin" --selection-config "$_lane_selection_config"
+                --topology --selection-origin "$_lane_selection_origin" --selection-config "$_lane_selection_config"
             ;;
         *)
             echo "usage: he lane [show|probe] [--json] | select local|heavy|worktree [--root PATH] [--source-mode lite|full] [--expected-volume-uuid UUID] | clear" >&2
