@@ -232,6 +232,14 @@ ___helium_version() {
     ___helium_lane_transaction version
 }
 
+___helium_sync_source_mode_selection() {
+    # Acquisition owns the resolved source mode. The shell owns whether that
+    # value is an automatic selection or an independent caller override.
+    case " ${HELIUM_DEV_MANAGED_VARIABLES:-} " in
+        *" SOURCE_MODE "*) export HELIUM_DEV_RESOLVED_SOURCE_MODE="$_source_mode" ;;
+    esac
+}
+
 ___helium_setup_presetup_inner() {
     if [ -d "$_src_dir/out" ]; then
         ___helium_lane_preflight 15 || return
@@ -245,7 +253,10 @@ ___helium_setup_presetup_inner() {
         return
     fi
 
-    ___helium_acquire_inner || return
+    local _acquisition_status=0
+    ___helium_acquire_inner || _acquisition_status=$?
+    ___helium_sync_source_mode_selection
+    [ "$_acquisition_status" -eq 0 ] || return "$_acquisition_status"
     ___helium_resources_inner || return
     ___helium_setup_gn || return
 

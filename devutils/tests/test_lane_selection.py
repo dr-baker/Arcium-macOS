@@ -113,6 +113,30 @@ printf '%s|%s' "$HELIUM_DEV_LANE" "$HELIUM_DEV_SOURCE_MODE"
             output = self.shell(shell, 'source dev.sh; printf "%s|%s|%s" "$HELIUM_DEV_LANE" "$HELIUM_DEV_BUILD_ROOT" "$HELIUM_DEV_SOURCE_MODE"')
             self.assertEqual(output, f"local|{self.root}/build|lite")
 
+    def test_presetup_records_resolved_mode_in_shell_then_resource_reads_new_selection(self):
+        for shell in ("bash", "zsh"):
+            for resolved_mode in ("lite", "full"):
+                with self.subTest(shell=shell, resolved_mode=resolved_mode):
+                    self.env["FIXTURE_RESOLVED_MODE"] = resolved_mode
+                    output = self.shell(shell, """
+python3 devutils/lane_selection.py --worktree "$PWD" clear
+source dev.sh || exit $?
+___helium_lane_preflight(){ :; }
+___helium_resources_inner(){ :; }
+___helium_setup_gn(){ :; }
+___helium_version_inner(){ :; }
+___helium_acquire_inner(){
+    _source_mode="$FIXTURE_RESOLVED_MODE"
+    export HELIUM_DEV_SOURCE_MODE="$_source_mode"
+}
+___helium_setup_presetup_inner || exit $?
+printf '%s|%s|%s\\n' "$_source_mode" "$HELIUM_DEV_SOURCE_MODE" "$HELIUM_DEV_RESOLVED_SOURCE_MODE"
+python3 devutils/lane_selection.py --worktree "$PWD" select worktree --root "$PWD/next" --source-mode lite
+source dev.sh || exit $?
+printf '%s|%s' "$HELIUM_DEV_SOURCE_MODE" "$HELIUM_DEV_LANE_SELECTION_ORIGIN"
+""")
+                    self.assertEqual(output, f"{resolved_mode}|{resolved_mode}|{resolved_mode}\nlite|saved")
+
     def test_failed_resource_disables_cached_commands_until_recovery(self):
         for shell in ("bash", "zsh"):
             with self.subTest(shell=shell):
