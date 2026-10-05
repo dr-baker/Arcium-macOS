@@ -396,11 +396,14 @@ after the complete state has been verified. The receipt binds the selected
 core commit and gitlink, the Chromium version, the exact merged-series syntax
 and patch bytes, and every patch-owned source path. Material build and package
 inputs are tracked by later receipts. Changing one of those inputs makes its
-receipt stale. Changes limited to `AGENTS.md`, documentation, or tooling tests
-do not; build-affecting development tools such as `dev.sh`, patch handling, and
-receipt code do. Run `he replay` again before `he dev`, `he build-full
---approved`, or packaging. `he check` remains a read-only patch catalog and
-applied-state check and does not create replay proof.
+preparation, build, or package receipt stale. Changes limited to `AGENTS.md`,
+documentation, or tooling tests do not. Build-affecting development tools such
+as `dev.sh` and receipt code can invalidate preparation or build proof while
+replay remains current. Follow the stale stage's repair command in
+[Refresh preparation proof](#refresh-preparation-proof). Run `he replay` when
+replay proof is stale, including after patch bytes or patch order change.
+`he check` remains a read-only patch catalog and applied-state check and does
+not create replay proof.
 
 ### Recover replay timestamps
 
@@ -585,10 +588,15 @@ GN defaults, the Siso backend, the generated graph, and full-source test assets
 have separate receipts. Changes to `dev.sh`, `build_preparation.py`,
 `build_backend.py`, or `build_receipt.py` invalidate every non-acquisition stage.
 Run the producer commands again instead of editing receipt hashes to adopt
-existing outputs.
+existing outputs. Preserve current replay proof when these tooling changes
+leave its bound source and patch inputs unchanged.
 
-The acquisition receipt has separate inputs. It verifies recipe lineage and the
-architecture and source-mode markers. It does not hash the mutable Chromium tree
+The acquisition receipt has separate inputs. `helium_acquisition.sh` owns cold
+source and dependency acquisition. `dev.sh` owns lane selection and shell
+bookkeeping. Changes to shell selection bookkeeping do not change the
+acquisition producer.
+The acquisition receipt verifies recipe lineage and the architecture and
+source-mode markers. It does not hash the mutable Chromium tree
 or downloaded toolchain. Retain warm acquisition when its verifier passes, then
 verify actual source/base state and strict replay separately. A stale acquisition
 receipt requires a new unused lane; preserve the current lane.
@@ -601,7 +609,7 @@ he version
 he configure --refresh-defaults
 ```
 
-Finish pending recovery with `he replay` before configuring. Configuration checks
+If replay proof is stale, run `he replay` before configuring. Configuration checks
 current replay proof before changing defaults, preparing assets or bootstrapping
 GN, which itself compiles a tool.
 
