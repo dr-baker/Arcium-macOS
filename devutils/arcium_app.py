@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import fcntl
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -27,6 +29,8 @@ from build_execution import (
     verify_material_inputs,
 )
 from build_lane import LaneError, acquire_lane_lock
+from build_diagnostics import _Directories, _write_new
+from build_receipt import ReceiptError, sha256_file
 from helium_dev_bundle import (
     BundleError,
     BundlePaths,
@@ -38,6 +42,7 @@ from helium_dev_bundle import (
     resolve_bundle_paths,
 )
 from profile_clone import ProfileCloneError, clone_profile_once
+from replay_contract import ReplayError
 from helium_dev_runtime import (
     ProcessCohort, ProcessRecord, ProfileSpec, discover_chromium_processes,
     live_singleton_owner,
@@ -711,28 +716,196 @@ def verify_installed_arcium(destination: Path) -> None:
         raise ArciumError("installed Arcium signature verification failed") from error
 
 
+
+LAUNCH_LOG_RETENTION = 8
+COMPLETED_LOG_BYTES = 64 * 1024
+
+
+def arcium_log_root(home: str | os.PathLike[str] | None = None) -> Path:
+    return (Path.home() if home is None else Path(home)) / "Library" / "Logs" / "Arcium"
+
+
+def _private_log_directory(root: Path) -> tuple[_Directories, int, list]:
+    # Pin the home/fixture anchor; all log-state components refuse symlinks.
+    anchor = root.parent.parent.parent.resolve()
+    directories = _Directories(anchor)
+    try:
+        directory, links = directories.open(root.relative_to(root.parent.parent.parent).parts, create=True)
+        os.fchmod(directory, 0o700)
+        return directories, directory, links
+    except BaseException:
+        directories.close()
+        raise
+
+
+def _pid_live(pid: object) -> bool:
+    if type(pid) is not int or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, OverflowError):
+        return False
+    except PermissionError:
+        return True
+
+
+def _prune_launch_logs(directory: int) -> None:
+    completed = []
+    for name in os.listdir(directory):
+        if not re.fullmatch(r"launch-[0-9a-f]{32}\.json", name):
+            continue
+        try:
+            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                os.close(descriptor)
+                continue
+            with os.fdopen(descriptor) as handle:
+                metadata = json.loads(handle.read(8192))
+            if not isinstance(metadata, dict) or _pid_live(metadata.get("pid")):
+                continue
+            log = name.removesuffix(".json") + ".log"
+            value = os.stat(log, dir_fd=directory, follow_symlinks=False)
+            if not stat.S_ISREG(value.st_mode):
+                continue
+            completed.append((value.st_mtime_ns, name, log))
+            if value.st_size > COMPLETED_LOG_BYTES:
+                fd = os.open(log, os.O_RDWR | os.O_NOFOLLOW, dir_fd=directory)
+                with os.fdopen(fd, "r+b") as handle:
+                    handle.seek(-COMPLETED_LOG_BYTES, os.SEEK_END)
+                    tail = handle.read(COMPLETED_LOG_BYTES)
+                    handle.seek(0)
+                    handle.write(tail)
+                    handle.truncate()
+        except (OSError, ValueError):
+            continue
+    for _, metadata, log in sorted(completed, reverse=True)[LAUNCH_LOG_RETENTION - 1:]:
+        try:
+            os.unlink(metadata, dir_fd=directory)
+            os.unlink(log, dir_fd=directory)
+        except OSError:
+            pass
+
+
+def _installed_artifacts(install_path: Path) -> dict[str, str]:
+    executable = installed_executable(install_path)
+    return {str(path.relative_to(install_path)): sha256_file(path) for path in (
+        install_path / "Contents/Info.plist", executable,
+        install_path / "Contents/_CodeSignature/CodeResources",
+    )}
+
+
+def record_installed_arcium(install_path: Path, execution, *, home=None, worktree: Path | None = None, build_root: Path | None = None) -> Path:
+    root = arcium_log_root(home)
+    directories, directory, links = _private_log_directory(root)
+    try:
+        document = {"schema": 1, "app_path": str(install_path),
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    "source_worktree": str(worktree) if worktree is not None else None,
+                    "build_root": str(build_root) if build_root is not None else None,
+                    "execution_receipt_id": execution.receipt_id,
+                    "material_inputs_sha256": execution.material_inputs_sha256,
+                    "lane": execution.lane, "artifacts": _installed_artifacts(install_path)}
+        name = ".installed-" + uuid.uuid4().hex
+        _write_new(directory, name, (json.dumps(document, indent=2, sort_keys=True) + "\n").encode())
+        directories.verify(links)
+        os.replace(name, "installed.json", src_dir_fd=directory, dst_dir_fd=directory)
+        return root / "installed.json"
+    finally:
+        directories.close()
+
+
+def inspect_installed_arcium(worktree: Path, build_root: Path, *, lane: str,
+                             install_path: Path = DEFAULT_INSTALL_PATH, home=None) -> dict[str, object]:
+    """Read exact installed proof; never package, install, or launch."""
+    result = {"path": str(install_path), "exists": install_path.is_dir(), "exact": False,
+              "freshness": "missing", "error": None}
+    if not result["exists"]:
+        return result
+    result["freshness"] = "unproven"
+    try:
+        root = arcium_log_root(home)
+        # Read without creating state and reject symlinked evidence.
+        directories = _Directories(root.parent.parent.parent.resolve())
+        try:
+            directory, links = directories.open(root.relative_to(root.parent.parent.parent).parts)
+            fd = os.open("installed.json", os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory)
+            with os.fdopen(fd) as handle:
+                receipt = json.loads(handle.read(64 * 1024))
+            directories.verify(links)
+        finally:
+            directories.close()
+        if not isinstance(receipt, dict) or receipt.get("schema") != 1:
+            raise ArciumError("installed receipt is malformed")
+        verify_installed_arcium(install_path)
+        if receipt.get("app_path") != str(install_path) or receipt.get("artifacts") != _installed_artifacts(install_path):
+            result["freshness"] = "stale"
+            raise ArciumError("installed bundle differs from its recorded package")
+        result["exact"] = True
+        execution = require_current_execution(worktree, build_root, lane=lane)
+        if receipt.get("execution_receipt_id") != execution.receipt_id or receipt.get("material_inputs_sha256") != execution.material_inputs_sha256:
+            result["freshness"] = "stale"
+            raise ArciumError("installed package differs from the current runnable build")
+        result.update(freshness="current", execution_receipt_id=execution.receipt_id,
+                      receipt_path=str(root / "installed.json"))
+    except FileNotFoundError:
+        result["error"] = "installed package receipt is missing; update Arcium to establish proof"
+    except (ExecutionError, ReplayError) as error:
+        result.update(freshness="stale", error=str(error))
+    except (ArciumError, BundleError, ReceiptError, OSError, ValueError, subprocess.SubprocessError) as error:
+        result["error"] = str(error)[:1200]
+    return result
+
 def launch_arcium(
     install_path: Path,
     profile: Path,
+    *,
+    log_root: Path | None = None,
+    evidence: dict[str, object] | None = None,
 ) -> int:
     info = verify_profile_identity(install_path)
     executable_name = _safe_executable_name(info.get("CFBundleExecutable"))
     executable = install_path / "Contents" / "MacOS" / executable_name
     if not executable.is_file() or not os.access(executable, os.X_OK):
         raise ArciumError("installed Arcium executable is missing")
-    process = subprocess.Popen(
-        [
-            str(executable),
-            f"--user-data-dir={profile}",
-            "--no-first-run",
-            "--enable-features=" + ",".join(DEFAULT_FEATURES),
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    return process.pid
+    root = arcium_log_root() if log_root is None else log_root
+    directories, directory, links = _private_log_directory(root)
+    name = "launch-" + uuid.uuid4().hex
+    log_path = root / (name + ".log")
+    metadata_path = root / (name + ".json")
+    process = None
+    try:
+        _prune_launch_logs(directory)
+        fd = os.open(name + ".log", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory)
+        with os.fdopen(fd, "wb") as log:
+            directories.verify(links)
+            process = subprocess.Popen(
+                [str(executable), f"--user-data-dir={profile}", "--no-first-run",
+                 "--enable-features=" + ",".join(DEFAULT_FEATURES)],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+            )
+        metadata = {"schema": 1, "pid": process.pid, "app_path": str(install_path),
+                    "launched_at": datetime.now(timezone.utc).isoformat(),
+                    "executable_path": str(executable), "bundle_identifier": ARCIUM_BUNDLE_ID,
+                    "profile": str(profile), "mock_keychain": False, "log_path": str(log_path)}
+        _write_new(directory, name + ".json", (json.dumps(metadata, indent=2, sort_keys=True) + "\n").encode())
+        if evidence is not None:
+            evidence.update(log_path=str(log_path), launch_metadata_path=str(metadata_path))
+        print(f"arcium: launch log {log_path}", file=sys.stderr)
+        return process.pid
+    except OSError as error:
+        try:
+            _write_new(directory, name + ".json", (json.dumps({
+                "schema": 1, "pid": process.pid if process is not None else None,
+                "outcome": "launch-evidence-failed" if process is not None else "launch-failed",
+                "app_path": str(install_path), "profile": str(profile),
+                "log_path": str(log_path), "error_type": type(error).__name__,
+            }) + "\n").encode())
+        except OSError:
+            pass
+        raise ArciumError(f"Arcium launch failed; log {log_path}: {error}") from error
+    finally:
+        directories.close()
 
 
 def verify_arcium_launch(install_path: Path, profile: Path, pid: int) -> None:
@@ -763,7 +936,7 @@ def _update_action_locked(
 ) -> dict[str, object]:
     try:
         material_at_entry = capture_material_inputs(paths.worktree)
-        require_current_execution(
+        execution = require_current_execution(
             paths.worktree,
             paths.source_dir.parent,
             lane=os.environ.get("HELIUM_DEV_LANE", "worktree"),
@@ -787,27 +960,40 @@ def _update_action_locked(
         migration = initialize_profile(source_profile, target_profile)
         started = time.monotonic()
         package = _package_arcium_locked(paths, identity=identity)
+        package_seconds = time.monotonic() - started
+        install_started = time.monotonic()
         with prepared_install(Path(str(package["app_path"])), install_path) as (staging, install_method):
+            install_prepare_seconds = time.monotonic() - install_started
             preparation_seconds = time.monotonic() - started
             print(f"arcium: replacement prepared in {preparation_seconds:.1f}s", file=sys.stderr)
             handoff_started = time.monotonic()
             verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+            restart_started = time.monotonic()
             if restart:
                 quit_for_restart(**profile_arguments)
+            restart_seconds = time.monotonic() - restart_started
             require_closed(**profile_arguments)
             verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
+            install_started = time.monotonic()
             previous = _replace_directory(
                 staging, install_path, verifier=verify_installed_arcium, retain_previous=True,
                 preserve_published=True,
             )
+            install_seconds = install_prepare_seconds + time.monotonic() - install_started
+            launch_evidence = {}
+            launch_started = time.monotonic()
             try:
                 require_closed(**profile_arguments)
                 verify_material_inputs(paths.worktree, paths.source_dir.parent, material_at_entry)
-                pid = launch_arcium(install_path, target_profile) if launch else None
+                pid = launch_arcium(install_path, target_profile, log_root=arcium_log_root(home), evidence=launch_evidence) if launch else None
                 if pid is not None:
                     verify_arcium_launch(install_path, target_profile, pid)
+                launch_seconds = time.monotonic() - launch_started
+                installed_receipt_path = record_installed_arcium(install_path, execution, home=home, worktree=paths.worktree, build_root=paths.source_dir.parent)
             except BaseException as error:
                 recovery = f" Previous bundle retained at {previous}." if previous else ""
+                if launch_evidence.get("log_path"):
+                    recovery += f" Launch log: {launch_evidence['log_path']}."
                 raise ArciumError(f"Arcium handoff failed.{recovery} Profile was not rolled back: {error}") from error
             if previous is not None:
                 try:
@@ -830,6 +1016,14 @@ def _update_action_locked(
         "restart": restart,
         "preparation_seconds": round(preparation_seconds, 3),
         "handoff_seconds": round(handoff_seconds, 3),
+        "stage_seconds": {"package": round(package_seconds, 3), "install": round(install_seconds, 3),
+                          "restart": round(restart_seconds, 3), "launch-verification": round(launch_seconds, 3)},
+        "proof_gates": ["compiled", "packaged", "installed"] + (["launched"] if pid is not None else []),
+        "installed_receipt_path": str(installed_receipt_path),
+        "execution_receipt_id": execution.receipt_id,
+        "source_worktree": str(paths.worktree), "build_root": str(paths.source_dir.parent),
+        "lane": execution.lane,
+        **launch_evidence,
     }
 
 
@@ -952,7 +1146,12 @@ def _emit(document: dict[str, object], json_mode: bool) -> None:
     else:
         action = "installed and launched" if document.get("pid") is not None else "installed"
         print(f"arcium: {action} {document.get('app_path')}")
-        print(f"arcium: handoff took {document.get('handoff_seconds')}s")
+        for stage, seconds in document.get("stage_seconds", {}).items():
+            print(f"arcium: {stage} took {seconds:.3f}s")
+        print(f"arcium: profile root {document.get('profile')}")
+        if document.get("log_path"):
+            print(f"arcium: launch log {document['log_path']}")
+        print(f"arcium: installation receipt {document.get('installed_receipt_path')}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:

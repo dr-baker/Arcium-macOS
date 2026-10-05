@@ -221,7 +221,9 @@ class BuildBackendTests(unittest.TestCase):
                 "helium_dev.ensure_gclient_identity"
             ), patch("helium_dev.require_current_replay_proof"), patch(
                 "build_preparation.require_current_replay_proof", return_value=SimpleNamespace(receipt_id="a" * 64)
-            ), patch("helium_dev.record_execution"):
+            ), patch("helium_dev.record_execution", return_value=SimpleNamespace(
+                receipt_id="e" * 64, replay_receipt_id="a" * 64, source_receipt_id="b" * 64,
+            )):
                 for stage in ("resources", "version", "configured"):
                     if stage == "configured":
                         write(source / "out/Default/build.ninja", "# fixture configured graph\n")

@@ -888,7 +888,7 @@ def build_action(
                         material_inputs_at_entry=material_at_entry,
                         prepared_inputs_at_entry=preparation_at_entry,
                     )
-                except ExecutionError as error:
+                except (ExecutionError, ReplayError) as error:
                     result = replace(result, ok=False, outcome="failed", error=str(error),
                                      warnings=result.warnings + ("build finished; runnable build proof was not established",))
         elif action == "build-full":
@@ -914,7 +914,7 @@ def build_action(
                         material_inputs_at_entry=material_at_entry,
                         prepared_inputs_at_entry=preparation_at_entry,
                     )
-                except ExecutionError as error:
+                except (ExecutionError, ReplayError) as error:
                     result = replace(result, ok=False, outcome="failed", error=str(error),
                                      warnings=result.warnings + ("build finished; runnable build proof was not established",))
         else:
