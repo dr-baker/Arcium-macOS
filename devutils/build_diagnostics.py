@@ -334,3 +334,73 @@ class BuildEvidence:
         os.fchmod(self._archive, 0o500)
         self._directories.verify(self._archive_links)
         return self.path
+
+
+def publish_result(archive_root: Path, document: dict[str, object]) -> Path:
+    """Publish one protected operation report and an atomic latest-result pointer.
+
+    Call under the existing lane lock. A report is diagnostic evidence only;
+    runnable-build receipts remain the authority for installation.
+    """
+    archive = _absolute(archive_root)
+    directories = _Directories(archive.parent.parent)
+    try:
+        root, links = directories.open(archive.relative_to(directories.anchor).parts, create=True)
+        invocation = uuid.uuid4().hex
+        report, report_links = directories.open(("results", invocation), parent=root, create=True)
+        path = archive_root / "results" / invocation / "result.json"
+        result = dict(document, result_path=str(path), recorded_at=datetime.now(timezone.utc).isoformat())
+        _write_new(report, "result.json", (json.dumps(result, indent=2, sort_keys=True) + "\n").encode())
+        summary = [f"{result.get('action')}: {result.get('outcome', 'ok' if result.get('ok') else 'refused')}",
+                   f"Recorded at: {result['recorded_at']}"]
+        for key in ("source_worktree", "build_root", "lane", "targets", "execution_receipt_id", "replay_receipt_id", "source_receipt_id"):
+            if key in result:
+                summary.append(f"{key}: {result[key]}")
+        for name, seconds in result.get("stage_seconds", {}).items():
+            summary.append(f"{name}: {seconds:.3f}s measured wall time")
+        if result.get("error"):
+            summary.append("error: " + str(result["error"])[:1200])
+        summary.extend("warning: " + str(warning)[:1200] for warning in result.get("warnings", ()))
+        summary.extend("evidence: " + str(evidence) for evidence in result.get("evidence_paths", ()))
+        summary.append("Proof gates: " + ", ".join(result.get("proof_gates", ())))
+        _write_new(report, "summary.txt", ("\n".join(summary) + "\n").encode())
+        directories.verify(links + report_links)
+        name = ".latest-" + invocation
+        _write_new(root, name, (json.dumps({"result_path": str(path), "summary_path": str(path.with_name('summary.txt')), "recorded_at": result["recorded_at"], "action": result.get("action"), "outcome": result.get("outcome")}) + "\n").encode())
+        directories.verify(links)
+        os.replace(name, "latest-result.json", src_dir_fd=root, dst_dir_fd=root)
+        os.fchmod(report, 0o500)
+        return path
+    finally:
+        directories.close()
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+    parser = argparse.ArgumentParser(description="Record measured iteration stages without running build tools")
+    parser.add_argument("--build-root", type=Path, required=True)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--lane", required=True)
+    parser.add_argument("--outcome", choices=("completed", "failed"), required=True)
+    parser.add_argument("--failed-stage")
+    parser.add_argument("--stage", action="append", default=[])
+    args = parser.parse_args()
+    timings = {}
+    for value in args.stage:
+        name, seconds = value.split("=", 1)
+        duration = float(seconds)
+        if name not in {"validation", "configure", "build", "update"} or duration < 0:
+            parser.error("invalid measured stage")
+        timings[name] = duration
+    try:
+        path = publish_result(args.build_root / ".arcium" / "iteration-evidence", {
+            "ok": args.outcome == "completed", "action": "arcium-iterate",
+            "outcome": args.outcome, "failed_stage": args.failed_stage,
+            "stage_seconds": timings, "source_worktree": str(args.root),
+            "build_root": str(args.build_root), "lane": args.lane, "targets": ["chrome"],
+            "error": f"{args.failed_stage} failed; see stage output and build/launch evidence" if args.failed_stage else None,
+        })
+        print(f"arcium iterate: result {path}")
+    except OSError as error:
+        print(f"arcium iterate: result report unavailable: {type(error).__name__}", file=sys.stderr)

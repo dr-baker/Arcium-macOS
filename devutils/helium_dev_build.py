@@ -18,6 +18,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from threading import Event, Lock, Thread
 from types import ModuleType
 from typing import Callable, Mapping, Protocol, Sequence
@@ -299,6 +300,8 @@ class BuildResult:
     warnings: tuple[str, ...] = ()
     error: str | None = None
     evidence_paths: tuple[str, ...] = ()
+    outcome: str | None = None
+    stage_seconds: Mapping[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -313,6 +316,8 @@ class BuildResult:
             "warnings": list(self.warnings),
             "error": self.error,
             "evidence_paths": list(self.evidence_paths),
+            "outcome": self.outcome or ("ok" if self.ok else "refused"),
+            "stage_seconds": dict(self.stage_seconds),
         }
 
 
@@ -665,6 +670,9 @@ class HeliumDevBuilder:
     _commands: list[tuple[str, ...]] = field(default_factory=list, init=False)
     _evidence_paths: list[str] = field(default_factory=list, init=False)
     _evidence_warnings: list[str] = field(default_factory=list, init=False)
+    _stage_seconds: dict[str, float] = field(default_factory=dict, init=False)
+    _outcome: str = field(default="refused", init=False)
+    _preflight_gates: list[str] = field(default_factory=list, init=False)
 
     def _environment(self) -> dict[str, str]:
         environment = self.backend.environment(os.environ)
@@ -676,6 +684,9 @@ class HeliumDevBuilder:
         self._commands.clear()
         self._evidence_paths.clear()
         self._evidence_warnings.clear()
+        self._stage_seconds.clear()
+        self._outcome = "refused"
+        self._preflight_gates.clear()
 
     def _run(
         self,
@@ -699,6 +710,9 @@ class HeliumDevBuilder:
                 self._evidence_warnings.append(f"build evidence unavailable: {type(error).__name__}")
         result = None
         error_type = None
+        is_autoninja = len(argv) > 1 and argv[1] == str(self.paths.autoninja_path)
+        stage = ("plan" if "-n" in argv else "build") if is_autoninja else "graph"
+        started = time.monotonic()
         try:
             result = self.runner(
                 argv,
@@ -711,6 +725,7 @@ class HeliumDevBuilder:
             error_type = type(error).__name__
             raise
         finally:
+            self._stage_seconds[stage] = self._stage_seconds.get(stage, 0.0) + time.monotonic() - started
             if evidence is not None:
                 try:
                     path = evidence.finish(
@@ -738,18 +753,25 @@ class HeliumDevBuilder:
         warnings: Sequence[str] = (),
         error: str | None = None,
     ) -> BuildResult:
+        completed = tuple(dict.fromkeys(proof_gates or self._preflight_gates))
+        compile_gates = {"focused-compile", "component-relinked", "bundle-resources-relinked", "full-build"}
+        outcome = self._outcome
+        if ok:
+            outcome = "compiled" if compile_gates.intersection(completed) else "no-work" if "no-work-plan" in completed else "planned"
         return BuildResult(
             ok=ok,
             action=action,
             targets=targets,
             commands=tuple(self._commands),
             edge_count=edge_count,
-            proof_gates=tuple(proof_gates),
+            proof_gates=completed,
             artifact_state=artifact_status.artifact_state,
             running_process_stale=artifact_status.running_process_stale,
             warnings=tuple(warnings) + artifact_status.warnings + tuple(self._evidence_warnings),
             evidence_paths=tuple(self._evidence_paths),
             error=error,
+            outcome=outcome,
+            stage_seconds={name: round(seconds, 3) for name, seconds in self._stage_seconds.items()},
         )
 
     def _prepare(self, targets: Sequence[str]) -> tuple[str, ...]:
@@ -763,6 +785,9 @@ class HeliumDevBuilder:
     def _siso_query(self, kind: str, target: str) -> CommandResult:
         result = self._run((self.paths.siso_path, "query", kind, "-C", self.paths.out_dir, target))
         if result.returncode != 0:
+            if result.timed_out:
+                self._outcome = "timed-out"
+                raise BuildGraphError(f"generated graph query timed out while querying {kind} for {target!r}")
             raise BuildGraphError(f"generated graph rejected target {target!r} while querying {kind}")
         return result
 
@@ -774,6 +799,7 @@ class HeliumDevBuilder:
             result = self._siso_query("rule", target)
             if not result.output.strip():
                 raise BuildGraphError(f"generated graph returned no rule for target {target!r}")
+        self._preflight_gates.append("generated-graph-validated")
         return normalized
 
     def query_commands(self, target: str) -> tuple[str, ...]:
@@ -784,6 +810,7 @@ class HeliumDevBuilder:
         commands = parse_siso_query_commands(result.output)
         if not commands:
             raise BuildGraphError(f"generated graph returned no command for target {target!r}")
+        self._preflight_gates.append("generated-link-command-inspected")
         return commands
 
     def query_inputs(self, target: str) -> tuple[str, ...]:
@@ -794,6 +821,7 @@ class HeliumDevBuilder:
         inputs = tuple(line.strip() for line in result.output.splitlines() if line.strip())
         if not inputs:
             raise BuildGraphError(f"generated graph returned no inputs for target {target!r}")
+        self._preflight_gates.append("generated-link-inputs-inspected")
         return inputs
 
     def _autoninja_command(self, targets: Sequence[str], *, dry_run: bool) -> tuple[str, ...]:
@@ -821,9 +849,11 @@ class HeliumDevBuilder:
         }
         result = self._run(self._autoninja_command(targets, dry_run=True))
         if result.returncode != 0:
+            self._outcome = "timed-out" if result.timed_out else "failed"
             raise BuildGraphError(
-                _command_failure(result, "autoninja dry-run failed; refusing to build")
+                "autoninja dry-run timed out" if result.timed_out else _command_failure(result, "autoninja dry-run failed; build was not started")
             )
+        self._preflight_gates.append("autoninja-dry-run")
         if result.streamed_edge_count_ambiguous:
             raise BuildBudgetError("dry-run reported conflicting edge totals; refusing to build")
         if (
@@ -852,6 +882,7 @@ class HeliumDevBuilder:
             raise BuildBudgetError(
                 f"dry-run planned {edge_count} edges, above configured budget {self.edge_budget}; refusing to build"
             )
+        self._preflight_gates.append("edge-budget-checked")
         return edge_count
 
     def build_plan(self, targets: Sequence[str]) -> BuildResult:
@@ -862,6 +893,9 @@ class HeliumDevBuilder:
         try:
             normalized = self.validate_graph_targets(targets)
             edge_count = self._dry_run(normalized)
+        except (OSError, subprocess.SubprocessError) as error:
+            self._outcome = "failed"
+            return self._result(ok=False, action="build-plan", targets=normalized, error=str(error)[:1200])
         except BuildError as error:
             return self._result(ok=False, action="build-plan", targets=normalized, error=str(error))
         return self._result(
@@ -882,12 +916,15 @@ class HeliumDevBuilder:
                 proof_gates=tuple(plan.proof_gates) + ("no-work-plan",),
                 warnings=("dry-run reported no work; build was not executed",),
             )
+        self._outcome = "failed"
         try:
             result = self._run(
                 self._autoninja_command(plan.targets, dry_run=False),
                 progress_total=plan.edge_count,
             )
-        except BuildError as error:
+        except (BuildError, OSError, subprocess.SubprocessError) as error:
+            if isinstance(error, BuildError):
+                self._outcome = "refused"
             return self._result(
                 ok=False, action=action, targets=plan.targets,
                 edge_count=plan.edge_count, proof_gates=plan.proof_gates,
@@ -896,6 +933,7 @@ class HeliumDevBuilder:
         if result.returncode != 0:
             detail = "autoninja build failed"
             if result.timed_out:
+                self._outcome = "timed-out"
                 detail = "autoninja build timed out"
             else:
                 detail = _command_failure(result, detail)
@@ -936,7 +974,7 @@ class HeliumDevBuilder:
             )
         plan = self.build_plan(normalized)
         if not plan.ok:
-            return replace(plan, action="compile", warnings=("compile was not started",))
+            return replace(plan, action="compile", warnings=plan.warnings + ("compile was not started",))
         return self._execute_planned("compile", plan, proof_gates=("focused-compile",))
 
     def relink(
@@ -954,8 +992,10 @@ class HeliumDevBuilder:
             self.query_inputs(target)
             self.query_commands(target)
             edge_count = self._dry_run((target,))
-        except BuildError as error:
-            return self._result(ok=False, action="relink", targets=(target,), error=str(error))
+        except (BuildError, OSError, subprocess.SubprocessError) as error:
+            if not isinstance(error, BuildError):
+                self._outcome = "failed"
+            return self._result(ok=False, action="relink", targets=(target,), error=str(error)[:1200])
 
         plan = self._result(
             ok=True,
@@ -1003,5 +1043,5 @@ class HeliumDevBuilder:
             )
         plan = self.build_plan(FULL_BUILD_TARGETS)
         if not plan.ok:
-            return replace(plan, action="build-full", warnings=("full build was not started",))
+            return replace(plan, action="build-full", warnings=plan.warnings + ("full build was not started",))
         return self._execute_planned("build-full", plan, proof_gates=("full-build",))

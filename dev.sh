@@ -739,19 +739,35 @@ ___helium_arcium_iterate_inner() {
         return 2
     fi
     local _started=$SECONDS
-    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" --build-root "$_build_dir" preflight --restart || return
-    ___helium_check || return
-    ___helium_require_replay_proof || return
-    echo "arcium iterate: validation took $((SECONDS - _started))s" >&2
-    local _stage_started=$SECONDS
-    ___helium_configure_inner || return
-    echo "arcium iterate: configuration took $((SECONDS - _stage_started))s" >&2
-    _stage_started=$SECONDS
-    ___helium_build_full "$@" || return
-    echo "arcium iterate: build took $((SECONDS - _stage_started))s" >&2
-    ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
-        --root "$_root_dir" --build-root "$_build_dir" update --restart || return
+    local _stage_started _stage _code
+    local -a _timings
+    for _stage in validation configure build update; do
+        _stage_started=$SECONDS
+        echo "arcium iterate: starting $_stage" >&2
+        case "$_stage" in
+            validation)
+                ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+                    --root "$_root_dir" --build-root "$_build_dir" preflight --restart &&
+                ___helium_check && ___helium_require_replay_proof
+                _code=$?;;
+            configure) ___helium_configure_inner; _code=$?;;
+            build) ___helium_build_full "$@"; _code=$?;;
+            update)
+                ___helium_python "$_helium_harness_root/devutils/arcium_app.py" \
+                    --root "$_root_dir" --build-root "$_build_dir" update --restart
+                _code=$?;;
+        esac
+        _timings+=(--stage "$_stage=$((SECONDS - _stage_started))")
+        echo "arcium iterate: $_stage took $((SECONDS - _stage_started))s" >&2
+        if [ "$_code" != 0 ]; then
+            echo "arcium iterate: $_stage failed (exit $_code); later stages were not started" >&2
+            ___helium_python "$_helium_harness_root/devutils/build_diagnostics.py" \
+                --build-root "$_build_dir" --root "$_root_dir" --lane "${HELIUM_DEV_LANE:-worktree}" --outcome failed --failed-stage "$_stage" "${_timings[@]}"
+            return "$_code"
+        fi
+    done
+    ___helium_python "$_helium_harness_root/devutils/build_diagnostics.py" \
+        --build-root "$_build_dir" --root "$_root_dir" --lane "${HELIUM_DEV_LANE:-worktree}" --outcome completed "${_timings[@]}"
     echo "arcium iterate: completed in $((SECONDS - _started))s" >&2
 }
 
