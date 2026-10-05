@@ -586,10 +586,6 @@ ___helium_check() {
         --patches "$_patches_dir" \
         --series series.merged \
         --complete || return
-    if find "$_src_dir" -name '*.rej' -print -quit | grep -q .; then
-        echo "check: patch rejects remain in the development source" >&2
-        return 1
-    fi
     ___helium_check_source || return
     echo "check: active patch stack passed"
 }

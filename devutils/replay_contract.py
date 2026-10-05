@@ -27,6 +27,7 @@ from build_receipt import (
     write_receipt_atomic,
 )
 from build_lane import LaneError, acquire_lane_lock
+from check_source import first_patch_reject
 from replay_timestamps import (
     TimestampRecoveryError, recovery_timestamps, restore_timestamps,
     consume_recovery_timestamps, has_pending_recovery,
@@ -361,8 +362,9 @@ def _write_proof(worktree: Path, source_dir: Path) -> ReplayReceipt:
 def _validate_replayed_state(worktree: Path, source_dir: Path) -> None:
     report = inspect_quilt_state(source_dir, _patch_root(worktree))
     report.comparison.require_complete()
-    if any(source_dir.rglob("*.rej")):
-        raise ReplayError("patch rejects remain in the development source")
+    rejected = first_patch_reject(source_dir)
+    if rejected is not None:
+        raise ReplayError(f"patch rejects remain in the development source: {rejected}")
 
 
 def _quilt_environment(worktree: Path) -> dict[str, str]:

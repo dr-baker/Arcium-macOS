@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -70,6 +71,36 @@ class SourceCheckTests(unittest.TestCase):
         tracked.write_text("new \n", encoding="utf-8")
         with self.assertRaisesRegex(SourceCheckError, "trailing whitespace"):
             check_source(self.source)
+
+    def test_source_command_prunes_only_top_level_metadata_and_output(self) -> None:
+        script = Path(__file__).resolve().parents[1] / 'check_source.py'
+
+        def command():
+            return subprocess.run([sys.executable, str(script), '--source', str(self.source)],
+                                  capture_output=True, text=True, timeout=10)
+
+        for name in ('out', '.git', '.pc'):
+            ignored = self.source / name / 'nested' / 'irrelevant.rej'
+            ignored.parent.mkdir(parents=True)
+            ignored.write_text('generated or metadata\n')
+        external = self.root / 'external'
+        external.mkdir()
+        (external / 'linked.rej').write_text('outside source\n')
+        (self.source / 'linked-directory').symlink_to(external, target_is_directory=True)
+        self.assertEqual(command().returncode, 0)
+
+        # All actual source is checked, including nested names that resemble
+        # the three top-level directories excluded from traversal.
+        for name in ('component', 'component/out', 'component/.git', 'component/.pc'):
+            rejected = self.source / name / 'actual.rej'
+            rejected.parent.mkdir(parents=True, exist_ok=True)
+            rejected.write_text('failed source patch\n')
+            result = command()
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn(str(rejected), result.stderr)
+            rejected.unlink()
+        (self.source / 'link.rej').symlink_to(external / 'linked.rej')
+        self.assertEqual(command().returncode, 2)
 
 
 if __name__ == "__main__":
