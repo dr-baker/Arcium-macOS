@@ -24,6 +24,7 @@ from devutils.build_lane import (
     MACOS_UNIX_PATH_BYTES,
     SCCACHE_SOCKET_SUFFIX,
     probe_storage_topology,
+    probe_volume,
 )
 
 
@@ -56,6 +57,30 @@ class BuildLaneTest(unittest.TestCase):
             warn_if_unencrypted=True,
             warn_if_ownership_disabled=True,
         )
+
+    def test_probe_caps_apfs_capacity_at_filesystem_available_space(self):
+        gib = 1024**3
+        metadata = {
+            "MountPoint": str(self.mount), "VolumeUUID": "volume-1",
+            "FilesystemType": "apfs", "FilesystemName": "Case-sensitive APFS",
+            "WritableVolume": True, "Internal": False,
+            "APFSContainerFree": 150 * gib,
+        }
+        filesystem = SimpleNamespace(f_bavail=21 * gib // 4096, f_frsize=4096)
+        with patch("devutils.build_lane.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=plistlib.dumps(metadata))), patch("devutils.build_lane.os.statvfs", return_value=filesystem):
+            volume = probe_volume(self.root)
+        self.assertEqual(volume.free_bytes, 21 * gib)
+        report = diagnose_lane(replace(self.spec, minimum_free_bytes=80 * gib), volume)
+        self.assertIn("free-space", [item.code for item in report.diagnostics])
+
+    def test_probe_uses_valid_container_limit_and_ignores_malformed_values(self):
+        for container_free, expected in ((40, 40), (150, 100), (0, 0), (True, 100), (False, 100), (-1, 100), ("40", 100), (40.5, 100), (None, 100)):
+            with self.subTest(container_free=container_free):
+                metadata = {"MountPoint": str(self.mount), "APFSContainerFree": container_free}
+                with patch("devutils.build_lane.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=plistlib.dumps({k: v for k, v in metadata.items() if v is not None}))), patch("devutils.build_lane.os.statvfs", return_value=SimpleNamespace(f_bavail=25, f_frsize=4)):
+                    self.assertEqual(probe_volume(self.root).free_bytes, expected)
+        with patch("devutils.build_lane.subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=plistlib.dumps({"MountPoint": str(self.mount), "FilesystemType": "exfat"}))), patch("devutils.build_lane.os.statvfs", return_value=SimpleNamespace(f_bavail=25, f_frsize=4)):
+            self.assertEqual(probe_volume(self.root).free_bytes, 100)
 
     def test_image_topology_uses_actual_mounted_entity_and_host_space(self):
         image = self.mount / "build.sparseimage"
