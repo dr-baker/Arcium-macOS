@@ -356,6 +356,12 @@ def publish_result(archive_root: Path, document: dict[str, object]) -> Path:
         for key in ("source_worktree", "build_root", "lane", "targets", "execution_receipt_id", "replay_receipt_id", "source_receipt_id"):
             if key in result:
                 summary.append(f"{key}: {result[key]}")
+        if "edge_count" in result:
+            summary.append(f"Planned edges: {result['edge_count']}")
+        for source, label in (("build_output", "Actions reported by build"),
+                              ("local_log_records", "Local log action records")):
+            if source in result.get("observed_actions", {}):
+                summary.append(f"{label}: {result['observed_actions'][source]}")
         for name, seconds in result.get("stage_seconds", {}).items():
             summary.append(f"{name}: {seconds:.3f}s measured wall time")
         if result.get("error"):

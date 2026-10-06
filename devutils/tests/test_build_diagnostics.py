@@ -316,7 +316,9 @@ class IntegrationTests(unittest.TestCase):
         from devutils.build_diagnostics import publish_result
         root = self.source.parent / ".arcium" / "build-evidence"
         result = self.builder.compile(("obj/example.o",))
-        path = publish_result(root, result.as_dict())
+        report = result.as_dict()
+        report["observed_actions"] = {"build_output": 665, "local_log_records": 668}
+        path = publish_result(root, report)
         pointer = json.loads((root / "latest-result.json").read_text())
         self.assertEqual(pointer["result_path"], str(path))
         document = json.loads(path.read_text())
@@ -324,7 +326,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(set(document["stage_seconds"]), {"graph", "plan", "build"})
         self.assertTrue(all(value >= 0 for value in document["stage_seconds"].values()))
         self.assertEqual(path.stat().st_mode & 0o777, 0o400)
-        self.assertIn("compiled", path.with_name("summary.txt").read_text())
+        summary = path.with_name("summary.txt").read_text()
+        self.assertIn("compiled", summary)
+        self.assertIn("Planned edges: 2", summary)
+        self.assertIn("Actions reported by build: 665", summary)
+        self.assertIn("Local log action records: 668", summary)
         refused = publish_result(root, {"ok": False, "action": "compile", "outcome": "refused", "error": "edge budget"})
         self.assertEqual(json.loads((root / "latest-result.json").read_text())["result_path"], str(refused))
         self.assertTrue(path.is_file())

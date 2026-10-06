@@ -112,6 +112,7 @@ class CommandResult:
     stderr_truncated: bool = False
     streamed_edge_count: int | None = None
     streamed_edge_count_ambiguous: bool = False
+    observed_actions: Mapping[str, int] = field(default_factory=dict)
 
     @property
     def output(self) -> str:
@@ -302,6 +303,7 @@ class BuildResult:
     evidence_paths: tuple[str, ...] = ()
     outcome: str | None = None
     stage_seconds: Mapping[str, float] = field(default_factory=dict)
+    observed_actions: Mapping[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -318,6 +320,7 @@ class BuildResult:
             "evidence_paths": list(self.evidence_paths),
             "outcome": self.outcome or ("ok" if self.ok else "refused"),
             "stage_seconds": dict(self.stage_seconds),
+            "observed_actions": dict(self.observed_actions),
         }
 
 
@@ -512,7 +515,12 @@ def subprocess_runner(
     progress_lock = Lock()
     progress_completed = 0
     progress_bucket = -1
-    progress_finishing_reported = False
+    progress_last_expanded: int | None = None
+    progress_exceeded_reported = False
+    progress_reported_completed = 0
+    progress_reported_total = 0
+    progress_log_completed = 0
+    expanded_report_interval = max(100, (progress_total or 0) // 100)
     progress_monitor_stop = Event()
     localexec_monitor = (
         _SisoLocalexecProgress(localexec_path)
@@ -522,35 +530,37 @@ def subprocess_runner(
         else None
     )
 
-    def report_completed(completed: int, *, estimated: bool) -> None:
-        nonlocal progress_completed, progress_bucket, progress_finishing_reported
+    def report_completed(completed: int, *, estimated: bool, reported_total: int | None = None) -> None:
+        nonlocal progress_completed, progress_bucket, progress_last_expanded, progress_exceeded_reported
+        nonlocal progress_reported_completed, progress_reported_total, progress_log_completed
         if progress_total is None or progress_total <= 0:
             return
         with progress_lock:
+            if estimated:
+                progress_log_completed = max(progress_log_completed, completed)
+            elif completed >= progress_reported_completed:
+                progress_reported_completed = completed
+                progress_reported_total = reported_total or progress_total
             if completed <= progress_completed:
                 return
             progress_completed = completed
             if completed >= progress_total:
-                if progress_finishing_reported:
+                first_excess = completed > progress_total and not progress_exceeded_reported
+                if (progress_last_expanded is not None and not first_excess
+                        and completed - progress_last_expanded < expanded_report_interval):
                     return
-                progress_finishing_reported = True
-                if estimated:
-                    print(
-                        "build progress: estimated 99.0% "
-                        f"({completed:,}/{progress_total:,} observed actions; "
-                        "awaiting command completion)",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                else:
-                    print(
-                        f"build progress: finishing "
-                        f"({completed:,}/{progress_total:,} actions)",
-                        file=sys.stderr,
-                        flush=True,
-                    )
+                progress_last_expanded = completed
+                progress_exceeded_reported = completed > progress_total
+                source = "action records observed in local log" if estimated else "actions reported by build"
+                print(
+                    f"build progress: {completed:,} {source}; "
+                    f"dry-run estimate {progress_total:,} actions",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 return
-            percent = min(99.0, 100.0 * completed / progress_total)
+            denominator = progress_total if estimated else reported_total or progress_total
+            percent = min(99.0, 100.0 * completed / denominator)
             bucket = int(percent)
             if bucket <= progress_bucket:
                 return
@@ -558,7 +568,7 @@ def subprocess_runner(
             suffix = "estimated " if estimated else ""
             print(
                 f"build progress: {suffix}{percent:.1f}% "
-                f"({completed:,}/{progress_total:,} actions)",
+                f"({completed:,}/{denominator:,} actions)",
                 file=sys.stderr,
                 flush=True,
             )
@@ -572,8 +582,8 @@ def subprocess_runner(
         for match in matches:
             completed = int(match.group(1).replace(",", ""))
             reported_total = int(match.group(2).replace(",", ""))
-            if reported_total == progress_total:
-                report_completed(completed, estimated=False)
+            if reported_total > 0 and 0 <= completed <= reported_total:
+                report_completed(completed, estimated=False, reported_total=reported_total)
 
     def monitor_localexec() -> None:
         if localexec_monitor is None:
@@ -581,8 +591,8 @@ def subprocess_runner(
         while not progress_monitor_stop.wait(_SISO_LOCALEXEC_POLL_SECONDS):
             report_completed(localexec_monitor.poll(), estimated=True)
         # Capture the final records after the child exits but before the
-        # result is returned.  This can advance to ``finishing`` without
-        # falsely claiming 100 percent for a failed process.
+        # result is returned. Observed actions can exceed the dry-run estimate;
+        # command completion remains a separate fact.
         report_completed(localexec_monitor.poll(), estimated=True)
 
     def drain(name: str, pipe: object) -> None:
@@ -633,9 +643,16 @@ def subprocess_runner(
     proc.stderr.close()
     if progress_total is not None and progress_total > 0 and returncode == 0:
         with progress_lock:
+            counts = []
+            if progress_reported_total:
+                counts.append(f"{progress_reported_completed:,} actions reported by build"
+                              f" (reported total {progress_reported_total:,})")
+            if progress_log_completed and progress_log_completed != progress_reported_completed:
+                counts.append(f"{progress_log_completed:,} action records observed in local log")
+            observed = "; ".join(counts) or "observed actions unavailable"
             print(
-                f"build progress: 100.0% "
-                f"({progress_total:,}/{progress_total:,} actions)",
+                f"build progress: command completed ({observed}; "
+                f"dry-run estimate {progress_total:,} actions)",
                 file=sys.stderr,
                 flush=True,
             )
@@ -655,6 +672,10 @@ def subprocess_runner(
         stderr_truncated=truncated["stderr"],
         streamed_edge_count=streamed_edge_count,
         streamed_edge_count_ambiguous=streamed_edge_count_ambiguous,
+        observed_actions={
+            **({"build_output": progress_reported_completed} if progress_reported_total else {}),
+            **({"local_log_records": progress_log_completed} if progress_log_completed else {}),
+        },
     )
 
 
@@ -673,6 +694,7 @@ class HeliumDevBuilder:
     _stage_seconds: dict[str, float] = field(default_factory=dict, init=False)
     _outcome: str = field(default="refused", init=False)
     _preflight_gates: list[str] = field(default_factory=list, init=False)
+    _observed_actions: dict[str, int] = field(default_factory=dict, init=False)
 
     def _environment(self) -> dict[str, str]:
         environment = self.backend.environment(os.environ)
@@ -687,6 +709,7 @@ class HeliumDevBuilder:
         self._stage_seconds.clear()
         self._outcome = "refused"
         self._preflight_gates.clear()
+        self._observed_actions.clear()
 
     def _run(
         self,
@@ -720,6 +743,8 @@ class HeliumDevBuilder:
                 env=self._environment(),
                 progress_total=progress_total,
             )
+            if is_autoninja and "-n" not in argv:
+                self._observed_actions.update(result.observed_actions)
             return result
         except BaseException as error:
             error_type = type(error).__name__
@@ -772,6 +797,7 @@ class HeliumDevBuilder:
             error=error,
             outcome=outcome,
             stage_seconds={name: round(seconds, 3) for name, seconds in self._stage_seconds.items()},
+            observed_actions=dict(self._observed_actions),
         )
 
     def _prepare(self, targets: Sequence[str]) -> tuple[str, ...]:

@@ -358,8 +358,8 @@ def args(output):
             )
         self.assertEqual(result.returncode, 0)
         self.assertIn("build progress: 50.0% (2/4 actions)", progress.getvalue())
-        self.assertIn("build progress: finishing (4/4 actions)", progress.getvalue())
-        self.assertIn("build progress: 100.0% (4/4 actions)", progress.getvalue())
+        self.assertIn("4 actions reported by build; dry-run estimate 4 actions", progress.getvalue())
+        self.assertIn("command completed (4 actions reported by build (reported total 4); dry-run estimate 4 actions)", progress.getvalue())
 
     def test_subprocess_runner_estimates_progress_from_new_localexec_records(self) -> None:
         localexec = self.output / "siso_localexec"
@@ -383,12 +383,99 @@ def args(output):
         output = progress.getvalue()
         self.assertIn("build progress: estimated 25.0% (1/4 actions)", output)
         self.assertIn(
-            "build progress: estimated 99.0% "
-            "(4/4 observed actions; awaiting command completion)",
+            "build progress: 4 action records observed in local log; "
+            "dry-run estimate 4 actions",
             output,
         )
         self.assertNotIn("estimated 100.0%", output)
-        self.assertIn("build progress: 100.0% (4/4 actions)", output)
+        self.assertIn("command completed (4 action records observed in local log; dry-run estimate 4 actions)", output)
+
+    def test_subprocess_runner_keeps_bounded_local_log_progress_after_expansion(self) -> None:
+        localexec = self.output / "siso_localexec"
+        script = r"""
+from pathlib import Path
+import sys, time
+with Path(sys.argv[1]).open('w') as handle:
+    previous = 0
+    for completed in (13, 14, 114, 214, 314, 414, 514, 614, 665):
+        handle.write(''.join(f'action: obj/{i}.o\n' for i in range(previous, completed)))
+        handle.flush()
+        previous = completed
+        time.sleep(.35)
+"""
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (sys.executable, "-c", script, str(localexec), "-C", str(self.output)),
+                cwd=self.source, env={}, progress_total=13,
+            )
+        self.assertEqual(result.returncode, 0)
+        output = progress.getvalue()
+        self.assertIn("dry-run estimate 13 actions", output)
+        later_updates = [line for line in output.splitlines()
+                         if "local log" in line and "command completed" not in line]
+        self.assertGreaterEqual(len(later_updates), 3)
+        self.assertIn("command completed (665 action records observed in local log; dry-run estimate 13 actions)", output)
+        self.assertEqual(result.observed_actions, {"local_log_records": 665})
+        self.assertNotIn("99.0%", output)
+        self.assertNotIn("finishing", output)
+        self.assertNotIn("13/13", output)
+        self.assertLessEqual(len(output.splitlines()), 11)
+
+    def test_subprocess_runner_uses_expanded_reported_total_without_flooding(self) -> None:
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (sys.executable, "-c", "[print(f'[{i}/665] CXX obj/{i}.o') for i in range(1, 666)]"),
+                cwd=self.source, env={}, progress_total=13,
+            )
+        self.assertEqual(result.returncode, 0)
+        output = progress.getvalue()
+        self.assertIn("14 actions reported by build; dry-run estimate 13 actions", output)
+        self.assertIn("114 actions reported by build", output)
+        self.assertIn("614 actions reported by build", output)
+        self.assertIn("command completed (665 actions reported by build (reported total 665); dry-run estimate 13 actions)", output)
+        self.assertEqual(result.observed_actions, {"build_output": 665})
+        self.assertNotIn("13/13", output)
+        self.assertNotIn("99.0%", output)
+        self.assertLessEqual(len(output.splitlines()), 12)
+
+    def test_subprocess_runner_keeps_expanded_counts_when_command_fails(self) -> None:
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner(
+                (sys.executable, "-c", "[print(f'[{i}/665] CXX obj/{i}.o') for i in range(1, 216)]; raise SystemExit(1)"),
+                cwd=self.source, env={}, progress_total=13,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.observed_actions, {"build_output": 215})
+        self.assertIn("114 actions reported by build", progress.getvalue())
+        self.assertNotIn("command completed", progress.getvalue())
+        self.assertNotIn("100.0%", progress.getvalue())
+
+    def test_compile_keeps_planned_edges_separate_from_observed_actions(self) -> None:
+        original = self.runner
+        def executor(args, **kwargs):
+            result = original(args, **kwargs)
+            if "query" not in args and "-n" not in args:
+                return CommandResult(args=tuple(args), returncode=0,
+                                     observed_actions={"build_output": 665, "local_log_records": 668})
+            return result
+        self.builder.runner = executor
+        result = self.builder.compile(("obj/example.o",))
+        self.assertTrue(result.ok)
+        self.assertEqual(result.edge_count, 2)
+        self.assertEqual(result.observed_actions, {"build_output": 665, "local_log_records": 668})
+        self.assertEqual(result.as_dict()["observed_actions"], dict(result.observed_actions))
+
+    def test_subprocess_runner_does_not_invent_action_count_on_completion(self) -> None:
+        progress = io.StringIO()
+        with redirect_stderr(progress):
+            result = subprocess_runner((sys.executable, "-c", "pass"),
+                                       cwd=self.source, env={}, progress_total=13)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("command completed (observed actions unavailable; dry-run estimate 13 actions)", progress.getvalue())
+        self.assertNotIn("13/13", progress.getvalue())
 
     def test_subprocess_runner_resets_localexec_when_log_is_replaced(self) -> None:
         localexec = self.output / "siso_localexec"
@@ -409,7 +496,7 @@ def args(output):
         self.assertEqual(result.returncode, 0)
         output = progress.getvalue()
         self.assertIn(
-            "estimated 99.0% (1/1 observed actions; awaiting command completion)",
+            "1 action records observed in local log; dry-run estimate 1 actions",
             output,
         )
         self.assertNotIn("2/1 actions", output)
@@ -432,6 +519,7 @@ def args(output):
         self.assertEqual(result.returncode, 1)
         output = progress.getvalue()
         self.assertNotIn("100.0%", output)
+        self.assertNotIn("command completed", output)
 
 
 if __name__ == "__main__":
