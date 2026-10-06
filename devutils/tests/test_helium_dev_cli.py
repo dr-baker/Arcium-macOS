@@ -52,6 +52,20 @@ class HeliumDevCliTests(unittest.TestCase):
             helium_dev._emit(document, json_mode=True)
         self.assertEqual(json.loads(json_output.getvalue()), document)
 
+    def test_human_build_summary_separates_planned_and_observed_counts(self) -> None:
+        document = {"ok": True, "action": "build-full", "outcome": "compiled",
+                    "proof_gates": ["full-build"], "edge_count": 13,
+                    "observed_actions": {"build_output": 665, "local_log_records": 668}}
+        output = io.StringIO()
+        with redirect_stdout(output):
+            helium_dev._emit(document, json_mode=False)
+        text = output.getvalue()
+        self.assertIn("build-full: compiled", text)
+        self.assertIn("13 planned edges", text)
+        self.assertIn("665 actions reported by build", text)
+        self.assertIn("668 local log action records", text)
+        self.assertNotIn("1333", text)
+
     def test_cli_passes_external_build_root_to_runtime(self) -> None:
         with patch(
             "helium_dev.runtime_action",

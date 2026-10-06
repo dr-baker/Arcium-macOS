@@ -310,8 +310,11 @@ command from starting the expensive build silently.
 Broad builds report estimated action progress on standard error, for example
 `build progress: estimated 60.0% (33,867/56,437 actions)`. The denominator is
 the current dry-run plan, not elapsed time. Linking and packaging near the end
-can take longer than an average compile action. The display stays below 100%,
-and may say `finishing`, until the build command succeeds.
+can take longer than an average compile action. Once the estimate is exhausted,
+the display reports observed action counts at bounded intervals and keeps the
+original estimate visible. Build output counts and local log records remain
+distinct. Command completion reports the observed counts, without assuming the
+dry-run estimate was the final total.
 
 Run `he bootstrap --approved` once per cold lane. If a runnable warm output
 already exists, the command stops and directs you to `he dev`.
@@ -555,8 +558,11 @@ lanes. Product-only lite lanes keep their existing preparation flow.
 
 `he build-full --approved` is the explicit broad-build path. It still runs a
 dry run, requires a current replay receipt, and enforces the pending-edge
-budget. If the plan exceeds the budget, inspect it before you pass a larger
-`--edge-budget N` value.
+budget. This checks the initial dry-run estimate; generators can reveal more
+downstream work during the build. If the plan exceeds the budget, inspect the
+refused plan and choose a larger `--edge-budget N` when the work justifies it
+within the existing task authorization. Crossing the threshold alone does not
+require fresh approval.
 
 Use `he arcium iterate --approved` for a full build and installed-app restart.
 Use `he build-full --approved` for a broad build without launching an app.

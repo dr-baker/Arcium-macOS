@@ -1102,7 +1102,13 @@ def _emit(document: dict[str, object], *, json_mode: bool) -> None:
         edges = document.get("edge_count")
         artifact = document.get("artifact_state")
         runtime = f" · runtime artifact {artifact}" if document.get("action") == "relink" else ""
-        print(f"{document['action']}: {state} · {edges if edges is not None else '-'} edges{runtime} · proof {gates}")
+        observed = document.get("observed_actions", {})
+        counts = ""
+        if "build_output" in observed:
+            counts += f" · {observed['build_output']:,} actions reported by build"
+        if "local_log_records" in observed:
+            counts += f" · {observed['local_log_records']:,} local log action records"
+        print(f"{document['action']}: {state} · {edges if edges is not None else '-'} planned edges{counts}{runtime} · proof {gates}")
         return
     state = "ok" if document.get("ok") else "refused"
     detail = document.get("error") or document.get("action")
