@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "omnibox-command-bar",
-  "description": "Accept floating omnibox modes, saved identities, structural ranking, commands, cancellation, and same-profile restart.",
+  "description": "Accept floating omnibox modes, saved identities, structural ranking, distinct commands, material settings, delayed navigation, cancellation, and same-profile restart.",
   "profile": {
     "policy": "isolated",
     "name": "omnibox-command-bar"
@@ -15,6 +15,8 @@
       "filters": [
         "BookmarkProviderTest.Arcium*",
         "AutocompleteResultTest.Arcium*",
+        "OmniboxResultViewTest.Arcium*",
+        "CommandBarMaterialTest.*",
         "ArciumOmniboxServiceTest.*",
         "ArciumCommandBarTest.*"
       ]
@@ -39,8 +41,11 @@
     "Open the bar, type a query and select a command row, then press Command-T; verify the old query and selection clear before Escape",
     "Use matching acceptance-owned Pins in two Spaces and a Favorite to verify tiers, rich metadata, Return activation, and duplicate-URL identities",
     "Explicitly select Pin current tab, Add current tab to Favorites, Move Pin to Space, Close live instance, and Return Pin home on acceptance-owned items",
+    "Inspect action icons, target context, and activation cues; use arrow keys to move between navigation and action rows without moving focus from the input",
+    "Move the pointer across the floating results and its rounded edges; dismiss and reopen the bar repeatedly, including during a pending navigation",
+    "Choose Solid and Glass appearance while the bar is open; inspect both the search surface and result popup over page content, and leave a recorded preference selected for restart",
     "Verify Escape restores page focus, outside click dismisses the bar, and resize or active-tab changes leave no detached input",
-    "Quit normally, restart the same profile, inspect saved-item identity and usage, then remove only acceptance-owned items"
+    "Quit normally, restart the same profile, inspect saved-item identity, usage, and the recorded appearance preference, then restore the original appearance and remove only acceptance-owned items"
   ],
   "observables": [
     "Command-T and Escape leave tab count and current tab unchanged",
@@ -49,8 +54,11 @@
     "Active-Space Pins rank before Favorites, which rank before other-Space Pins; quality then frecency order each tier",
     "Rows expose title, action, type, live state, Space, and root-to-leaf folder breadcrumb; saved results offer no Remove Suggestion",
     "All five explicit command rows mutate the intended source identity; stale rows do nothing",
+    "Commands have distinct semantic icons and clear targets; typing a query does not make a destructive command the default Return action",
+    "Mouse entry into a standalone results popup and navigation completion after bar dismissal produce no crash",
+    "Solid and Glass update both floating surfaces consistently without losing the query, selection, or keyboard focus; Glass follows the existing browser glass policy",
     "Cancellation creates no tab or navigation and restores usable focus",
-    "Normal restart preserves durable items and usage; close and quit produce no new crash"
+    "Normal restart preserves durable items, usage, and command-bar appearance; close and quit produce no new crash"
   ],
   "verify_persistence": true,
   "verify_teardown": true
