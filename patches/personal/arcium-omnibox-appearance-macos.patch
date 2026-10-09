@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/BUILD.gn
 +++ src/chrome/browser/ui/BUILD.gn
-@@ -3602,6 +3602,7 @@
+@@ -3602,6 +3602,7 @@ static_library("ui") {
        "views/helium/frame_corner_radius_mac.mm",
        "views/helium/glass_surface_mac.h",
        "views/helium/glass_surface_mac.mm",
@@ -201,7 +201,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_model.cc
 +++ src/chrome/browser/ui/cocoa/arcium_settings_model.cc
-@@ -46,7 +46,7 @@
+@@ -46,7 +46,7 @@ constexpr char kSharedPaletteDarkChromeC
  constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
  constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
  
@@ -210,7 +210,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
      prefs::kRestoreOnStartup,
      prefs::kPromptForDownload,
      prefs::kHeliumLittleArcExternalLinks,
-@@ -59,6 +59,7 @@
+@@ -59,6 +59,7 @@ constexpr std::array<std::string_view, 3
      prefs::kHeliumLayout,
      prefs::kVerticalTabsUncollapsedWidth,
      arcium::kCollapsedSidebarStylePref,
@@ -222,7 +222,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
-@@ -101,6 +101,7 @@
+@@ -101,6 +101,7 @@ NSString* const kKeyZenModeSidebarPinned
  NSString* const kKeyZenModeTopChromePinned = @"zen_mode_top_chrome_pinned";
  NSString* const kKeyAppearance = @"settings_appearance";
  NSString* const kKeyChromeAppearance = @"chrome_appearance";
@@ -230,7 +230,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  NSString* const kKeySidebarWidth = @"sidebar_width";
  NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
  NSString* const kKeyChromeFrameBorderWidth = @"chrome_frame_border_width";
-@@ -1237,6 +1238,17 @@
+@@ -1237,6 +1238,17 @@ void SettingsModelProfileWillBeDestroyed
    const bool sidebar_navigation_configured =
        sidebar_navigation_pref_available && sidebar_navigation_available &&
        model->GetBoolean(arcium::kArcSidebarNavigationEnabledPref);
@@ -248,7 +248,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    const bool sidebar_width_available = model && model->HasSidebarWidth();
    const bool sidebar_width_managed =
        sidebar_width_available && model->IsSidebarWidthManaged();
-@@ -1360,6 +1372,9 @@
+@@ -1360,6 +1372,9 @@ void SettingsModelProfileWillBeDestroyed
      @"chromeUIScaleIsDefault" : @(chrome_ui_scale_is_default),
      @"chromeUIScaleAvailable" : @(chrome_ui_scale_available),
      @"chromeUIScaleManaged" : @(chrome_ui_scale_managed),
@@ -258,7 +258,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      @"sidebarWidth" : @(sidebar_width),
      @"sidebarWidthAvailable" : @(sidebar_width_available),
      @"sidebarWidthManaged" : @(sidebar_width_managed),
-@@ -2086,6 +2101,21 @@
+@@ -2086,6 +2101,21 @@ void SettingsModelProfileWillBeDestroyed
      }
      return;
    }
@@ -284,7 +284,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -388,6 +388,12 @@
+@@ -388,6 +388,12 @@ struct ArciumAppearanceSnapshot: Equatab
      var sidebarWidth = 200
      var sidebarWidthAvailable = false
      var sidebarWidthManaged = false
@@ -297,17 +297,17 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var collapsedSidebarStyle = 0
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
-@@ -411,6 +417,9 @@
+@@ -411,6 +417,9 @@ struct ArciumAppearanceSnapshot: Equatab
          sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
          sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
          sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
-+        commandBarAppearance = finiteIntegerOptional(dictionary["commandBarAppearance"]) == 1 ? 1 : 0
++        commandBarAppearance = exactIntegerOptional(dictionary["commandBarAppearance"]) == 1 ? 1 : 0
 +        commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
 +        commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
          collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
          let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
              .filter { (0...1).contains($0.value) }
-@@ -825,6 +834,12 @@
+@@ -825,6 +834,12 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "sidebar_width", value: Int(min(max(width.rounded(), 160), 400)))
      }
  
@@ -320,11 +320,23 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      func setCollapsedSidebarStyle(_ style: Int) {
          guard snapshot.appearance.collapsedSidebarStyleAvailable,
                !snapshot.appearance.collapsedSidebarStyleManaged,
+@@ -1099,6 +1114,11 @@ private func integerOptional(_ value: An
+     return nil
+ }
+ 
++private func exactIntegerOptional(_ value: Any?) -> Int? {
++    guard let value = finiteDouble(value) else { return nil }
++    return Int(exactly: value)
++}
++
+ private func finiteIntegerOptional(_ value: Any?) -> Int? {
+     if let value = value as? Int { return value }
+     guard let value = value as? NSNumber,
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -562,6 +562,16 @@
+@@ -562,6 +562,16 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
@@ -345,13 +357,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -1085,6 +1085,64 @@
+@@ -1088,6 +1088,74 @@ final class ArciumSettingsUIContractTest
+     }
  
-         XCTAssertEqual(delegate.settings.map(\.key), ["sidebar_width", "sidebar_width"])
-         XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [200, 201])
-+    }
-+
-+    @MainActor
+     @MainActor
 +    func testCommandBarAppearanceUsesTypedProfileCallbackAndExternalSnapshot() {
 +        let delegate = TestDelegate()
 +        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
@@ -401,12 +410,25 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +
 +    @MainActor
 +    func testCommandBarAppearanceRejectsMalformedSnapshotValues() {
-+        for value: Any in [true, 1.5, -1, 2, "glass", Double.infinity] {
++        let invalidValues: [Any] = [
++            true, false, NSNumber(value: true), NSNumber(value: false),
++            1.5, NSNumber(value: 1.5), Float(1.25), -1, 2, "glass", "1",
++            Double.infinity, -Double.infinity, Double.nan,
++            Double.greatestFiniteMagnitude, NSNull()
++        ]
++        for value in invalidValues {
 +            let snapshot = ArciumAppearanceSnapshot(["commandBarAppearance": value])
-+            XCTAssertEqual(snapshot.commandBarAppearance, 0)
++            XCTAssertEqual(snapshot.commandBarAppearance, 0, "Unexpected value: \(String(reflecting: value))")
 +        }
-+        XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": 1]).commandBarAppearance, 1)
-+        XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": 0]).commandBarAppearance, 0)
-     }
- 
-     @MainActor
++        for value: Any in [1, 1.0, Float(1), NSNumber(value: 1), NSNumber(value: 1.0)] {
++            XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 1)
++        }
++        for value: Any in [0, 0.0, NSNumber(value: 0)] {
++            XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 0)
++        }
++    }
++
++    @MainActor
+     func testCollapsedSidebarAndFrameBorderUseTypedHostCallbacks() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
