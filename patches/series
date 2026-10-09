@@ -33,3 +33,6 @@ personal/arcium-arc-default-full-collapse-macos.patch
 personal/arcium-feature-settings-macos.patch
 personal/arcium-sidebar-navigation-macos.patch
 personal/arcium-update-feed.patch
+
+# Command bar native material and Settings follow the shared appearance patch.
+personal/arcium-omnibox-appearance-macos.patch

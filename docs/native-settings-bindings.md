@@ -29,6 +29,7 @@ Historical runtime results and their original source attribution are retained in
 | Show Extensions button | `arcium.appearance.sidebar_extensions_drawer` / `kSidebarExtensionsDrawerEnabledPref`; profile boolean, default `false` | The sidebar navigation feature patch connects the optional header button to the existing Extensions menu. It is independent of `prefs::kShowExtensionsButton`. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
+| Command bar appearance | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice and the existing browser glass dictionary for both search and results widgets. Solid keeps the themed opaque panel. Glass uses the existing native resolver, factory, and updater. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
 | Show Home / Back / Forward / Reload buttons | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`; profile | `ToolbarView` binds each pref and updates the corresponding button visibility (`chrome/browser/ui/views/toolbar/toolbar_view.cc:725-757,2327-2346`). |
 | Show profile / Extensions / menu / media controls | `prefs::kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton`; profile | `ToolbarView` binds each pref and updates the matching view/controller (`toolbar_view.cc:769-806,2348-2365`). Extensions has an additional pref/command-line visibility gate (`chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc:478-483,1002-1010`); avatar is intentionally always visible for incognito/guest (`toolbar_view.cc:774-780`). |
@@ -95,6 +96,23 @@ Arcium writes the saved role through `shared_palette` and chrome values through
 `controlColorID`. Resetting chrome resolves a linked accent against the
 acknowledged reset colors; custom accents remain independent. A fresh native
 snapshot clears pending edits even when the host rejects or clamps a write.
+
+## Command bar appearance
+
+**Command bar appearance** changes only the floating command bar. **Solid** is
+its default. **Glass** follows the original profile's existing window background
+style, including material, tint, color points, and grain. Glass enables that style
+for the command bar even when window effects are off, without changing the window
+setting. The shared resolver still applies renderer overrides and Reduce
+Transparency. Unsupported or opaque outcomes keep the panel readable
+and retain the saved Glass choice.
+
+The `command_bar_appearance` bridge action accepts exact integers `0` and `1`.
+Both native widgets own `arcium::CommandBarMaterial` observers, which update their
+native backgrounds without rebuilding the input or results. Clipping follows the
+painted Views bounds and corners. The results material excludes the search-bar
+cutout to avoid applying blur twice. Closing a widget removes its native decoration
+and preference and accessibility observers.
 
 ## Browser layout and size
 
