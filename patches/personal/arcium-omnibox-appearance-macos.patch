@@ -1,0 +1,412 @@
+Index: src/chrome/browser/ui/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/BUILD.gn
++++ src/chrome/browser/ui/BUILD.gn
+@@ -3602,6 +3602,7 @@
+       "views/helium/frame_corner_radius_mac.mm",
+       "views/helium/glass_surface_mac.h",
+       "views/helium/glass_surface_mac.mm",
++      "views/omnibox/arcium_command_bar_material_mac.mm",
+       "views/helium/native_frame_materials_mac.h",
+       "views/helium/native_frame_materials_mac.mm",
+       "views/tab_contents/chrome_web_contents_view_delegate_views_mac.h",
+Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material.cc
+===================================================================
+--- src.orig/chrome/browser/ui/views/omnibox/arcium_command_bar_material.cc
++++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material.cc
+@@ -14,11 +14,13 @@
+ 
+ namespace arcium {
+ 
++#if !BUILDFLAG(IS_MAC)
+ std::unique_ptr<CommandBarNativeBackground> CreateCommandBarNativeBackground(
+     views::Widget*,
+     base::RepeatingClosure) {
+   return nullptr;
+ }
++#endif
+ 
+ CommandBarMaterial::CommandBarMaterial(
+     views::Widget* widget,
+Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
+@@ -0,0 +1,164 @@
++// Copyright 2026 The Helium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license found in the LICENSE file.
++
++#include "chrome/browser/ui/views/omnibox/arcium_command_bar_material.h"
++
++#import <Cocoa/Cocoa.h>
++#import <QuartzCore/QuartzCore.h>
++
++#include <algorithm>
++#include <optional>
++#include <utility>
++
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "chrome/browser/ui/views/helium/glass_surface.h"
++#import "chrome/browser/ui/views/helium/glass_surface_mac.h"
++#include "ui/color/color_provider.h"
++#include "ui/views/widget/widget.h"
++
++namespace arcium {
++namespace {
++
++class CommandBarNativeBackgroundMac : public CommandBarNativeBackground {
++ public:
++  CommandBarNativeBackgroundMac(views::Widget* widget,
++                               base::RepeatingClosure appearance_changed)
++      : widget_(widget) {
++    accessibility_observer_ = [NSWorkspace.sharedWorkspace.notificationCenter
++        addObserverForName:
++            NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
++                    object:nil
++                     queue:NSOperationQueue.mainQueue
++                usingBlock:^(NSNotification*) {
++                  appearance_changed.Run();
++                }];
++  }
++
++  ~CommandBarNativeBackgroundMac() override {
++    [NSWorkspace.sharedWorkspace.notificationCenter
++        removeObserver:accessibility_observer_];
++    [background_view_ removeFromSuperview];
++  }
++
++  bool Update(bool requested,
++              const helium::GlassSurfaceConfiguration& configuration,
++              const gfx::Rect& bounds,
++              const gfx::RoundedCornersF& corner_radii) override {
++    NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++    NSView* content_view = window.contentView;
++    const helium::GlassBackendAvailability availability =
++        helium::GetNativeFrameGlassAvailability();
++    const helium::GlassSurfaceResolution resolution =
++        helium::ResolveGlassSurfaceConfiguration(
++            configuration, helium::GetRequestedGlassBackend(),
++            availability.native_liquid_glass, availability.native_material,
++            availability.reduce_transparency);
++    if (!requested || !resolution.paints_chrome_transparent || !content_view ||
++        bounds.IsEmpty()) {
++      [background_view_ removeFromSuperview];
++      background_view_ = nil;
++      last_configuration_.reset();
++      return false;
++    }
++
++    const NSRect frame = NSMakeRect(
++        bounds.x(), content_view.isFlipped
++                        ? bounds.y()
++                        : NSHeight(content_view.bounds) - bounds.bottom(),
++        bounds.width(), bounds.height());
++    const auto color_mode = widget_->GetColorMode();
++    const SkColor theme_color =
++        widget_->GetColorProvider()->GetColor(kColorToolbar);
++    if (background_view_ && last_configuration_ == configuration &&
++        last_active_material_ == resolution.active && last_bounds_ == bounds &&
++        last_corner_radii_ == corner_radii && last_color_mode_ == color_mode &&
++        last_theme_color_ == theme_color) {
++      return true;
++    }
++    if (!background_view_) {
++      background_view_ = helium::CreateNativeGlassBackgroundView(
++          frame, color_mode, theme_color, configuration, resolution);
++      if (!background_view_) {
++        return false;
++      }
++      // Match the existing browser native-frame integration. This view is a
++      // background effect, so remote_cocoa leaves it below Views content.
++      [content_view addSubview:background_view_
++                    positioned:NSWindowBelow
++                    relativeTo:nil];
++    } else {
++      helium::ApplyNativeGlassBackgroundView(
++          background_view_, frame, color_mode, theme_color, configuration,
++          resolution);
++    }
++    background_view_.wantsLayer = YES;
++    // The results top edge is square below the search-bar cutout. Preserve
++    // each painted corner rather than imposing a second rounded silhouette.
++    const CGFloat width = NSWidth(background_view_.bounds);
++    const CGFloat height = NSHeight(background_view_.bounds);
++    const CGFloat maximum = std::min(width, height) / 2.0;
++    const auto radius = [maximum](float value) {
++      return std::clamp<CGFloat>(value, 0.0, maximum);
++    };
++    const bool flipped = background_view_.isFlipped;
++    const CGFloat top_left = radius(flipped ? corner_radii.lower_left()
++                                            : corner_radii.upper_left());
++    const CGFloat top_right = radius(flipped ? corner_radii.lower_right()
++                                             : corner_radii.upper_right());
++    const CGFloat bottom_left = radius(flipped ? corner_radii.upper_left()
++                                               : corner_radii.lower_left());
++    const CGFloat bottom_right = radius(flipped ? corner_radii.upper_right()
++                                                : corner_radii.lower_right());
++    CGMutablePathRef path = CGPathCreateMutable();
++    CGPathMoveToPoint(path, nullptr, bottom_left, 0);
++    CGPathAddLineToPoint(path, nullptr, width - bottom_right, 0);
++    CGPathAddArcToPoint(path, nullptr, width, 0, width, bottom_right,
++                       bottom_right);
++    CGPathAddLineToPoint(path, nullptr, width, height - top_right);
++    CGPathAddArcToPoint(path, nullptr, width, height, width - top_right, height,
++                       top_right);
++    CGPathAddLineToPoint(path, nullptr, top_left, height);
++    CGPathAddArcToPoint(path, nullptr, 0, height, 0, height - top_left,
++                       top_left);
++    CGPathAddLineToPoint(path, nullptr, 0, bottom_left);
++    CGPathAddArcToPoint(path, nullptr, 0, 0, bottom_left, 0, bottom_left);
++    CGPathCloseSubpath(path);
++    CAShapeLayer* mask = [CAShapeLayer layer];
++    mask.frame = background_view_.bounds;
++    mask.fillColor = NSColor.blackColor.CGColor;
++    mask.path = path;
++    CGPathRelease(path);
++    background_view_.layer.mask = mask;
++    last_configuration_ = configuration;
++    last_active_material_ = resolution.active;
++    last_bounds_ = bounds;
++    last_corner_radii_ = corner_radii;
++    last_color_mode_ = color_mode;
++    last_theme_color_ = theme_color;
++    return true;
++  }
++
++ private:
++  raw_ptr<views::Widget> widget_;
++  NSView* __strong background_view_ = nil;
++  id __strong accessibility_observer_ = nil;
++  std::optional<helium::GlassSurfaceConfiguration> last_configuration_;
++  helium::GlassSurfaceMaterial last_active_material_ =
++      helium::GlassSurfaceMaterial::kAuto;
++  gfx::Rect last_bounds_;
++  gfx::RoundedCornersF last_corner_radii_;
++  std::optional<ui::ColorProviderKey::ColorMode> last_color_mode_;
++  std::optional<SkColor> last_theme_color_;
++};
++
++}  // namespace
++
++std::unique_ptr<CommandBarNativeBackground> CreateCommandBarNativeBackground(
++    views::Widget* widget,
++    base::RepeatingClosure appearance_changed) {
++  return std::make_unique<CommandBarNativeBackgroundMac>(
++      widget, std::move(appearance_changed));
++}
++
++}  // namespace arcium
+Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_model.cc
++++ src/chrome/browser/ui/cocoa/arcium_settings_model.cc
+@@ -46,7 +46,7 @@
+ constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
+ constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
+ 
+-constexpr std::array<std::string_view, 37> kProfilePreferences = {
++constexpr std::array<std::string_view, 38> kProfilePreferences = {
+     prefs::kRestoreOnStartup,
+     prefs::kPromptForDownload,
+     prefs::kHeliumLittleArcExternalLinks,
+@@ -59,6 +59,7 @@
+     prefs::kHeliumLayout,
+     prefs::kVerticalTabsUncollapsedWidth,
+     arcium::kCollapsedSidebarStylePref,
++    arcium::kCommandBarAppearancePref,
+     arcium::kArcSidebarNavigationEnabledPref,
+     arcium::kSidebarExtensionsDrawerEnabledPref,
+     arcium::kChromeFrameBorderWidthPref,
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -101,6 +101,7 @@
+ NSString* const kKeyZenModeTopChromePinned = @"zen_mode_top_chrome_pinned";
+ NSString* const kKeyAppearance = @"settings_appearance";
+ NSString* const kKeyChromeAppearance = @"chrome_appearance";
++NSString* const kKeyCommandBarAppearance = @"command_bar_appearance";
+ NSString* const kKeySidebarWidth = @"sidebar_width";
+ NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
+ NSString* const kKeyChromeFrameBorderWidth = @"chrome_frame_border_width";
+@@ -1237,6 +1238,17 @@
+   const bool sidebar_navigation_configured =
+       sidebar_navigation_pref_available && sidebar_navigation_available &&
+       model->GetBoolean(arcium::kArcSidebarNavigationEnabledPref);
++  const bool command_bar_appearance_available =
++      model && model->HasPreference(arcium::kCommandBarAppearancePref);
++  const bool command_bar_appearance_managed =
++      command_bar_appearance_available &&
++      model->IsManaged(arcium::kCommandBarAppearancePref);
++  const int command_bar_appearance =
++      command_bar_appearance_available &&
++              model->GetInteger(arcium::kCommandBarAppearancePref) ==
++                  arcium::kCommandBarAppearanceGlass
++          ? arcium::kCommandBarAppearanceGlass
++          : arcium::kCommandBarAppearanceSolid;
+   const bool sidebar_width_available = model && model->HasSidebarWidth();
+   const bool sidebar_width_managed =
+       sidebar_width_available && model->IsSidebarWidthManaged();
+@@ -1360,6 +1372,9 @@
+     @"chromeUIScaleIsDefault" : @(chrome_ui_scale_is_default),
+     @"chromeUIScaleAvailable" : @(chrome_ui_scale_available),
+     @"chromeUIScaleManaged" : @(chrome_ui_scale_managed),
++    @"commandBarAppearance" : @(command_bar_appearance),
++    @"commandBarAppearanceAvailable" : @(command_bar_appearance_available),
++    @"commandBarAppearanceManaged" : @(command_bar_appearance_managed),
+     @"sidebarWidth" : @(sidebar_width),
+     @"sidebarWidthAvailable" : @(sidebar_width_available),
+     @"sidebarWidthManaged" : @(sidebar_width_managed),
+@@ -2086,6 +2101,21 @@
+     }
+     return;
+   }
++  if ([key isEqualToString:kKeyCommandBarAppearance]) {
++    // This enum is intentionally exact: booleans, fractions and unknown
++    // values must not silently become a different material preference.
++    if (GetIntegerObject(value, &integer_value) &&
++        CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
++        [value doubleValue] == integer_value &&
++        (integer_value == arcium::kCommandBarAppearanceSolid ||
++         integer_value == arcium::kCommandBarAppearanceGlass) &&
++        model_->HasPreference(arcium::kCommandBarAppearancePref) &&
++        !model_->IsManaged(arcium::kCommandBarAppearancePref)) {
++      model_->SetInteger(arcium::kCommandBarAppearancePref, integer_value);
++      [self modelDidChange];
++    }
++    return;
++  }
+   if ([key isEqualToString:kKeyChromeUIScale]) {
+     if (GetIntegerObject(value, &integer_value) &&
+         integer_value >= arcium::kChromeUIScaleMin &&
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -388,6 +388,12 @@
+     var sidebarWidth = 200
+     var sidebarWidthAvailable = false
+     var sidebarWidthManaged = false
++    var commandBarAppearance = 0
++    var commandBarAppearanceAvailable = false
++    var commandBarAppearanceManaged = false
++    var canEditCommandBarAppearance: Bool {
++        commandBarAppearanceAvailable && !commandBarAppearanceManaged
++    }
+     var collapsedSidebarStyle = 0
+     var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
+     var collapsedSidebarStyleAvailable = false
+@@ -411,6 +417,9 @@
+         sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
+         sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
+         sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
++        commandBarAppearance = finiteIntegerOptional(dictionary["commandBarAppearance"]) == 1 ? 1 : 0
++        commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
++        commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
+         collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
+         let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
+             .filter { (0...1).contains($0.value) }
+@@ -825,6 +834,12 @@
+         settingChanged(key: "sidebar_width", value: Int(min(max(width.rounded(), 160), 400)))
+     }
+ 
++    func setCommandBarAppearance(_ appearance: Int) {
++        guard snapshot.appearance.canEditCommandBarAppearance,
++              (0...1).contains(appearance) else { return }
++        settingChanged(key: "command_bar_appearance", value: appearance)
++    }
++
+     func setCollapsedSidebarStyle(_ style: Int) {
+         guard snapshot.appearance.collapsedSidebarStyleAvailable,
+               !snapshot.appearance.collapsedSidebarStyleManaged,
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -562,6 +562,16 @@
+             }
+             backgroundEditor
+ 
++            SSectionCard(title: "Command bar") {
++                SPicker("Command bar appearance", selection: Binding(
++                    get: { store.snapshot.appearance.commandBarAppearance },
++                    set: { store.setCommandBarAppearance($0) }
++                ), options: [(value: 0, label: "Solid"), (value: 1, label: "Glass")],
++                    description: "Glass uses your saved window background style.")
++                .disabled(!store.snapshot.appearance.canEditCommandBarAppearance)
++                .accessibilityIdentifier("command-bar-appearance")
++            }
++
+             SSectionCard(title: "Browser layout and size") {
+                 SPicker("Browser layout", selection: Binding(
+                     get: { store.snapshot.tabs.layout },
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -1085,6 +1085,64 @@
+ 
+         XCTAssertEqual(delegate.settings.map(\.key), ["sidebar_width", "sidebar_width"])
+         XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [200, 201])
++    }
++
++    @MainActor
++    func testCommandBarAppearanceUsesTypedProfileCallbackAndExternalSnapshot() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "commandBarAppearance": 0,
++            "commandBarAppearanceAvailable": true,
++            "commandBarAppearanceManaged": false
++        ]], delegate: delegate)
++        let otherProfile = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "commandBarAppearance": 0,
++            "commandBarAppearanceAvailable": true
++        ]], delegate: TestDelegate())
++
++        store.setCommandBarAppearance(1)
++        store.setCommandBarAppearance(99)
++        store.setCommandBarAppearance(-1)
++        XCTAssertEqual(delegate.settings.map(\.key), ["command_bar_appearance"])
++        XCTAssertEqual(delegate.settings.first?.value as? Int, 1)
++        store.updateSnapshot(["available": true, "appearance": [
++            "commandBarAppearance": 1,
++            "commandBarAppearanceAvailable": true,
++            "commandBarAppearanceManaged": false
++        ]])
++        XCTAssertEqual(store.snapshot.appearance.commandBarAppearance, 1)
++        XCTAssertEqual(otherProfile.snapshot.appearance.commandBarAppearance, 0)
++        store.setCommandBarAppearance(0)
++        XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [1, 0])
++    }
++
++    @MainActor
++    func testCommandBarAppearanceHonorsManagedAndUnavailablePreferences() {
++        let delegate = TestDelegate()
++        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "commandBarAppearance": 1,
++            "commandBarAppearanceAvailable": true,
++            "commandBarAppearanceManaged": true
++        ]], delegate: delegate)
++        managed.setCommandBarAppearance(0)
++        XCTAssertFalse(managed.snapshot.appearance.canEditCommandBarAppearance)
++        XCTAssertEqual(managed.snapshot.appearance.commandBarAppearance, 1)
++
++        let unavailable = ArciumSettingsStore(snapshot: ["available": true], delegate: delegate)
++        unavailable.setCommandBarAppearance(1)
++        XCTAssertFalse(unavailable.snapshot.appearance.canEditCommandBarAppearance)
++        XCTAssertEqual(unavailable.snapshot.appearance.commandBarAppearance, 0)
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    @MainActor
++    func testCommandBarAppearanceRejectsMalformedSnapshotValues() {
++        for value: Any in [true, 1.5, -1, 2, "glass", Double.infinity] {
++            let snapshot = ArciumAppearanceSnapshot(["commandBarAppearance": value])
++            XCTAssertEqual(snapshot.commandBarAppearance, 0)
++        }
++        XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": 1]).commandBarAppearance, 1)
++        XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": 0]).commandBarAppearance, 0)
+     }
+ 
+     @MainActor
