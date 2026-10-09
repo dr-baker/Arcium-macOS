@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "id": "omnibox-command-bar",
+  "description": "Accept floating omnibox modes, saved identities, structural ranking, commands, cancellation, and same-profile restart.",
+  "profile": {
+    "policy": "isolated",
+    "name": "omnibox-command-bar"
+  },
+  "feature_flags": [
+    "HeliumFavoritesAndPins"
+  ],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_omnibox_unit_tests",
+      "filters": [
+        "BookmarkProviderTest.Arcium*",
+        "AutocompleteResultTest.Arcium*",
+        "ArciumOmniboxServiceTest.*",
+        "ArciumCommandBarTest.*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "HeliumSpaceServiceTest.OmniboxFolderPathsStayRootToLeafAcrossSiblings",
+        "HeliumSpaceServiceTest.OmniboxCurrentMeansSelectedInSourceWindow"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Launch the exact recorded bundle and profile after replay, compilation, and packaging pass",
+    "For installed acceptance, use the session-authorized Personal profile at the Arcium user-data root and record this profile substitution separately",
+    "Record existing settings and create only acceptance-owned tabs and Spaces; preserve user items"
+  ],
+  "steps": [
+    "Press Command-T and inspect the New tab bar before typing; press Escape",
+    "Press Command-L, type a test URL, press Return, and inspect the original tab",
+    "Press Command-T, type a second test URL, press Return, and inspect both tabs",
+    "Open the bar, type a query and select a command row, then press Command-T; verify the old query and selection clear before Escape",
+    "Use matching acceptance-owned Pins in two Spaces and a Favorite to verify tiers, rich metadata, Return activation, and duplicate-URL identities",
+    "Explicitly select Pin current tab, Add current tab to Favorites, Move Pin to Space, Close live instance, and Return Pin home on acceptance-owned items",
+    "Verify Escape restores page focus, outside click dismisses the bar, and resize or active-tab changes leave no detached input",
+    "Quit normally, restart the same profile, inspect saved-item identity and usage, then remove only acceptance-owned items"
+  ],
+  "observables": [
+    "Command-T and Escape leave tab count and current tab unchanged",
+    "Command-L changes the current tab; Command-T Return creates one new ordinary tab",
+    "Arrow keys select rows; saved-result Return activates or restores exactly one qualified item",
+    "Active-Space Pins rank before Favorites, which rank before other-Space Pins; quality then frecency order each tier",
+    "Rows expose title, action, type, live state, Space, and root-to-leaf folder breadcrumb; saved results offer no Remove Suggestion",
+    "All five explicit command rows mutate the intended source identity; stale rows do nothing",
+    "Cancellation creates no tab or navigation and restores usable focus",
+    "Normal restart preserves durable items and usage; close and quit produce no new crash"
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}
