@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import uuid
 
-from .apps import copy_app, profile_owner
+from .apps import copy_app, lock_state
 from .common import HeError
 
 _TRANSIENT = ("RunningChromeVersion", "SingletonCookie", "SingletonLock", "SingletonSocket")
@@ -23,7 +23,7 @@ def _snapshot(root: Path) -> tuple:
     return tuple(records)
 
 
-def clone_once(source: Path, destination: Path) -> str:
+def clone_once(source: Path, destination: Path, *, still_running=None) -> str:
     """Copy `source` to a missing `destination`; never overwrite an existing one.
 
     SQLite journal and WAL files are copied with their databases. Runtime
@@ -35,8 +35,14 @@ def clone_once(source: Path, destination: Path) -> str:
         return "existing"
     if source.is_symlink() or not source.is_dir():
         raise HeError(f"profile seed is missing: {source}")
-    if (owner := profile_owner(source)) is not None:
-        raise HeError(f"profile seed {source} is in use by pid {owner}; quit that browser first")
+    state, pid = lock_state(source)
+    if state == "live":
+        raise HeError(f"profile seed {source} is in use by pid {pid}; quit that browser first")
+    if state == "foreign":
+        raise HeError(f"profile seed {source} is locked by another host or an unreadable lock; "
+                      "quit any browser using it, then remove its SingletonLock")
+    if still_running is not None and (pids := still_running()):
+        raise HeError(f"a browser that may use {source} is running (pids {pids}); quit it first")
     destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     staging = destination.parent / f".{destination.name}.seed-{uuid.uuid4().hex}"
     try:

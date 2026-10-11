@@ -2,7 +2,7 @@
 
 A stub browser stands in for Chromium: it holds the profile's SingletonLock
 the way Chromium does and quits on SIGTERM. Signing is ad hoc, which the
-installer allows only under HELIUM_TEST_ALLOW_AD_HOC.
+installer allows only with HELIUM_TEST_MODE=1 and HELIUM_TEST_ALLOW_AD_HOC=1.
 """
 
 from __future__ import annotations
@@ -48,7 +48,9 @@ class AppsTest(unittest.TestCase):
         self.support = self.m.home / "Library" / "Application Support"
         self.install = self.m.root / "Applications" / "Arcium.app"
         self.arcium_env = {
-            "HELIUM_ARCIUM_INSTALL_PATH": str(self.install),
+            "HELIUM_TEST_MODE": "1",
+            "HELIUM_ARCIUM_TEST_INSTALL_PATH": str(self.install),
+            "HELIUM_TEST_HELIUM_APP": str(self.m.root / "Applications" / "Helium.app"),
             "ARCIUM_CODESIGN_IDENTITY": "-",
             "HELIUM_TEST_ALLOW_AD_HOC": "1",
             "HELIUM_ARCIUM_QUIT": "term",
@@ -210,6 +212,75 @@ class AppsTest(unittest.TestCase):
         refused = self.m.he("arcium", "--no-build", **env, check=False)
         self.assertNotEqual(refused.returncode, 0)
         self.assertFalse(self.install.exists())
+
+    # Review round 2 regressions ----------------------------------------------------
+
+    def test_single_dash_profile_switches_are_refused(self) -> None:
+        for flag in ("-user-data-dir=/tmp/x", "--User-Data-Dir=/tmp/x", "-use-mock-keychain"):
+            refused = self.m.he("run", "--profile", "alpha", flag, check=False)
+            self.assertIn("is set by he run", refused.stderr, flag)
+        self.assertIsNone(apps.profile_owner(self.profile("alpha")))
+
+    def test_symlinked_profiles_are_refused(self) -> None:
+        helium = self.support / "net.imput.helium"
+        helium.mkdir(parents=True)
+        (self.support / "Arcium").symlink_to(helium)
+        refused = self.m.he("arcium", "--no-build", **self.arcium_env, check=False)
+        self.assertIn("symlink", refused.stderr)
+        self.profile("linked").parent.mkdir(parents=True)
+        self.profile("linked").symlink_to(helium)
+        refused = self.m.he("run", "--profile", "linked", check=False)
+        self.assertIn("symlink", refused.stderr)
+
+    def test_install_refuses_other_instances_of_the_installed_app(self) -> None:
+        self._seed_helium_profile()
+        self.m.he("arcium", "--no-launch", "--no-build", **self.arcium_env)
+        other = self.m.root / "other-profile"
+        other.mkdir()
+        stub = subprocess.Popen([str(self.install / "Contents" / "MacOS" / "Helium"), f"--user-data-dir={other}"])
+        self.addCleanup(lambda: (stub.kill(), stub.wait()))
+        time.sleep(0.3)
+        refused = self.m.he("arcium", "iterate", "--no-build", **self.arcium_env, check=False)
+        self.assertIn("other Arcium instances", refused.stderr)
+
+    def test_failed_agent_build_does_not_install(self) -> None:
+        (self.m.src / "a.cc").write_text("this does not compile\n")
+        failed = self.m.he("agent", "arcium", "--approved", **self.arcium_env, check=False)
+        self.assertNotEqual(failed.returncode, 0)
+        self.assertFalse(self.install.exists())
+        record = json.loads((self.m.build_dir / ".arcium" / "agent" / "last-arcium.json").read_text())
+        self.assertEqual(record["outcome"], "failed")
+
+    def test_arcium_actions_are_parsed_once(self) -> None:
+        refused = self.m.he("agent", "arcium", "--no-build", "iterate", **self.arcium_env, check=False)
+        self.assertIn("pass --approved", refused.stderr)
+        both = self.m.he("arcium", "status", "iterate", **self.arcium_env, check=False)
+        self.assertIn("takes one of", both.stderr)
+        self.assertFalse(self.install.exists())
+
+    def test_install_refuses_to_move_aside_a_non_arcium_directory(self) -> None:
+        self.install.mkdir(parents=True)
+        (self.install / "keep").write_text("mine")
+        self._seed_helium_profile()
+        refused = self.m.he("arcium", "--no-build", **self.arcium_env, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual((self.install / "keep").read_text(), "mine")
+
+    def test_stop_refuses_a_reused_lock_pid(self) -> None:
+        beta = json.loads(self.m.he("run", "--profile", "beta", "--json").stdout)
+        alpha = self.profile("alpha")
+        alpha.mkdir(parents=True)
+        (alpha / "SingletonLock").symlink_to(f"{__import__('socket').gethostname()}-{beta['pid']}")
+        refused = self.m.he("stop", "--profile", "alpha", check=False)
+        self.assertIn("was not started on it", refused.stderr)
+        self.assertTrue(apps.alive(beta["pid"]))
+
+    def test_migration_refuses_a_profile_locked_by_another_host(self) -> None:
+        self._seed_helium_profile()
+        (self.support / "net.imput.helium" / "SingletonLock").symlink_to("other-host.local-12345")
+        refused = self.m.he("arcium", "--no-build", **self.arcium_env, check=False)
+        self.assertIn("another host", refused.stderr)
+        self.assertFalse((self.support / "Arcium").exists())
 
     # Agent path -------------------------------------------------------------------
 

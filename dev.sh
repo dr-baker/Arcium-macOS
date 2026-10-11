@@ -584,13 +584,30 @@ ___helium_stop() {
     esac
 }
 
-# he arcium [install|iterate|status] [--no-build] [--no-launch] [--json]
-___helium_arcium() {
-    local action=install build=true argument
-    local -a options=()
+# The one action word in he arcium's arguments: install (default), iterate, or status.
+___helium_arcium_action() {
+    local action="" argument
     for argument in "$@"; do
         case "$argument" in
-            install|iterate|status) action="$argument" ;;
+            install|iterate|status)
+                if [ -n "$action" ]; then
+                    echo "error: he arcium takes one of install, iterate, or status" >&2
+                    return 2
+                fi
+                action="$argument" ;;
+        esac
+    done
+    echo "${action:-install}"
+}
+
+# he arcium [install|iterate|status] [--no-build] [--no-launch] [--json]
+___helium_arcium() {
+    local action build=true argument
+    local -a options=()
+    action="$(___helium_arcium_action "$@")" || return
+    for argument in "$@"; do
+        case "$argument" in
+            install|iterate|status) ;;
             --no-build) build=false ;;
             --no-launch|--json) options+=("$argument") ;;
             --approved) ;;  # accepted for the previous tooling's muscle memory
@@ -599,10 +616,52 @@ ___helium_arcium() {
     done
     if [ "$action" != status ]; then
         ___helium_refuse_in_scratch
-        ! $build || ___helium_build chrome
+        if $build; then
+            ___helium_build chrome
+        fi
     fi
     PYTHONPATH="$_he_tools_dir/devutils" PYTHONDONTWRITEBYTECODE=1 \
         python3 -m arcium.install --build-dir "$_build_dir" "$action" "${options[@]}"
+}
+
+# One agent action, run as its own bash process so `set -e` applies to every
+# step (a function called on the left of || would run with errexit off).
+___helium_agent_action() {
+    local command="$1"
+    shift
+    case "$command" in
+        build)
+            local -a guard=() targets=()
+            while [ "$#" -gt 0 ]; do
+                case "$1" in
+                    --approved) guard+=(--approved); shift ;;
+                    --edge-budget) guard+=(--edge-budget "$2"); shift 2 ;;
+                    *) targets+=("$1"); shift ;;
+                esac
+            done
+            ___helium_he agent-guard "${guard[@]}" "${targets[@]}" >/dev/null
+            ___helium_build "${targets[@]}" ;;
+        push)
+            ___helium_quilt_push "$@"
+            ___helium_he check ;;
+        replay)
+            ___helium_replay
+            ___helium_he check ;;
+        pop) ___helium_quilt_pop "$@" ;;
+        save-patch) ___helium_save_patch "$@" ;;
+        scratch) ___helium_scratch "$@" ;;
+        arcium)
+            local -a rest=()
+            local approved=false argument
+            for argument in "$@"; do
+                if [ "$argument" = --approved ]; then approved=true; else rest+=("$argument"); fi
+            done
+            if [ "$(___helium_arcium_action "${rest[@]}")" = iterate ] && ! $approved; then
+                echo "error: he agent arcium iterate restarts the installed app; pass --approved" >&2
+                return 1
+            fi
+            ___helium_arcium "${rest[@]}" ;;
+    esac
 }
 
 # he agent CMD: the same commands with an edge budget, strict checks, and a
@@ -615,40 +674,21 @@ ___helium_agent() {
         build|push|pop|replay|save-patch|scratch|arcium) ;;
         *) echo "usage: he agent status|build|push|pop|replay|save-patch|scratch|arcium ..." >&2; return 2 ;;
     esac
-    local -a guard=() args=()
-    local approved=false json=false
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --approved) approved=true; guard+=(--approved); shift ;;
-            --edge-budget) guard+=(--edge-budget "$2"); shift 2 ;;
-            --json) json=true; shift ;;
-            *) args+=("$1"); shift ;;
-        esac
+    local -a args=()
+    local json=false
+    for argument in "$@"; do
+        if [ "$argument" = --json ]; then json=true; else args+=("$argument"); fi
     done
     local log started status=0
     log="$(mktemp "${TMPDIR:-/tmp}/he-agent.XXXXXX")"
     started="$(date +%s)"
-    {
-        case "$command" in
-            build)
-                ___helium_he agent-guard "${guard[@]}" "${args[@]}" >/dev/null &&
-                    ___helium_build "${args[@]}" ;;
-            push) ___helium_quilt_push "${args[@]}" && ___helium_he check ;;
-            replay) ___helium_replay && ___helium_he check ;;
-            pop) ___helium_quilt_pop "${args[@]}" ;;
-            save-patch) ___helium_save_patch "${args[@]}" ;;
-            scratch) ___helium_scratch "${args[@]}" ;;
-            arcium)
-                if [ "${args[0]:-}" = iterate ] && ! $approved; then
-                    echo "error: he agent arcium iterate restarts the installed app; pass --approved" >&2
-                    false
-                else
-                    ___helium_arcium "${args[@]}"
-                fi ;;
-        esac
-    } > >(tee -a "$log") 2> >(tee -a "$log" >&2) || status=$?
+    HELIUM_BUILD_DIR="$_build_dir" HELIUM_DEV_WORKTREE="$_root_dir" \
+        bash -c 'source "$1" >/dev/null || exit 2; shift; set -e; ___helium_agent_action "$@"' \
+        bash "$_he_tools_dir/dev.sh" "$command" "${args[@]}" \
+        > >(tee -a "$log") 2> >(tee -a "$log" >&2) || status=$?
+    wait
     local -a result=(agent-result --name "$command" --status "$status" --seconds "$(( $(date +%s) - started ))" --log "$log")
-    $json && result+=(--json)
+    if $json; then result+=(--json); fi
     ___helium_he "${result[@]}"
     rm -f "$log"
     return "$status"
@@ -708,7 +748,7 @@ __helium_menu() {
             fi;;
         stop) shift; ___helium_stop "$@";;
         arcium)
-            if [ "${2:-}" = status ]; then
+            if [ "$(___helium_arcium_action "${@:2}")" = status ]; then
                 shift; ___helium_arcium "$@"
             else
                 ___helium_locked arcium __helium_dispatch "$@"

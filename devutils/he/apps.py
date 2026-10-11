@@ -151,6 +151,26 @@ def alive(pid: int) -> bool:
     return True
 
 
+def lock_state(user_data_dir: Path) -> tuple[str, int | None]:
+    """("none" | "live" | "stale" | "foreign", pid) for a profile's SingletonLock.
+
+    A lock naming another host cannot be checked from here, so callers treat
+    it as possibly in use.
+    """
+    try:
+        target = os.readlink(user_data_dir / "SingletonLock")
+    except FileNotFoundError:
+        return "none", None
+    except OSError:
+        return "foreign", None
+    host, _, pid = target.rpartition("-")
+    if not pid.isdigit():
+        return "foreign", None
+    if host != socket.gethostname():
+        return "foreign", int(pid)
+    return ("live" if alive(int(pid)) else "stale"), int(pid)
+
+
 def profile_owner(user_data_dir: Path) -> int | None:
     """The live local process holding a Chromium profile's SingletonLock.
 
@@ -181,6 +201,29 @@ def processes_in(bundle: Path) -> list[int]:
     """PIDs whose executable lives inside `bundle`."""
     prefix = str(bundle.resolve()) + "/"
     return [pid for pid in command_lines() if (path := process_path(pid)) and path.startswith(prefix)]
+
+
+def main_processes_in(bundle: Path) -> list[int]:
+    """Browser main processes (not helpers) running from `bundle`."""
+    lines = command_lines()
+    return [pid for pid in processes_in(bundle) if not re.search(r"(?:^|\s)--type=", lines.get(pid, ""))]
+
+
+def uses_profile(pid: int, user_data_dir: Path) -> bool:
+    """True if the process was started with exactly this --user-data-dir."""
+    # ps joins arguments with spaces, and profile paths contain spaces, so match
+    # the whole argument followed by the next separator.
+    return f" --user-data-dir={user_data_dir} " in f" {command_lines().get(pid, '')} "
+
+
+def require_plain_profile(path: Path, protected: list[Path]) -> None:
+    """Refuse a profile path that is a symlink or resolves to a protected profile."""
+    if path.is_symlink() or (path.exists() and not path.is_dir()):
+        raise HeError(f"profile {path} is a symlink or not a directory; refusing to use it")
+    resolved = path.resolve()
+    for other in protected:
+        if other.exists() and resolved == other.resolve() and path.absolute() != other.absolute():
+            raise HeError(f"profile {path} resolves to {other}; refusing to use it")
 
 
 def wait_for_exit(pids: list[int], timeout: float) -> bool:

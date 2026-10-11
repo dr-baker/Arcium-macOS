@@ -40,8 +40,20 @@ LOG_RETENTION = 8
 QUIT_TIMEOUT = 15.0
 
 
+DEFAULT_INSTALL_PATH = Path("/Applications/Arcium.app")
+HELIUM_APP = Path("/Applications/Helium.app")
+
+
+def _test_mode() -> bool:
+    return os.environ.get("HELIUM_TEST_MODE") == "1"
+
+
 def install_path() -> Path:
-    return Path(os.environ.get("HELIUM_ARCIUM_INSTALL_PATH", "/Applications/Arcium.app"))
+    """/Applications/Arcium.app. Tests may redirect it, and only in test mode."""
+    override = os.environ.get("HELIUM_ARCIUM_TEST_INSTALL_PATH")
+    if override and _test_mode():
+        return Path(override)
+    return DEFAULT_INSTALL_PATH
 
 
 def _support() -> Path:
@@ -70,19 +82,33 @@ def install_lock():
 
 
 def running(app: Path, profile: Path) -> dict | None:
-    """Who owns the Arcium profile, and whether it is this installed app."""
+    """Who owns the Arcium profile, and what else runs from the installed bundle."""
     pid = apps.profile_owner(profile)
-    if pid is None:
+    others = [p for p in apps.main_processes_in(app) if p != pid] if app.is_dir() else []
+    if pid is None and not others:
         return None
-    path = apps.process_path(pid)
-    installed = app.is_dir() and path == str(apps.executable(app).resolve())
-    command = apps.command_lines().get(pid, "")
-    return {"pid": pid, "executable": path, "installed": installed, "mock_keychain": "--use-mock-keychain" in command}
+    path = apps.process_path(pid) if pid else None
+    installed = pid is not None and app.is_dir() and path == str(apps.executable(app).resolve())
+    command = apps.command_lines().get(pid, "") if pid else ""
+    return {"pid": pid, "executable": path, "installed": installed, "others": others,
+            "mock_keychain": "--use-mock-keychain" in command}
+
+
+def _profiles_ok(profile: Path) -> None:
+    apps.require_plain_profile(profile, [helium_profile()])
+    if apps.lock_state(profile)[0] == "foreign":
+        raise ArciumError(f"{profile} is locked by another host; remove its SingletonLock if nothing uses it")
+
+
+def _helium_running() -> list[int]:
+    """Installed Helium processes that could be using its default profile."""
+    helium = Path(os.environ["HELIUM_TEST_HELIUM_APP"]) if _test_mode() and "HELIUM_TEST_HELIUM_APP" in os.environ else HELIUM_APP
+    return apps.main_processes_in(helium) if helium.is_dir() else []
 
 
 def _quit(pid: int, app: Path) -> None:
     """Ask for a normal quit through NSRunningApplication, never forcing it."""
-    if os.environ.get("HELIUM_ARCIUM_QUIT") == "term":  # test seam for stub browsers
+    if os.environ.get("HELIUM_ARCIUM_QUIT") == "term" and _test_mode():  # stub browsers are not apps
         os.kill(pid, signal.SIGTERM)
         return
     script = """ObjC.import('AppKit');
@@ -120,19 +146,21 @@ def _publish(staging: Path, app: Path) -> Path | None:
     puts the previous bundle back.
     """
     previous = app.parent / f".{app.name}.previous-{uuid.uuid4().hex}"
-    moved = False
+    if app.exists() or app.is_symlink():
+        if app.is_symlink() or not app.is_dir():
+            raise ArciumError(f"refusing to replace non-directory {app}")
+        verify_identity(app)  # never move aside something that is not Arcium
     try:
-        if app.exists() or app.is_symlink():
-            if app.is_symlink() or not app.is_dir():
-                raise ArciumError(f"refusing to replace non-directory {app}")
+        if app.exists():
             os.replace(app, previous)
-            moved = True
         os.replace(staging, app)
     except BaseException:
-        if moved and not app.exists():
+        # Decide from the filesystem, not from how far this code got: an
+        # interrupt can land between a rename and the next statement.
+        if not app.exists() and previous.exists():
             os.replace(previous, app)
         raise
-    return previous if moved else None
+    return previous if previous.exists() else None
 
 
 def _launch(app: Path, profile: Path) -> tuple[int, Path]:
@@ -154,8 +182,11 @@ def update(out_dir: Path, *, restart: bool, launch: bool = True) -> dict:
     app = install_path()
     profile = arcium_profile()
     with install_lock():
+        _profiles_ok(profile)
         owner = running(app, profile)
         if owner is not None:
+            if owner["others"]:
+                raise ArciumError(f"other Arcium instances are running from {app} (pids {owner['others']}); quit them first")
             if not restart:
                 raise ArciumError(f"Arcium is running (pid {owner['pid']}); quit it or use he arcium iterate")
             if not owner["installed"]:
@@ -163,7 +194,8 @@ def update(out_dir: Path, *, restart: bool, launch: bool = True) -> dict:
             if owner["mock_keychain"]:
                 raise ArciumError("Arcium is running with a mock Keychain; quit it before updating")
         identity = signing_identity()
-        migrated = clone_once(helium_profile(), profile) if not profile.exists() else "existing"
+        migrated = (clone_once(helium_profile(), profile, still_running=_helium_running)
+                    if not profile.exists() else "existing")
         started = time.monotonic()
         staging = app.parent / f".{app.name}.install-{uuid.uuid4().hex}"
         try:
@@ -177,6 +209,9 @@ def update(out_dir: Path, *, restart: bool, launch: bool = True) -> dict:
                 if not apps.wait_for_exit([owner["pid"]], QUIT_TIMEOUT):
                     raise ArciumError("Arcium did not finish quitting; close any open dialog and retry. "
                                       "Nothing was replaced")
+            # Helpers can outlive the main process briefly; wait for all of them.
+            if app.is_dir() and not apps.wait_for_exit(apps.processes_in(app), QUIT_TIMEOUT):
+                raise ArciumError(f"processes from {app} are still running; nothing was replaced")
             if (late := running(app, profile)) is not None:
                 raise ArciumError(f"the Arcium profile is in use again (pid {late['pid']}); nothing was replaced")
             previous = _publish(staging, app)

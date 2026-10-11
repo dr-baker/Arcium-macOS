@@ -79,8 +79,9 @@ def signing_identity() -> str:
     """A stable identity. Keychain items for the persistent profile are bound to
     the signature, so an ad hoc signature would lose access to saved data."""
     requested = os.environ.get(SIGNING_IDENTITY_ENV, "").strip()
-    if requested == "-" and os.environ.get("HELIUM_TEST_ALLOW_AD_HOC") == "1":
-        return "-"
+    if (requested == "-" and os.environ.get("HELIUM_TEST_MODE") == "1"
+            and os.environ.get("HELIUM_TEST_ALLOW_AD_HOC") == "1"):
+        return "-"  # stub apps in tests only
     identities = signing_identities()
     if requested:
         if requested not in identities:

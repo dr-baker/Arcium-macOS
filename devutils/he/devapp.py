@@ -36,7 +36,7 @@ DEV_FLAGS = ("--enable-ui-devtools", "--use-mock-keychain", "--no-first-run", "-
 ENABLED_FEATURES = ("HeliumFavoritesAndPins",)
 DISABLED_FEATURES = ("DialMediaRouteProvider",)
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-_OWNED_FLAGS = ("--user-data-dir", "--profile-directory", "--use-mock-keychain")
+_OWNED_SWITCHES = ("user-data-dir", "profile-directory", "use-mock-keychain")
 RECORD = "dev-bundles.json"
 
 
@@ -123,12 +123,14 @@ def prepare_bundle(paths: Paths, label: str | None) -> Path:
 def _features(passthrough: list[str]) -> tuple[list[str], list[str], list[str]]:
     enabled, disabled, rest = list(ENABLED_FEATURES), list(DISABLED_FEATURES), []
     for argument in passthrough:
-        key, _, value = argument.partition("=")
-        if key in _OWNED_FLAGS:
-            raise HeError(f"{key} is set by he run; choose the profile with --profile NAME")
-        if key == "--enable-features":
+        # Chromium accepts "-switch" and "--switch", and the last duplicate wins.
+        key, _, value = argument.lstrip().partition("=")
+        name = key.lstrip("-").strip().lower() if key.lstrip().startswith("-") else None
+        if name in _OWNED_SWITCHES:
+            raise HeError(f"--{name} is set by he run; choose the profile with --profile NAME")
+        if name == "enable-features":
             enabled += [v for v in value.split(",") if v]
-        elif key == "--disable-features":
+        elif name == "disable-features":
             disabled += [v for v in value.split(",") if v]
         else:
             rest.append(argument)
@@ -143,6 +145,9 @@ def run(paths: Paths, name: str | None, *, fresh: bool = False, labeled: bool = 
         raise HeError("--labeled needs --profile NAME")
     profile = profile_dir(name, fresh=fresh, home=home)
     enabled, disabled, rest = _features(passthrough or [])
+    apps.require_plain_profile(profile, [support(home) / "net.imput.helium", support(home) / "Arcium"])
+    if apps.lock_state(profile)[0] == "foreign":
+        raise HeError(f"profile {profile} is locked by another host; remove its SingletonLock if nothing uses it")
     if (owner := apps.profile_owner(profile)) is not None:
         raise HeError(f"profile {profile} is already running (pid {owner}); he stop --profile {name or ''} first".rstrip())
     if fresh:
@@ -180,6 +185,12 @@ def stop(name: str | None, *, fresh: bool = False, home: Path | None = None, tim
     path = apps.process_path(owner) or ""
     if f"/{DEV_NAME}.app/" not in path and f"/{DEV_NAME} - " not in path:
         raise HeError(f"profile {profile} is owned by {path or f'pid {owner}'}, not a Dev app; refusing to stop it")
+    # A stale lock's pid can be reused by another browser; require the process
+    # to have been started on this profile, and recheck just before signalling.
+    if not apps.uses_profile(owner, profile):
+        raise HeError(f"pid {owner} holds {profile}'s lock but was not started on it; refusing to stop it")
+    if apps.profile_owner(profile) != owner or apps.process_path(owner) != path:
+        raise HeError("the Dev app changed while stopping; retry")
     os.kill(owner, signal.SIGTERM)
     if not apps.wait_for_exit([owner], timeout):
         raise HeError(f"pid {owner} did not quit within {timeout:.0f}s; check for an open dialog")

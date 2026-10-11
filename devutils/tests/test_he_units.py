@@ -139,5 +139,37 @@ class AgentAndAssetsTest(Fixture):
             test_assets._archive_members(archive)
 
 
+class InstallerUnitTest(Fixture):
+    def test_install_path_override_needs_test_mode(self) -> None:
+        from arcium import install
+        with mock.patch.dict(os.environ, {"HELIUM_ARCIUM_TEST_INSTALL_PATH": "/tmp/elsewhere.app"}, clear=False):
+            os.environ.pop("HELIUM_TEST_MODE", None)
+            self.assertEqual(install.install_path(), install.DEFAULT_INSTALL_PATH)
+
+    def test_interrupted_publish_puts_the_previous_bundle_back(self) -> None:
+        import plistlib
+        from arcium import install
+        app = self.root / "Arcium.app"
+        staging = self.root / ".Arcium.app.install"
+        for bundle in (app, staging):
+            (bundle / "Contents").mkdir(parents=True)
+            with (bundle / "Contents" / "Info.plist").open("wb") as handle:
+                plistlib.dump({"CFBundleIdentifier": "net.imput.arcium", "CrProductDirName": "Arcium"}, handle)
+        real_replace = os.replace
+        calls = []
+
+        def interrupted(source, destination):
+            calls.append(source)
+            real_replace(source, destination)
+            if len(calls) == 1:
+                raise KeyboardInterrupt
+
+        with mock.patch.object(install.os, "replace", interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                install._publish(staging, app)
+        self.assertTrue((app / "Contents" / "Info.plist").is_file())
+        self.assertTrue(staging.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
