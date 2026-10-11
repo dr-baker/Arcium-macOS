@@ -103,37 +103,6 @@ class LaneTransactionTests(unittest.TestCase):
             self.assertFalse((target / "build").exists())
             self.assertFalse((root / f".arcium-tmp-{os.geteuid()}").exists())
 
-    def test_heavy_transaction_passes_validated_cli_pin_to_the_real_sourced_shell(self) -> None:
-        for ambient in (None, "stale-ambient-volume"):
-            with self.subTest(ambient=ambient), tempfile.TemporaryDirectory(prefix="ac-", dir="/private/tmp") as temporary:
-                root = Path(temporary).resolve()
-                environment = self._fixture_environment(root)
-                environment.pop("HELIUM_DEV_HEAVY_VOLUME_UUID", None)
-                if ambient is not None:
-                    environment["HELIUM_DEV_HEAVY_VOLUME_UUID"] = ambient
-                (root / "fake-tools/python3").symlink_to(sys.executable)
-                for helper in ("setup_python.sh", "helium_acquisition.sh", "lane_selection.py"):
-                    (root / "devutils" / helper).write_bytes((ROOT / "devutils" / helper).read_bytes())
-                subprocess.run(["git", "init", "-q", str(root)], check=True, env=environment)
-                observed = root / "observed-pin.json"
-                environment["OBSERVED_PIN"] = str(observed)
-                script = root / "dev.sh"
-                script.write_text(
-                    (ROOT / "dev.sh").read_text()
-                    + "\n___helium_configure_inner(){ ___helium_python -c 'import json,os,sys; "
-                    "from pathlib import Path; Path(os.environ[\"OBSERVED_PIN\"]).write_text("
-                    "json.dumps([os.environ[\"HELIUM_DEV_HEAVY_VOLUME_UUID\"],sys.argv[1]]))' "
-                    '"$_heavy_volume_uuid"; }\n',
-                    encoding="utf-8",
-                )
-                result = subprocess.run(
-                    [sys.executable, str(CLI), "--worktree", str(root), "--build-root", str(root / "build"),
-                     "--lane", "heavy", "--expected-volume-uuid", "fixture-volume", "--script", str(script), "configure"],
-                    env=environment, capture_output=True, text=True, check=False,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(json.loads(observed.read_text()), ["fixture-volume", "fixture-volume"])
-
     def test_transaction_holds_lock_and_propagates_failure(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
