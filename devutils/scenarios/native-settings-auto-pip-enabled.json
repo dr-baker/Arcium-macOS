@@ -18,8 +18,8 @@
     }
   ],
   "preconditions": [
-    "Use an explicitly authorized isolated profile. Launch the current packaged development bundle with he run --isolated native-settings-auto-pip-enabled --enable-features=BrowserInitiatedAutomaticPictureInPicture.",
-    "Record the exact source commits, bundle, profile, command line, and fresh build/package receipts.",
+    "Use an explicitly authorized isolated profile. Launch the current development build with he run --profile native-settings-auto-pip-enabled --enable-features=BrowserInitiatedAutomaticPictureInPicture.",
+    "Record the exact source commits, bundle, profile, and command line.",
     "First establish baseline row unavailability through the native-settings contract without this feature override.",
     "Prepare a media page meeting the current automatic-entry eligibility conditions. Prove automatic entry works with the preference enabled before attributing a later lack of entry to the preference.",
     "Save the original preference and restore it after testing. Do not treat failure to establish eligible automatic entry as a passing off-switch test."

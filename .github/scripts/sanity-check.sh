@@ -11,8 +11,9 @@ pip3.14 install httplib2==0.22.0 requests Pillow --break
 
 source dev.sh
 
-# CI starts with an empty build lane. Keep dev.sh's lane-local Quilt catalog.
-he setup | tee setup.log
+# CI runners have less free disk than a full local build needs; the setup
+# here stops after a short build, so skip the 100 GiB check.
+he setup --force | tee setup.log
 
 if [ "$1" = "sub" ]; then
     he sub

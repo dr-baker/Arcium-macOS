@@ -62,7 +62,7 @@ class ReleaseEntrypointsTest(unittest.TestCase):
             "he() {\n"
             "  printf '%s\\n' \"$*\" >> \"$HE_CALLS\"\n"
             "  case \"$1\" in\n"
-            "    setup) echo 'source prepared' ;;\n"
+            "    setup) [ \"$2\" = --force ] && echo 'source prepared' ;;\n"
             "    reset) return 2 ;;\n"
             "    *) return 2 ;;\n"
             "  esac\n"
@@ -91,7 +91,7 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         )
 
         self.assertEqual(0, result.returncode, result.stdout)
-        self.assertEqual("setup\n", calls.read_text(encoding="utf-8"))
+        self.assertEqual("setup --force\n", calls.read_text(encoding="utf-8"))
 
     def test_local_build_passes_no_fuzz_to_patch_utility(self) -> None:
         self.install_python_stub()
