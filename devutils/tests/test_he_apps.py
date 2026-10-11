@@ -1,0 +1,282 @@
+"""Dev profiles, the installed Arcium app, and the agent path, end to end.
+
+A stub browser stands in for Chromium: it holds the profile's SingletonLock
+the way Chromium does and quits on SIGTERM. Signing is ad hoc, which the
+installer allows only under HELIUM_TEST_ALLOW_AD_HOC.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import plistlib
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from minichromium import CORE_PATCH, TOOLS, MiniChromium, run  # noqa: E402
+from he import apps  # noqa: E402
+
+REQUIRED = all(shutil.which(tool) for tool in ("quilt", "ninja", "clang", "clang++", "codesign"))
+
+
+def json_tail(text: str) -> dict:
+    """The JSON object printed last, after any build output."""
+    lines = text.splitlines()
+    return json.loads("\n".join(lines[max(i for i, line in enumerate(lines) if line == "{"):]))
+
+
+def plist(path: Path) -> dict:
+    with path.open("rb") as handle:
+        return plistlib.load(handle)
+
+
+@unittest.skipUnless(REQUIRED, "needs quilt, ninja, clang, and codesign")
+class AppsTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.m = MiniChromium()
+        self.addCleanup(self.m.cleanup)
+        self.addCleanup(self._kill_stubs)
+        self.m.ready()
+        self.m.make_app()
+        self.support = self.m.home / "Library" / "Application Support"
+        self.install = self.m.root / "Applications" / "Arcium.app"
+        self.arcium_env = {
+            "HELIUM_ARCIUM_INSTALL_PATH": str(self.install),
+            "ARCIUM_CODESIGN_IDENTITY": "-",
+            "HELIUM_TEST_ALLOW_AD_HOC": "1",
+            "HELIUM_ARCIUM_QUIT": "term",
+        }
+
+    def _kill_stubs(self) -> None:
+        for lock in self.m.home.rglob("SingletonLock"):
+            pid = apps.profile_owner(lock.parent)
+            if pid is not None:
+                os.kill(pid, signal.SIGTERM)
+
+    def profile(self, name: str) -> Path:
+        return self.support / "Helium Development" / "profiles" / "isolated" / name
+
+    # Dev profiles ------------------------------------------------------------
+
+    def test_named_profile_runs_the_shared_dev_identity(self) -> None:
+        result = json.loads(self.m.he("run", "--profile", "alpha", "--json", "--enable-features=Extra").stdout)
+        app = self.m.out / "Helium Dev.app"
+        self.assertEqual(result["app"], str(app))
+        self.assertEqual(plist(app / "Contents" / "Info.plist")["CFBundleIdentifier"], "net.imput.helium.dev")
+        helper = app / "Contents" / "Frameworks" / "Helium Helper.app" / "Contents" / "Info.plist"
+        self.assertEqual(plist(helper)["CFBundleIdentifier"], "net.imput.helium.helper.dev")
+        args = (self.profile("alpha") / "stub-args").read_text().splitlines()
+        self.assertIn("--use-mock-keychain", args)
+        self.assertIn("--enable-features=HeliumFavoritesAndPins,Extra", args)
+        self.assertEqual(apps.profile_owner(self.profile("alpha")), result["pid"])
+        self.assertIn("stopped", self.m.he("stop", "--profile", "alpha").stdout)
+        self.assertIsNone(apps.profile_owner(self.profile("alpha")))
+
+    def test_labeled_profiles_run_side_by_side_with_their_own_bundles(self) -> None:
+        self.m.he("run", "--profile", "alpha")
+        beta = json.loads(self.m.he("run", "--profile", "beta", "--labeled", "--json").stdout)
+        labeled = self.m.out / "Helium Dev - beta.app"
+        self.assertEqual(beta["app"], str(labeled))
+        identifier = plist(labeled / "Contents" / "Info.plist")["CFBundleIdentifier"]
+        self.assertRegex(identifier, r"^net\.imput\.helium\.dev\.[0-9a-f]{16}$")
+        self.assertLess(len(identifier) + 70, 128)
+        self.assertIsNotNone(apps.profile_owner(self.profile("alpha")))
+        self.assertIsNotNone(apps.profile_owner(self.profile("beta")))
+
+    def test_profile_flags_and_existing_profiles_are_refused(self) -> None:
+        refused = self.m.he("run", "--profile", "alpha", "--user-data-dir=/tmp/x", check=False)
+        self.assertIn("set by he run", refused.stderr)
+        self.m.he("run", "--profile", "alpha")
+        again = self.m.he("run", "--profile", "alpha", check=False)
+        self.assertIn("already running", again.stderr)
+        self.m.he("stop", "--profile", "alpha")
+        fresh = self.m.he("run", "--fresh", "alpha", check=False)
+        self.assertEqual(fresh.returncode, 0, fresh.stderr)
+        self.m.he("stop", "--fresh", "alpha")
+        self.assertIn("already exists", self.m.he("run", "--fresh", "alpha", check=False).stderr)
+
+    def test_seeding_copies_a_stopped_profile_once(self) -> None:
+        seed = self.m.root / "seed"
+        (seed / "Default").mkdir(parents=True)
+        (seed / "Default" / "Bookmarks").write_text("marks")
+        self.m.he("run", "--profile", "seeded", "--seed-from", str(seed))
+        self.assertEqual((self.profile("seeded") / "Default" / "Bookmarks").read_text(), "marks")
+
+    def test_a_running_dev_app_is_not_replaced_by_a_new_build(self) -> None:
+        self.m.he("run", "--profile", "alpha")
+        (self.m.out / "Helium.app" / "Contents" / "Resources").mkdir()
+        (self.m.out / "Helium.app" / "Contents" / "Resources" / "new").write_text("rebuilt")
+        refused = self.m.he("run", "--profile", "other", check=False)
+        self.assertIn("running an older build", refused.stderr)
+
+    def test_dev_bundles_do_not_count_as_build_output(self) -> None:
+        self.m.he("pop")
+        self.m.he("run", "--profile", "alpha")
+        result = self.m.he("push")
+        self.assertIn("restored timestamps", result.stderr)
+
+    def test_stop_refuses_a_profile_owned_by_something_else(self) -> None:
+        profile = self.profile("foreign")
+        profile.mkdir(parents=True)
+        stub = subprocess.Popen([str(self.m.root / "stub" / "browser"), f"--user-data-dir={profile}"])
+        self.addCleanup(lambda: (stub.kill(), stub.wait()))
+        for _ in range(50):
+            if apps.profile_owner(profile):
+                break
+            time.sleep(0.05)
+        refused = self.m.he("stop", "--profile", "foreign", check=False)
+        self.assertIn("not a Dev app", refused.stderr)
+
+    # Installed Arcium -----------------------------------------------------------
+
+    def _seed_helium_profile(self) -> None:
+        helium = self.support / "net.imput.helium" / "Default"
+        helium.mkdir(parents=True)
+        (helium / "History").write_text("visits")
+
+    def test_install_packages_signs_migrates_and_launches(self) -> None:
+        self._seed_helium_profile()
+        result = self.m.he("arcium", "--json", **self.arcium_env)
+        data = json_tail(result.stdout)
+        info = plist(self.install / "Contents" / "Info.plist")
+        self.assertEqual(info["CFBundleIdentifier"], "net.imput.arcium")
+        self.assertEqual(info["CrProductDirName"], "Arcium")
+        helper = self.install / "Contents" / "Frameworks" / "Helium Helper.app" / "Contents" / "Info.plist"
+        self.assertEqual(plist(helper)["CFBundleIdentifier"], "net.imput.arcium.helper")
+        self.assertTrue((self.install / "Contents" / "Frameworks" / "libone.dylib").is_file())
+        self.assertEqual(data["component_libraries"], 2)
+        self.assertEqual((self.support / "Arcium" / "Default" / "History").read_text(), "visits")
+        self.assertEqual(apps.profile_owner(self.support / "Arcium"), data["pid"])
+        status = json.loads(self.m.he("arcium", "status", "--json", **self.arcium_env).stdout)
+        self.assertTrue(status["signature_ok"])
+        self.assertTrue(status["running"]["installed"])
+
+    def test_install_refuses_while_arcium_runs_and_iterate_restarts_it(self) -> None:
+        self._seed_helium_profile()
+        first = json_tail(self.m.he("arcium", "--json", **self.arcium_env).stdout)["pid"]
+        refused = self.m.he("arcium", **self.arcium_env, check=False)
+        self.assertIn("Arcium is running", refused.stderr)
+        second = json_tail(self.m.he("arcium", "iterate", "--json", **self.arcium_env).stdout)
+        self.assertTrue(second["restarted"])
+        self.assertNotEqual(second["pid"], first)
+        self.assertFalse(apps.alive(first))
+
+    def test_failure_before_publication_keeps_the_installed_app(self) -> None:
+        self._seed_helium_profile()
+        self.m.he("arcium", "--no-launch", **self.arcium_env)
+        before = (self.install / "Contents" / "Info.plist").read_bytes()
+        failed = self.m.he("arcium", **{**self.arcium_env, "ARCIUM_CODESIGN_IDENTITY": "Nobody"}, check=False)
+        self.assertIn("names no available signing identity", failed.stderr)
+        self.assertEqual((self.install / "Contents" / "Info.plist").read_bytes(), before)
+        self.assertEqual(list(self.install.parent.glob(".Arcium.app.*")), [])
+
+    def test_failure_after_publication_keeps_both_bundles_and_the_profile(self) -> None:
+        self._seed_helium_profile()
+        self.m.he("arcium", "--no-launch", **self.arcium_env)
+        broken = self.m.out / "Helium.app" / "Contents" / "MacOS" / "Helium"
+        broken.unlink()
+        broken.write_text("#!/bin/sh\nexit 1\n")
+        broken.chmod(0o755)
+        history = (self.support / "Arcium" / "Default" / "History").read_text()
+        failed = self.m.he("arcium", "--no-build", **self.arcium_env, check=False)
+        self.assertIn("did not start cleanly", failed.stderr)
+        self.assertIn("Previous bundle kept at", failed.stderr)
+        self.assertEqual(len(list(self.install.parent.glob(".Arcium.app.previous-*"))), 1)
+        self.assertEqual((self.install / "Contents" / "MacOS" / "Helium").read_text(), "#!/bin/sh\nexit 1\n")
+        self.assertEqual((self.support / "Arcium" / "Default" / "History").read_text(), history)
+
+    def test_iterate_refuses_a_mock_keychain_arcium(self) -> None:
+        self._seed_helium_profile()
+        self.m.he("arcium", "--no-launch", **self.arcium_env)
+        executable = self.install / "Contents" / "MacOS" / "Helium"
+        stub = subprocess.Popen([str(executable), f"--user-data-dir={self.support / 'Arcium'}", "--use-mock-keychain"])
+        self.addCleanup(lambda: (stub.kill(), stub.wait()))
+        for _ in range(50):
+            if apps.profile_owner(self.support / "Arcium"):
+                break
+            time.sleep(0.05)
+        refused = self.m.he("arcium", "iterate", **self.arcium_env, check=False)
+        self.assertIn("mock Keychain", refused.stderr)
+
+    def test_install_needs_a_stable_signing_identity(self) -> None:
+        env = {**self.arcium_env, "ARCIUM_CODESIGN_IDENTITY": "-", "HELIUM_TEST_ALLOW_AD_HOC": "0"}
+        refused = self.m.he("arcium", "--no-build", **env, check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertFalse(self.install.exists())
+
+    # Agent path -------------------------------------------------------------------
+
+    def test_agent_build_needs_targets_and_respects_the_budget(self) -> None:
+        self.assertIn("explicit targets", self.m.he("agent", "build", check=False).stderr)
+        (self.m.src / "a.cc").touch()
+        (self.m.src / "b.cc").touch()
+        refused = self.m.he("agent", "build", "chrome", "--edge-budget", "1", check=False)
+        self.assertIn("above the budget", refused.stderr)
+        built = self.m.he("agent", "build", "chrome", "--edge-budget", "1", "--approved", "--json")
+        result = json_tail(built.stdout)
+        self.assertEqual(result["outcome"], "ok")
+        record = self.m.build_dir / ".arcium" / "agent" / "last-build.json"
+        self.assertEqual(json.loads(record.read_text())["outcome"], "ok")
+
+    def test_agent_build_refuses_a_pending_snapshot_and_strict_problems(self) -> None:
+        self.m.he("pop")
+        self.assertIn("snapshot is pending", self.m.he("agent", "build", "chrome", check=False).stderr)
+        self.m.he("push")
+        (self.m.worktree / "resources" / "icon.txt").write_text("changed\n")
+        self.assertIn("he check reports problems", self.m.he("agent", "build", "chrome", check=False).stderr)
+
+    def test_agent_status_is_json(self) -> None:
+        status = json.loads(self.m.he("agent", "status").stdout)
+        self.assertEqual(status["patches"]["applied"], status["patches"]["series"])
+        self.assertFalse(status["timestamp_snapshot_pending"])
+
+    def test_agent_arcium_iterate_needs_approval(self) -> None:
+        refused = self.m.he("agent", "arcium", "iterate", **self.arcium_env, check=False)
+        self.assertIn("pass --approved", refused.stderr)
+
+
+@unittest.skipUnless(shutil.which("bash"), "needs bash")
+class RemoteExecutionTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.m = MiniChromium()
+        self.addCleanup(self.m.cleanup)
+        siso = self.m.src / "build" / "config" / "siso"
+        siso.mkdir(parents=True)
+        (siso / "configure_siso.py").write_text(
+            "import sys, pathlib\npathlib.Path(sys.argv[0]).with_name('args.txt').write_text(' '.join(sys.argv[1:]))\n")
+        (self.m.worktree / "helium-chromium" / "flags.gn").write_text("is_official_build=true\n")
+
+    def call(self, function: str, **env: str) -> subprocess.CompletedProcess:
+        script = f'source "{TOOLS / "dev.sh"}" >/dev/null && {function}'
+        return run(["bash", "-c", script], env=self.m.env(**env), check=False)
+
+    def test_remote_backend_uses_nativelink_and_keeps_tls(self) -> None:
+        result = self.call("___helium_configure_siso", SISO_REAPI_ADDRESS="grpc.example:443")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = (self.m.src / "build/config/siso/args.txt").read_text()
+        self.assertIn("--reapi_address=grpc.example:443", args)
+        self.assertIn("--reapi_instance=main", args)
+        self.assertIn("--reapi_backend_config_path=nativelink.star", args)
+        self.call("___helium_setup_gn", SISO_REAPI_ADDRESS="grpc.example:443")
+        gn = (self.m.out / "args.gn").read_text()
+        self.assertIn("use_remoteexec = true", gn)
+        self.assertNotIn("cc_wrapper", gn)
+
+    def test_local_backend_regenerates_chromium_defaults(self) -> None:
+        self.call("___helium_configure_siso")
+        self.assertIn("--rbe_instance=", (self.m.src / "build/config/siso/args.txt").read_text())
+
+    def test_plaintext_setting_is_validated(self) -> None:
+        result = self.call("___helium_configure_siso", SISO_REAPI_ADDRESS="x:1", RBE_service_no_security="yes")
+        self.assertIn("must be true or false", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

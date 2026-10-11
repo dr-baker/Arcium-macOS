@@ -128,7 +128,9 @@ ___helium_setup_gn() {
     mkdir -p "$_out_dir"
     cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$OUT_FILE"
 
-    if command -v sccache 2>&1 >/dev/null; then
+    if [ -n "${SISO_REAPI_ADDRESS:-}" ]; then
+        echo 'use_remoteexec = true' >> "$OUT_FILE"
+    elif command -v sccache 2>&1 >/dev/null; then
         echo 'cc_wrapper="sccache"' >> "$OUT_FILE"
     elif command -v ccache 2>&1 >/dev/null; then
         echo 'cc_wrapper="env CCACHE_COMPILERCHECK=content CCACHE_SLOPPINESS=time_macros ccache"' >> "$OUT_FILE"
@@ -147,6 +149,35 @@ ___helium_setup_gn() {
 
     sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE"
     ___helium_he stamp gn-defaults
+}
+
+# Remote execution through NativeLink is optional: set SISO_REAPI_ADDRESS
+# (and optionally SISO_REAPI_INSTANCE), then he configure --refresh-defaults.
+# TLS stays on unless RBE_service_no_security=true is set explicitly. With
+# SISO_REAPI_ADDRESS unset this writes Chromium's local Siso configuration,
+# which also covers full clones made with --nohooks.
+___helium_configure_siso() {
+    case "${RBE_service_no_security:-false}" in
+        true|false) ;;
+        *) echo "error: RBE_service_no_security must be true or false" >&2; return 2 ;;
+    esac
+    if [ -n "${SISO_REAPI_ADDRESS:-}" ]; then
+        export SISO_REAPI_INSTANCE="${SISO_REAPI_INSTANCE:-main}"
+        python3 "$_src_dir/build/config/siso/configure_siso.py" \
+            --reapi_address="$SISO_REAPI_ADDRESS" \
+            --reapi_instance="$SISO_REAPI_INSTANCE" \
+            --reapi_backend_config_path=nativelink.star
+    else
+        python3 "$_src_dir/build/config/siso/configure_siso.py" \
+            --rbe_instance=projects/rbe-chrome-untrusted/instances/default_instance
+    fi
+}
+
+___helium_setup_remoteexec_toolchain() {
+    [ -n "${SISO_REAPI_ADDRESS:-}" ] || return 0
+    python3 "$_src_dir/tools/clang/scripts/update.py" \
+        --host-os=linux \
+        --output-dir="$_src_dir/third_party/llvm-build/Release+Asserts_linux"
 }
 
 ___helium_info_pull() {
@@ -179,6 +210,9 @@ ___helium_configure() {
     fi
     cd "$_src_dir"
     ___helium_setup_siso
+    ___helium_configure_siso
+    ___helium_setup_remoteexec_toolchain
+    ___helium_he test-assets
     "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch"
     python3 ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles
     "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands
@@ -333,6 +367,7 @@ ___helium_build() {
     ___helium_he timestamps discard --reason "built while patches were popped"
     ___helium_he check --warn
     ___helium_use_build_tmpdir
+    [ -z "${SISO_REAPI_ADDRESS:-}" ] || export SISO_REAPI_INSTANCE="${SISO_REAPI_INSTANCE:-main}"
     cd "$_src_dir"
     SISO_PATH="$_siso_path" python3 "$_depot_tools_dir/autoninja.py" \
     -k 0 "${jobs[@]}" -C "$_out_dir" "${targets[@]}"
@@ -431,8 +466,7 @@ ___helium_check() {
 }
 
 ___helium_locate() {
-    PYTHONDONTWRITEBYTECODE=1 python3 "$_he_tools_dir/devutils/patch_lookup.py" \
-        --worktree "$_root_dir" --build-root "$_build_dir" --source "$_src_dir" "$@"
+    ___helium_he locate "$@"
 }
 
 # he scratch NAME | he scratch --remove NAME
@@ -521,6 +555,105 @@ ___helium_lint() {
     ___helium_tidy;
 }
 
+# he run [--profile NAME | --isolated NAME | --fresh NAME] [--labeled]
+#        [--seed-from installed|dev|arcium|PATH] [--json] [browser flags...]
+# Without profile options this is upstream's he run.
+___helium_run_profile() {
+    ___helium_refuse_in_scratch
+    local -a options=() passthrough=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --profile|--isolated) options+=(--profile "$2"); shift 2 ;;
+            --profile=*|--isolated=*) options+=(--profile "${1#*=}"); shift ;;
+            --fresh) options+=(--profile "$2" --fresh); shift 2 ;;
+            --fresh=*) options+=(--profile "${1#*=}" --fresh); shift ;;
+            --seed-from) options+=(--seed-from "$2"); shift 2 ;;
+            --labeled|--json) options+=("$1"); shift ;;
+            *) passthrough+=("$1"); shift ;;
+        esac
+    done
+    ___helium_he run "${options[@]}" -- "${passthrough[@]}"
+}
+
+___helium_stop() {
+    case "${1:-}" in
+        --profile|--isolated) ___helium_he stop --profile "$2" ;;
+        --fresh) ___helium_he stop --profile "$2" --fresh ;;
+        '') ___helium_he stop ;;
+        *) echo "usage: he stop [--profile NAME | --fresh NAME]" >&2; return 2 ;;
+    esac
+}
+
+# he arcium [install|iterate|status] [--no-build] [--no-launch] [--json]
+___helium_arcium() {
+    local action=install build=true argument
+    local -a options=()
+    for argument in "$@"; do
+        case "$argument" in
+            install|iterate|status) action="$argument" ;;
+            --no-build) build=false ;;
+            --no-launch|--json) options+=("$argument") ;;
+            --approved) ;;  # accepted for the previous tooling's muscle memory
+            *) echo "usage: he arcium [install|iterate|status] [--no-build] [--no-launch] [--json]" >&2; return 2 ;;
+        esac
+    done
+    if [ "$action" != status ]; then
+        ___helium_refuse_in_scratch
+        ! $build || ___helium_build chrome
+    fi
+    PYTHONPATH="$_he_tools_dir/devutils" PYTHONDONTWRITEBYTECODE=1 \
+        python3 -m arcium.install --build-dir "$_build_dir" "$action" "${options[@]}"
+}
+
+# he agent CMD: the same commands with an edge budget, strict checks, and a
+# JSON result in .arcium/agent/last-CMD.json. See docs/agents.md.
+___helium_agent() {
+    local command="${1:-}"
+    [ "$#" -eq 0 ] || shift
+    case "$command" in
+        status) ___helium_he agent-status; return ;;
+        build|push|pop|replay|save-patch|scratch|arcium) ;;
+        *) echo "usage: he agent status|build|push|pop|replay|save-patch|scratch|arcium ..." >&2; return 2 ;;
+    esac
+    local -a guard=() args=()
+    local approved=false json=false
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --approved) approved=true; guard+=(--approved); shift ;;
+            --edge-budget) guard+=(--edge-budget "$2"); shift 2 ;;
+            --json) json=true; shift ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    local log started status=0
+    log="$(mktemp "${TMPDIR:-/tmp}/he-agent.XXXXXX")"
+    started="$(date +%s)"
+    {
+        case "$command" in
+            build)
+                ___helium_he agent-guard "${guard[@]}" "${args[@]}" >/dev/null &&
+                    ___helium_build "${args[@]}" ;;
+            push) ___helium_quilt_push "${args[@]}" && ___helium_he check ;;
+            replay) ___helium_replay && ___helium_he check ;;
+            pop) ___helium_quilt_pop "${args[@]}" ;;
+            save-patch) ___helium_save_patch "${args[@]}" ;;
+            scratch) ___helium_scratch "${args[@]}" ;;
+            arcium)
+                if [ "${args[0]:-}" = iterate ] && ! $approved; then
+                    echo "error: he agent arcium iterate restarts the installed app; pass --approved" >&2
+                    false
+                else
+                    ___helium_arcium "${args[@]}"
+                fi ;;
+        esac
+    } > >(tee -a "$log") 2> >(tee -a "$log" >&2) || status=$?
+    local -a result=(agent-result --name "$command" --status "$status" --seconds "$(( $(date +%s) - started ))" --log "$log")
+    $json && result+=(--json)
+    ___helium_he "${result[@]}"
+    rm -f "$log"
+    return "$status"
+}
+
 # Commands that change the source tree, build output, or build-dir state run
 # under the build-dir lock; read-only commands do not.
 __helium_dispatch() {
@@ -554,6 +687,9 @@ __helium_dispatch() {
 
         build) ___helium_build "$@";;
         reset) ___helium_reset;;
+        run) ___helium_run_profile "$@";;
+        arcium) ___helium_arcium "$@";;
+        agent) ___helium_agent "$@";;
     esac
 }
 
@@ -564,10 +700,29 @@ __helium_menu() {
         merge|unmerge|push|pop|replay|save-patch|pull|scratch|format|tidy|lint|build|reset)
             ___helium_locked "$1" __helium_dispatch "$@";;
 
+        run)
+            if [ "$#" -eq 1 ]; then
+                ___helium_run
+            else
+                ___helium_locked run __helium_dispatch "$@"
+            fi;;
+        stop) shift; ___helium_stop "$@";;
+        arcium)
+            if [ "${2:-}" = status ]; then
+                shift; ___helium_arcium "$@"
+            else
+                ___helium_locked arcium __helium_dispatch "$@"
+            fi;;
+        agent)
+            if [ "${2:-}" = status ] || [ "$#" -eq 1 ]; then
+                shift; ___helium_agent "$@"
+            else
+                ___helium_locked "agent-${2}" __helium_dispatch "$@"
+            fi;;
+
         validate) ___helium_validate "$2";;
         check) ___helium_check;;
         locate) shift; ___helium_locate "$@";;
-        run) ___helium_run;;
         *)
             echo "usage: he <command>" >&2
             echo "\tsetup [--full-source] - sets up the dev environment fully for the first time" >&2
@@ -608,6 +763,10 @@ __helium_menu() {
             echo "\n" >&2
             echo "\tbuild [--jobs N] [TARGET...] - builds a development binary" >&2
             echo "\trun - runs a development build of helium with dev data dir & ui devtools enabled" >&2
+            echo "\trun --profile NAME [--fresh] [--labeled] [--seed-from SRC] [flags] - runs Helium Dev on a named profile" >&2
+            echo "\tstop [--profile NAME] - quits the Helium Dev app using that profile" >&2
+            echo "\tarcium [install|iterate|status] - installs the build as /Applications/Arcium.app" >&2
+            echo "\tagent CMD - agent path with build budgets and strict checks; see docs/agents.md" >&2
             echo "\treset - nukes everything" >&2
     esac
 }

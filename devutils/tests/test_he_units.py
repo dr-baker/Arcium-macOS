@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from he import __main__ as cli, quilt, records, scratch, timestamps  # noqa: E402
+from he import __main__ as cli, agent, quilt, records, scratch, test_assets, timestamps  # noqa: E402
 from he.common import HeError, make_paths  # noqa: E402
 
 
@@ -119,6 +119,24 @@ class ScratchAndTmpTest(Fixture):
         with mock.patch.dict(os.environ, {"HELIUM_TMPDIR": "/tmp/" + "x" * 100}):
             with self.assertRaises(HeError):
                 cli._tmpdir(self.paths)
+
+
+class AgentAndAssetsTest(Fixture):
+    def test_planned_edges_reads_ninja_and_siso_progress(self) -> None:
+        self.assertEqual(agent.planned_edges("[1/4] cc a\n[2/4] cc b\n"), 4)
+        self.assertEqual(agent.planned_edges("ninja: no work to do.\n"), 0)
+
+    def test_test_font_archives_cannot_escape_their_directory(self) -> None:
+        import io
+        import tarfile
+        archive = self.root / "fonts.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            data = b"x"
+            info = tarfile.TarInfo("../escape.ttf")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        with self.assertRaises(HeError):
+            test_assets._archive_members(archive)
 
 
 if __name__ == "__main__":

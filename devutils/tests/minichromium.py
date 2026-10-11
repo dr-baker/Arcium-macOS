@@ -49,6 +49,35 @@ build chrome: phony obj/a.o obj/b.o obj/p.o obj/long.o
 build chromedriver: phony obj/p.o
 """
 
+# A stub browser: takes --user-data-dir, holds Chromium's SingletonLock
+# ("<host>-<pid>"), records its arguments, and quits on SIGTERM.
+STUB_BROWSER = r"""
+#include <signal.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+static char lock[4096];
+static void quit(int signal_number) { (void)signal_number; unlink(lock); _exit(0); }
+int main(int argc, char **argv) {
+    const char *dir = NULL;
+    for (int i = 1; i < argc; i++)
+        if (!strncmp(argv[i], "--user-data-dir=", 16)) dir = argv[i] + 16;
+    if (!dir) return 3;
+    char host[256], target[512], args[4096];
+    gethostname(host, sizeof host);
+    snprintf(target, sizeof target, "%s-%d", host, getpid());
+    snprintf(lock, sizeof lock, "%s/SingletonLock", dir);
+    unlink(lock);
+    if (symlink(target, lock)) return 4;
+    snprintf(args, sizeof args, "%s/stub-args", dir);
+    FILE *file = fopen(args, "w");
+    for (int i = 1; i < argc; i++) fprintf(file, "%s\n", argv[i]);
+    fclose(file);
+    signal(SIGTERM, quit);
+    for (;;) pause();
+}
+"""
+
 AUTONINJA = """\
 import os, sys
 args = [a for a in sys.argv[1:]]
@@ -181,6 +210,28 @@ class MiniChromium:
             if "ninja explain: output obj/" in line and "older than most recent input" in line:
                 rebuilt.add(line.split("output ", 1)[1].split()[0])
         return rebuilt
+
+    def make_app(self) -> Path:
+        """A fake component-build Helium.app with a helper and two loose dylibs."""
+        import plistlib
+        work = self.root / "stub"
+        work.mkdir(exist_ok=True)
+        (work / "stub.c").write_text(STUB_BROWSER)
+        run(["clang", "-o", str(work / "browser"), str(work / "stub.c")])
+        app = self.out / "Helium.app"
+        helper = app / "Contents" / "Frameworks" / "Helium Helper.app"
+        for bundle, executable, identifier in ((app, "Helium", "net.imput.helium"),
+                                               (helper, "Helium Helper", "net.imput.helium.helper")):
+            (bundle / "Contents" / "MacOS").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(work / "browser", bundle / "Contents" / "MacOS" / executable)
+            with (bundle / "Contents" / "Info.plist").open("wb") as handle:
+                plistlib.dump({"CFBundleExecutable": executable, "CFBundleIdentifier": identifier,
+                               "CFBundleName": executable, "CFBundleDisplayName": executable,
+                               "CFBundlePackageType": "APPL"}, handle)
+        for name in ("libone", "libtwo"):
+            (work / f"{name}.c").write_text(f"int {name}(void) {{ return 1; }}\n")
+            run(["clang", "-dynamiclib", "-o", str(self.out / f"{name}.dylib"), str(work / f"{name}.c")])
+        return app
 
     def ready(self) -> None:
         """Merge, push, record stamps, and build once."""

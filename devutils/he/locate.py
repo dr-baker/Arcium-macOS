@@ -1,23 +1,19 @@
-#!/usr/bin/env python3
-"""Find source ownership in authoritative patches without preparing a build lane."""
+"""`he locate QUERY`: find which authoritative patch owns a file or text.
+
+Searches the selected worktree's core and macOS catalogs, not generated
+copies. Auto mode treats a query with `*?[` as a path glob, one with `/` as an
+exact Chromium-relative path, and anything else as literal text.
+"""
 
 from __future__ import annotations
 
-import argparse
 import ast
 import fnmatch
-import json
 from pathlib import Path, PurePosixPath
 import re
-import sys
 
-from patch_workspace import (
-    PatchWorkspaceError,
-    _authoritative_state,
-    generated_root,
-    validate_catalog_snapshot,
-)
-from quilt_state import QuiltStateError, inspect_quilt_state, read_patch_list
+from . import catalog, quilt
+from .common import HeError, Paths
 
 
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
@@ -41,7 +37,7 @@ def _source_path(header: str) -> str | None:
             break
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts or value in {"", "."}:
-        raise PatchWorkspaceError(f"unsafe source path in patch header: {value}")
+        raise HeError(f"unsafe source path in patch header: {value}")
     return str(path)
 
 
@@ -74,14 +70,14 @@ def _files(content: bytes) -> list[dict[str, object]]:
                     new_line += 1
                     new_remaining -= 1
             elif line != "\\ No newline at end of file":
-                raise PatchWorkspaceError(f"invalid unified hunk at patch line {index + 1}")
+                raise HeError(f"invalid unified hunk at patch line {index + 1}")
         elif line.startswith("diff --git "):
             fields = re.findall(r'"(?:[^"\\]|\\.)*"|\S+', line)
             if len(fields) != 4:
                 # Git leaves ordinary spaces unquoted in diff --git headers.
                 paths = line[len("diff --git "):].split(" b/")
                 if len(paths) != 2 or not paths[0].startswith("a/"):
-                    raise PatchWorkspaceError(f"ambiguous Git file header at patch line {index + 1}")
+                    raise HeError(f"ambiguous Git file header at patch line {index + 1}")
                 fields = ["diff", "--git", paths[0], "b/" + paths[1]]
             old_path = _source_path(fields[2])
             new_path = _source_path(fields[3])
@@ -95,7 +91,7 @@ def _files(content: bytes) -> list[dict[str, object]]:
             new_path = _source_path(lines[index + 1][4:])
             path = new_path or old_path
             if path is None:
-                raise PatchWorkspaceError("patch file has no source path")
+                raise HeError("patch file has no source path")
             header = {"sourcepath": path, "previous_sourcepath": old_path if old_path != path else None, "lines": [], "fallback": False}
             if current is not None and current["fallback"]:
                 # Replace a preceding Git/Index fallback with the unified paths.
@@ -106,7 +102,7 @@ def _files(content: bytes) -> list[dict[str, object]]:
             index += 1
         elif match := _HUNK.match(line):
             if current is None:
-                raise PatchWorkspaceError(f"hunk has no file header at patch line {index + 1}")
+                raise HeError(f"hunk has no file header at patch line {index + 1}")
             old_line, old_count, new_line, new_count = match.groups()
             old_line, new_line = int(old_line), int(new_line)
             old_remaining = int(old_count) if old_count is not None else 1
@@ -115,89 +111,84 @@ def _files(content: bytes) -> list[dict[str, object]]:
             if heading:
                 current["lines"].append({"kind": "heading", "text": heading, "patch_line": index + 1, "old_line": None, "new_line": None})
         elif current is not None and line.startswith(("+", "-")) and line != "-- ":
-            raise PatchWorkspaceError(f"source change outside a unified hunk at patch line {index + 1}")
+            raise HeError(f"source change outside a unified hunk at patch line {index + 1}")
         index += 1
     if old_remaining or new_remaining:
-        raise PatchWorkspaceError("patch ends before the unified hunk is complete")
+        raise HeError("patch ends before the unified hunk is complete")
     return files
 
 
 def _query_mode(query: str, mode: str) -> str:
     if not query or "\n" in query or "\r" in query:
-        raise PatchWorkspaceError("query must be one nonempty line")
+        raise HeError("query must be one nonempty line")
     if mode == "auto":
         mode = "glob" if any(character in query for character in "*?[") else "path" if "/" in query else "text"
     if mode in {"path", "glob"}:
         path = PurePosixPath(query)
         if path.is_absolute() or ".." in path.parts:
-            raise PatchWorkspaceError("source path queries must be relative to Chromium src, without '..'")
+            raise HeError("source path queries must be relative to Chromium src, without '..'")
     return mode
 
 
-def _lane(authoritative: dict[str, object], build_root: Path | None, source: Path | None) -> tuple[dict[str, object], tuple[str, ...] | None]:
-    lane: dict[str, object] = {"build_root": str(build_root) if build_root else None, "generated_catalog": "unselected", "quilt_status": "unavailable", "top": None}
-    applied = None
+def _authoritative_state(worktree: Path) -> dict:
+    paths = Paths(worktree, worktree)
+    state = catalog._authoritative(paths)
+    return {"core_names": state["core"], "outer_names": state["outer"],
+            "owners": state["owners"], "contents": state["contents"]}
+
+
+def _lane(authoritative: dict, build_root: Path | None, source: Path | None) -> tuple[dict, tuple[str, ...] | None]:
+    """The selected build dir's catalog and Quilt state, for match annotations."""
+    lane = {"build_root": str(build_root) if build_root else None, "generated_catalog": "unselected",
+            "quilt_status": "unavailable", "top": None}
     if build_root is None:
-        return lane, applied
-    root = generated_root(build_root)
-    lane["generated_patch_root"] = str(root)
-    if not root.exists():
+        return lane, None
+    paths = Paths(Path(authoritative["worktree"]), build_root)
+    if not (paths.catalog / catalog.MANIFEST).is_file():
         lane["generated_catalog"] = "missing"
-        lane["catalog_detail"] = "selected lane has no generated patch catalog"
-    else:
-        try:
-            validate_catalog_snapshot(root, authoritative)
-            lane["generated_catalog"] = "current"
-        except (OSError, UnicodeError, PatchWorkspaceError) as error:
-            lane["generated_catalog"] = "stale"
-            lane["catalog_detail"] = str(error)
-    if source is None:
-        return lane, applied
-    lane["source"] = str(source)
-    if not (source / ".pc").is_dir():
-        lane["quilt_detail"] = "selected source has no Quilt metadata"
-        return lane, applied
+        return lane, None
     try:
-        ledger = source / ".pc" / "applied-patches"
-        if ledger.exists():
-            observed = read_patch_list(ledger)
-            lane["top"] = observed[-1] if observed else None
-        report = inspect_quilt_state(source, root)
-        lane["top"] = report.comparison.applied[-1] if report.comparison.applied else None
-        report.comparison.require_valid_prefix()
-        lane["quilt_status"] = "complete" if report.comparison.complete else "partial" if report.comparison.applied else "popped"
-        lane["applied_count"] = len(report.comparison.applied)
-        if lane["generated_catalog"] == "current":
-            applied = report.comparison.applied
-    except (OSError, UnicodeError, QuiltStateError) as error:
+        problems = catalog.drift(paths)
+    except HeError as error:
+        problems = [str(error)]
+    lane["generated_catalog"] = "stale" if problems else "current"
+    if problems:
+        lane["catalog_detail"] = "; ".join(problems)
+    applied = quilt.applied(paths.src)
+    series = quilt.read_list(paths.catalog / "series.merged")
+    lane["top"] = applied[-1] if applied else None
+    lane["applied_count"] = len(applied)
+    if applied != series[: len(applied)]:
         lane["quilt_status"] = "invalid"
-        lane["quilt_detail"] = str(error)
-    return lane, applied
+        return lane, None
+    lane["quilt_status"] = "complete" if applied == series else "partial" if applied else "popped"
+    return lane, applied if not problems else None
 
 
 def locate(worktree: Path, query: str, *, mode: str = "auto", build_root: Path | None = None, source: Path | None = None, limit: int = 40, ignore_case: bool = False) -> dict[str, object]:
     """Search series entries only. Neither source copies nor generated patches own results."""
     if not 1 <= limit <= 200:
-        raise PatchWorkspaceError("limit must be between 1 and 200 patch/file matches")
+        raise HeError("limit must be between 1 and 200 patch/file matches")
     worktree = worktree.expanduser().resolve()
     build_root = build_root.expanduser().resolve() if build_root else None
     source = source.expanduser().resolve() if source else None
     mode = _query_mode(query, mode)
     authoritative = _authoritative_state(worktree)
+    authoritative["worktree"] = str(worktree)
     lane, applied = _lane(authoritative, build_root, source)
     needle = query.casefold() if ignore_case else query
     owners = authoritative["owners"]
     names = (*authoritative["core_names"], *authoritative["outer_names"])
     if len(set(names)) != len(names):
-        raise PatchWorkspaceError("authoritative patch catalogs contain duplicate entries")
+        raise HeError("authoritative patch catalogs contain duplicate entries")
     matches: list[dict[str, object]] = []
     for position, name in enumerate(names, start=1):
         owner = owners[name]
         patch_root = worktree / "helium-chromium" / "patches" if owner == "core" else worktree / "patches"
         try:
             files = _files(authoritative["contents"][name])
-        except (ValueError, SyntaxError, PatchWorkspaceError) as error:
-            raise PatchWorkspaceError(f"{patch_root / name}: {error}") from error
+        except (ValueError, SyntaxError, HeError) as error:
+            raise HeError(f"{patch_root / name}: {error}") from error
         for file in files:
             paths = [file["sourcepath"]]
             if file["previous_sourcepath"]:
@@ -260,27 +251,3 @@ def format_report(report: dict[str, object]) -> str:
                 lines.append(f"    {owner['omitted_excerpts']} more matching lines")
     lines.append(f"\n{report['total_patch_file_matches']} patch/file matches; {report['omitted_patch_file_matches']} omitted by limit")
     return "\n".join(lines)
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--worktree", type=Path, required=True)
-    parser.add_argument("--build-root", type=Path)
-    parser.add_argument("--source", type=Path)
-    parser.add_argument("--mode", choices=("auto", "text", "path", "glob"), default="auto", help="auto: literal text, exact path when '/' occurs, glob when '*?[' occurs; paths are relative to Chromium src")
-    parser.add_argument("--ignore-case", action="store_true")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--limit", type=int, default=40, help="maximum patch/file matches, 1–200; three line excerpts per match")
-    parser.add_argument("query")
-    arguments = parser.parse_args(argv)
-    try:
-        report = locate(arguments.worktree, arguments.query, mode=arguments.mode, build_root=arguments.build_root, source=arguments.source, limit=arguments.limit, ignore_case=arguments.ignore_case)
-    except (OSError, PatchWorkspaceError) as error:
-        print(str(error), file=sys.stderr)
-        return 2
-    print(json.dumps(report, indent=2, sort_keys=True) if arguments.json else format_report(report))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

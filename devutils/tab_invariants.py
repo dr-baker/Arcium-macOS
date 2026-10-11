@@ -7,6 +7,7 @@ results record binary identity but do not certify source freshness.
 from __future__ import annotations
 
 import argparse
+import fcntl
 from dataclasses import dataclass
 import hashlib
 import json
@@ -166,37 +167,39 @@ def main() -> int:
     if args.build and (not args.driver_checkout or
                        not (args.driver_checkout / "dev.sh").is_file()):
         parser.error("--build requires --driver-checkout with dev.sh")
-    # Serialize tests with replay, builds, packaging, and live interaction.
-    from build_lane import acquire_lane_lock
+    tiers = SUITES if args.tier == "all" else [args.tier]
     args.report_dir.mkdir(parents=True, exist_ok=True)
     run_dir = Path(tempfile.mkdtemp(prefix="tab-invariants-", dir=args.report_dir))
     summary = {"status": "failed", "tiers": {}, "source_freshness": "not-certified"}
     try:
-        with acquire_lane_lock(args.build_root / ".arcium/lane.lock",
-                               {"action": "tab-invariants"}) as descriptor:
-            for tier in SUITES if args.tier == "all" else [args.tier]:
+        if args.build:
+            # he build takes the build-dir lock itself.
+            environment = dict(os.environ, HELIUM_BUILD_DIR=str(args.build_root.resolve()),
+                               HELIUM_DEV_WORKTREE=str(Path(__file__).resolve().parents[1]))
+            with (run_dir / "build.log").open("w") as log:
+                build = run_command([
+                    "bash", "-c", 'source "$1/dev.sh" >/dev/null && shift && he build "$@"',
+                    "tab-invariants", str(args.driver_checkout.resolve()),
+                    *(SUITES[tier].binary for tier in tiers)], env=environment,
+                    stdout=log, stderr=subprocess.STDOUT, timeout=args.timeout)
+            if build.returncode:
+                raise GateFailure(f"Build failed; see {run_dir / 'build.log'}")
+        # Hold the build-dir lock while tests run, so no he command changes
+        # the binaries or source underneath them.
+        with (args.build_root / ".arcium" / "lane.lock").open("a+") as lock:
+            try:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise GateFailure("the build dir is busy with another he command") from None
+            for tier in tiers:
                 report = run_dir / tier
                 report.mkdir()
-                if args.build:
-                    environment = dict(os.environ,
-                        HELIUM_DEV_BUILD_ROOT=str(args.build_root.resolve()),
-                        HELIUM_DEV_WORKTREE=str(Path(__file__).resolve().parents[1]),
-                        HELIUM_DEV_LANE_LOCK_FD=str(descriptor))
-                    with (report / "build.log").open("w") as log:
-                        build = run_command([
-                            "zsh", "-c", 'source "$1/dev.sh" && he compile "$2" --json',
-                            "tab-invariants", str(args.driver_checkout.resolve()),
-                            SUITES[tier].binary], env=environment,
-                            stdout=log, stderr=subprocess.STDOUT,
-                            pass_fds=(descriptor,), timeout=args.timeout)
-                    if build.returncode:
-                        raise GateFailure(f"Build failed; see {report / 'build.log'}")
                 summary["tiers"][tier] = run_suite(
                     SUITES[tier], args.build_root / "src/out/Default", report,
                     args.timeout)
         summary["status"] = "passed"
         if args.build:
-            summary["source_freshness"] = "built-under-lane-lock"
+            summary["source_freshness"] = "built-before-locked-run"
     except (GateFailure, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         summary["error"] = str(error)
     (run_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

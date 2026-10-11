@@ -150,8 +150,12 @@ def _built_since(paths: Paths, journal: Path, out_dirs: list[str]) -> str | None
         # -H follows a symlinked out dir itself. Links inside out/ point at
         # Xcode SDKs and log files, not build outputs, so they are not followed.
         # Errors count as a hit.
+        # Dev app bundles that `he run` copies next to Helium.app are not build
+        # outputs; skip them, and the out dir's own entry, which they touch.
         result = subprocess.run(
-            ["find", "-H", str(directory), "-newercm", str(journal), "-print", "-quit"],
+            ["find", "-H", str(directory), "-mindepth", "1",
+             "(", "-name", "Helium Dev*.app", "-o", "-name", ".Helium Dev*", ")", "-prune",
+             "-o", "-newercm", str(journal), "-print", "-quit"],
             capture_output=True, text=True, check=False,
         )
         if result.returncode or result.stdout.strip():

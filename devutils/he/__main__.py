@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import plistlib
@@ -121,6 +122,34 @@ def main(argv: list[str] | None = None) -> int:
     scratch_parser.add_argument("name", nargs="?")
     commands.add_parser("gclient-marker")
     commands.add_parser("tmpdir")
+    finder = commands.add_parser("locate")
+    finder.add_argument("--mode", choices=("auto", "text", "path", "glob"), default="auto")
+    finder.add_argument("--ignore-case", action="store_true")
+    finder.add_argument("--json", action="store_true")
+    finder.add_argument("--limit", type=int, default=40)
+    finder.add_argument("query")
+    run = commands.add_parser("run")
+    run.add_argument("--profile")
+    run.add_argument("--fresh", action="store_true")
+    run.add_argument("--labeled", action="store_true")
+    run.add_argument("--seed-from")
+    run.add_argument("--json", action="store_true")
+    run.add_argument("passthrough", nargs=argparse.REMAINDER)
+    stop = commands.add_parser("stop")
+    stop.add_argument("--profile")
+    stop.add_argument("--fresh", action="store_true")
+    commands.add_parser("test-assets")
+    guard = commands.add_parser("agent-guard")
+    guard.add_argument("--edge-budget", type=int, default=None)
+    guard.add_argument("--approved", action="store_true")
+    guard.add_argument("targets", nargs="*")
+    result = commands.add_parser("agent-result")
+    result.add_argument("--name", required=True)
+    result.add_argument("--status", type=int, required=True)
+    result.add_argument("--seconds", type=float, required=True)
+    result.add_argument("--log")
+    result.add_argument("--json", action="store_true")
+    commands.add_parser("agent-status")
     space = commands.add_parser("space")
     space.add_argument("--need-gib", type=float, required=True)
     args = parser.parse_args(argv)
@@ -180,6 +209,41 @@ def main(argv: list[str] | None = None) -> int:
                     write_atomic(paths.build_dir / name, content.encode())
         elif args.command == "tmpdir":
             print(_tmpdir(paths))
+        elif args.command == "locate":
+            from . import locate
+            report = locate.locate(paths.worktree, args.query, mode=args.mode, build_root=paths.build_dir,
+                                   source=paths.src, limit=args.limit, ignore_case=args.ignore_case)
+            print(json.dumps(report, indent=2, sort_keys=True) if args.json else locate.format_report(report))
+        elif args.command == "run":
+            from . import devapp
+            extra = args.passthrough[1:] if args.passthrough[:1] == ["--"] else args.passthrough
+            launched = devapp.run(paths, args.profile, fresh=args.fresh, labeled=args.labeled,
+                                  seed=args.seed_from, passthrough=extra)
+            print(devapp.describe(launched) if args.json else
+                  f"running {Path(launched['app']).name} pid {launched['pid']} on {launched['profile']}\nlog: {launched['log']}")
+        elif args.command == "stop":
+            from . import devapp
+            print(devapp.stop(args.profile, fresh=args.fresh))
+        elif args.command == "test-assets":
+            if records.source_mode(paths) == "full":
+                from . import test_assets
+                print(test_assets.ensure(paths.src), file=sys.stderr)
+        elif args.command == "agent-guard":
+            from . import agent
+            budget = args.edge_budget if args.edge_budget is not None else int(
+                os.environ.get("HELIUM_EDGE_BUDGET", agent.DEFAULT_EDGE_BUDGET))
+            edges = agent.guard_build(paths, args.targets, budget=budget, approved=args.approved,
+                                      problems=[p for p in problems(paths) if not p.startswith("timestamp snapshot")])
+            print(edges)
+        elif args.command == "agent-result":
+            from . import agent
+            done = agent.record_result(paths, args.name, args.status, args.seconds,
+                                       Path(args.log) if args.log else None, {})
+            if args.json:
+                print(agent.dumps(done))
+        elif args.command == "agent-status":
+            from . import agent
+            print(agent.dumps(agent.status(paths, problems(paths))))
         elif args.command == "space":
             free = _free_gib(paths)
             if free < args.need_gib:
