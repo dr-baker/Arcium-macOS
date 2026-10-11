@@ -25,37 +25,30 @@ model persistence; they do not prove browser session restoration or motion quali
 
 ## Build and run
 
-Use the selected source checkout and lane under the normal development workflow.
-Replay new patches with zero fuzz before building. Source `dev.sh` on canonical
-main, selecting the intended worktree and build lane explicitly.
+Source `dev.sh`, push the patches with `he push`, and run `he check`. With
+`--build`, the runner builds the tier's test targets through `he build` first.
+`$HELIUM_DEV_BUILD_ROOT` is the build dir `dev.sh` selected.
 
 ```sh
+source dev.sh
 he check
-he build-plan helium_persistent_item_model_tests
-he compile helium_persistent_item_model_tests
-python3 "$HELIUM_DEV_WORKTREE/devutils/tab_invariants.py" \
-  --build --driver-checkout /Users/daniel/Developer/Helium/helium-macos \
+python3 devutils/tab_invariants.py --build --driver-checkout "$PWD" \
   --tier model --build-root "$HELIUM_DEV_BUILD_ROOT" \
   --report-dir "$HELIUM_DEV_BUILD_ROOT/.arcium/test-results"
 ```
 
-The service and browser tiers require their actual test executables. Use a
-full-source test lane when the product-only source archive lacks test inputs.
-The service tier reuses the existing focused executable, so unrelated generic
-`unit_tests` compilation is not a prerequisite. Inspect plans and storage before
-compiling test targets. Do not copy
-individual missing fixtures into the product lane.
+The service and browser tiers need Chromium's test data, so they need a build
+dir made with `he setup --full-source`. Do not copy individual missing fixtures
+into a lite build dir.
 
 ```sh
-he build-plan arcium_feature_settings_unit_tests browser_tests
-he compile arcium_feature_settings_unit_tests browser_tests
-python3 "$HELIUM_DEV_WORKTREE/devutils/tab_invariants.py" \
-  --build --driver-checkout /Users/daniel/Developer/Helium/helium-macos \
+python3 devutils/tab_invariants.py --build --driver-checkout "$PWD" \
   --tier all --build-root "$HELIUM_DEV_BUILD_ROOT" \
   --report-dir "$HELIUM_DEV_BUILD_ROOT/.arcium/test-results"
 ```
 
-Each run holds the lane lock and creates a fresh results directory. Discovery
+Each run holds the build-dir lock while tests run and creates a fresh results
+directory. Discovery
 must find the required new tests. Results must account for every discovered test,
 with no failures, skips, duplicates or missing results. Retries are disabled.
 The model executable reports XML; Chromium service/browser launchers report an
@@ -92,10 +85,6 @@ worker with the correct Chromium source, SDK and build artifacts.
 - Six runner tests passed, covering missing inventory, skipped/failed/duplicate
   results, missing reports, process failure and launcher summary validation.
 - The service and browser translation units compiled. Their executable gates
-  could not build: the lite lane lacks
+  could not build: the lite build dir lacks
   `chrome/test/data/extensions/extension_api_unittest/api_features.json`.
-  Neither executable ran. A refreshed full-source test lane remains required.
-
-Evidence is retained under
-`/Volumes/T9/ArciumBuild/tasks/tab-invariants/`, including `model-gate.log`,
-`service-gate.log`, `browser-gate.log`, `mutation.log` and per-run results.
+  Neither executable ran. A full-source build dir remains required.
