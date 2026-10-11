@@ -21,6 +21,7 @@ from .common import HeError, Paths, read_json, sha256_bytes, sha256_file, write_
 APPLIED = "applied.json"
 STAMPS = "stamps.json"
 ACQUISITION = "acquisition.json"
+BEFORE_PUSH = "applied-before-push.json"
 
 # Inputs per out-of-graph producer, relative to the source worktree.
 STAMP_INPUTS = {
@@ -53,25 +54,36 @@ def _applied_record(paths: Paths) -> dict[str, str]:
 
 def clear_applied(paths: Paths) -> None:
     (paths.state / APPLIED).unlink(missing_ok=True)
+    (paths.state / BEFORE_PUSH).unlink(missing_ok=True)
+
+
+def mark_before_push(paths: Paths) -> None:
+    """Remember which patches were applied before `he push` runs Quilt."""
+    write_json(paths.state / BEFORE_PUSH, list(quilt.applied(paths.src)))
 
 
 def sync_applied(paths: Paths, rebaseline: tuple[str, ...] = ()) -> None:
     """Call after every push, pop, or refresh made through `he`.
 
-    A patch keeps the hash recorded when it was applied. Only newly applied
-    patches, and patches named in `rebaseline` (just refreshed), take the lane
-    copy's current hash. Pushing the unapplied suffix never rebaselines the
-    applied prefix.
+    A patch keeps the hash recorded when it was applied. Only patches this
+    push applied (absent from the list `mark_before_push` saved), and patches
+    named in `rebaseline` (just refreshed), take the lane copy's current hash.
+    A patch that was already applied without a record stays unrecorded, so
+    `he check` keeps reporting it.
     """
     previous = _applied_record(paths)
+    before_path = paths.state / BEFORE_PUSH
+    before = read_json(before_path)
+    before_push = set(before) if isinstance(before, list) else None
     current = {}
     for name in quilt.applied(paths.src):
         copy = paths.catalog / name
         if name in previous and name not in rebaseline:
             current[name] = previous[name]
-        elif copy.is_file():
+        elif (name in rebaseline or (before_push is not None and name not in before_push)) and copy.is_file():
             current[name] = sha256_file(copy)
     write_json(paths.state / APPLIED, {"version": 1, "patches": current})
+    before_path.unlink(missing_ok=True)
 
 
 def applied_drift(paths: Paths) -> list[str]:

@@ -153,17 +153,22 @@ def _style(patch: bytes, override: str | None) -> list[str]:
     return ["-p", "1"] if style == "p1" else ["-p", "ab", "--no-index"]
 
 
-def _export(paths: Paths, current: dict, name: str, content: bytes) -> None:
-    """Write one lane patch back to its owner, refusing concurrent edits."""
+def _check_export(paths: Paths, current: dict, name: str, content: bytes) -> Path | None:
+    """The owning file to write, None if it already holds `content`.
+
+    Refuses if the owning file changed since `he merge` to anything else.
+    Accepting an owner that already matches makes a retried export safe.
+    """
     owner = current["owners"].get(name)
     if owner not in ("core", "outer"):
         raise HeError(f"{name} has no authoritative owner")
     target = owner_path(paths, owner, name)
-    baseline = current["hashes"].get(name)
-    if not target.is_file() or sha256_bytes(target.read_bytes()) != baseline:
+    existing = target.read_bytes() if target.is_file() else None
+    if existing == content:
+        return None
+    if existing is None or sha256_bytes(existing) != current["hashes"].get(name):
         raise HeError(f"{target} changed since he merge; reconcile it, then he pop; he merge; he push")
-    write_atomic(target, content)
-    current["hashes"][name] = sha256_bytes(content)
+    return target
 
 
 def save_patch(paths: Paths, style: str | None = None) -> str:
@@ -178,18 +183,25 @@ def save_patch(paths: Paths, style: str | None = None) -> str:
         raise HeError(f"{top} is not in the merged catalog; create new patches in the authoritative series")
     with authoritative_lock(paths):
         target = owner_path(paths, owner, top)
-        if sha256_bytes(target.read_bytes()) != current["hashes"].get(top):
+        lane = (paths.catalog / top).read_bytes()
+        authoritative = target.read_bytes() if target.is_file() else b""
+        # The owner may already hold the lane copy if a previous save stopped
+        # before updating the manifest.
+        if authoritative != lane and sha256_bytes(authoritative) != current["hashes"].get(top):
             raise HeError(f"{target} changed since he merge; reconcile it before saving")
         environment = {k: v for k, v in os.environ.items()
                        if k not in ("QUILT_DIFF_ARGS", "QUILT_REFRESH_ARGS", "QUILT_NO_DIFF_INDEX")}
         environment.update(QUILT_PATCHES=str(paths.catalog), QUILT_SERIES="series.merged")
         result = subprocess.run(
-            ["quilt", "--quiltrc", "-", "refresh", "--no-timestamps", *_style(target.read_bytes(), style)],
+            ["quilt", "--quiltrc", "-", "refresh", "--no-timestamps", *_style(authoritative or lane, style)],
             cwd=paths.src, env=environment, capture_output=True, text=True, check=False,
         )
         if result.returncode:
             raise HeError((result.stdout + result.stderr).strip() or f"quilt refresh failed for {top}")
-        _export(paths, current, top, (paths.catalog / top).read_bytes())
+        refreshed = (paths.catalog / top).read_bytes()
+        if authoritative != refreshed:
+            write_atomic(target, refreshed)
+        current["hashes"][top] = sha256_bytes(refreshed)
         write_json(paths.catalog / MANIFEST, current)
     records.sync_applied(paths, rebaseline=(top,))
     return top
@@ -200,8 +212,12 @@ def unmerge(paths: Paths) -> list[str]:
 
     Refreshed patches go back to their owners. Patches added to series.merged
     with `quilt new` go to the macOS catalog, after the nearest preceding
-    macOS patch. While patches are applied the catalog stays in place.
+    macOS patch. Every conflict is found before anything is written, and a
+    retried unmerge does not duplicate work. While patches are applied the
+    catalog stays in place.
     """
+    if not (paths.catalog / MANIFEST).is_file():
+        return []
     current = manifest(paths)
     merged = quilt.read_list(paths.catalog / "series.merged")
     known = set(current["owners"])
@@ -210,35 +226,49 @@ def unmerge(paths: Paths) -> list[str]:
         raise HeError("series.merged dropped patches; remove them from their owning series by hand: " + ", ".join(removed))
     written = []
     with authoritative_lock(paths):
+        writes = []
         for name in merged:
-            if name not in known:
-                continue
             content = (paths.catalog / name).read_bytes()
-            if sha256_bytes(content) != current["hashes"][name]:
-                _export(paths, current, name, content)
-                written.append(name)
-        new = [name for name in merged if name not in known]
-        if new:
-            outer_series = paths.outer_patches / "series"
-            lines = outer_series.read_text(encoding="utf-8").splitlines()
-            for name in new:
+            if name in known:
+                if sha256_bytes(content) == current["hashes"][name]:
+                    continue
+                target = _check_export(paths, current, name, content)
+            else:
                 target = paths.outer_patches / name
-                content = (paths.catalog / name).read_bytes()
                 if target.exists() and target.read_bytes() != content:
                     raise HeError(f"{target} already exists with other content")
+                if target.exists():
+                    target = None
+            writes.append((name, target, content))
+
+        outer_series = paths.outer_patches / "series"
+        lines = outer_series.read_text(encoding="utf-8").splitlines()
+        listed = {quilt.read_list_line(line) for line in lines} - {None}
+        new = [name for name in merged if name not in known]
+        for name in new:
+            if name in listed:
+                continue
+            previous = [n for n in merged[: merged.index(name)] if current["owners"].get(n) == "outer" or n in new]
+            index = 0
+            for anchor in reversed(previous):
+                positions = [i for i, line in enumerate(lines) if quilt.read_list_line(line) == anchor]
+                if positions:
+                    index = positions[0] + 1
+                    break
+            lines.insert(index, name)
+            listed.add(name)
+
+        for name, target, content in writes:
+            if target is not None:
                 write_atomic(target, content)
-                previous = [n for n in merged[: merged.index(name)] if current["owners"].get(n) == "outer" or n in new]
-                anchor = previous[-1] if previous else None
-                index = 0
-                if anchor is not None:
-                    index = next(i for i, line in enumerate(lines) if quilt.read_list_line(line) == anchor) + 1
-                lines.insert(index, name)
-                current["owners"][name] = "outer"
-                current["hashes"][name] = sha256_bytes(content)
-                current["outer"] = [n for n in merged if current["owners"].get(n) == "outer"]
-                written.append(name)
+            current["hashes"][name] = sha256_bytes(content)
+            written.append(name)
+        if new:
             outer_bytes = ("\n".join(lines) + "\n").encode()
             write_atomic(outer_series, outer_bytes)
+            for name in new:
+                current["owners"][name] = "outer"
+            current["outer"] = [n for n in merged if current["owners"].get(n) == "outer"]
             current["outer_series_sha256"] = sha256_bytes(outer_bytes)
         write_json(paths.catalog / MANIFEST, current)
     if not quilt.applied(paths.src):

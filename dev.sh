@@ -21,7 +21,8 @@ ___helium_load_dev_env() {
     [ -f "$file" ] || return 0
     while IFS='=' read -r key value || [ -n "$key" ]; do
         case "$key" in
-            HELIUM_[A-Z_]*|SISO_[A-Z_]*) ;;
+            *[!A-Z0-9_]*) continue ;;
+            HELIUM_*|SISO_*) ;;
             *) continue ;;
         esac
         value="${value%\"}"; value="${value#\"}"; value="${value%\'}"; value="${value#\'}"
@@ -244,7 +245,8 @@ ___helium_setup() {
 }
 
 ___helium_reset() {
-    ___helium_patches_unmerge || true
+    # Write refreshed lane patches back first; a conflict stops the reset.
+    ___helium_patches_unmerge
     ___helium_he timestamps discard --reason reset || true
     rm -f "$_build_dir/.arcium/applied.json" "$_build_dir/.arcium/stamps.json"
     rm "$_subs_cache" || true
@@ -351,8 +353,9 @@ ___helium_pull() {
         return 1
     fi
 
-    ___helium_quilt_pop || true
-    ___helium_patches_unmerge || true
+    # Stop before touching git or the catalog if lane edits cannot be saved.
+    ___helium_quilt_pop
+    ___helium_patches_unmerge
 
     for dir in "$_root_dir" "$_main_repo"; do
         git -C "$dir" stash \
@@ -385,6 +388,7 @@ ___helium_quilt_push() {
         *) echo "usage: he push [--refresh]" >&2; return 2 ;;
     esac
     ___helium_he acquisition require
+    ___helium_he mark-before-push
     cd "$_src_dir"
     local status=0
     QUILT_PATCH_OPTS="$patch_opts" ___helium_quilt push -a "${mode[@]}" </dev/null || status=$?

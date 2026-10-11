@@ -59,10 +59,12 @@ class QuiltTest(Fixture):
 class AppliedRecordTest(Fixture):
     def test_new_patches_take_the_lane_hash_and_old_ones_keep_theirs(self) -> None:
         self.series("a.patch", "b.patch")
+        records.mark_before_push(self.paths)
         self.apply("a.patch")
         records.sync_applied(self.paths)
         first = json.loads((self.paths.state / "applied.json").read_text())["patches"]["a.patch"]
         (self.paths.catalog / "a.patch").write_text("edited\n")
+        records.mark_before_push(self.paths)
         self.apply("a.patch", "b.patch")
         records.sync_applied(self.paths)
         current = json.loads((self.paths.state / "applied.json").read_text())["patches"]
@@ -71,6 +73,15 @@ class AppliedRecordTest(Fixture):
         self.assertEqual(len(records.applied_drift(self.paths)), 1)
         records.sync_applied(self.paths, rebaseline=("a.patch",))
         self.assertEqual(records.applied_drift(self.paths), [])
+
+    def test_patches_applied_before_the_push_stay_unrecorded(self) -> None:
+        self.series("a.patch", "b.patch")
+        self.apply("a.patch")  # applied outside he
+        records.mark_before_push(self.paths)
+        self.apply("a.patch", "b.patch")
+        records.sync_applied(self.paths)
+        current = json.loads((self.paths.state / "applied.json").read_text())["patches"]
+        self.assertEqual(set(current), {"b.patch"})
 
 
 class TimestampTest(Fixture):

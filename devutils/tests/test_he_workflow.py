@@ -271,20 +271,132 @@ class WorkflowTest(unittest.TestCase):
     def test_dev_sh_sources_in_zsh(self) -> None:
         if not shutil.which("zsh"):
             self.skipTest("zsh not installed")
-        script = f'source "{TOOLS / "dev.sh"}" >/dev/null && echo "$_build_dir" && he check >/dev/null; echo $?'
+        self.m.ready()
+        script = f'source "{TOOLS / "dev.sh"}" >/dev/null && echo "$_build_dir" && he pop >/dev/null 2>&1 && he push >/dev/null 2>&1 && he check'
         result = run(["zsh", "-c", script], env=self.m.env(), check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[0], str(self.m.build_dir))
+        self.assertIn("ok: 3 patches applied and current", result.stdout)
+        self.assertEqual(self.m.would_rebuild(), set())
 
     def test_release_build_ignores_development_settings(self) -> None:
-        script = (
-            f'export HELIUM_BUILD_DIR=/nowhere _build_dir=/nowhere; '
-            f'unset _build_dir HELIUM_BUILD_DIR HELIUM_DEV_WORKTREE HELIUM_TMPDIR; '
-            f'_root_dir="{self.m.worktree}"; source "{self.m.worktree}/env.sh"; echo "$_src_dir"'
-        )
-        result = run(["bash", "-c", script], env=self.m.env())
-        self.assertEqual(result.stdout.strip(), f"{self.m.worktree}/build/src")
-        self.assertIn("unset _build_dir HELIUM_BUILD_DIR HELIUM_DEV_WORKTREE", (TOOLS / "build.sh").read_text())
+        # build.sh refuses when <checkout>/build/src holds a Quilt tree. Put one
+        # only there: refusing proves it ignored HELIUM_BUILD_DIR and dev.env.
+        shutil.copy2(TOOLS / "build.sh", self.m.worktree / "build.sh")
+        (self.m.worktree / "build" / "src" / ".pc").mkdir(parents=True)
+        config = self.m.home / ".config" / "arcium"
+        config.mkdir(parents=True)
+        (config / "dev.env").write_text(f"HELIUM_BUILD_DIR={self.m.build_dir}\n")
+        result = run(["bash", str(self.m.worktree / "build.sh"), "arm64"], env=self.m.env(), check=False)
+        self.assertEqual(result.returncode, 2, result.stderr[-2000:])
+        self.assertIn("Refusing to reset a development lane", result.stderr)
+        self.assertTrue((self.m.src / "a.cc").exists())
 
+    # Review round 1 regressions -----------------------------------------------------
+
+    def test_symlinked_out_dir_still_detects_raw_builds(self) -> None:
+        self.m.he("merge")
+        self.m.he("push")
+        target = self.m.root / "elsewhere" / "Default"
+        target.parent.mkdir()
+        shutil.move(str(self.m.out), str(target))
+        self.m.out.symlink_to(target)
+        ninja = target / "build.ninja"
+        ninja.write_text(ninja.read_text().replace("../../", f"{self.m.src}/"))
+        self.m.stamp_all()
+        self.m.he("build")
+        self.m.he("pop")
+        self.m.ninja("chrome")
+        result = self.m.he("push")
+        self.assertIn("timestamps not restored", result.stderr)
+        self.assertEqual(self.m.would_rebuild(), {"obj/a.o", "obj/b.o", "obj/p.o", "obj/long.o"})
+
+    def test_touched_snapshot_is_not_trusted(self) -> None:
+        self.m.ready()
+        self.m.he("pop")
+        self.m.ninja("chrome")
+        os.utime(self.m.build_dir / ".arcium" / "timestamps.json")
+        result = self.m.he("push")
+        self.assertIn("modified after capture", result.stderr)
+        self.assertEqual(self.m.would_rebuild(), {"obj/a.o", "obj/b.o", "obj/p.o", "obj/long.o"})
+
+    def test_keeper_off_at_push_discards_the_snapshot(self) -> None:
+        self.m.ready()
+        self.m.he("pop")
+        result = self.m.he("push", HELIUM_KEEP_TIMESTAMPS="0")
+        self.assertIn("discarded", result.stderr)
+        self.assertEqual(self.m.would_rebuild(), {"obj/a.o", "obj/b.o", "obj/p.o", "obj/long.o"})
+
+    def test_raw_applied_prefix_stays_unrecorded_after_suffix_push(self) -> None:
+        self.m.he("merge")
+        self.m.quilt("push")
+        copy = self.m.build_dir / ".arcium" / "patches" / CORE_PATCH
+        copy.write_text(copy.read_text().replace("+int g();", "+int g(); // edited"))
+        self.m.he("push")
+        result = self.m.he("check", check=False)
+        self.assertIn(f"{CORE_PATCH} was applied outside he", result.stdout)
+
+    def test_pull_stops_when_lane_edits_conflict(self) -> None:
+        self.m.ready()
+        self.m.he("pop", OUTER_PATCH)
+        (self.m.src / "a.cc").write_text('#include "h.h"\nint a() { return 9; }\n')
+        self.m.quilt("refresh")
+        self.m.write_patch(OUTER_PATCH, core=False, files={"a.cc": '#include "h.h"\nint a() { return 7; }\n'})
+        lane = (self.m.build_dir / ".arcium" / "patches" / OUTER_PATCH).read_text()
+        result = self.m.he("pull", check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("changed since he merge", result.stderr)
+        self.assertEqual((self.m.build_dir / ".arcium" / "patches" / OUTER_PATCH).read_text(), lane)
+
+    def test_retried_unmerge_does_not_duplicate_new_patches(self) -> None:
+        self.m.he("merge")
+        self.m.he("push")
+        self.m.quilt("new", "personal/new.patch")
+        self.m.quilt("add", "b.cc")
+        (self.m.src / "b.cc").write_text("int b() { return 3; }\n")
+        self.m.quilt("refresh")
+        self.m.he("unmerge")  # patches applied: exports and keeps the catalog
+        manifest = self.m.build_dir / ".arcium" / "patches" / "manifest.json"
+        data = json.loads(manifest.read_text())
+        data["owners"].pop("personal/new.patch")
+        manifest.write_text(json.dumps(data))  # as if the manifest write had failed
+        self.m.he("pop")
+        self.m.he("unmerge")
+        series = (self.m.worktree / "patches" / "series").read_text().split()
+        self.assertEqual(series.count("personal/new.patch"), 1)
+
+    def test_dev_env_keys_cannot_inject_commands(self) -> None:
+        config = self.m.home / ".config" / "arcium"
+        config.mkdir(parents=True)
+        marker = self.m.root / "injected"
+        (config / "dev.env").write_text(f"HELIUM_X:-$(touch {marker})=1\nHELIUM_OK=$(touch {marker})\n")
+        env = self.m.env()
+        result = run(["bash", "-c", f'source "{TOOLS / "dev.sh"}" >/dev/null && printf %s "$HELIUM_OK"'], env=env)
+        self.assertFalse(marker.exists())
+        self.assertEqual(result.stdout, f"$(touch {marker})")
+
+    def test_terminating_he_stops_the_locked_command(self) -> None:
+        self.m.he("merge")
+        child_pid = self.m.root / "child.pid"
+        lock = subprocess.Popen(
+            ["python3", "-m", "he", "--worktree", str(self.m.worktree), "--build-dir", str(self.m.build_dir),
+             "lock", "--label", "test", "--", "bash", "-c", f"echo $$ > {child_pid}; sleep 30"],
+            env={**self.m.env(), "PYTHONPATH": str(TOOLS / "devutils")},
+        )
+        for _ in range(100):
+            if child_pid.exists() and child_pid.read_text().strip():
+                break
+            import time; time.sleep(0.05)
+        pid = int(child_pid.read_text())
+        lock.terminate()
+        lock.wait(timeout=10)
+        with self.assertRaises(ProcessLookupError):
+            for _ in range(50):
+                os.kill(pid, 0)
+                import time; time.sleep(0.1)
+        handle = (self.m.build_dir / ".arcium" / "lane.lock").open("a+")
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.close()
 
 if __name__ == "__main__":
     unittest.main()

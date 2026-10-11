@@ -41,7 +41,9 @@ to `<build dir>/.arcium/patches`, and nothing generated lands in git.
 `he unmerge` keeps upstream's meaning: patches you refreshed go back to their
 owning repository, and patches you created with `quilt new` go into the macOS
 series. `he save-patch` does the same for just the top patch, keeping that
-patch's header style. Both refuse if the owning file changed since `he merge`.
+patch's header style. Both refuse, before writing anything, if an owning file
+changed since `he merge`; `he pull` and `he reset` stop on that refusal
+instead of discarding lane edits. A retried export is safe.
 
 ## Strict push
 
@@ -59,8 +61,12 @@ gives byte-identical files their original timestamps. Only files whose
 content really changed, and what includes them, rebuild.
 
 Restoration is skipped, costing one normal rebuild, if anything wrote to
-`src/out/` since the snapshot, if out directories changed, or if the snapshot
-is unreadable. `he build` while patches are popped drops the snapshot.
+`src/out/` since the snapshot (a symlinked out dir is followed to its target),
+if out directories changed, if the snapshot file was modified or is
+unreadable, if the machine restarted, or if the wall clock moved backwards.
+`he build` while patches are popped drops the snapshot. Directory symlinks
+inside an out dir are not followed; do not point one at a place where build
+outputs are written.
 
 Do not run a build outside `he` (raw `autoninja`, an IDE) at the same moment
 as `he push`; that is the one case the tooling cannot detect.
@@ -84,7 +90,8 @@ Turn it off with `HELIUM_KEEP_TIMESTAMPS=0`.
 Commands that change the source tree, build output, or build-dir state take a
 lock on `<build dir>/.arcium/lane.lock`. A second command is refused at once
 instead of interleaving. Read-only commands (`check`, `locate`, `validate`,
-`run`) take no lock.
+`run`) take no lock. Interrupting or terminating `he` passes the signal to the
+running command and keeps the lock until it exits.
 
 ## Scratch source for patch authoring
 

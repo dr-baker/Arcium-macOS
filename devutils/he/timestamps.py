@@ -12,8 +12,11 @@ an older time afterwards would hide that change from the build tool.
 Three layers enforce it:
 1. `he` holds the build-dir lock from snapshot to restore, and `he build`
    discards a pending snapshot before building.
-2. Before restoring, every src/out/*/ directory is scanned for any entry whose
-   inode change time is newer than the snapshot. Any hit skips restoration.
+2. Before restoring, every src/out/*/ directory (following a symlinked out
+   dir to its target) is scanned for any entry whose inode change time is newer than the snapshot.
+   Any hit skips restoration. The snapshot's own mtime is the cutoff, so it
+   must still equal the recorded capture time, and the wall clock must not
+   have moved backwards since capture.
 3. The docs state the one case left: a build outside `he` running at the
    same moment as the restore.
 
@@ -50,10 +53,33 @@ def pending(paths: Paths) -> bool:
 
 
 def _out_dirs(paths: Paths) -> list[str]:
+    """Each src/out entry that is a directory, by name and resolved target.
+
+    Symlinked out dirs count: outputs written through a symlink change the
+    target's entries, not the link's.
+    """
     root = paths.src / "out"
     if not root.is_dir():
         return []
-    return sorted(entry.name for entry in os.scandir(root) if entry.is_dir(follow_symlinks=False))
+    return sorted(f"{entry.name}={Path(entry.path).resolve()}" for entry in os.scandir(root) if entry.is_dir())
+
+
+def _clock() -> dict:
+    """Wall and monotonic time plus boot identity, to detect clock changes."""
+    boot = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True, check=False).stdout.strip()
+    return {"wall_ns": time.time_ns(), "monotonic_ns": time.clock_gettime_ns(time.CLOCK_MONOTONIC), "boot": boot}
+
+
+def _clock_problem(captured: dict) -> str | None:
+    now = _clock()
+    if not captured or captured.get("boot") != now["boot"]:
+        return "the machine restarted since the snapshot"
+    wall = now["wall_ns"] - captured["wall_ns"]
+    monotonic = now["monotonic_ns"] - captured["monotonic_ns"]
+    # Allow one second of drift; a backward jump means ctimes cannot be trusted.
+    if wall < monotonic - 1_000_000_000:
+        return "the wall clock moved backwards since the snapshot"
+    return None
 
 
 def _safe(relative: str) -> bool:
@@ -91,7 +117,8 @@ def capture(paths: Paths) -> str:
     applied = quilt.applied(paths.src)
     if not applied or applied != series:
         return "stack is not fully applied; no timestamp snapshot taken"
-    captured_at = time.time_ns()
+    clock = _clock()
+    captured_at = clock["wall_ns"]
     files = {}
     for relative in quilt.owned_files(paths.src, applied):
         if _safe(relative) and (record := _record(paths.src / relative)) is not None:
@@ -99,6 +126,7 @@ def capture(paths: Paths) -> str:
     write_json(journal, {
         "version": VERSION,
         "captured_at_ns": captured_at,
+        "clock": clock,
         "source_dir": str(paths.src),
         "out_dirs": _out_dirs(paths),
         "files": files,
@@ -117,10 +145,13 @@ def discard(paths: Paths, reason: str) -> str | None:
 
 
 def _built_since(paths: Paths, journal: Path, out_dirs: list[str]) -> str | None:
-    for name in out_dirs:
-        directory = paths.src / "out" / name
+    for entry in out_dirs:
+        directory = paths.src / "out" / entry.split("=", 1)[0]
+        # -H follows a symlinked out dir itself. Links inside out/ point at
+        # Xcode SDKs and log files, not build outputs, so they are not followed.
+        # Errors count as a hit.
         result = subprocess.run(
-            ["find", str(directory), "-newercm", str(journal), "-print", "-quit"],
+            ["find", "-H", str(directory), "-newercm", str(journal), "-print", "-quit"],
             capture_output=True, text=True, check=False,
         )
         if result.returncode or result.stdout.strip():
@@ -133,6 +164,8 @@ def restore(paths: Paths) -> str | None:
     journal = journal_path(paths)
     if not journal.exists():
         return None
+    if not enabled():
+        return discard(paths, "HELIUM_KEEP_TIMESTAMPS=0")
     if quilt.applied(paths.src) != quilt.read_list(paths.catalog / "series.merged"):
         return "stack is not fully applied; timestamp snapshot kept for the next push"
     try:
@@ -143,7 +176,11 @@ def restore(paths: Paths) -> str | None:
         journal.unlink(missing_ok=True)
         return f"timestamp snapshot was unreadable ({error}); discarded"
     reason = None
-    if data.get("source_dir") != str(paths.src):
+    if journal.stat().st_mtime_ns != data.get("captured_at_ns"):
+        reason = "the snapshot file was modified after capture"
+    elif (problem := _clock_problem(data.get("clock"))) is not None:
+        reason = problem
+    elif data.get("source_dir") != str(paths.src):
         reason = "snapshot belongs to another source tree"
     elif data.get("out_dirs") != _out_dirs(paths):
         reason = "out directories changed since the snapshot"

@@ -105,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     save = commands.add_parser("save-patch")
     save.add_argument("--style", choices=("p1", "ab"))
     commands.add_parser("sync-applied")
+    commands.add_parser("mark-before-push")
     check = commands.add_parser("check")
     check.add_argument("--warn", action="store_true", help="print problems to stderr and exit 0")
     stamp = commands.add_parser("stamp")
@@ -140,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"saved {catalog.save_patch(paths, args.style)}")
         elif args.command == "sync-applied":
             records.sync_applied(paths)
+        elif args.command == "mark-before-push":
+            records.mark_before_push(paths)
         elif args.command == "check":
             found = problems(paths)
             for line in found:
