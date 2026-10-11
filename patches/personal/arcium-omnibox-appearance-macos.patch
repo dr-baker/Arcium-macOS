@@ -32,7 +32,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,260 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license found in the LICENSE file.
@@ -159,16 +159,21 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +      return false;
 +    }
 +
++    // Views publishes the new frameless window size before remote_cocoa has
++    // resized its NSView. Use the same target height as the clip so a shorter
++    // result list cannot cache a frame offset derived from the previous size.
++    const CGFloat content_height = widget_->GetWindowBoundsInScreen().height();
 +    const NSRect frame =
 +        NSMakeRect(bounds.x(),
 +                   content_view.isFlipped
 +                       ? bounds.y()
-+                       : NSHeight(content_view.bounds) - bounds.bottom(),
++                       : content_height - bounds.bottom(),
 +                   bounds.width(), bounds.height());
 +    const auto color_mode = widget_->GetColorMode();
 +    const SkColor theme_color =
 +        widget_->GetColorProvider()->GetColor(kColorToolbar);
-+    if (background_view_ && last_configuration_ == configuration &&
++    if (background_view_ && NSEqualRects(background_view_.frame, frame) &&
++        last_configuration_ == configuration &&
 +        last_active_material_ == resolution.active && last_bounds_ == bounds &&
 +        last_corner_radii_ == corner_radii && last_color_mode_ == color_mode &&
 +        last_theme_color_ == theme_color &&
