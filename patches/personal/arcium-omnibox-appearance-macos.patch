@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/BUILD.gn
 +++ src/chrome/browser/ui/BUILD.gn
-@@ -3602,6 +3602,7 @@ static_library("ui") {
+@@ -3606,6 +3606,7 @@ static_library("ui") {
        "views/helium/frame_corner_radius_mac.mm",
        "views/helium/glass_surface_mac.h",
        "views/helium/glass_surface_mac.mm",
@@ -315,7 +315,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
      arcium::kArcSidebarNavigationEnabledPref,
      arcium::kSidebarExtensionsDrawerEnabledPref,
      arcium::kChromeFrameBorderWidthPref,
-@@ -511,6 +513,36 @@ void ArciumSettingsModel::ClearPreferenc
+@@ -511,6 +513,38 @@ void ArciumSettingsModel::ClearPreferenc
    prefs_->ClearPref(name);
  }
  
@@ -334,8 +334,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
 +  }
 +  for (const auto* key : {"labels", "icons", "scope_reveal"}) {
 +    const auto value = layout.FindInt(key);
-+    if (!value || *value < 0 ||
-+        *value > (std::string_view(key) == "labels" ? 2 : 3)) {
++    const int maximum = std::string_view(key) == "labels"         ? 2
++                        : std::string_view(key) == "scope_reveal" ? 5
++                                                                  : 3;
++    if (!value || *value < 0 || *value > maximum) {
 +      return false;
 +    }
 +  }
@@ -471,7 +473,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        if let value = exactIntegerOptional(dictionary["icons"]), (0...3).contains(value) {
 +            icons = value
 +        }
-+        if let value = exactIntegerOptional(dictionary["scope_reveal"]), (0...3).contains(value) {
++        if let value = exactIntegerOptional(dictionary["scope_reveal"]), (0...5).contains(value) {
 +            reveal = value
 +        }
 +        connected = strictBoolean(dictionary["connected"]) ?? true
@@ -569,7 +571,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      @ObservedObject var store: ArciumSettingsStore
      @Environment(\.settingsTheme) private var theme
      @State private var backgroundMode: BackgroundMode = .everyday
-@@ -562,6 +571,33 @@ private struct AppearanceSettingsPage: V
+@@ -562,6 +571,34 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
@@ -589,7 +591,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                        (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
 +                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
 +                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
-+                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden")])
++                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
++                        (value: 4, label: "Flush"), (value: 5, label: "Divot")])
 +                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
 +                    SToggle("Full width scopes", isOn: commandLayoutBinding(\.fullWidth))
 +                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
@@ -607,7 +610,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -1088,6 +1088,102 @@ final class ArciumSettingsUIContractTest
+@@ -1088,6 +1088,125 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor
@@ -636,6 +639,29 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        ]], delegate: delegate)
 +        blocked.setCommandPanelLayout(layout)
 +        XCTAssertEqual(delegate.settings.count, 1)
++    }
++
++    @MainActor
++    func testFlushDivotAndHiddenScopeValuesPersistThroughTheProfileCallback() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "commandPanelLayoutAvailable": true
++        ]], delegate: delegate)
++        for reveal in [3, 4, 5] {
++            var layout = store.snapshot.appearance.commandPanelLayout
++            layout.reveal = reveal
++            store.setCommandPanelLayout(layout)
++            let saved = delegate.settings.last?.value as? [String: Any]
++            XCTAssertEqual(saved?["scope_reveal"] as? Int, reveal)
++            store.updateSnapshot(["available": true, "appearance": [
++                "commandPanelLayoutAvailable": true,
++                "commandPanelLayout": layout.dictionary
++            ]])
++            XCTAssertEqual(store.snapshot.appearance.commandPanelLayout.reveal, reveal)
++        }
++        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": 6]).reveal, 2)
++        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": true]).reveal, 2)
++        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": 4.5]).reveal, 2)
 +    }
 +
 +    @MainActor
@@ -727,7 +753,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,55 @@
 +// Copyright 2026 The Helium Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -752,8 +778,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
 +  }
 +  NSDictionary* layout = value;
 +  base::DictValue result;
-+  constexpr struct { const char* key; int maximum; } enums[] = {
-+      {"labels", 2}, {"icons", 3}, {"scope_reveal", 3}};
++  constexpr struct {
++    const char* key;
++    int maximum;
++  } enums[] = {{"labels", 2}, {"icons", 3}, {"scope_reveal", 5}};
 +  for (const auto& field : enums) {
 +    id object = layout[[NSString stringWithUTF8String:field.key]];
 +    if (![object isKindOfClass:[NSNumber class]] ||
@@ -785,7 +813,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
-@@ -0,0 +1,78 @@
+@@ -0,0 +1,93 @@
 +// Copyright 2026 The Helium Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -796,7 +824,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 +#include "chrome/browser/ui/browser.h"
 +#include "chrome/browser/ui/cocoa/arcium_settings_model.h"
 +#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
-+#include "chrome/browser/ui/views/frame/test_with_browser_view.h"
++#include "chrome/test/base/browser_with_test_window_test.h"
 +#include "components/prefs/pref_service.h"
 +#include "testing/gtest/include/gtest/gtest.h"
 +
@@ -822,11 +850,20 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 +  EXPECT_EQ(true, converted->FindBool("activity_dots"));
 +}
 +TEST(CommandPanelLayoutMacTest, RejectsMalformedEnums) {
-+  for (id invalid in @[@YES, @1.5, @(-1), @4, @"1", [NSNull null],
-+                       @(INFINITY), @(NAN)]) {
++  for (id invalid in
++       @[ @YES, @1.5, @(-1), @6, @"1", [NSNull null], @(INFINITY), @(NAN) ]) {
 +    auto layout = Layout();
 +    layout[@"scope_reveal"] = invalid;
 +    EXPECT_FALSE(CommandPanelLayoutFromNSObject(layout));
++  }
++}
++TEST(CommandPanelLayoutMacTest, PreservesFlushDivotAndExistingHiddenValues) {
++  for (NSNumber* reveal in @[ @3, @4, @5 ]) {
++    auto layout = Layout();
++    layout[@"scope_reveal"] = reveal;
++    auto converted = CommandPanelLayoutFromNSObject(layout);
++    ASSERT_TRUE(converted);
++    EXPECT_EQ([reveal intValue], converted->FindInt("scope_reveal"));
 +  }
 +}
 +TEST(CommandPanelLayoutMacTest, RejectsNumericBooleanSubstitutes) {
@@ -849,28 +886,34 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 +  layout[@"unknown"] = @2;
 +  EXPECT_FALSE(CommandPanelLayoutFromNSObject(layout));
 +}
-+using CommandPanelLayoutModelTest = TestWithBrowserView;
++// The profile contract needs a test window, without a native BrowserWidget.
++using CommandPanelLayoutModelTest = BrowserWithTestWindowTest;
 +TEST_F(CommandPanelLayoutModelTest, BridgePayloadSavesThroughProfileOwner) {
 +  ArciumSettingsModel model(browser()->profile(), base::DoNothing(),
 +                             base::DoNothing());
-+  auto layout = Layout();
-+  layout[@"scope_reveal"] = @3;
-+  layout[@"scope_tints"] = @NO;
-+  auto converted = CommandPanelLayoutFromNSObject(layout);
-+  ASSERT_TRUE(converted);
-+  ASSERT_TRUE(model.SetCommandPanelLayout(*converted));
-+  EXPECT_EQ(*converted, model.GetCommandPanelLayout());
-+  EXPECT_EQ(*converted, browser()->profile()->GetPrefs()->GetDict(
-+      arcium::kCommandPanelLayoutPref));
++  for (NSNumber* reveal in @[ @3, @4, @5 ]) {
++    auto layout = Layout();
++    layout[@"scope_reveal"] = reveal;
++    layout[@"scope_tints"] = @NO;
++    auto converted = CommandPanelLayoutFromNSObject(layout);
++    ASSERT_TRUE(converted);
++    ASSERT_TRUE(model.SetCommandPanelLayout(*converted));
++    EXPECT_EQ(*converted, model.GetCommandPanelLayout());
++    EXPECT_EQ(*converted, browser()->profile()->GetPrefs()->GetDict(
++                              arcium::kCommandPanelLayoutPref));
++  }
++  auto malformed = model.GetCommandPanelLayout();
++  malformed.Set("scope_reveal", 6);
++  EXPECT_FALSE(model.SetCommandPanelLayout(malformed));
 +}
 +}  // namespace arcium_settings
 Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -117,6 +117,7 @@ if (!is_android && toolkit_views) {
-       "//url",
-     ]
+@@ -130,6 +130,7 @@ if (!is_android && toolkit_views) {
+       ]
+     }
      if (is_mac) {
 +      sources += [ "../browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm" ]
        data_deps = [ "//chrome:chrome_framework" ]
