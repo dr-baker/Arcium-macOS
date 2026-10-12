@@ -12,13 +12,14 @@ build graph cannot see. Each problem names the command that fixes it.
 | When you need to… | Run |
 | --- | --- |
 | Know the build dir's state | `he agent check --json` |
-| Find the patch that owns a file, symbol, or string | `he agent locate QUERY` |
+| Find the patch that owns a file, symbol, or string | `he agent locate QUERY` (text, a path, a glob such as `chrome/*.cc`, or a regex such as `scope.*glow`) |
 | Edit an existing patch | `he agent pop PATCH`, `quilt add PATH` for files it does not own yet, edit, `he agent save-patch`, `he agent push` |
 | Create a patch | [Creating a new patch](building.md#creating-a-new-patch) |
 | Pick up patch changes after a pull, branch switch, or merge | `he agent pop`, `he agent merge`, `he agent push` |
 | Rebuild the patched source, or prove the series applies with zero fuzz | `he agent replay` |
 | Repair a patch that `he agent push` stopped on | [Repair a patch that fails to apply](#repair-a-patch-that-fails-to-apply) |
-| Compile | `he agent build TARGET...` |
+| Compile | `he agent build TARGET...` (it spends 30-60 s on a dry run first) |
+| Run the native Settings Swift package tests | Copy the package out of the source tree first: `cp -cR "$HELIUM_DEV_BUILD_ROOT/src/chrome/browser/ui/cocoa/arcium_settings_swift" /tmp/NAME`, then `swift test --package-path /tmp/NAME --filter TEST` |
 | Refresh build inputs `he check` names | `he agent version`, `he agent resources`, or `he agent configure --refresh-defaults` |
 | Test without touching real profiles | `he agent run --profile NAME`, then `he agent stop --profile NAME` |
 | Run several Dev apps at once | add `--labeled` to each `he agent run` |
@@ -90,7 +91,7 @@ Report each gate you reached on its own line, and name what you did not reach:
 - **Inspected:** the source, patch ownership, and build dir you read.
 - **Replayed:** the full series applied with zero fuzz (`he agent replay` or a clean `he agent push`).
 - **Compiled:** each target that built.
-- **Packaged:** the exact app bundle produced.
+- **Packaged:** the exact app bundle produced (`he agent run --json` prints it as `app`).
 - **Launched:** the exact bundle, profile, and flags that ran.
 - **Behavior-tested:** the interaction and the visible result.
 - **Persistence-tested:** what survived a normal quit and relaunch on the same profile.

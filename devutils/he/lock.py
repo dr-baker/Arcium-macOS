@@ -110,6 +110,11 @@ def run_locked(lock_path: Path, argv: list[str], *, label: str) -> int:
             _set_foreground(terminal, os.getpgrp())
             for signum, handler in previous.items():
                 signal.signal(signum, handler)
+        # Clear the owner label while still holding the lock, so a stale label
+        # never looks like a running command.
+        handle.seek(0)
+        handle.truncate()
+        handle.flush()
         # Report a signal death the way a shell does.
         return 128 - status if status < 0 else status
     finally:

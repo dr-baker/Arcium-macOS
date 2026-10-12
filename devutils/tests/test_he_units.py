@@ -144,6 +144,22 @@ class AgentAndAssetsTest(Fixture):
             test_assets._archive_members(archive)
 
 
+class LocateAndLockTest(Fixture):
+    def test_auto_mode_tells_regexes_from_globs(self) -> None:
+        from he.locate import _query_mode
+        self.assertEqual(_query_mode("scope.*glow|glow.*scope", "auto"), "regex")
+        self.assertEqual(_query_mode("chrome/*.cc", "auto"), "glob")
+        self.assertEqual(_query_mode("*.mm", "auto"), "glob")
+        self.assertEqual(_query_mode("chrome/browser/x.cc", "auto"), "path")
+        self.assertEqual(_query_mode("kFoo", "auto"), "text")
+
+    def test_lock_label_is_cleared_on_release(self) -> None:
+        from he import lock
+        path = self.root / ".arcium" / "lane.lock"
+        self.assertEqual(lock.run_locked(path, ["true"], label="build"), 0)
+        self.assertEqual(path.read_text(), "")
+
+
 class InstallerUnitTest(Fixture):
     def test_install_path_override_needs_test_mode(self) -> None:
         from arcium import install

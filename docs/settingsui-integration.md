@@ -175,3 +175,15 @@ accurately in the UI and enforced by the backend.
 A release must include and sign the native library before sealing the
 enclosing app. Only the real signed bundle proves that macOS accepts and loads
 it.
+
+## Testing the Swift package
+
+Run `swift test` on a copy-on-write copy outside the Chromium tree:
+
+```sh
+cp -cR "$HELIUM_DEV_BUILD_ROOT/src/chrome/browser/ui/cocoa/arcium_settings_swift" /tmp/arcium-settings-test
+swift test --package-path /tmp/arcium-settings-test --filter ArciumSettingsUIContractTests
+```
+
+Inside the source tree, SwiftPM spends minutes scanning the surrounding
+checkout and writes a `.build` directory into the generated source.

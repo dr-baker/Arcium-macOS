@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("gclient-marker")
     commands.add_parser("tmpdir")
     finder = commands.add_parser("locate")
-    finder.add_argument("--mode", choices=("auto", "text", "path", "glob"), default="auto")
+    finder.add_argument("--mode", choices=("auto", "text", "regex", "path", "glob"), default="auto")
     finder.add_argument("--ignore-case", action="store_true")
     finder.add_argument("--json", action="store_true")
     finder.add_argument("--limit", type=int, default=40)

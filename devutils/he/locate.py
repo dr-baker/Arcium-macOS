@@ -1,8 +1,10 @@
 """`he locate QUERY`: find which authoritative patch owns a file or text.
 
 Searches the selected worktree's core and macOS catalogs, not generated
-copies. Auto mode treats a query with `*?[` as a path glob, one with `/` as an
-exact Chromium-relative path, and anything else as literal text.
+copies. Auto mode treats a path-like query with `*?[` as a glob (`chrome/*.cc`,
+`*.mm`), one with `/` as an exact Chromium-relative path, one with regex syntax
+(`.*`, `|`, `\b`, `^`, `$`) as a regular expression over patch lines, and
+anything else as literal text.
 """
 
 from __future__ import annotations
@@ -122,7 +124,21 @@ def _query_mode(query: str, mode: str) -> str:
     if not query or "\n" in query or "\r" in query:
         raise HeError("query must be one nonempty line")
     if mode == "auto":
-        mode = "glob" if any(character in query for character in "*?[") else "path" if "/" in query else "text"
+        wild = any(character in query for character in "*?[")
+        path_like = "/" in query or (query.startswith("*.") and " " not in query)
+        if wild and path_like:
+            mode = "glob"
+        elif "/" in query and " " not in query:
+            mode = "path"
+        elif re.search(r"\.\*|\\\||\||\\b|^\^|\$$|\\[sdw]", query):
+            mode = "regex"
+        else:
+            mode = "text"
+    if mode == "regex":
+        try:
+            re.compile(query)
+        except re.error as error:
+            raise HeError(f"invalid regular expression: {error}") from None
     if mode in {"path", "glob"}:
         path = PurePosixPath(query)
         if path.is_absolute() or ".." in path.parts:
@@ -196,12 +212,15 @@ def locate(worktree: Path, query: str, *, mode: str = "auto", build_root: Path |
             candidates = [path.casefold() if ignore_case else path for path in paths]
             if mode == "text":
                 hits = [line for line in file["lines"] if needle in (line["text"].casefold() if ignore_case else line["text"])]
+            elif mode == "regex":
+                pattern = re.compile(query.replace("\\|", "|"), re.IGNORECASE if ignore_case else 0)
+                hits = [line for line in file["lines"] if pattern.search(line["text"])]
             else:
                 matched = any(needle == path if mode == "path" else fnmatch.fnmatchcase(path, needle) for path in candidates)
                 hits = file["lines"] if matched else []
                 if not matched:
                     continue
-            if mode == "text" and not hits:
+            if mode in {"text", "regex"} and not hits:
                 continue
             generated_state = "unknown" if applied is None else "top" if lane["top"] == name else "applied" if name in applied else "pending"
             matches.append({

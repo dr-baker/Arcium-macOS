@@ -59,11 +59,15 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
     out = paths.src / "out" / "Default"
     command = ["python3", str(paths.src / "third_party" / "depot_tools" / "autoninja.py"), "-C", str(out), "-n", *targets]
     environment = {**os.environ, "SISO_PATH": str(paths.src / "third_party" / "siso" / "cipd" / "siso")}
+    import sys
+    print(f"he agent build: dry run of {' '.join(targets)} to check the edge budget "
+          "(loading the build graph takes 30-60 s)", file=sys.stderr, flush=True)
     result = subprocess.run(command, cwd=paths.src, env=environment, capture_output=True, text=True, check=False)
     if result.returncode:
         raise HeError(f"dry run failed:\n{(result.stdout + result.stderr).strip()[-2000:]}")
     output = result.stdout + result.stderr
     edges = planned_edges(output)
+    print(f"he agent build: {edges} edges planned (budget {budget})", file=sys.stderr, flush=True)
     if edges > budget and not approved:
         plan = paths.state / "last-plan.txt"
         plan.parent.mkdir(parents=True, exist_ok=True)
