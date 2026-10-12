@@ -120,6 +120,17 @@ def verify_signature(app: Path) -> None:
     codesign(["--verify", "--deep", "--strict", str(app)], f"signature check of {app}")
 
 
+def build_fingerprint(out_dir: Path) -> str:
+    """Sizes and mtimes of Helium.app and the component dylibs: changes on every relink."""
+    import hashlib
+    digest = hashlib.sha256()
+    app = out_dir / "Helium.app"
+    for path in [*sorted(app.rglob("*")), *sorted(out_dir.glob("*.dylib"))]:
+        metadata = path.lstat()
+        digest.update(f"{path.relative_to(out_dir)}\0{metadata.st_size}\0{metadata.st_mtime_ns}\n".encode())
+    return digest.hexdigest()
+
+
 def component_libraries(out_dir: Path) -> list[Path]:
     """Loose dylibs a component build's app loads from the out dir."""
     args = (out_dir / "args.gn").read_text(encoding="utf-8") if (out_dir / "args.gn").is_file() else ""

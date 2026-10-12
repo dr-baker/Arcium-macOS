@@ -23,7 +23,7 @@ build graph cannot see. Each problem names the command that fixes it.
 | Test without touching real profiles | `he agent run --profile NAME`, then `he agent stop --profile NAME` |
 | Run several Dev apps at once | add `--labeled` to each `he agent run` |
 | Install the build as the daily browser | `he agent arcium`, plus `--approved` if Arcium is running |
-| Check the installed app | `he agent arcium status` |
+| Check whether the installed app is the current build | `he agent arcium status` (`matches_build`) |
 | Author patches while another agent uses the shared build dir | [Parallel work](parallel-work.md) |
 
 A patch edit reaches git only through `he save-patch` (the top patch) or

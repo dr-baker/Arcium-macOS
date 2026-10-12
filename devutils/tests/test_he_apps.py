@@ -160,6 +160,10 @@ class AppsTest(unittest.TestCase):
         status = json.loads(self.m.he("arcium", "status", "--json", **self.arcium_env).stdout)
         self.assertTrue(status["signature_ok"])
         self.assertTrue(status["running"]["installed"])
+        self.assertTrue(status["matches_build"])
+        (self.m.out / "libone.dylib").touch()
+        relinked = json.loads(self.m.he("arcium", "status", "--json", **self.arcium_env).stdout)
+        self.assertFalse(relinked["matches_build"])
 
     def test_install_restarts_a_running_arcium(self) -> None:
         self._seed_helium_profile()

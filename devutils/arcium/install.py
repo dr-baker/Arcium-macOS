@@ -71,6 +71,10 @@ def helium_profile() -> Path:
     return _support() / "net.imput.helium"
 
 
+def _record_path() -> Path:
+    return _support() / "Arcium Development" / "installed.json"
+
+
 @contextmanager
 def install_lock():
     """One update at a time, from any build dir (same file as the previous tooling)."""
@@ -201,6 +205,7 @@ def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict
         migrated = (clone_once(helium_profile(), profile, still_running=_helium_running)
                     if not profile.exists() else "existing")
         started = time.monotonic()
+        built = apps.build_fingerprint(out_dir)
         staging = app.parent / f".{app.name}.install-{uuid.uuid4().hex}"
         try:
             packaged = package(out_dir, staging, identity)
@@ -233,16 +238,28 @@ def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict
                               "The profile was not rolled back.") from error
         if previous is not None:
             shutil.rmtree(previous, ignore_errors=True)
+        _record_path().write_text(json.dumps({"build_dir": str(out_dir.parents[2]), "build_fingerprint": built,
+                                              "installed_at": datetime.now().isoformat(timespec="seconds")},
+                                             indent=2) + "\n")
     return {"app": str(app), "profile": str(profile), "profile_setup": migrated, "pid": pid,
             "log": str(log) if log else None, "signing_identity": identity,
             "prepared_seconds": round(prepared, 1), "restarted": owner is not None, **packaged}
 
 
-def status() -> dict:
+def status(out_dir: Path | None = None) -> dict:
     app = install_path()
     result = {"app": str(app), "installed": app.is_dir(), "profile": str(arcium_profile())}
     if not app.is_dir():
         return result
+    try:
+        record = json.loads(_record_path().read_text())
+    except (OSError, ValueError):
+        record = None
+    result["installed_from"] = record
+    if record and out_dir is not None and (out_dir / "Helium.app").is_dir():
+        # True when the installed app came from this build dir's current output.
+        result["matches_build"] = (record.get("build_dir") == str(out_dir.parents[2])
+                                   and record.get("build_fingerprint") == apps.build_fingerprint(out_dir))
     try:
         info = verify_identity(app)
         result.update(identity_ok=True, version=info.get("CFBundleShortVersionString"))
@@ -270,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.action == "status":
-            result = status()
+            result = status(args.build_dir.resolve() / "src" / "out" / "Default")
         else:
             agent = os.environ.get("HELIUM_AGENT_MODE") == "1"
             result = update(args.build_dir.resolve() / "src" / "out" / "Default",

@@ -7,7 +7,8 @@ commit and owns the macOS product, packaging, signing, resources, and platform
 integration. Shared browser behavior belongs in core.
 
 The development tooling stays close to upstream Helium's `dev.sh`: every
-upstream `he` command keeps its meaning. Agents prefix every `he` command with
+upstream `he` command keeps its name, and the few behavior changes are listed
+in `docs/development-changes.md`. Agents prefix every `he` command with
 `he agent`, which adds guards to builds and installs.
 
 ## Where to go

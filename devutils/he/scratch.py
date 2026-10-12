@@ -95,7 +95,7 @@ def pull(paths: Paths, relatives: list[str]) -> list[str]:
     if not is_scratch(paths.build_dir):
         raise HeError("he scratch-pull runs inside a scratch build dir")
     source_root = parent_src(paths.build_dir)
-    pulled = []
+    pulled = []  # files that do not exist in the shared tree are new; nothing to pull
     for relative in relatives:
         parts = Path(relative).parts
         if Path(relative).is_absolute() or ".." in parts or not parts:
@@ -103,8 +103,10 @@ def pull(paths: Paths, relatives: list[str]) -> list[str]:
         source, target = source_root / relative, paths.src / relative
         if target.exists():
             continue
+        if not source.exists():
+            continue  # a new file: quilt add creates it
         if not source.is_file() or source.is_symlink():
-            raise HeError(f"{relative} is not a file in {source_root}")
+            raise HeError(f"{relative} is not a regular file in {source_root}")
         target.parent.mkdir(parents=True, exist_ok=True)
         _clone(source, target)
         pulled.append(relative)

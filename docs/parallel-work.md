@@ -17,8 +17,9 @@ is a **worker** with its own git worktree and branch.
    `HELIUM_BUILD_DIR=… HELIUM_DEV_WORKTREE=<your worktree> source …/dev.sh`;
    run that in your worktree.
 2. In the scratch, `he agent pop PATCH` to the patch you own. A scratch holds
-   only files some patch owns; before `quilt add` on any other file, run
-   `he agent scratch-pull PATH`.
+   only files some patch owns; before `quilt add` on any other existing
+   Chromium file, run `he agent scratch-pull PATH`. A brand-new file needs no
+   pull; `quilt add` creates it.
 3. Edit, `he agent save-patch`, `he agent push`, and commit in your worktree.
 4. Scratches cannot build. For a compiler check, ask the integrator, or use a
    full build dir of your own.
