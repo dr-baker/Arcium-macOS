@@ -99,10 +99,11 @@ class AppsTest(unittest.TestCase):
         again = self.m.he("run", "--profile", "alpha", check=False)
         self.assertIn("already running", again.stderr)
         self.m.he("stop", "--profile", "alpha")
-        fresh = self.m.he("run", "--fresh", "alpha", check=False)
-        self.assertEqual(fresh.returncode, 0, fresh.stderr)
-        self.m.he("stop", "--fresh", "alpha")
-        self.assertIn("already exists", self.m.he("run", "--fresh", "alpha", check=False).stderr)
+        new = self.m.he("run", "--profile", "gamma", "--new", check=False)
+        self.assertEqual(new.returncode, 0, new.stderr)
+        self.m.he("stop", "--profile", "gamma")
+        self.assertIn("already exists", self.m.he("run", "--profile", "gamma", "--new", check=False).stderr)
+        self.assertNotEqual(self.m.he("run", "--fresh", "delta", check=False).returncode, 0)
 
     def test_seeding_copies_a_stopped_profile_once(self) -> None:
         seed = self.m.root / "seed"
@@ -160,12 +161,11 @@ class AppsTest(unittest.TestCase):
         self.assertTrue(status["signature_ok"])
         self.assertTrue(status["running"]["installed"])
 
-    def test_install_refuses_while_arcium_runs_and_iterate_restarts_it(self) -> None:
+    def test_install_restarts_a_running_arcium(self) -> None:
         self._seed_helium_profile()
         first = json_tail(self.m.he("arcium", "--json", **self.arcium_env).stdout)["pid"]
-        refused = self.m.he("arcium", **self.arcium_env, check=False)
-        self.assertIn("Arcium is running", refused.stderr)
-        second = json_tail(self.m.he("arcium", "iterate", "--json", **self.arcium_env).stdout)
+        self.assertNotEqual(self.m.he("arcium", "iterate", **self.arcium_env, check=False).returncode, 0)
+        second = json_tail(self.m.he("arcium", "--json", **self.arcium_env).stdout)
         self.assertTrue(second["restarted"])
         self.assertNotEqual(second["pid"], first)
         self.assertFalse(apps.alive(first))
@@ -194,7 +194,7 @@ class AppsTest(unittest.TestCase):
         self.assertEqual((self.install / "Contents" / "MacOS" / "Helium").read_text(), "#!/bin/sh\nexit 1\n")
         self.assertEqual((self.support / "Arcium" / "Default" / "History").read_text(), history)
 
-    def test_iterate_refuses_a_mock_keychain_arcium(self) -> None:
+    def test_install_refuses_a_mock_keychain_arcium(self) -> None:
         self._seed_helium_profile()
         self.m.he("arcium", "--no-launch", **self.arcium_env)
         executable = self.install / "Contents" / "MacOS" / "Helium"
@@ -204,7 +204,7 @@ class AppsTest(unittest.TestCase):
             if apps.profile_owner(self.support / "Arcium"):
                 break
             time.sleep(0.05)
-        refused = self.m.he("arcium", "iterate", **self.arcium_env, check=False)
+        refused = self.m.he("arcium", **self.arcium_env, check=False)
         self.assertIn("mock Keychain", refused.stderr)
 
     def test_install_needs_a_stable_signing_identity(self) -> None:
@@ -240,7 +240,7 @@ class AppsTest(unittest.TestCase):
         stub = subprocess.Popen([str(self.install / "Contents" / "MacOS" / "Helium"), f"--user-data-dir={other}"])
         self.addCleanup(lambda: (stub.kill(), stub.wait()))
         time.sleep(0.3)
-        refused = self.m.he("arcium", "iterate", "--no-build", **self.arcium_env, check=False)
+        refused = self.m.he("arcium", "--no-build", **self.arcium_env, check=False)
         self.assertIn("other Arcium instances", refused.stderr)
 
     def test_failed_agent_build_does_not_install(self) -> None:
@@ -248,14 +248,10 @@ class AppsTest(unittest.TestCase):
         failed = self.m.he("agent", "arcium", "--approved", **self.arcium_env, check=False)
         self.assertNotEqual(failed.returncode, 0)
         self.assertFalse(self.install.exists())
-        record = json.loads((self.m.build_dir / ".arcium" / "agent" / "last-arcium.json").read_text())
-        self.assertEqual(record["outcome"], "failed")
 
-    def test_arcium_actions_are_parsed_once(self) -> None:
-        refused = self.m.he("agent", "arcium", "--no-build", "iterate", **self.arcium_env, check=False)
-        self.assertIn("pass --approved", refused.stderr)
-        both = self.m.he("arcium", "status", "iterate", **self.arcium_env, check=False)
-        self.assertIn("takes one of", both.stderr)
+    def test_status_is_unlocked_and_read_only(self) -> None:
+        status = json.loads(self.m.he("arcium", "status", "--json", **self.arcium_env).stdout)
+        self.assertFalse(status["installed"])
         self.assertFalse(self.install.exists())
 
     def test_install_refuses_to_move_aside_a_non_arcium_directory(self) -> None:
@@ -290,11 +286,8 @@ class AppsTest(unittest.TestCase):
         (self.m.src / "b.cc").touch()
         refused = self.m.he("agent", "build", "chrome", "--edge-budget", "1", check=False)
         self.assertIn("above the budget", refused.stderr)
-        built = self.m.he("agent", "build", "chrome", "--edge-budget", "1", "--approved", "--json")
-        result = json_tail(built.stdout)
-        self.assertEqual(result["outcome"], "ok")
-        record = self.m.build_dir / ".arcium" / "agent" / "last-build.json"
-        self.assertEqual(json.loads(record.read_text())["outcome"], "ok")
+        self.m.he("agent", "build", "chrome", "--edge-budget", "1", "--approved")
+        self.assertIn("--approved belongs to he agent build", self.m.he("build", "--approved", check=False).stderr)
 
     def test_agent_build_refuses_a_pending_snapshot_and_strict_problems(self) -> None:
         self.m.he("pop")
@@ -303,14 +296,24 @@ class AppsTest(unittest.TestCase):
         (self.m.worktree / "resources" / "icon.txt").write_text("changed\n")
         self.assertIn("he check reports problems", self.m.he("agent", "build", "chrome", check=False).stderr)
 
-    def test_agent_status_is_json(self) -> None:
-        status = json.loads(self.m.he("agent", "status").stdout)
+    def test_check_json_reports_state(self) -> None:
+        status = json.loads(self.m.he("check", "--json").stdout)
         self.assertEqual(status["patches"]["applied"], status["patches"]["series"])
         self.assertFalse(status["timestamp_snapshot_pending"])
+        self.assertEqual(status["problems"], [])
 
-    def test_agent_arcium_iterate_needs_approval(self) -> None:
-        refused = self.m.he("agent", "arcium", "iterate", **self.arcium_env, check=False)
+    def test_agent_prefix_passes_other_commands_through(self) -> None:
+        self.assertIn("ok:", self.m.he("agent", "check").stdout)
+        self.m.he("agent", "replay")
+
+    def test_agent_arcium_needs_approval_only_to_restart(self) -> None:
+        self._seed_helium_profile()
+        first = json_tail(self.m.he("agent", "arcium", "--json", **self.arcium_env).stdout)
+        refused = self.m.he("agent", "arcium", **self.arcium_env, check=False)
         self.assertIn("pass --approved", refused.stderr)
+        self.assertTrue(apps.alive(first["pid"]))
+        self.m.he("agent", "arcium", "--approved", **self.arcium_env)
+        self.assertFalse(apps.alive(first["pid"]))
 
 
 @unittest.skipUnless(shutil.which("bash"), "needs bash")

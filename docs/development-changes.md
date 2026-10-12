@@ -44,7 +44,8 @@ to `<build dir>/.arcium/patches`, and nothing generated lands in git.
 `he unmerge` keeps upstream's meaning: patches you refreshed go back to their
 owning repository, and patches you created with `quilt new` go into the macOS
 series. `he save-patch` does the same for just the top patch, keeping that
-patch's header style. Both refuse, before writing anything, if an owning file
+patch's header style. `he merge` refuses to replace the catalog while it holds
+refreshed patches that were not saved back (`he merge --discard` drops them). Both refuse, before writing anything, if an owning file
 changed since `he merge`; `he pull` and `he reset` stop on that refusal
 instead of discarding lane edits. A retried export is safe.
 
@@ -95,7 +96,7 @@ Turn it off with `HELIUM_KEEP_TIMESTAMPS=0`.
 Commands that change the source tree, build output, or build-dir state take a
 lock on `<build dir>/.arcium/lane.lock`. A second command is refused at once
 instead of interleaving. Read-only commands (`check`, `locate`, `validate`,
-`run` without a profile, `stop`, `arcium status`, `agent status`) take no lock.
+`run` without arguments, `stop`, `arcium status`) take no lock.
 Interrupting or terminating `he` passes the signal to the running command and
 keeps the lock until it exits.
 
@@ -145,17 +146,19 @@ use:
 - on first install it copies the stopped Helium profile into the Arcium
   profile once.
 
-`he arcium iterate` prepares the replacement first, asks the running Arcium to
+When Arcium is running, `he arcium` prepares the replacement first, asks it to
 quit through macOS, and never forces it. A failure before the swap restores the
 previous bundle. After the swap there is no automatic rollback, because the new
 version may already have opened the profile; both bundles are kept and named
 in the error. Profile data is never rolled back.
 
-## Agent path
+## Agent prefix
 
-`he agent CMD` runs the same commands with an edge budget for builds, strict
-checks, and JSON results. Normal commands never change because an agent calls
-them. See [Working with agents](agents.md).
+`he agent CMD` runs any `he` command. Two get stricter: `build` needs explicit
+targets, a clean `he check`, no pending timestamp snapshot, and a dry-run plan
+within an edge budget unless `--approved`; `arcium` needs `--approved` to
+restart a running Arcium. Nothing changes for commands typed without the
+prefix. See [Agent workflow](agent-workflow.md).
 
 ## Remote builds
 

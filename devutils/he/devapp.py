@@ -44,13 +44,13 @@ def support(home: Path | None = None) -> Path:
     return (home or Path.home()) / "Library" / "Application Support"
 
 
-def profile_dir(name: str | None, *, fresh: bool = False, home: Path | None = None) -> Path:
-    """The historic Dev profile, or a named one beside the previous tooling's."""
+def profile_dir(name: str | None, *, home: Path | None = None) -> Path:
+    """The historic Dev profile, or a named one where the previous tooling kept them."""
     if name is None:
         return support(home) / "net.imput.helium.dev"
     if not _NAME.fullmatch(name):
         raise HeError(f"invalid profile name: {name} (letters, digits, '.', '_', '-'; up to 64)")
-    return support(home) / "Helium Development" / "profiles" / ("fresh" if fresh else "isolated") / name
+    return support(home) / "Helium Development" / "profiles" / "isolated" / name
 
 
 def seed_source(value: str, home: Path | None = None) -> Path:
@@ -138,23 +138,23 @@ def _features(passthrough: list[str]) -> tuple[list[str], list[str], list[str]]:
     return enabled, list(dict.fromkeys(disabled)), rest
 
 
-def run(paths: Paths, name: str | None, *, fresh: bool = False, labeled: bool = False,
+def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = False,
         seed: str | None = None, passthrough: list[str] | None = None, home: Path | None = None) -> dict:
     """Launch a Dev app on a profile and return once it owns that profile."""
     if labeled and name is None:
         raise HeError("--labeled needs --profile NAME")
-    profile = profile_dir(name, fresh=fresh, home=home)
+    if new and name is None:
+        raise HeError("--new needs --profile NAME")
+    profile = profile_dir(name, home=home)
     enabled, disabled, rest = _features(passthrough or [])
     apps.require_plain_profile(profile, [support(home) / "net.imput.helium", support(home) / "Arcium"])
     if apps.lock_state(profile)[0] == "foreign":
         raise HeError(f"profile {profile} is locked by another host; remove its SingletonLock if nothing uses it")
     if (owner := apps.profile_owner(profile)) is not None:
         raise HeError(f"profile {profile} is already running (pid {owner}); he stop --profile {name or ''} first".rstrip())
-    if fresh:
-        if profile.exists():
-            raise HeError(f"fresh profile already exists: {profile}; pick a new name")
-        profile.mkdir(mode=0o700, parents=True)
-    elif not profile.exists():
+    if new and profile.exists():
+        raise HeError(f"profile {name} already exists: {profile}; pick a new name")
+    if not profile.exists():
         if seed is not None:
             clone_once(seed_source(seed, home), profile)
         else:
@@ -177,8 +177,8 @@ def run(paths: Paths, name: str | None, *, fresh: bool = False, labeled: bool = 
     return {"pid": process.pid, "app": str(bundle), "profile": str(profile), "log": str(log)}
 
 
-def stop(name: str | None, *, fresh: bool = False, home: Path | None = None, timeout: float = 15.0) -> str:
-    profile = profile_dir(name, fresh=fresh, home=home)
+def stop(name: str | None, *, home: Path | None = None, timeout: float = 15.0) -> str:
+    profile = profile_dir(name, home=home)
     owner = apps.profile_owner(profile)
     if owner is None:
         return f"profile {profile} is not running"

@@ -2,7 +2,7 @@
 
 Use a development profile with synthetic pages. Keep the display, window size,
 tab count, page animation, power mode, and input cadence the same across runs.
-Record the outer and core commits with each result. Use `he agent status` to confirm
+Record the outer and core commits with each result. Use `he check --json` to confirm
 the running Dev app and profile before collecting evidence.
 
 ## Check normal use
@@ -55,15 +55,15 @@ Prepare the named bundle and profile:
 
 ```sh
 source dev.sh
-he run --fresh feature-perf
+he run --profile feature-perf --new
 ```
 
 Open five synthetic tabs and enable MRU cycling in Settings. Start a 45-second
 recording; traces go to the build dir's `.arcium` directory:
 
 ```sh
-he stop --fresh feature-perf
-he run --fresh feature-perf \
+he stop --profile feature-perf
+he run --profile feature-perf \
 	--trace-startup=ui,cc,viz,gpu,benchmark \
 	--trace-startup-format=json --trace-startup-duration=45 \
 	--trace-startup-file="$HELIUM_DEV_BUILD_ROOT/.arcium/mru-glass.json"
@@ -76,8 +76,8 @@ separate runs. Wait for the recording to finish before reading its file.
 Save the histograms, then repeat with the same profile and workload:
 
 ```sh
-he stop --fresh feature-perf
-he run --fresh feature-perf --arcium-glass-backend=opaque \
+he stop --profile feature-perf
+he run --profile feature-perf --arcium-glass-backend=opaque \
 	--trace-startup=ui,cc,viz,gpu,benchmark \
 	--trace-startup-format=json --trace-startup-duration=45 \
 	--trace-startup-file="$HELIUM_DEV_BUILD_ROOT/.arcium/mru-opaque.json"

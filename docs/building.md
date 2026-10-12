@@ -2,7 +2,7 @@
 
 This follows upstream Helium's build guide. Where Arcium's tooling differs, a
 short note links to [How Arcium's tooling differs](development-changes.md).
-Agents read [Working with agents](agents.md) as well.
+Coding agents start with [Agent workflow](agent-workflow.md).
 
 ### Navigation
 
@@ -189,7 +189,9 @@ applied patches, the patch catalog, and generated resources are current.
    patches in `helium-chromium` first, then advance the outer gitlink.
 
 If someone else changed patches in your checkout (a pull, a branch switch),
-`he check` says so. Run `he pop`, `he merge`, `he push` to pick them up.
+`he check` says so. Run `he pop`, `he merge`, `he push` to pick them up, or
+`he replay` to rebuild the patched source from the patches already merged.
+`he merge` refuses to overwrite a patch you refreshed but did not save back.
 
 ### Run Dev profiles
 
@@ -199,9 +201,9 @@ mock Keychain, so they never interfere with installed Helium or Arcium:
 
 ```sh
 he run --profile pins-test
-he run --fresh migration-check           # a new, empty profile
+he run --profile migration-check --new      # refuse if it already exists
 he run --profile import --seed-from arcium  # copy a stopped profile once
-he run --profile b --labeled             # its own Dock icon, for running side by side
+he run --profile b --labeled                # its own Dock icon, for running side by side
 he stop --profile pins-test
 ```
 
@@ -212,11 +214,12 @@ in `~/Library/Application Support/Helium Development/profiles/`.
 ### Install as Arcium
 
 `he arcium` builds `chrome`, packages it as `/Applications/Arcium.app`, and
-launches it with the persistent Arcium profile and the real Keychain:
+launches it with the persistent Arcium profile and the real Keychain. If
+Arcium is running, it prepares the new app first, asks Arcium to quit, swaps,
+and relaunches:
 
 ```sh
-he arcium            # Arcium must be closed
-he arcium iterate    # asks the running Arcium to quit, swaps, relaunches
+he arcium              # --no-build to package the current build output
 he arcium status
 ```
 

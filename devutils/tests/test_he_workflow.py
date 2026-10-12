@@ -253,6 +253,17 @@ class WorkflowTest(unittest.TestCase):
         self.m.he("scratch", "--remove", "worker")
         self.assertFalse(root.exists())
 
+    def test_merge_refuses_unsaved_lane_edits(self) -> None:
+        self.m.ready()
+        self.m.he("pop", LONG_PATCH)
+        (self.m.src / "long.cc").write_text((self.m.src / "long.cc").read_text() + "// edit\n")
+        self.m.quilt("refresh")
+        self.m.he("pop")
+        refused = self.m.he("merge", check=False)
+        self.assertIn("not saved back", refused.stderr)
+        self.m.he("merge", "--discard")
+        self.assertNotIn("// edit", (self.m.worktree / "patches" / LONG_PATCH).read_text())
+
     def test_scratch_holds_only_owned_files_and_pulls_others(self) -> None:
         self.m.ready()
         root = self.m.build_dir / ".arcium" / "scratch" / "w"

@@ -42,12 +42,14 @@ def problems(paths: Paths) -> list[str]:
     if applied != series[: len(applied)]:
         found.append("applied patches are not a prefix of series.merged; run he pop, then he push")
     elif len(applied) < len(series):
-        found.append(f"{len(series) - len(applied)} of {len(series)} patches are not applied")
+        found.append(f"{len(series) - len(applied)} of {len(series)} patches are not applied; run he push")
     found += catalog.drift(paths)
+    found += [f"{name} was refreshed but not saved back; run he save-patch at that patch, or he unmerge"
+              for name in catalog.unsaved(paths) if name not in applied]
     found += records.applied_drift(paths)
     for relative in quilt.owned_files(paths.src, applied):
         if (paths.src / f"{relative}.rej").exists():
-            found.append(f"reject file left behind: {relative}.rej")
+            found.append(f"reject file left behind: {relative}.rej; fix the patch, then delete it")
     found += records.stamp_drift(paths)
     if (note := timestamps.status(paths)) is not None:
         found.append(note)
@@ -101,7 +103,8 @@ def main(argv: list[str] | None = None) -> int:
     lock = commands.add_parser("lock")
     lock.add_argument("--label", required=True)
     lock.add_argument("argv", nargs=argparse.REMAINDER)
-    commands.add_parser("merge")
+    merger = commands.add_parser("merge")
+    merger.add_argument("--discard", action="store_true", help="drop lane patch edits that were not saved back")
     commands.add_parser("unmerge")
     save = commands.add_parser("save-patch")
     save.add_argument("--style", choices=("p1", "ab"))
@@ -109,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("mark-before-push")
     check = commands.add_parser("check")
     check.add_argument("--warn", action="store_true", help="print problems to stderr and exit 0")
+    check.add_argument("--json", action="store_true", help="print the build dir's full state as JSON")
     stamp = commands.add_parser("stamp")
     stamp.add_argument("name", choices=sorted(records.STAMP_INPUTS))
     acquisition = commands.add_parser("acquisition")
@@ -132,30 +136,18 @@ def main(argv: list[str] | None = None) -> int:
     finder.add_argument("query")
     run = commands.add_parser("run")
     run.add_argument("--profile")
-    run.add_argument("--fresh", action="store_true")
+    run.add_argument("--new", action="store_true")
     run.add_argument("--labeled", action="store_true")
     run.add_argument("--seed-from")
     run.add_argument("--json", action="store_true")
     run.add_argument("passthrough", nargs=argparse.REMAINDER)
     stop = commands.add_parser("stop")
     stop.add_argument("--profile")
-    stop.add_argument("--fresh", action="store_true")
     commands.add_parser("test-assets")
     guard = commands.add_parser("agent-guard")
     guard.add_argument("--edge-budget", type=int, default=None)
     guard.add_argument("--approved", action="store_true")
     guard.add_argument("targets", nargs="*")
-    result = commands.add_parser("agent-result")
-    result.add_argument("--name", required=True)
-    result.add_argument("--status", type=int, required=True)
-    result.add_argument("--seconds", type=float, required=True)
-    result.add_argument("--log")
-    result.add_argument("--json", action="store_true")
-    commands.add_parser("agent-status")
-    agent_run = commands.add_parser("agent-run")
-    agent_run.add_argument("--name", required=True)
-    agent_run.add_argument("--json", action="store_true")
-    agent_run.add_argument("argv", nargs=argparse.REMAINDER)
     space = commands.add_parser("space")
     space.add_argument("--need-gib", type=float, required=True)
     args = parser.parse_args(argv)
@@ -167,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             return run_locked(paths.state / "lane.lock", command, label=args.label)
         if args.command == "merge":
             records.require_compatible(paths)
-            catalog.merge(paths)
+            catalog.merge(paths, discard=args.discard)
             print(f"merged {len(quilt.read_list(paths.catalog / 'series.merged'))} patches into {paths.catalog}")
         elif args.command == "unmerge":
             for name in catalog.unmerge(paths):
@@ -178,6 +170,11 @@ def main(argv: list[str] | None = None) -> int:
             records.sync_applied(paths)
         elif args.command == "mark-before-push":
             records.mark_before_push(paths)
+        elif args.command == "check" and args.json:
+            from . import agent
+            found = problems(paths)
+            print(agent.dumps(agent.status(paths, found)))
+            return 1 if found else 0
         elif args.command == "check":
             found = problems(paths)
             for line in found:
@@ -226,13 +223,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "run":
             from . import devapp
             extra = args.passthrough[1:] if args.passthrough[:1] == ["--"] else args.passthrough
-            launched = devapp.run(paths, args.profile, fresh=args.fresh, labeled=args.labeled,
+            launched = devapp.run(paths, args.profile, new=args.new, labeled=args.labeled,
                                   seed=args.seed_from, passthrough=extra)
             print(devapp.describe(launched) if args.json else
                   f"running {Path(launched['app']).name} pid {launched['pid']} on {launched['profile']}\nlog: {launched['log']}")
         elif args.command == "stop":
             from . import devapp
-            print(devapp.stop(args.profile, fresh=args.fresh))
+            print(devapp.stop(args.profile))
         elif args.command == "test-assets":
             if records.source_mode(paths) == "full":
                 from . import test_assets
@@ -244,19 +241,6 @@ def main(argv: list[str] | None = None) -> int:
             edges = agent.guard_build(paths, args.targets, budget=budget, approved=args.approved,
                                       problems=[p for p in problems(paths) if not p.startswith("timestamp snapshot")])
             print(edges)
-        elif args.command == "agent-result":
-            from . import agent
-            done = agent.record_result(paths, args.name, args.status, args.seconds,
-                                       Path(args.log) if args.log else None, {})
-            if args.json:
-                print(agent.dumps(done))
-        elif args.command == "agent-run":
-            from . import agent
-            command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
-            return agent.run_and_record(paths, args.name, command, as_json=args.json)
-        elif args.command == "agent-status":
-            from . import agent
-            print(agent.dumps(agent.status(paths, problems(paths))))
         elif args.command == "space":
             free = _free_gib(paths)
             if free < args.need_gib:

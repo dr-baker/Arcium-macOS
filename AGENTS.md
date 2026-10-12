@@ -7,14 +7,16 @@ commit and owns the macOS product, packaging, signing, resources, and platform
 integration. Shared browser behavior belongs in core.
 
 The development tooling stays close to upstream Helium's `dev.sh`: every
-upstream `he` command keeps its meaning, and agents use `he agent ...`.
+upstream `he` command keeps its meaning. Agents prefix every `he` command with
+`he agent`, which adds guards to builds and installs.
 
 ## Where to go
 
 - `helium-chromium/` - pinned Arcium core and shared patches.
 - `patches/` - macOS-only Quilt patches.
-- `docs/building.md` - read before building, patch authoring, or runtime testing.
-- `docs/agents.md` - read before using a shared build dir or coordinating parallel work.
+- `docs/agent-workflow.md` - read before running any `he` command: which command fits each task, the agent guards, runtime modes, proof gates.
+- `docs/parallel-work.md` - read before dispatching parallel agents or working as one.
+- `docs/building.md` - the human build guide; setup, new patches, Chromium updates.
 - `docs/development-changes.md` - why the tooling differs from upstream Helium's.
 - `devutils/he/`, `devutils/arcium/` - tooling behind `he`; `devutils/tests/` covers it.
 - `devutils/scenarios/` - repeatable behavior-test contracts.
@@ -26,18 +28,18 @@ upstream `he` command keeps its meaning, and agents use `he agent ...`.
 - Commit shared patches in core first, then advance the outer gitlink.
 - Add Daniel-owned behavior in feature-scoped `patches/personal/*.patch` files.
   The merged catalog in a build dir is generated.
-- In a shared build dir, run `he agent` commands, never raw `autoninja`,
-  `ninja`, or `quilt push`. One integrator owns the shared build dir.
+- Run patch and build work through `he agent ...` so the build-dir lock and
+  timestamp checks see it. One integrator owns a shared build dir.
 - Before a runtime handoff, clarify build only, installed app, or isolated
   testing if the session has not established it.
-- Report replay, compilation, packaging, launch, and behavior separately.
+- Report proof gates separately, as `docs/agent-workflow.md` lists them.
 - Push to an upstream repository only when Daniel asks.
 
 ## Vocabulary
 
 - **Arcium core** - the shared browser product pinned by this repository.
 - **Build dir** - one directory holding Chromium source, the merged catalog, and output (`HELIUM_BUILD_DIR`).
-- **Scratch** - a copy-on-write clone of a build dir's source for patch authoring; it cannot build.
+- **Scratch** - copy-on-write clones of the files a build dir's patches own, for patch authoring; it cannot build.
 - **Integrator** - the named owner of the shared build dir and combined validation.
 - **Timestamp keeper** - restores original times on byte-identical files after pop and push.
 - **Scenario contract** - repeatable steps, profile, and expected behavior for a test.

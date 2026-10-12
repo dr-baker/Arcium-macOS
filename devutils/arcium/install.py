@@ -1,15 +1,18 @@
 """Install the current build as /Applications/Arcium.app and launch it.
 
-`he arcium` installs while Arcium is closed. `he arcium iterate` prepares the
-replacement first, asks the running Arcium to quit normally, then swaps and
-relaunches. Neither forces a quit, and neither touches profile data: the
+`he arcium` prepares the replacement first; if Arcium is running it then asks
+it to quit normally, and swaps and relaunches. It never forces a quit and
+never touches profile data: the
 persistent profile is created once from the Helium profile and then left
 alone. Before the new bundle is published, a failure restores the previous
 one. After publication there is no automatic rollback, because the new
 version may already have opened and migrated the profile; both bundles are
 kept and reported.
 
-Usage: python3 -m arcium.install --build-dir DIR {install,iterate,status} [--json]
+Usage: python3 -m arcium.install --build-dir DIR {install,status} [--json] [--no-launch] [--approved]
+
+Under the `he agent` prefix (HELIUM_AGENT_MODE=1), restarting a running
+Arcium needs --approved, because it interrupts the browser in use.
 """
 
 from __future__ import annotations
@@ -178,7 +181,7 @@ def _launch(app: Path, profile: Path) -> tuple[int, Path]:
     return process.pid, log
 
 
-def update(out_dir: Path, *, restart: bool, launch: bool = True) -> dict:
+def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict:
     app = install_path()
     profile = arcium_profile()
     with install_lock():
@@ -187,8 +190,9 @@ def update(out_dir: Path, *, restart: bool, launch: bool = True) -> dict:
         if owner is not None:
             if owner["others"]:
                 raise ArciumError(f"other Arcium instances are running from {app} (pids {owner['others']}); quit them first")
-            if not restart:
-                raise ArciumError(f"Arcium is running (pid {owner['pid']}); quit it or use he arcium iterate")
+            if not approved:
+                raise ArciumError(f"Arcium is running (pid {owner['pid']}) and would be restarted; "
+                                  "pass --approved if the session has authorized that")
             if not owner["installed"]:
                 raise ArciumError(f"the Arcium profile is owned by {owner['executable']}, not {app}; quit it first")
             if owner["mock_keychain"]:
@@ -259,7 +263,8 @@ def status() -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="he arcium")
     parser.add_argument("--build-dir", required=True, type=Path)
-    parser.add_argument("action", choices=("install", "iterate", "status"))
+    parser.add_argument("action", choices=("install", "status"))
+    parser.add_argument("--approved", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-launch", action="store_true")
     args = parser.parse_args(argv)
@@ -267,8 +272,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "status":
             result = status()
         else:
+            agent = os.environ.get("HELIUM_AGENT_MODE") == "1"
             result = update(args.build_dir.resolve() / "src" / "out" / "Default",
-                            restart=args.action == "iterate", launch=not args.no_launch)
+                            launch=not args.no_launch, approved=args.approved or not agent)
     except HeError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

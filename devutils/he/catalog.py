@@ -19,7 +19,7 @@ import tempfile
 from typing import Iterator
 
 from . import quilt, records
-from .common import HeError, Paths, read_json, sha256_bytes, write_atomic, write_json
+from .common import sha256_file, HeError, Paths, read_json, sha256_bytes, write_atomic, write_json
 
 MANIFEST = "manifest.json"
 
@@ -82,9 +82,26 @@ def require_popped(paths: Paths, action: str) -> None:
         raise HeError(f"{action} needs a fully popped stack; run he pop first")
 
 
-def merge(paths: Paths) -> None:
+def unsaved(paths: Paths) -> list[str]:
+    """Lane patches refreshed or created since he merge and not saved back."""
+    if not (paths.catalog / MANIFEST).is_file():
+        return []
+    current = manifest(paths)
+    names = []
+    for name in quilt.read_list(paths.catalog / "series.merged"):
+        copy = paths.catalog / name
+        baseline = current.get("hashes", {}).get(name)
+        if copy.is_file() and (baseline is None or sha256_file(copy) != baseline):
+            names.append(name)
+    return names
+
+
+def merge(paths: Paths, *, discard: bool = False) -> None:
     """Copy both authoritative catalogs into the build dir."""
     require_popped(paths, "he merge")
+    if not discard and (pending := unsaved(paths)):
+        raise HeError("these lane patches were refreshed or created but not saved back: "
+                      + ", ".join(pending) + "; run he unmerge to save them, or he merge --discard to drop them")
     paths.state.mkdir(parents=True, exist_ok=True)
     with authoritative_lock(paths):
         state = _authoritative(paths)
@@ -132,11 +149,11 @@ def drift(paths: Paths) -> list[str]:
         return [f"cannot read authoritative catalogs: {error}"]
     if sha256_bytes(state["core_series"]) != current.get("core_series_sha256") or \
             sha256_bytes(state["outer_series"]) != current.get("outer_series_sha256"):
-        problems.append("series order or membership changed in the worktree")
+        problems.append("series order or membership changed in the worktree; run he pop, he merge, he push")
     hashes = current.get("hashes", {})
     for name, content in state["contents"].items():
         if name in hashes and hashes[name] != sha256_bytes(content):
-            problems.append(f"{name} changed in the worktree")
+            problems.append(f"{name} changed in the worktree; run he pop, he merge, he push")
     return problems
 
 

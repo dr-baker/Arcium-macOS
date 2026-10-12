@@ -1,10 +1,10 @@
-"""The agent path, `he agent ...`: the same commands with stricter checks.
+"""Checks behind the `he agent` prefix, and the state behind `he check --json`.
 
-A human never meets these checks unless they type `he agent`. Agents get:
-- a dry-run edge budget on builds, overridden only with --approved;
-- refusal to build while a timestamp snapshot is pending;
-- `he check` problems as errors instead of warnings;
-- one JSON result per command in .arcium/agent/last-<command>.json.
+`he agent CMD` runs any he command. Two get stricter: `build` refuses a
+broad dry-run plan without --approved, refuses while a timestamp snapshot is
+pending, and refuses when `he check` reports problems; `arcium` refuses to
+restart a running Arcium without --approved (see arcium.install). A human
+never meets these checks without typing `he agent`.
 """
 
 from __future__ import annotations
@@ -69,49 +69,6 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
     return edges
 
 
-def record_result(paths: Paths, command: str, status: int, seconds: float, log: Path | None, extra: dict) -> dict:
-    lines = log.read_text(errors="replace").splitlines() if log and log.is_file() else []
-    errors = [line for line in lines if re.search(r"\b(error|failed|FAILED)\b", line)][:20]
-    result = {"command": command, "outcome": "ok" if status == 0 else "failed", "exit_status": status,
-              "seconds": round(seconds, 1), "first_errors": errors, "finished_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-              "build_dir": str(paths.build_dir), "worktree": str(paths.worktree), **extra}
-    write_json(paths.state / "agent" / f"last-{command}.json", result)
-    return result
-
-
-def run_and_record(paths: Paths, name: str, argv: list[str], *, as_json: bool) -> int:
-    """Run one agent action, echo its output, and record a JSON result."""
-    import sys
-    import tempfile
-    import threading
-
-    started = time.monotonic()
-    with tempfile.NamedTemporaryFile("w+b", prefix="he-agent-", delete=False) as log:
-        log_path = Path(log.name)
-    lock = threading.Lock()
-    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    def copy(stream, sink):
-        for chunk in iter(lambda: stream.readline(), b""):
-            sink.write(chunk)
-            sink.flush()
-            with lock, log_path.open("ab") as handle:
-                handle.write(chunk)
-
-    threads = [threading.Thread(target=copy, args=(process.stdout, sys.stdout.buffer)),
-               threading.Thread(target=copy, args=(process.stderr, sys.stderr.buffer))]
-    for thread in threads:
-        thread.start()
-    status = process.wait()
-    for thread in threads:
-        thread.join()
-    result = record_result(paths, name, status, time.monotonic() - started, log_path, {})
-    log_path.unlink(missing_ok=True)
-    if as_json:
-        print(dumps(result))
-    return status
-
-
 def status(paths: Paths, problems: list[str]) -> dict:
     series = quilt.read_list(paths.catalog / "series.merged")
     applied = quilt.applied(paths.src)
@@ -130,7 +87,6 @@ def status(paths: Paths, problems: list[str]) -> dict:
         "problems": problems,
         "scratches": sorted(p.name for p in scratch_root.iterdir()) if scratch_root.is_dir() else [],
         "running_dev_profiles": running,
-        "last_results": sorted(p.name for p in (paths.state / "agent").glob("last-*.json")),
     }
 
 

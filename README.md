@@ -20,7 +20,7 @@ features belong in Arcium core.
 | How do I migrate an existing profile and recover if it fails? | [Daily-driver migration](docs/arc-daily-driver-migration.md) |
 | How do I author patches and build the product? | [Build guide](docs/building.md) |
 | Why does the tooling differ from upstream Helium's? | [Development changes](docs/development-changes.md) |
-| How should coding agents work in parallel? | [Working with agents](docs/agents.md) |
+| How should coding agents use the tooling? | [Agent workflow](docs/agent-workflow.md) and [parallel work](docs/parallel-work.md) |
 | How does native Settings integrate with the browser and renderer? | [SettingsUI integration](docs/settingsui-integration.md) |
 | Which saved preference and runtime consumer backs each control? | [Native settings bindings](docs/native-settings-bindings.md) |
 | What happens when a feature is turned off or unavailable? | [Feature settings contracts](docs/feature-settings-audit.md) |
