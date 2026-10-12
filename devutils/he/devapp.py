@@ -96,7 +96,7 @@ def prepare_bundle(paths: Paths, label: str | None) -> Path:
             return target
         except HeError:
             current = False
-    if target.exists() and apps.processes_in(target):
+    if target.exists() and apps.browser_processes_in(target):
         raise HeError(f"{target.name} is running an older build; he stop its profile first")
     suffix = bundle_id[len("net.imput.helium"):]
     staging = out / f".{app_name}.staging-{uuid.uuid4().hex}"

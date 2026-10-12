@@ -219,7 +219,7 @@ def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict
                     raise ArciumError("Arcium did not finish quitting; close any open dialog and retry. "
                                       "Nothing was replaced")
             # Helpers can outlive the main process briefly; wait for all of them.
-            if app.is_dir() and not apps.wait_for_exit(apps.processes_in(app), QUIT_TIMEOUT):
+            if app.is_dir() and not apps.wait_for_exit(apps.browser_processes_in(app), QUIT_TIMEOUT):
                 raise ArciumError(f"processes from {app} are still running; nothing was replaced")
             if (late := running(app, profile)) is not None:
                 raise ArciumError(f"the Arcium profile is in use again (pid {late['pid']}); nothing was replaced")
@@ -270,7 +270,7 @@ def status(out_dir: Path | None = None) -> dict:
         result["signature_ok"] = True
     except HeError as error:
         result.update(signature_ok=False, problem=str(error))
-    details = subprocess.run(["/usr/bin/codesign", "-dv", str(app)], capture_output=True, text=True, check=False).stderr
+    details = subprocess.run(["/usr/bin/codesign", "-dvv", str(app)], capture_output=True, text=True, check=False).stderr
     result["signed_by"] = next((line.split("=", 1)[1] for line in details.splitlines() if line.startswith("Authority=")),
                                "ad hoc" if "adhoc" in details else None)
     result["running"] = running(app, arcium_profile())

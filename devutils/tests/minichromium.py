@@ -230,6 +230,10 @@ class MiniChromium:
                 plistlib.dump({"CFBundleExecutable": executable, "CFBundleIdentifier": identifier,
                                "CFBundleName": executable, "CFBundleDisplayName": executable,
                                "CFBundlePackageType": "APPL"}, handle)
+        helpers = app / "Contents" / "Helpers"
+        helpers.mkdir(parents=True, exist_ok=True)
+        (work / "sleeper.c").write_text("#include <unistd.h>\nint main(void) { for (;;) pause(); }\n")
+        run(["clang", "-o", str(helpers / "chrome_crashpad_handler"), str(work / "sleeper.c")])
         for name in ("libone", "libtwo"):
             (work / f"{name}.c").write_text(f"int {name}(void) {{ return 1; }}\n")
             run(["clang", "-dynamiclib", "-o", str(self.out / f"{name}.dylib"), str(work / f"{name}.c")])

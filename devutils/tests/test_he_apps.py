@@ -236,6 +236,15 @@ class AppsTest(unittest.TestCase):
         refused = self.m.he("run", "--profile", "linked", check=False)
         self.assertIn("symlink", refused.stderr)
 
+    def test_a_lingering_crash_handler_does_not_block_an_update(self) -> None:
+        self._seed_helium_profile()
+        self.m.he("arcium", "--no-launch", "--no-build", **self.arcium_env)
+        handler = self.install / "Contents/Helpers/chrome_crashpad_handler"
+        crashpad = subprocess.Popen([str(handler), "--monitor-self"])
+        self.addCleanup(lambda: (crashpad.kill(), crashpad.wait()))
+        time.sleep(0.3)
+        self.m.he("arcium", "--no-build", **self.arcium_env)
+
     def test_install_refuses_other_instances_of_the_installed_app(self) -> None:
         self._seed_helium_profile()
         self.m.he("arcium", "--no-launch", "--no-build", **self.arcium_env)

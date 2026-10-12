@@ -85,8 +85,10 @@ def status(paths: Paths, problems: list[str]) -> dict:
     profiles = Path.home() / "Library" / "Application Support" / "Helium Development" / "profiles"
     running = []
     for profile in sorted(profiles.glob("*/*")) + [Path.home() / "Library" / "Application Support" / "net.imput.helium.dev"]:
-        if (pid := apps.profile_owner(profile)) is not None:
-            running.append({"profile": str(profile), "pid": pid, "executable": apps.process_path(pid)})
+        pid = apps.profile_owner(profile)
+        # A stale lock can name a pid now reused by an unrelated process.
+        if pid is not None and "/Helium Dev" in (path := apps.process_path(pid) or "") and apps.uses_profile(pid, profile):
+            running.append({"profile": str(profile), "pid": pid, "executable": path})
     return {
         "worktree": str(paths.worktree),
         "build_dir": str(paths.build_dir),

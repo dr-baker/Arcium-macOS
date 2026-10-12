@@ -215,9 +215,19 @@ def processes_in(bundle: Path) -> list[int]:
 
 
 def main_processes_in(bundle: Path) -> list[int]:
-    """Browser main processes (not helpers) running from `bundle`."""
-    lines = command_lines()
-    return [pid for pid in processes_in(bundle) if not re.search(r"(?:^|\s)--type=", lines.get(pid, ""))]
+    """Browser main processes running from `bundle`: its main executable, not
+    helpers or the crash handler."""
+    try:
+        main = str(executable(bundle).resolve())
+    except HeError:
+        return []
+    return [pid for pid in processes_in(bundle) if process_path(pid) == main]
+
+
+def browser_processes_in(bundle: Path) -> list[int]:
+    """Main and helper processes from `bundle`. Crashpad's handler is left out:
+    it is not tied to one browser process and is safe to leave running."""
+    return [pid for pid in processes_in(bundle) if not (process_path(pid) or "").endswith("/chrome_crashpad_handler")]
 
 
 def uses_profile(pid: int, user_data_dir: Path) -> bool:
