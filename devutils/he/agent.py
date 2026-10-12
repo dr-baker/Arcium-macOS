@@ -62,10 +62,19 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
     result = subprocess.run(command, cwd=paths.src, env=environment, capture_output=True, text=True, check=False)
     if result.returncode:
         raise HeError(f"dry run failed:\n{(result.stdout + result.stderr).strip()[-2000:]}")
-    edges = planned_edges(result.stdout + result.stderr)
+    output = result.stdout + result.stderr
+    edges = planned_edges(output)
     if edges > budget and not approved:
-        raise HeError(f"this build plans {edges} edges, above the budget of {budget}; "
-                      "rerun with --approved if the work justifies it, or raise --edge-budget")
+        plan = paths.state / "last-plan.txt"
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        plan.write_text(output, errors="replace")
+        commands = [line for line in output.splitlines() if line.strip() and not _SISO_NOISE.match(line)
+                    and not line.startswith(("depot_tools/", "ninja:", "offline mode", "build finished", "local:", "fs:"))]
+        sample = "\n  ".join(line[:160] for line in commands[:8])
+        raise HeError(f"this build plans {edges} edges, above the budget of {budget}.\n"
+                      f"First planned commands:\n  {sample}\n"
+                      f"Full dry run: {plan}. Siso records why each step is dirty in {out / 'siso_explain'}.\n"
+                      "Fix the cause, or rerun with --approved if the breadth is expected.")
     return edges
 
 

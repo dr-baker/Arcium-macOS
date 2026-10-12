@@ -286,6 +286,8 @@ class AppsTest(unittest.TestCase):
         (self.m.src / "b.cc").touch()
         refused = self.m.he("agent", "build", "chrome", "--edge-budget", "1", check=False)
         self.assertIn("above the budget", refused.stderr)
+        self.assertIn("First planned commands", refused.stderr)
+        self.assertTrue((self.m.build_dir / ".arcium" / "last-plan.txt").is_file())
         self.m.he("agent", "build", "chrome", "--edge-budget", "1", "--approved")
         self.assertIn("--approved belongs to he agent build", self.m.he("build", "--approved", check=False).stderr)
 
