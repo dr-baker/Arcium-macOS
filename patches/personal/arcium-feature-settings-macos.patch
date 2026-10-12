@@ -48,47 +48,6 @@ Index: src/chrome/browser/prefs/browser_prefs.cc
    QuitWithAppsController::RegisterPrefs(registry);
    system_media_permissions::RegisterSystemMediaPermissionStatesPrefs(registry);
    AppShimRegistry::Get()->RegisterLocalPrefs(registry);
-Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
-===================================================================
---- src.orig/chrome/browser/ui/cocoa/arcium_settings_model.cc
-+++ src/chrome/browser/ui/cocoa/arcium_settings_model.cc
-@@ -45,12 +45,15 @@ constexpr char kSharedPaletteDarkChromeC
- constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
- constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
- 
--constexpr std::array<std::string_view, 32> kProfilePreferences = {
-+constexpr std::array<std::string_view, 35> kProfilePreferences = {
-     prefs::kRestoreOnStartup,
-     prefs::kPromptForDownload,
-     prefs::kHeliumLittleArcExternalLinks,
-+    prefs::kHeliumPeekEnabled,
-+    prefs::kArciumOmniboxPersistentItemsEnabled,
-     prefs::kNewTabNextToActive,
-     prefs::kTabCyclingMRU,
-+    prefs::kArciumAutoPictureInPictureEnabled,
-     prefs::kShiftRightClickContextMenu,
-     prefs::kHeliumLayout,
-     prefs::kVerticalTabsUncollapsedWidth,
-@@ -380,11 +383,14 @@ ArciumSettingsModel::ArciumSettingsModel
-   }
-   if (local_state_) {
-     local_pref_change_registrar_.Init(local_state_);
--    if (local_state_->FindPreference(prefs::kConfirmToQuitEnabled)) {
--      local_pref_change_registrar_.Add(
--          prefs::kConfirmToQuitEnabled,
--          base::BindRepeating(&ArciumSettingsModel::OnLocalPreferenceChanged,
--                              base::Unretained(this)));
-+    for (std::string_view name : {prefs::kConfirmToQuitEnabled,
-+                                  prefs::kArciumShowSpacesInDockMenu}) {
-+      if (local_state_->FindPreference(name)) {
-+        local_pref_change_registrar_.Add(
-+            name,
-+            base::BindRepeating(&ArciumSettingsModel::OnLocalPreferenceChanged,
-+                                base::Unretained(this)));
-+      }
-     }
-   }
- }
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
@@ -146,7 +105,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          newTabNextToActive = boolean(dictionary["newTabNextToActive"])
          tabCyclingMRU = boolean(dictionary["tabCyclingMRU"])
          shiftRightClickContextMenu = boolean(dictionary["shiftRightClickContextMenu"])
-@@ -490,6 +507,19 @@ struct ArciumSettingsSnapshot: Equatable
+@@ -514,6 +531,19 @@ struct ArciumSettingsSnapshot: Equatable
      var appearance: ArciumAppearanceSnapshot
      var shortcuts: ArciumShortcutsSnapshot
  
@@ -166,7 +125,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      init(dictionary: NSDictionary) {
          let values = dictionaryValues(dictionary)
          available = boolean(values["available"], defaultValue: false)
-@@ -843,13 +873,21 @@ final class ArciumSettingsStore: Observa
+@@ -874,13 +904,21 @@ final class ArciumSettingsStore: Observa
          switch key {
          case "prompt_for_download": snapshot.general.promptForDownload
          case "little_arc_external_links": snapshot.general.littleArcExternalLinks
@@ -268,7 +227,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                          )
                      )
                  }
-@@ -589,6 +637,27 @@ private struct AppearanceSettingsPage: V
+@@ -587,6 +635,27 @@ private struct AppearanceSettingsPage: V
                      }
                  }
              }
@@ -480,9 +439,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "base/logging.h"
  #include "base/strings/sys_string_conversions.h"
 @@ -37,8 +38,10 @@
- #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
- #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
  #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/helium/arcium_settings_model.h"
+ #include "chrome/browser/ui/helium/arcium_settings_prefs.h"
 +#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
  #include "chrome/browser/ui/helium/helium_space_service.h"
@@ -656,18 +615,3 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    }
  
    if ([key isEqualToString:kKeyNewTabNextToActive] &&
-Index: src/chrome/common/pref_names.h
-===================================================================
---- src.orig/chrome/common/pref_names.h
-+++ src/chrome/common/pref_names.h
-@@ -762,6 +762,10 @@ inline constexpr char kShowVerticalTabsC
- inline constexpr char kShowDynamicNewTabButton[] =
-     "helium.browser.show_dynamic_new_tab_button";
- 
-+// When true, the macOS Dock menu includes Spaces from all browser profiles.
-+inline constexpr char kArciumShowSpacesInDockMenu[] =
-+    "arcium.dock_menu.show_spaces";
-+
- // A boolean pref set to true if Gemini integration be enabled. This is managed
- // by enterprise policy.
- inline constexpr char kGeminiSettings[] = "browser.gemini_settings";
