@@ -7356,7 +7356,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 +
 +This snapshot is copied from committed package revisions for offline SwiftPM builds.
 +
-+- SettingsUI: `/Users/daniel/Developer/SettingsUI`, revision `164b8920aa7fd388d560d3e7e706f65e477d21ff`.
++- SettingsUI: local `SettingsUI` checkout, revision `164b8920aa7fd388d560d3e7e706f65e477d21ff`.
 +- ColorTokensKit-Swift: revision `cba1f4c857412f9f241efce4ce79302c487710f2`, package version `0.3.0`.
 +- SettingsUI manifest delta: replace the exact remote ColorTokensKit dependency with `.package(path: "../ColorTokensKit-Swift")`. No other upstream manifest field is changed.
 +- SettingsUI has no tracked LICENSE file at the source revision; its README is retained. ColorTokensKit's `MIT-LICENSE.txt` is retained.

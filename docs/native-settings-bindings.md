@@ -7,7 +7,7 @@ The mapping originated in the generated source audit at outer `607bdd4` and
 core `6a31ba3c`. Its numeric line references are historical navigation aids;
 locate the named symbols in the selected source when reviewing a later revision.
 Historical runtime results and their original source attribution are retained in the
-[implementation history](audits/settings-implementation-history.md#native-binding-audit-provenance).
+implementation history (on the `archive/dated-docs-2026-10-11` branch).
 
 ## Control to consumer mapping
 
@@ -366,14 +366,14 @@ menu item, including its Close Tab and Close Window behavior.
 This reference identifies saved values and runtime consumers. It does not claim
 that every row, policy, layout, or device interaction was live-tested. The
 sidebar navigation follow-up passed build checks and the bounded live checks
-recorded in the [changelog](changelog-2026-10-03.md#sidebar-navigation-validation-and-remaining-gaps).
+recorded in the changelog (on the `archive/dated-docs-2026-10-11` branch).
 That record also identifies unverified behavior and incomplete fixture cleanup. The
 [feature settings acceptance plan](feature-settings-audit.md#acceptance-checks)
 contains reusable checks. Historical observations retain their original bundle
-and profile in the [implementation history](audits/settings-implementation-history.md).
-The [October 3 changelog](changelog-2026-10-03.md#validation-and-known-gaps)
+and profile in the implementation history (on the `archive/dated-docs-2026-10-11` branch).
+The October 3 changelog (on the `archive/dated-docs-2026-10-11` branch)
 records the accepted product scope, including the completed selector-accent
 check and three human-waived live checks that remain unverified. Its separate
-[October 4 follow-up](changelog-2026-10-03.md#october-4-follow-up) records the
+October 4 follow-up (on the `archive/dated-docs-2026-10-11` branch) records the
 top-pin, decorative-availability, and Size-reopen checks. Glow edge
 discoloration remains unresolved.

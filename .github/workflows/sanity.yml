@@ -35,7 +35,9 @@ jobs:
       with:
         python-version: '3.14'
     - name: Install test dependencies
-      run: python3 -m pip install --disable-pip-version-check --requirement requirements-dev.txt
+      run: |
+        python3 -m pip install --disable-pip-version-check --requirement requirements-dev.txt
+        brew install quilt ninja
     - name: Run devutils unit tests
       run: |
         python3 -m unittest discover --start-directory devutils/tests --pattern 'test*.py'

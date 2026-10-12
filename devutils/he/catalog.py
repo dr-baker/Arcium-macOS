@@ -1,0 +1,298 @@
+"""The lane copy of the merged patch catalog.
+
+Upstream's `he merge` copies core patches into the outer `patches/` directory
+in git. Here the merged view lives in `<build dir>/.arcium/patches`, so one
+build dir can serve any source worktree and nothing generated lands in git.
+The layout and `manifest.json` (schema 1) match the previous tooling, so
+existing build dirs keep working.
+"""
+
+from __future__ import annotations
+
+from contextlib import contextmanager
+import fcntl
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+from typing import Iterator
+
+from . import quilt, records
+from .common import sha256_file, HeError, Paths, read_json, sha256_bytes, write_atomic, write_json
+
+MANIFEST = "manifest.json"
+
+
+@contextmanager
+def authoritative_lock(paths: Paths) -> Iterator[None]:
+    """Serialize writes to authoritative catalogs across every build dir."""
+    result = subprocess.run(
+        ["git", "-C", str(paths.worktree), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode or not result.stdout.strip():
+        raise HeError(f"{paths.worktree} is not a git checkout")
+    # Same file name as the previous tooling, so old and new exclude each other.
+    lock = Path(result.stdout.strip()) / "arcium-authoritative.lock"
+    with lock.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+
+
+def _authoritative(paths: Paths) -> dict:
+    core_series = (paths.core_patches / "series").read_bytes()
+    outer_series = (paths.outer_patches / "series").read_bytes()
+    core = quilt.read_list(paths.core_patches / "series")
+    outer = quilt.read_list(paths.outer_patches / "series")
+    overlap = sorted(set(core) & set(outer))
+    if overlap:
+        raise HeError("core and macOS patch catalogs both list: " + ", ".join(overlap))
+    contents, owners = {}, {}
+    for owner, root, names in (("core", paths.core_patches, core), ("outer", paths.outer_patches, outer)):
+        for name in names:
+            path = root / name
+            if not path.is_file() or path.is_symlink():
+                raise HeError(f"{owner} series lists a missing patch: {name}")
+            contents[name] = path.read_bytes()
+            owners[name] = owner
+    return {"core": core, "outer": outer, "core_series": core_series,
+            "outer_series": outer_series, "contents": contents, "owners": owners}
+
+
+def _merged_series(core_series: bytes, outer_series: bytes) -> bytes:
+    if core_series and not core_series.endswith(b"\n"):
+        core_series += b"\n"
+    return core_series + outer_series
+
+
+def manifest(paths: Paths) -> dict:
+    value = read_json(paths.catalog / MANIFEST)
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise HeError(f"no patch catalog in {paths.build_dir}; run he merge")
+    return value
+
+
+def owner_path(paths: Paths, owner: str, name: str) -> Path:
+    return (paths.core_patches if owner == "core" else paths.outer_patches) / name
+
+
+def require_popped(paths: Paths, action: str) -> None:
+    if quilt.applied(paths.src):
+        raise HeError(f"{action} needs a fully popped stack; run he pop first")
+
+
+def unsaved(paths: Paths) -> list[str]:
+    """Lane patches refreshed or created since he merge and not saved back."""
+    if not (paths.catalog / MANIFEST).is_file():
+        return []
+    current = manifest(paths)
+    names = []
+    for name in quilt.read_list(paths.catalog / "series.merged"):
+        copy = paths.catalog / name
+        baseline = current.get("hashes", {}).get(name)
+        if copy.is_file() and (baseline is None or sha256_file(copy) != baseline):
+            names.append(name)
+    return names
+
+
+def merge(paths: Paths, *, discard: bool = False) -> None:
+    """Copy both authoritative catalogs into the build dir."""
+    require_popped(paths, "he merge")
+    if not discard and (pending := unsaved(paths)):
+        raise HeError("these lane patches were refreshed or created but not saved back: "
+                      + ", ".join(pending) + "; run he unmerge to save them, or he merge --discard to drop them")
+    paths.state.mkdir(parents=True, exist_ok=True)
+    with authoritative_lock(paths):
+        state = _authoritative(paths)
+        staging = Path(tempfile.mkdtemp(prefix=".patches-", dir=paths.state))
+        try:
+            for name, content in state["contents"].items():
+                (staging / name).parent.mkdir(parents=True, exist_ok=True)
+                (staging / name).write_bytes(content)
+            (staging / "series.prepend").write_bytes(state["core_series"])
+            (staging / "series.orig").write_bytes(state["outer_series"])
+            (staging / "series.merged").write_bytes(_merged_series(state["core_series"], state["outer_series"]))
+            write_json(staging / MANIFEST, {
+                "schema_version": 1,
+                "core": list(state["core"]),
+                "outer": list(state["outer"]),
+                "owners": state["owners"],
+                "hashes": {name: sha256_bytes(data) for name, data in state["contents"].items()},
+                "core_series_sha256": sha256_bytes(state["core_series"]),
+                "outer_series_sha256": sha256_bytes(state["outer_series"]),
+            })
+            old = None
+            if paths.catalog.exists():
+                old = paths.catalog.with_name(f".patches-old-{os.getpid()}")
+                os.replace(paths.catalog, old)
+            os.replace(staging, paths.catalog)
+            if old is not None:
+                shutil.rmtree(old, ignore_errors=True)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+    # A fully popped tree may still point at an older catalog location.
+    pc_pointer = paths.src / ".pc" / ".quilt_patches"
+    if pc_pointer.exists() and quilt.pointer(paths.src) != paths.catalog:
+        write_atomic(pc_pointer, f"{paths.catalog}\n".encode())
+    records.clear_applied(paths)
+
+
+def drift(paths: Paths) -> list[str]:
+    """How the lane copy differs from the selected worktree's catalogs."""
+    current = manifest(paths)
+    problems = []
+    try:
+        state = _authoritative(paths)
+    except (OSError, HeError) as error:
+        return [f"cannot read authoritative catalogs: {error}"]
+    if sha256_bytes(state["core_series"]) != current.get("core_series_sha256") or \
+            sha256_bytes(state["outer_series"]) != current.get("outer_series_sha256"):
+        problems.append("series order or membership changed in the worktree; run he pop, he merge, he push")
+    hashes = current.get("hashes", {})
+    for name, content in state["contents"].items():
+        if name in hashes and hashes[name] != sha256_bytes(content):
+            problems.append(f"{name} changed in the worktree; run he pop, he merge, he push")
+    return problems
+
+
+def _style(patch: bytes, override: str | None) -> list[str]:
+    """Keep the authoritative patch's header convention when refreshing."""
+    style = override
+    if style is None:
+        if patch.startswith(b"Index: src/") or b"\nIndex: src/" in patch:
+            style = "p1"
+        elif patch.startswith(b"--- a/") or b"\n--- a/" in patch:
+            style = "ab"
+        else:
+            raise HeError("could not tell this patch's header style; pass --style p1 or --style ab")
+    return ["-p", "1"] if style == "p1" else ["-p", "ab", "--no-index"]
+
+
+def _check_export(paths: Paths, current: dict, name: str, content: bytes) -> Path | None:
+    """The owning file to write, None if it already holds `content`.
+
+    Refuses if the owning file changed since `he merge` to anything else.
+    Accepting an owner that already matches makes a retried export safe.
+    """
+    owner = current["owners"].get(name)
+    if owner not in ("core", "outer"):
+        raise HeError(f"{name} has no authoritative owner")
+    target = owner_path(paths, owner, name)
+    existing = target.read_bytes() if target.is_file() else None
+    if existing == content:
+        return None
+    if existing is None or sha256_bytes(existing) != current["hashes"].get(name):
+        raise HeError(f"{target} changed since he merge; reconcile it, then he pop; he merge; he push")
+    return target
+
+
+def save_patch(paths: Paths, style: str | None = None) -> str:
+    """Refresh the top patch and write it back to its owning repository."""
+    current = manifest(paths)
+    applied = quilt.applied(paths.src)
+    if not applied:
+        raise HeError("no patch is applied")
+    top = applied[-1]
+    owner = current["owners"].get(top)
+    if owner is None:
+        raise HeError(f"{top} is not in the merged catalog; create new patches in the authoritative series")
+    with authoritative_lock(paths):
+        target = owner_path(paths, owner, top)
+        lane = (paths.catalog / top).read_bytes()
+        authoritative = target.read_bytes() if target.is_file() else b""
+        # The owner may already hold the lane copy if a previous save stopped
+        # before updating the manifest.
+        if authoritative != lane and sha256_bytes(authoritative) != current["hashes"].get(top):
+            raise HeError(f"{target} changed since he merge; reconcile it before saving")
+        environment = {k: v for k, v in os.environ.items()
+                       if k not in ("QUILT_DIFF_ARGS", "QUILT_REFRESH_ARGS", "QUILT_NO_DIFF_INDEX")}
+        environment.update(QUILT_PATCHES=str(paths.catalog), QUILT_SERIES="series.merged")
+        result = subprocess.run(
+            ["quilt", "--quiltrc", "-", "refresh", "--no-timestamps", *_style(authoritative or lane, style)],
+            cwd=paths.src, env=environment, capture_output=True, text=True, check=False,
+        )
+        if result.returncode:
+            raise HeError((result.stdout + result.stderr).strip() or f"quilt refresh failed for {top}")
+        refreshed = (paths.catalog / top).read_bytes()
+        from . import scratch
+        if (created := scratch.created_files_in_parent(paths, paths.catalog / top)):
+            raise HeError(f"{top} would create files that already exist in the shared tree: {', '.join(created)}; "
+                          "run he scratch-pull for them before quilt add, then edit again")
+        if authoritative != refreshed:
+            write_atomic(target, refreshed)
+        current["hashes"][top] = sha256_bytes(refreshed)
+        write_json(paths.catalog / MANIFEST, current)
+    records.sync_applied(paths, rebaseline=(top,))
+    return top
+
+
+def unmerge(paths: Paths) -> list[str]:
+    """Upstream's unmerge: write lane edits back, then drop the merged view.
+
+    Refreshed patches go back to their owners. Patches added to series.merged
+    with `quilt new` go to the macOS catalog, after the nearest preceding
+    macOS patch. Every conflict is found before anything is written, and a
+    retried unmerge does not duplicate work. While patches are applied the
+    catalog stays in place.
+    """
+    if not (paths.catalog / MANIFEST).is_file():
+        return []
+    current = manifest(paths)
+    merged = quilt.read_list(paths.catalog / "series.merged")
+    known = set(current["owners"])
+    removed = sorted(known - set(merged))
+    if removed:
+        raise HeError("series.merged dropped patches; remove them from their owning series by hand: " + ", ".join(removed))
+    written = []
+    with authoritative_lock(paths):
+        writes = []
+        for name in merged:
+            content = (paths.catalog / name).read_bytes()
+            if name in known:
+                if sha256_bytes(content) == current["hashes"][name]:
+                    continue
+                target = _check_export(paths, current, name, content)
+            else:
+                target = paths.outer_patches / name
+                if target.exists() and target.read_bytes() != content:
+                    raise HeError(f"{target} already exists with other content")
+                if target.exists():
+                    target = None
+            writes.append((name, target, content))
+
+        outer_series = paths.outer_patches / "series"
+        lines = outer_series.read_text(encoding="utf-8").splitlines()
+        listed = {quilt.read_list_line(line) for line in lines} - {None}
+        new = [name for name in merged if name not in known]
+        for name in new:
+            if name in listed:
+                continue
+            previous = [n for n in merged[: merged.index(name)] if current["owners"].get(n) == "outer" or n in new]
+            index = 0
+            for anchor in reversed(previous):
+                positions = [i for i, line in enumerate(lines) if quilt.read_list_line(line) == anchor]
+                if positions:
+                    index = positions[0] + 1
+                    break
+            lines.insert(index, name)
+            listed.add(name)
+
+        for name, target, content in writes:
+            if target is not None:
+                write_atomic(target, content)
+            current["hashes"][name] = sha256_bytes(content)
+            written.append(name)
+        if new:
+            outer_bytes = ("\n".join(lines) + "\n").encode()
+            write_atomic(outer_series, outer_bytes)
+            for name in new:
+                current["owners"][name] = "outer"
+            current["outer"] = [n for n in merged if current["owners"].get(n) == "outer"]
+            current["outer_series_sha256"] = sha256_bytes(outer_bytes)
+        write_json(paths.catalog / MANIFEST, current)
+    if not quilt.applied(paths.src):
+        shutil.rmtree(paths.catalog)
+        records.clear_applied(paths)
+    return written

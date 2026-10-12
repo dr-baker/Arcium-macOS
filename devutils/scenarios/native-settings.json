@@ -34,7 +34,7 @@
   ],
   "preconditions": [
     "Use an explicitly authorized isolated profile and the exact newly built Arcium bundle.",
-    "Record the source commit, core commit, active patch series, build receipt, bundle path, and profile path.",
+    "Record the source commit, core commit, active patch series, bundle path, and profile path.",
     "Treat every check as unverified until the selected bundle produces the recorded result.",
     "Run the native ArciumSettingsUI Swift package tests separately; the GN tests above do not execute Swift contracts.",
     "Capture preference values before changing them and restore them after testing. Prepare disposable Favorites, Pins, and normal tabs with distinguishable nonprivate URLs.",

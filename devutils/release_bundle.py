@@ -8,30 +8,20 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
-from arcium_app import (
-    ARCIUM_BUNDLE_ID,
-    ARCIUM_NAME,
-    DEFAULT_PROFILE_NAME,
-    ArciumError,
-    rewrite_arcium_metadata,
-)
-from helium_dev_bundle import BundleError, _copy_source, _read_plist
+from arcium.bundle import ARCIUM_BUNDLE_ID, ARCIUM_NAME, PROFILE_DIR_NAME, ArciumError, rewrite_metadata
+from he.apps import copy_app, read_plist
+from he.common import HeError
 
 
 class ReleaseBundleError(RuntimeError):
     """A release copy could not be staged safely."""
 
 
-CopyRunner = Callable[..., object]
-
-
 def stage_release_bundle(
     source: Path,
     destination: Path,
-    *,
-    copy_runner: CopyRunner | None = None,
 ) -> dict[str, object]:
     """Copy Helium.app, rewrite only the copy, then verify its root identity."""
 
@@ -54,14 +44,14 @@ def stage_release_bundle(
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        copy_method = _copy_source(source_path, destination_path, copy_runner)
-        plist_count = rewrite_arcium_metadata(destination_path)
-        root_info = _read_plist(destination_path / "Contents" / "Info.plist")
+        copy_method = copy_app(source_path, destination_path)
+        plist_count = rewrite_metadata(destination_path)
+        root_info = read_plist(destination_path / "Contents" / "Info.plist")
         expected = {
             "CFBundleIdentifier": ARCIUM_BUNDLE_ID,
             "CFBundleDisplayName": ARCIUM_NAME,
             "CFBundleName": ARCIUM_NAME,
-            "CrProductDirName": DEFAULT_PROFILE_NAME,
+            "CrProductDirName": PROFILE_DIR_NAME,
         }
         for key, value in expected.items():
             if root_info.get(key) != value:
@@ -91,8 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         staged = stage_release_bundle(args.source, args.destination)
     except (
-        ArciumError,
-        BundleError,
+        HeError,
         OSError,
         ReleaseBundleError,
         subprocess.SubprocessError,

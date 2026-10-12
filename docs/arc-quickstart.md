@@ -179,4 +179,4 @@ It is separate from the Arc-style workflow additions above.
 
 For a control-by-control inventory and acceptance criteria, see the
 [feature settings audit](feature-settings-audit.md). For source ownership and
-development, see [Helium maintainer onboarding](helium-maintainer-onboarding.md).
+development, see the [build guide](building.md#repository-ownership).

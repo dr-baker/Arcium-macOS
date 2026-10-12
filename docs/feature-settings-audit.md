@@ -174,14 +174,14 @@ has passed. Record the selected core source, exact bundle, authorized runtime
 mode, profile, and feature flags with each result. A standalone UI preview does
 not establish installed-browser behavior.
 
-The [October 3 changelog](changelog-2026-10-03.md#validation-and-known-gaps)
+The October 3 changelog (on the `archive/dated-docs-2026-10-11` branch)
 records the accepted product scope. Its final Everyday/Advanced selector-accent
 check passed after the installed restart. Live OS Dock commands, corrected
 Shift-right-click delivery with the setting on and off, and the
 foreground/unoccluded blank-content comparison remain human-waived and
 unverified. No blank-content cause or fix is established.
 
-The separate [October 4 follow-up](changelog-2026-10-03.md#october-4-follow-up)
+The separate October 4 follow-up (on the `archive/dated-docs-2026-10-11` branch)
 records passed Fully hidden and Zen top-pin endpoints, the Icon rail endpoint,
 guidance in both appearance presentations, disabled-marker behavior, and the
 return of saved colors. Size changed from 0.80 to 0.81, survived closing and

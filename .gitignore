@@ -7,3 +7,4 @@ build/
 .pc
 
 resources/generated/
+__pycache__/

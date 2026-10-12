@@ -13,8 +13,8 @@ import unittest
 
 DEVUTILS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DEVUTILS))
-import arcium_app  # noqa: E402
-from arcium_app import ArciumError  # noqa: E402
+from arcium import bundle as arcium_app  # noqa: E402
+from arcium.bundle import ArciumError  # noqa: E402
 from release_bundle import ReleaseBundleError, stage_release_bundle  # noqa: E402
 
 

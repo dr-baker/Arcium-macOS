@@ -7,7 +7,7 @@ SettingsUI `BUILD.gn` asserts the 26.0 value. `mac_deployment_target` remains a
 separate GN setting that controls compilation. A 26.0 product minimum does not
 make every C++ target a 26.0 compile target.
 
-Check the effective value in the selected lane before reporting a build:
+Check the effective value in the build dir before reporting a build:
 
 ```sh
 cd "$HELIUM_DEV_BUILD_ROOT/src"
@@ -16,7 +16,7 @@ rg -n 'mac_min_system_version|mac_deployment_target' \
   build/config/mac/mac_sdk.gni out/Default/args.gn
 ```
 
-The generated `gn args` output is the lane's effective configuration. The
+The generated `gn args` output is the build dir's effective configuration. The
 source file and the native-settings patch show whether the 26.0 value came from
 the selected patch stack rather than the upstream 13.0 default.
 
@@ -85,8 +85,8 @@ See [Shared appearance](native-settings-bindings.md#shared-appearance) for owner
 ## Dependency provenance
 
 The original local SettingsUI source snapshot comes from commit
-`164b8920aa7fd388d560d3e7e706f65e477d21ff` of
-`/Users/daniel/Developer/SettingsUI`. The exported product preset includes the
+`164b8920aa7fd388d560d3e7e706f65e477d21ff` of the SettingsUI
+repository. The exported product preset includes the
 user's uncommitted design changes and is preserved byte for byte.
 
 The additive `SettingsPaletteEditor` and `SettingsColorAdjustmentSection`
@@ -112,11 +112,10 @@ owns native rendering; native settings consumes those types and the existing
 Spaces, Little Arc, and shortcut authorities. The production SettingsUI patch
 refines the native-settings baseline.
 
-The generated merged catalog is build-lane state; the core and macOS personal
+The merged catalog in the build dir is generated; the core and macOS personal
 patches remain the source owners. Include-only relocation of Spaces and Little
 Arc headers has been removed from native settings. Use the
-[maintainer onboarding](helium-maintainer-onboarding.md#patch-editing-and-review)
-and [build guide](building.md#update-an-existing-patch) for patch work.
+[build guide](building.md#change-an-existing-patch) for patch work.
 
 ## Shared editor adapter
 
@@ -155,7 +154,36 @@ and runtime behavior establish separate facts. The reusable window and shortcut
 checks are in [the acceptance plan](feature-settings-audit.md#native-window-and-shortcut-checks).
 A standalone UI preview does not establish installed-browser behavior.
 
-The [September implementation history](audits/settings-implementation-history.md)
+The September implementation history (on the `archive/dated-docs-2026-10-11` branch)
 retains original host experiments, hashes, deployment observations, and tool
-limitations. The [October 3 changelog](changelog-2026-10-03.md#validation-and-known-gaps)
+limitations. The October 3 changelog (on the `archive/dated-docs-2026-10-11` branch)
 records the accepted delivery and remaining unverified checks.
+
+## Native Settings boundary
+
+Native Settings uses a SwiftUI library loaded by the macOS browser integration.
+Chromium remains responsible for browser preferences and runtime behavior. The
+bridge exposes current values, editability, and reasons a control is
+unavailable. SwiftUI presents those values and submits changes through the
+bridge.
+
+When adding a control, review both the saved preference and the live consumer.
+Turning a feature off must stop the relevant behavior. A policy, disabled
+feature, unsupported layout, or active extension theme must be represented
+accurately in the UI and enforced by the backend.
+
+A release must include and sign the native library before sealing the
+enclosing app. Only the real signed bundle proves that macOS accepts and loads
+it.
+
+## Testing the Swift package
+
+Run `swift test` on a copy-on-write copy outside the Chromium tree:
+
+```sh
+cp -cR "$HELIUM_DEV_BUILD_ROOT/src/chrome/browser/ui/cocoa/arcium_settings_swift" /tmp/arcium-settings-test
+swift test --package-path /tmp/arcium-settings-test --filter ArciumSettingsUIContractTests
+```
+
+Inside the source tree, SwiftPM spends minutes scanning the surrounding
+checkout and writes a `.build` directory into the generated source.

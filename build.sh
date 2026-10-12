@@ -36,7 +36,10 @@ esac
 _root_dir="$(dirname "$(greadlink -f "$0")")"
 
 # Python paths are resolved while env.sh is sourced. Bind them before that
-# happens so a standalone release build cannot use an ambient development lane.
+# happens so a standalone release build cannot use an ambient development
+# build dir. dev.sh's settings (HELIUM_BUILD_DIR, ~/.config/arcium/dev.env)
+# never apply here.
+unset _build_dir HELIUM_BUILD_DIR HELIUM_DEV_WORKTREE HELIUM_TMPDIR
 export HELIUM_DEV_BUILD_ROOT="$_root_dir/build"
 export HELIUM_DEV_PYTHON_ENV="$_root_dir/build/python-env"
 source "$_root_dir/env.sh"

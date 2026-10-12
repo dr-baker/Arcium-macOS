@@ -2,8 +2,8 @@
 
 Use a development profile with synthetic pages. Keep the display, window size,
 tab count, page animation, power mode, and input cadence the same across runs.
-Record the outer and core commits with each result. Use `he status` to confirm
-the exact bundle and profile before collecting evidence.
+Record the outer and core commits with each result. Use `he check --json` to confirm
+the running Dev app and profile before collecting evidence.
 
 ## Check normal use
 
@@ -55,18 +55,18 @@ Prepare the named bundle and profile:
 
 ```sh
 source dev.sh
-he dev --isolated feature-perf --seed-from empty
+he run --profile feature-perf --new
 ```
 
 Open five synthetic tabs and enable MRU cycling in Settings. Start a 45-second
-recording on the T9 lane:
+recording; traces go to the build dir's `.arcium` directory:
 
 ```sh
-he stop --isolated feature-perf
-he run --isolated feature-perf \
+he stop --profile feature-perf
+he run --profile feature-perf \
 	--trace-startup=ui,cc,viz,gpu,benchmark \
 	--trace-startup-format=json --trace-startup-duration=45 \
-	--trace-startup-file=/Volumes/T9/ArciumBuild/build/.arcium/mru-glass.json
+	--trace-startup-file="$HELIUM_DEV_BUILD_ROOT/.arcium/mru-glass.json"
 ```
 
 Warm the previews by switching between the tabs once. Repeat a fixed sequence of Ctrl+Tab,
@@ -76,11 +76,11 @@ separate runs. Wait for the recording to finish before reading its file.
 Save the histograms, then repeat with the same profile and workload:
 
 ```sh
-he stop --isolated feature-perf
-he run --isolated feature-perf --arcium-glass-backend=opaque \
+he stop --profile feature-perf
+he run --profile feature-perf --arcium-glass-backend=opaque \
 	--trace-startup=ui,cc,viz,gpu,benchmark \
 	--trace-startup-format=json --trace-startup-duration=45 \
-	--trace-startup-file=/Volumes/T9/ArciumBuild/build/.arcium/mru-opaque.json
+	--trace-startup-file="$HELIUM_DEV_BUILD_ROOT/.arcium/mru-opaque.json"
 ```
 
 `--arcium-glass-backend=opaque` selects the shared glass system's opaque fallback
@@ -95,8 +95,8 @@ Summarize the successful presentation samples:
 
 ```sh
 python3 devutils/feature_performance.py \
-	/Volumes/T9/ArciumBuild/build/.arcium/mru-glass.json \
-	--baseline /Volumes/T9/ArciumBuild/build/.arcium/mru-opaque.json
+	"$HELIUM_DEV_BUILD_ROOT/.arcium/mru-glass.json" \
+	--baseline "$HELIUM_DEV_BUILD_ROOT/.arcium/mru-opaque.json"
 ```
 
 The output gives count, median, nearest-rank p95, and maximum milliseconds for
