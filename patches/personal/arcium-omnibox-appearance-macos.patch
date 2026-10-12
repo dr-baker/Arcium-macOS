@@ -315,7 +315,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
      arcium::kArcSidebarNavigationEnabledPref,
      arcium::kSidebarExtensionsDrawerEnabledPref,
      arcium::kChromeFrameBorderWidthPref,
-@@ -511,6 +513,38 @@ void ArciumSettingsModel::ClearPreferenc
+@@ -511,6 +513,43 @@ void ArciumSettingsModel::ClearPreferenc
    prefs_->ClearPref(name);
  }
  
@@ -329,7 +329,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
 +  if (shutting_down_ || !prefs_ ||
 +      !HasPreference(arcium::kCommandPanelLayoutPref) ||
 +      !prefs_->IsUserModifiablePreference(arcium::kCommandPanelLayoutPref) ||
-+      layout.size() != 7) {
++      layout.size() != 8) {
 +    return false;
 +  }
 +  for (const auto* key : {"labels", "icons", "scope_reveal"}) {
@@ -346,6 +346,11 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
 +    if (!layout.FindBool(key).has_value()) {
 +      return false;
 +    }
++  }
++  const auto strength = layout.FindDouble("glow_strength");
++  if (!strength || !std::isfinite(*strength) || *strength < 0.0 ||
++      *strength > 2.0) {
++    return false;
 +  }
 +  prefs_->SetDict(arcium::kCommandPanelLayoutPref, layout.Clone());
 +  return true;
@@ -454,7 +459,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -353,6 +353,36 @@ struct ArciumSharedPaletteSnapshot: Equa
+@@ -353,6 +353,40 @@ struct ArciumSharedPaletteSnapshot: Equa
      }
  }
  
@@ -465,6 +470,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    var connected = true
 +    var fullWidth = true
 +    var scopeTints = true
++    var glowStrength = 1.0
 +    var activityDots = true
 +    init(_ dictionary: [String: Any] = [:]) {
 +        if let value = exactIntegerOptional(dictionary["labels"]), (0...2).contains(value) {
@@ -479,19 +485,22 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        connected = strictBoolean(dictionary["connected"]) ?? true
 +        fullWidth = strictBoolean(dictionary["full_width"]) ?? true
 +        scopeTints = strictBoolean(dictionary["scope_tints"]) ?? true
++        if let value = finiteDouble(dictionary["glow_strength"]), (0...2).contains(value) {
++            glowStrength = value
++        }
 +        activityDots = strictBoolean(dictionary["activity_dots"]) ?? true
 +    }
 +    var dictionary: [String: Any] {
 +        ["labels": labels, "icons": icons, "scope_reveal": reveal,
 +         "connected": connected, "full_width": fullWidth,
-+         "scope_tints": scopeTints, "activity_dots": activityDots]
++         "scope_tints": scopeTints, "glow_strength": glowStrength, "activity_dots": activityDots]
 +    }
 +}
 +
  struct ArciumAppearanceSnapshot: Equatable {
      static let defaultCollapsedSidebarStyleOptions = [
          ArciumChoice(value: 0, label: "Icon rail"),
-@@ -388,6 +418,15 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -388,6 +422,15 @@ struct ArciumAppearanceSnapshot: Equatab
      var sidebarWidth = 200
      var sidebarWidthAvailable = false
      var sidebarWidthManaged = false
@@ -507,7 +516,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var collapsedSidebarStyle = 0
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
-@@ -411,6 +450,12 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -411,6 +454,12 @@ struct ArciumAppearanceSnapshot: Equatab
          sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
          sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
          sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
@@ -520,7 +529,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
          let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
              .filter { (0...1).contains($0.value) }
-@@ -825,6 +870,18 @@ final class ArciumSettingsStore: Observa
+@@ -825,6 +874,18 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "sidebar_width", value: Int(min(max(width.rounded(), 160), 400)))
      }
  
@@ -539,7 +548,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      func setCollapsedSidebarStyle(_ style: Int) {
          guard snapshot.appearance.collapsedSidebarStyleAvailable,
                !snapshot.appearance.collapsedSidebarStyleManaged,
-@@ -1099,6 +1156,11 @@ private func integerOptional(_ value: An
+@@ -1099,6 +1160,11 @@ private func integerOptional(_ value: An
      return nil
  }
  
@@ -571,7 +580,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      @ObservedObject var store: ArciumSettingsStore
      @Environment(\.settingsTheme) private var theme
      @State private var backgroundMode: BackgroundMode = .everyday
-@@ -562,6 +571,34 @@ private struct AppearanceSettingsPage: V
+@@ -562,6 +571,41 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
@@ -596,6 +605,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
 +                    SToggle("Full width scopes", isOn: commandLayoutBinding(\.fullWidth))
 +                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
++                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
++                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
++                            range: 0...2, step: 0.05,
++                            format: { "\(Int(($0 * 100).rounded()))%" },
++                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 100% is the default strength."))
++                        .accessibilityIdentifier("omnibox-scope-glow-strength")
++                    }
 +                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
 +                }
 +                .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
@@ -610,7 +626,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -1088,6 +1088,125 @@ final class ArciumSettingsUIContractTest
+@@ -1088,6 +1088,128 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor
@@ -624,6 +640,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        XCTAssertEqual(layout.icons, 2)
 +        XCTAssertEqual(layout.reveal, 2)
 +        XCTAssertTrue(layout.connected && layout.fullWidth && layout.scopeTints && layout.activityDots)
++        XCTAssertEqual(layout.glowStrength, 1.0)
++        layout.glowStrength = 0.75
 +        layout.labels = 0
 +        layout.reveal = 3
 +        store.setCommandPanelLayout(layout)
@@ -634,6 +652,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +            "commandPanelLayoutAvailable": true, "commandPanelLayout": layout.dictionary
 +        ]])
 +        XCTAssertEqual(store.snapshot.appearance.commandPanelLayout.reveal, 3)
++        XCTAssertEqual(store.snapshot.appearance.commandPanelLayout.glowStrength, 0.75)
 +        let blocked = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
 +            "commandPanelLayoutAvailable": true, "commandPanelLayoutManaged": true
 +        ]], delegate: delegate)
@@ -753,7 +772,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,65 @@
 +// Copyright 2026 The Helium Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -773,7 +792,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
 +// The shared palette bridge intentionally uses doubles. Command-bar enum
 +// values and booleans have a different schema and must retain their types.
 +inline std::optional<base::DictValue> CommandPanelLayoutFromNSObject(id value) {
-+  if (![value isKindOfClass:[NSDictionary class]] || [value count] != 7) {
++  if (![value isKindOfClass:[NSDictionary class]] || [value count] != 8) {
 +    return std::nullopt;
 +  }
 +  NSDictionary* layout = value;
@@ -804,6 +823,16 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
 +    }
 +    result.Set(key, static_cast<bool>([object boolValue]));
 +  }
++  id strength = layout[@"glow_strength"];
++  if (![strength isKindOfClass:[NSNumber class]] ||
++      CFGetTypeID((__bridge CFTypeRef)strength) == CFBooleanGetTypeID()) {
++    return std::nullopt;
++  }
++  const double number = [strength doubleValue];
++  if (!std::isfinite(number) || number < 0.0 || number > 2.0) {
++    return std::nullopt;
++  }
++  result.Set("glow_strength", number);
 +  return result;
 +}
 +
@@ -813,7 +842,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,107 @@
 +// Copyright 2026 The Helium Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -833,7 +862,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 +NSMutableDictionary* Layout() {
 +  return [@{@"labels": @1, @"icons": @2, @"scope_reveal": @2,
 +            @"connected": @YES, @"full_width": @YES, @"scope_tints": @YES,
-+            @"activity_dots": @YES} mutableCopy];
++            @"activity_dots": @YES, @"glow_strength": @1.0} mutableCopy];
 +}
 +}
 +
@@ -848,6 +877,20 @@ Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
 +  EXPECT_EQ(3, converted->FindInt("scope_reveal"));
 +  EXPECT_EQ(false, converted->FindBool("connected"));
 +  EXPECT_EQ(true, converted->FindBool("activity_dots"));
++}
++TEST(CommandPanelLayoutMacTest, ValidatesGlowStrength) {
++  for (NSNumber* strength in @[ @0.0, @0.75, @2.0 ]) {
++    auto layout = Layout();
++    layout[@"glow_strength"] = strength;
++    auto converted = CommandPanelLayoutFromNSObject(layout);
++    ASSERT_TRUE(converted);
++    EXPECT_EQ([strength doubleValue], converted->FindDouble("glow_strength"));
++  }
++  for (id invalid in @[ @YES, @(-0.1), @2.1, @"1", @(INFINITY), @(NAN) ]) {
++    auto layout = Layout();
++    layout[@"glow_strength"] = invalid;
++    EXPECT_FALSE(CommandPanelLayoutFromNSObject(layout));
++  }
 +}
 +TEST(CommandPanelLayoutMacTest, RejectsMalformedEnums) {
 +  for (id invalid in
