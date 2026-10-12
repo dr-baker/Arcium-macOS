@@ -253,6 +253,27 @@ class WorkflowTest(unittest.TestCase):
         self.m.he("scratch", "--remove", "worker")
         self.assertFalse(root.exists())
 
+    def test_scratch_holds_only_owned_files_and_pulls_others(self) -> None:
+        self.m.ready()
+        root = self.m.build_dir / ".arcium" / "scratch" / "w"
+        self.m.he("scratch", "w")
+        self.assertTrue((root / "src" / "h.h").is_file())
+        self.assertFalse((root / "src" / "unowned.cc").exists())
+        worker = {"HELIUM_BUILD_DIR": str(root)}
+        # Adding a file the scratch lacks would record it as a new file.
+        self.m.quilt("add", "unowned.cc", cwd=root / "src")
+        (root / "src" / "unowned.cc").write_text("int unowned() { return 1; }\n")
+        refused = self.m.he("save-patch", **worker, check=False)
+        self.assertIn("already exist in the shared tree", refused.stderr)
+        self.m.quilt("remove", "unowned.cc", cwd=root / "src")
+        (root / "src" / "unowned.cc").unlink(missing_ok=True)
+        self.m.he("scratch-pull", "unowned.cc", **worker)
+        self.m.quilt("add", "unowned.cc", cwd=root / "src")
+        (root / "src" / "unowned.cc").write_text("int unowned() { return 1; }\n")
+        self.m.he("save-patch", **worker)
+        saved = (self.m.worktree / "patches" / LONG_PATCH).read_text()
+        self.assertIn("-int unowned() { return 0; }", saved)
+
     # Configuration ------------------------------------------------------------------
 
     def test_dev_env_supplies_build_dir_and_environment_wins(self) -> None:

@@ -64,8 +64,8 @@ snapshots the applied stack's files, and the push that completes the stack
 gives byte-identical files their original timestamps. Only files whose
 content really changed, and what includes them, rebuild.
 
-Restoration is skipped, costing one normal rebuild, if anything wrote to
-`src/out/` since the snapshot (a symlinked out dir is followed to its target),
+Restoration is skipped, costing one normal rebuild, if anything other than
+Siso's per-run logs wrote to `src/out/` since the snapshot (a symlinked out dir is followed to its target),
 if out directories changed, if the snapshot file was modified or is
 unreadable, if the machine restarted, or if the wall clock moved backwards.
 `he build` while patches are popped drops the snapshot. Directory symlinks
@@ -101,11 +101,18 @@ keeps the lock until it exits.
 
 ## Scratch source for patch authoring
 
-`he scratch NAME` makes a copy-on-write APFS clone of the build dir's `src/`
-without `out/`. A worker sources `dev.sh` with `HELIUM_BUILD_DIR` set to the
-scratch and uses the normal `pop`, `save-patch`, and `push` there while the
-shared build dir keeps building. `he build` refuses in a scratch.
-`he scratch --remove NAME` deletes it.
+`he scratch NAME` gives a worker a build dir without build output that holds
+only what Quilt touches: every file the patch series owns, Quilt's backups,
+and a copy of the patch catalog, all as copy-on-write APFS clones. That is a
+few thousand files, so it takes seconds; a full clone of Chromium's source
+takes about 15 minutes and would hold the shared build dir's lock that long.
+
+A worker sources `dev.sh` with `HELIUM_BUILD_DIR` set to the scratch and uses
+the normal `pop`, `save-patch`, and `push` there while the shared build dir
+keeps building. Before `quilt add` on a file no patch owns yet, run
+`he scratch-pull PATH` to clone it in; `he save-patch` refuses a patch that
+would create a file the shared tree already has. `he build` refuses in a
+scratch. `he scratch --remove NAME` deletes it.
 
 ## Dev profiles
 

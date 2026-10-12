@@ -34,7 +34,8 @@ Each worker:
 2. authors patches in a scratch the integrator creates with
    `he agent scratch NAME`, using the printed `HELIUM_BUILD_DIR=… HELIUM_DEV_WORKTREE=…`
    line to source `dev.sh`;
-3. pops to the owning patch, edits, runs `he save-patch` and `he push` there,
+3. pops to the owning patch, runs `he scratch-pull PATH` for any file no patch
+   owns yet, `quilt add`s and edits, runs `he save-patch` and `he push` there,
    and commits in its worktree;
 4. hands off the branch, the patches it changed, the checks it ran, and what is
    still untested.

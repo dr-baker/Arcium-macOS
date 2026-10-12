@@ -125,6 +125,11 @@ class AgentAndAssetsTest(Fixture):
     def test_planned_edges_reads_ninja_and_siso_progress(self) -> None:
         self.assertEqual(agent.planned_edges("[1/4] cc a\n[2/4] cc b\n"), 4)
         self.assertEqual(agent.planned_edges("ninja: no work to do.\n"), 0)
+        siso = ("build start: Ready 1 Pending 1\nrebuild manifest finished\n"
+                "schedule pending:1+ready:0 (node:9 edge:2)\n1m09.24s schedule pending:7+ready:2 (node:9 edge:9)\n"
+                "clang++ -c a.cc -o a.o\nrm -rf x && cp -Rc y x\n\nbuild finished\nlocal:0 remote:0 skip:7\n")
+        self.assertEqual(agent.planned_edges(siso), 2)
+        self.assertEqual(agent.planned_edges("rebuild manifest finished\nbuild finished\n"), 0)
 
     def test_test_font_archives_cannot_escape_their_directory(self) -> None:
         import io

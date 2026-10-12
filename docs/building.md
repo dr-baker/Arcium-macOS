@@ -243,7 +243,9 @@ copy-on-write scratch:
 he scratch pins-fix
 ```
 
-and follow the printed command in the other checkout. Scratches cannot build.
+and follow the printed command in the other checkout. A scratch holds only the
+files patches own; run `he scratch-pull PATH` before `quilt add` on any other
+file. Scratches cannot build.
 ([why](development-changes.md#scratch-source-for-patch-authoring))
 
 ### Full source and browser tests

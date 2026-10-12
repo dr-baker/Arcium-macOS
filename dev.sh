@@ -679,19 +679,11 @@ ___helium_agent() {
     for argument in "$@"; do
         if [ "$argument" = --json ]; then json=true; else args+=("$argument"); fi
     done
-    local log started status=0
-    log="$(mktemp "${TMPDIR:-/tmp}/he-agent.XXXXXX")"
-    started="$(date +%s)"
-    HELIUM_BUILD_DIR="$_build_dir" HELIUM_DEV_WORKTREE="$_root_dir" \
+    local -a run=(agent-run --name "$command")
+    if $json; then run+=(--json); fi
+    HELIUM_BUILD_DIR="$_build_dir" HELIUM_DEV_WORKTREE="$_root_dir" ___helium_he "${run[@]}" -- \
         bash -c 'source "$1" >/dev/null || exit 2; shift; set -e; ___helium_agent_action "$@"' \
-        bash "$_he_tools_dir/dev.sh" "$command" "${args[@]}" \
-        > >(tee -a "$log") 2> >(tee -a "$log" >&2) || status=$?
-    wait
-    local -a result=(agent-result --name "$command" --status "$status" --seconds "$(( $(date +%s) - started ))" --log "$log")
-    if $json; then result+=(--json); fi
-    ___helium_he "${result[@]}"
-    rm -f "$log"
-    return "$status"
+        bash "$_he_tools_dir/dev.sh" "$command" "${args[@]}"
 }
 
 # Commands that change the source tree, build output, or build-dir state run
@@ -720,6 +712,7 @@ __helium_dispatch() {
         save-patch) ___helium_save_patch "$@";;
         pull) ___helium_pull;;
         scratch) ___helium_scratch "$@";;
+        scratch-pull) ___helium_he scratch-pull "$@";;
 
         format) ___helium_format;;
         tidy) ___helium_tidy;;
@@ -737,7 +730,7 @@ __helium_menu() {
     set -e
     case $1 in
         setup|presetup|configure|resources|version|sub|unsub|namesub|nameunsub|translate|transgen|\
-        merge|unmerge|push|pop|replay|save-patch|pull|scratch|format|tidy|lint|build|reset)
+        merge|unmerge|push|pop|replay|save-patch|pull|scratch|scratch-pull|format|tidy|lint|build|reset)
             ___helium_locked "$1" __helium_dispatch "$@";;
 
         run)
@@ -789,6 +782,7 @@ __helium_menu() {
             echo "\tsave-patch [--style p1|ab] - refreshes the top patch into its owning repository" >&2
             echo "\tpull - undoes all patches, pulls from git, redoes all patches" >&2
             echo "\tscratch NAME | --remove NAME - copy-on-write source for patch authoring" >&2
+            echo "\tscratch-pull PATH... - (in a scratch) clone files no patch owns yet before quilt add" >&2
 
             echo "\n" >&2
             echo "\tcheck - reports drift between patches, records, and the source tree" >&2

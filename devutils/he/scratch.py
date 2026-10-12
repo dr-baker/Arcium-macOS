@@ -1,13 +1,21 @@
 """Copy-on-write scratch source for patch authoring.
 
-A scratch is a build dir without build output: an APFS clone of the warm
-`src/` (minus `out/`) with its own copy of the patch catalog. Workers pop,
-edit, and save patches there while the shared build dir keeps building.
+A scratch is a build dir without build output, holding only what Quilt
+touches: every file the patch series owns, Quilt's `.pc` backups, and its own
+copy of the patch catalog, all as APFS clones. That is a few thousand files
+instead of Chromium's million, so it takes seconds and holds the shared build
+dir's lock only that long. Workers pop, edit, and save patches there while the
+shared build dir keeps building.
+
+A file no patch owns yet is not in the scratch. `he scratch-pull PATH...`
+clones it from the shared build dir before `quilt add`; `he save-patch`
+refuses a patch that would create a file the shared tree already has.
 """
 
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 from pathlib import Path
 import re
@@ -54,10 +62,12 @@ def create(paths: Paths, name: str) -> Path:
         raise HeError(f"scratch {name} already exists: {root}")
     (root / "src").mkdir(parents=True)
     try:
-        for entry in os.scandir(paths.src):
-            if entry.name == "out":
-                continue
-            _clone(Path(entry.path), root / "src" / entry.name)
+        _clone(paths.src / ".pc", root / "src" / ".pc")
+        for relative in [*quilt.owned_files(paths.src, series), "chrome/VERSION"]:
+            source = paths.src / relative
+            if source.is_file() and not source.is_symlink():
+                (root / "src" / relative).parent.mkdir(parents=True, exist_ok=True)
+                _clone(source, root / "src" / relative)
         (root / ".arcium").mkdir()
         _clone(paths.catalog, root / ".arcium" / "patches")
         for record in ("applied.json", "acquisition.json", "stamps.json"):
@@ -73,6 +83,51 @@ def create(paths: Paths, name: str) -> Path:
         shutil.rmtree(root, ignore_errors=True)
         raise
     return root
+
+
+def parent_src(build_dir: Path) -> Path:
+    marker = json.loads((build_dir / ".arcium" / MARKER).read_text(encoding="utf-8"))
+    return Path(marker["parent"]) / "src"
+
+
+def pull(paths: Paths, relatives: list[str]) -> list[str]:
+    """Clone files no patch owns yet from the shared build dir into this scratch."""
+    if not is_scratch(paths.build_dir):
+        raise HeError("he scratch-pull runs inside a scratch build dir")
+    source_root = parent_src(paths.build_dir)
+    pulled = []
+    for relative in relatives:
+        parts = Path(relative).parts
+        if Path(relative).is_absolute() or ".." in parts or not parts:
+            raise HeError(f"paths are relative to src without '..': {relative}")
+        source, target = source_root / relative, paths.src / relative
+        if target.exists():
+            continue
+        if not source.is_file() or source.is_symlink():
+            raise HeError(f"{relative} is not a file in {source_root}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _clone(source, target)
+        pulled.append(relative)
+    return pulled
+
+
+def created_files_in_parent(paths: Paths, patch: Path) -> list[str]:
+    """Files a scratch patch would create that the shared tree already has."""
+    if not is_scratch(paths.build_dir):
+        return []
+    source_root = parent_src(paths.build_dir)
+    lines = patch.read_text(errors="replace").splitlines()
+    created = []
+    for previous, line in zip(lines, lines[1:]):
+        if previous.startswith("--- /dev/null") and line.startswith("+++ "):
+            name = line[4:].split("\t")[0].strip()
+            for prefix in ("b/", "src/"):
+                if name.startswith(prefix):
+                    name = name[len(prefix):]
+                    break
+            if (source_root / name).exists():
+                created.append(name)
+    return created
 
 
 def remove(paths: Paths, name: str) -> Path:

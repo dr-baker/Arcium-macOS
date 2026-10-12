@@ -156,6 +156,8 @@ class MiniChromium:
         self.src.mkdir(parents=True)
         for path, content in PRISTINE.items():
             (self.src / path).write_text(content)
+        # A source file no patch owns, as most of Chromium is.
+        (self.src / "unowned.cc").write_text("int unowned() { return 0; }\n")
         (self.src / "chrome").mkdir()
         (self.src / "chrome" / "VERSION").write_text("MAJOR=151\nMINOR=0\nBUILD=7922\nPATCH=71\n")
         tools = self.src / "third_party" / "depot_tools"

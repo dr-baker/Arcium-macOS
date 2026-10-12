@@ -120,6 +120,8 @@ def main(argv: list[str] | None = None) -> int:
     scratch_parser = commands.add_parser("scratch")
     scratch_parser.add_argument("action", choices=("create", "remove", "is"))
     scratch_parser.add_argument("name", nargs="?")
+    puller = commands.add_parser("scratch-pull")
+    puller.add_argument("relatives", nargs="+")
     commands.add_parser("gclient-marker")
     commands.add_parser("tmpdir")
     finder = commands.add_parser("locate")
@@ -150,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
     result.add_argument("--log")
     result.add_argument("--json", action="store_true")
     commands.add_parser("agent-status")
+    agent_run = commands.add_parser("agent-run")
+    agent_run.add_argument("--name", required=True)
+    agent_run.add_argument("--json", action="store_true")
+    agent_run.add_argument("argv", nargs=argparse.REMAINDER)
     space = commands.add_parser("space")
     space.add_argument("--need-gib", type=float, required=True)
     args = parser.parse_args(argv)
@@ -203,6 +209,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(root)
             else:
                 print(f"removed {scratch.remove(paths, args.name)}")
+        elif args.command == "scratch-pull":
+            for relative in scratch.pull(paths, args.relatives):
+                print(f"pulled {relative}")
         elif args.command == "gclient-marker":
             for name, content in ((".gclient", _GCLIENT), (".gclient_entries", _GCLIENT_ENTRIES)):
                 if not (paths.build_dir / name).exists():
@@ -241,6 +250,10 @@ def main(argv: list[str] | None = None) -> int:
                                        Path(args.log) if args.log else None, {})
             if args.json:
                 print(agent.dumps(done))
+        elif args.command == "agent-run":
+            from . import agent
+            command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
+            return agent.run_and_record(paths, args.name, command, as_json=args.json)
         elif args.command == "agent-status":
             from . import agent
             print(agent.dumps(agent.status(paths, problems(paths))))

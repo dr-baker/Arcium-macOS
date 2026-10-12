@@ -88,14 +88,18 @@ def sync_applied(paths: Paths, rebaseline: tuple[str, ...] = ()) -> None:
 
 def applied_drift(paths: Paths) -> list[str]:
     record = _applied_record(paths)
-    problems = []
+    problems, unrecorded = [], []
     for name in quilt.applied(paths.src):
         copy = paths.catalog / name
         if name not in record:
-            problems.append(f"{name} was applied outside he; run he replay to be sure")
+            unrecorded.append(name)
         elif not copy.is_file() or sha256_file(copy) != record[name]:
             problems.append(f"{name} changed in the lane catalog after it was applied; "
                             "run he save-patch if you refreshed it, otherwise he replay")
+    if len(unrecorded) > 3:
+        problems.append(f"{len(unrecorded)} patches were applied outside he (first: {unrecorded[0]}); run he replay to be sure")
+    else:
+        problems += [f"{name} was applied outside he; run he replay to be sure" for name in unrecorded]
     return problems
 
 

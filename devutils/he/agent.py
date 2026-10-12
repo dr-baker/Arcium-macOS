@@ -23,10 +23,29 @@ DEFAULT_EDGE_BUDGET = 500
 _PROGRESS = re.compile(r"\[\s*\d+\s*/\s*(\d+)\s*\]")
 
 
+_SISO_NOISE = re.compile(r"^(?:[\d.ms]+\s+)?(?:schedule pending|build start|rebuild manifest|loading build|"
+                         r"load siso|ninja explain|disable fast local| use `)|^\s*$")
+
+
 def planned_edges(output: str) -> int:
-    """Edges a Ninja or Siso dry run would run: the largest [done/total] total."""
+    """Edges a dry run would run.
+
+    Ninja prints "[done/total]" progress. Siso prints each planned command on
+    its own line between "rebuild manifest finished" and "build finished".
+    """
     totals = [int(total) for total in _PROGRESS.findall(output)]
-    return max(totals, default=0)
+    if totals:
+        return max(totals)
+    lines = output.splitlines()
+    starts = [i for i, line in enumerate(lines) if line.startswith("rebuild manifest finished")]
+    if not starts:
+        return 0
+    body = []
+    for line in lines[starts[-1] + 1:]:
+        if line.startswith("build finished"):
+            break
+        body.append(line)
+    return sum(1 for line in body if not _SISO_NOISE.match(line))
 
 
 def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool, problems: list[str]) -> int:
@@ -58,6 +77,39 @@ def record_result(paths: Paths, command: str, status: int, seconds: float, log: 
               "build_dir": str(paths.build_dir), "worktree": str(paths.worktree), **extra}
     write_json(paths.state / "agent" / f"last-{command}.json", result)
     return result
+
+
+def run_and_record(paths: Paths, name: str, argv: list[str], *, as_json: bool) -> int:
+    """Run one agent action, echo its output, and record a JSON result."""
+    import sys
+    import tempfile
+    import threading
+
+    started = time.monotonic()
+    with tempfile.NamedTemporaryFile("w+b", prefix="he-agent-", delete=False) as log:
+        log_path = Path(log.name)
+    lock = threading.Lock()
+    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def copy(stream, sink):
+        for chunk in iter(lambda: stream.readline(), b""):
+            sink.write(chunk)
+            sink.flush()
+            with lock, log_path.open("ab") as handle:
+                handle.write(chunk)
+
+    threads = [threading.Thread(target=copy, args=(process.stdout, sys.stdout.buffer)),
+               threading.Thread(target=copy, args=(process.stderr, sys.stderr.buffer))]
+    for thread in threads:
+        thread.start()
+    status = process.wait()
+    for thread in threads:
+        thread.join()
+    result = record_result(paths, name, status, time.monotonic() - started, log_path, {})
+    log_path.unlink(missing_ok=True)
+    if as_json:
+        print(dumps(result))
+    return status
 
 
 def status(paths: Paths, problems: list[str]) -> dict:
