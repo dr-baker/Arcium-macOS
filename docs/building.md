@@ -6,6 +6,7 @@ Coding agents start with [Agent workflow](agent-workflow.md).
 
 ### Navigation
 
+- [First day](#first-day)
 - [Official (non-development) build](#official-non-development-build)
 - [Development build and environment](#development-build-and-environment)
   - [Basics](#basics)
@@ -18,6 +19,70 @@ Coding agents start with [Agent workflow](agent-workflow.md).
   - [Remote builds](#remote-builds)
   - [Updating for a new Chromium release](#updating-for-a-new-chromium-release)
 - [Repository ownership](#repository-ownership)
+
+## First day
+
+Budget an afternoon. Most of it is waiting on downloads and the first
+compile, so start early and read while it runs.
+
+1. Install the [requirements](#software-requirements) and
+   [dependencies](#build-dependencies) below.
+
+2. Clone the repository with its core checkout:
+
+    ```sh
+    git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git
+    cd Arcium-macOS
+    ```
+
+3. Pick a disk with about 100 GB free. The build goes in `build/` inside the
+   checkout unless you say otherwise. To use another disk, create
+   `~/.config/arcium/dev.env`:
+
+    ```sh
+    HELIUM_BUILD_DIR=/Volumes/BuildDisk/arcium/build
+    ```
+
+4. Set up and build:
+
+    ```sh
+    source dev.sh
+    he setup
+    he build
+    ```
+
+    `he setup` downloads Chromium, applies all of Arcium's patches, and
+    generates the build files. `he build` then compiles all of Chromium. That
+    first compile takes hours. Later builds only recompile what your change
+    touches, usually a few minutes.
+
+5. Run your build on a profile of its own:
+
+    ```sh
+    he run --profile mine
+    ```
+
+    This is a separate `Helium Dev` app with a fake Keychain. It can't touch
+    your passwords or an installed Helium or Arcium. `he stop --profile mine`
+    quits it.
+
+Before changing anything, read [Repository ownership](#repository-ownership).
+Browser-wide features live as patches in `helium-chromium/patches/personal/`,
+and Mac-only work lives in `patches/personal/`. Then follow
+[Change an existing patch](#change-an-existing-patch).
+
+Some things to know early:
+
+- Run `he check` when something seems off. Every problem it reports names
+  the command that fixes it.
+- `he arcium` installs your build as your everyday browser. It needs an Apple
+  Developer ID certificate, because Keychain access depends on a stable
+  signature. Without one, stick to `he run --profile`.
+- `browser_tests` need a second build dir with full source. See
+  [Full source and browser tests](#full-source-and-browser-tests).
+- If a command behaves differently from what upstream Helium's docs say,
+  [development-changes.md](development-changes.md) explains why and how to
+  turn the difference off.
 
 ### Software requirements
 
@@ -88,42 +153,9 @@ you've installed all [dependencies](#build-dependencies).
 
 ### Basics
 
-1. Choose where the build lives. It needs about 100 GB. By default it is
-   `<checkout>/build`, as upstream. To put it on another volume, create
-   `~/.config/arcium/dev.env`:
-
-    ```sh
-    HELIUM_BUILD_DIR=/Volumes/BuildDisk/arcium/build
-    ```
-
-    ([why](development-changes.md#build-dir-outside-the-checkout))
-
-2. Load the dev util script:
-
-    ```sh
-    source dev.sh
-    ```
-
-3. Set up the dev environment for the first time:
-
-    ```sh
-    he setup
-    ```
-
-4. Build your first development binary:
-
-    ```sh
-    he build
-    ```
-
-5. Run it with a dedicated data dir:
-
-    ```sh
-    he run
-    ```
-
-Run `he` to list every command, and `he check` at any time to see whether the
-applied patches, the patch catalog, and generated resources are current.
+The [First day](#first-day) steps set everything up. After that, each session
+starts with `source dev.sh`. The daily loop is: edit a patch, `he build`, and
+`he run --profile NAME`. Run `he` to list every command.
 
 ### Creating a new patch
 
