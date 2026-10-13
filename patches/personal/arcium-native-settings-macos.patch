@@ -123,6 +123,14 @@ Index: src/chrome/browser/ui/cocoa/BUILD.gn
      "applescript/apple_event_util.mm",
      "applescript/bookmark_folder_applescript.mm",
      "applescript/bookmark_item_applescript.mm",
+@@ -155,6 +160,7 @@ source_set("cocoa") {
+     "//chrome/browser/themes",
+     "//chrome/browser/translate",
+     "//chrome/browser/ui:accelerator_utils_headers",
++    "//chrome/browser/ui:arcium_settings_prefs",
+     "//chrome/browser/ui:recently_audible_helper",
+     "//chrome/browser/ui:simple_message_box_headers",
+     "//chrome/browser/ui:simple_message_box_internal",
 Index: src/chrome/browser/ui/cocoa/arcium_shortcut_recorder.h
 ===================================================================
 --- /dev/null

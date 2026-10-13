@@ -14153,3 +14153,15 @@ Index: src/chrome/browser/themes/theme_service_browsertest.cc
  IN_PROC_BROWSER_TEST_F(ThemeServiceBrowserTest, GetColorForToolbarButton) {
  #if BUILDFLAG(IS_LINUX)
    // This test relies on toolbar buttons having no tint, which is not currently
+Index: src/chrome/browser/themes/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/themes/BUILD.gn
++++ src/chrome/browser/themes/BUILD.gn
+@@ -181,6 +181,7 @@ if (!is_android) {
+       ":themes",
+       "//base",
+       "//chrome/browser/ui",
++      "//chrome/browser/ui:arcium_settings_prefs",
+       "//chrome/browser/ui/color:color_headers",
+       "//chrome/test:test_support",
+       "//chrome/test:test_support_ui",
