@@ -13726,126 +13726,6 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +        mode == .system ? "Auto" : mode.rawValue
 +    }
  }
-Index: src/chrome/browser/ui/cocoa/arcium_settings_model.cc
-===================================================================
---- src.orig/chrome/browser/ui/cocoa/arcium_settings_model.cc
-+++ src/chrome/browser/ui/cocoa/arcium_settings_model.cc
-@@ -23,6 +23,7 @@
- #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
- #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
- #include "chrome/browser/ui/cocoa/arcium_settings_prefs.h"
-+#include "chrome/browser/ui/color/chrome_color_id.h"
- #include "chrome/browser/ui/helium/helium_space.h"
- #include "chrome/browser/ui/helium/helium_space_service.h"
- #include "chrome/browser/ui/helium/helium_space_service_factory.h"
-@@ -32,6 +33,7 @@
- #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
- #include "chrome/common/pref_names.h"
- #include "components/prefs/pref_service.h"
-+#include "ui/color/color_provider.h"
- 
- namespace arcium_settings {
- namespace {
-@@ -40,6 +42,8 @@ constexpr char kSharedPaletteConfigurati
- constexpr char kSharedPaletteAccentKey[] = "accent";
- constexpr char kSharedPaletteLightChromeColorKey[] = "lightChromeColor";
- constexpr char kSharedPaletteDarkChromeColorKey[] = "darkChromeColor";
-+constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
-+constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
- 
- constexpr std::array<std::string_view, 30> kProfilePreferences = {
-     prefs::kRestoreOnStartup,
-@@ -226,14 +230,35 @@ std::optional<ParsedSharedPalette> Parse
-   const std::string* dark_chrome_color =
-       payload.FindString(kSharedPaletteDarkChromeColorKey);
-   if (!configuration || !accent || !light_chrome_color || !dark_chrome_color ||
--      !HasExactlyKeys(
--          *configuration,
--          {"accentSource", "customAccent", "brandLightness", "harmony",
--           "chromeSource", "companion", "hue", "chroma", "neutralHue",
--           "neutralChroma", "textContrast", "lightCanvas", "darkCanvas"})) {
-+      (configuration->size() != kSharedPaletteConfigurationKeyCount &&
-+       configuration->size() != kSharedPaletteConfigurationKeyCount + 1) ||
-+      !configuration->Find("accentSource") ||
-+      !configuration->Find("customAccent") ||
-+      !configuration->Find("brandLightness") ||
-+      !configuration->Find("harmony") ||
-+      !configuration->Find("chromeSource") ||
-+      !configuration->Find("companion") || !configuration->Find("hue") ||
-+      !configuration->Find("chroma") ||
-+      !configuration->Find("neutralHue") ||
-+      !configuration->Find("neutralChroma") ||
-+      !configuration->Find("textContrast") ||
-+      !configuration->Find("lightCanvas") ||
-+      !configuration->Find("darkCanvas")) {
-     return std::nullopt;
-   }
- 
-+  // The native model deliberately accepts no arbitrary metadata. This one
-+  // optional identifier is resolved by Swift, but must survive the native
-+  // preference round trip for the next snapshot.
-+  if (configuration->size() == kSharedPaletteConfigurationKeyCount + 1) {
-+    const std::string* control_color_id =
-+        configuration->FindString(kSharedPaletteControlColorIDKey);
-+    if (!control_color_id || control_color_id->empty() ||
-+        control_color_id->size() > 128) {
-+      return std::nullopt;
-+    }
-+  }
-+
-   const std::string* accent_source = configuration->FindString("accentSource");
-   const std::string* harmony = configuration->FindString("harmony");
-   const std::string* chrome_source = configuration->FindString("chromeSource");
-@@ -556,6 +581,8 @@ base::DictValue ArciumSettingsModel::Get
-   result.Set(kSharedPaletteDarkChromeColorKey, std::string());
-   result.Set("available", false);
-   result.Set("managed", false);
-+  result.Set("editable", false);
-+  result.Set("editabilityReason", std::string());
-   result.Set("overrideActive", false);
- 
-   if (!IsAppearanceAvailable() || !prefs_->FindPreference(kSharedPalettePref)) {
-@@ -566,6 +593,7 @@ base::DictValue ArciumSettingsModel::Get
-                        !prefs_->IsUserModifiablePreference(kSharedPalettePref);
-   result.Set("available", true);
-   result.Set("managed", managed);
-+  result.Set("editable", !managed);
- 
-   const std::optional<ParsedSharedPalette> palette =
-       ParseSharedPalette(prefs_->GetDict(kSharedPalettePref));
-@@ -575,6 +603,12 @@ base::DictValue ArciumSettingsModel::Get
-     return result;
-   }
-   if (theme_service_->UsingExtensionTheme()) {
-+    if (ui::ColorProvider* color_provider = theme_service_->GetColorProvider()) {
-+      result.Set(kSharedPaletteAccentKey,
-+                 ColorString(color_provider->GetColor(kColorToolbar)));
-+    }
-+    result.Set("editable", false);
-+    result.Set("editabilityReason", "extension_theme");
-     return result;
-   }
- 
-@@ -598,7 +632,8 @@ bool ArciumSettingsModel::SetSharedPalet
-   if (shutting_down_ || !IsAppearanceAvailable() ||
-       !prefs_->FindPreference(kSharedPalettePref) ||
-       !prefs_->IsUserModifiablePreference(kSharedPalettePref) ||
--      theme_service_->UsingPolicyTheme()) {
-+      theme_service_->UsingPolicyTheme() ||
-+      theme_service_->UsingExtensionTheme()) {
-     return false;
-   }
- 
-@@ -628,7 +663,8 @@ bool ArciumSettingsModel::ResetSharedPal
-   if (shutting_down_ || !IsAppearanceAvailable() ||
-       !prefs_->FindPreference(kSharedPalettePref) ||
-       !prefs_->IsUserModifiablePreference(kSharedPalettePref) ||
--      theme_service_->UsingPolicyTheme()) {
-+      theme_service_->UsingPolicyTheme() ||
-+      theme_service_->UsingExtensionTheme()) {
-     return false;
-   }
- 
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SControlAccentPicker.swift
 ===================================================================
 --- /dev/null
@@ -14151,8 +14031,8 @@ Index: src/chrome/browser/themes/theme_service_browsertest.cc
  #include "ui/native_theme/mock_os_settings_provider.h"
  
 +#if BUILDFLAG(IS_MAC)
-+#include "chrome/browser/ui/cocoa/arcium_settings_model.h"
-+#include "chrome/browser/ui/cocoa/arcium_settings_prefs.h"
++#include "chrome/browser/ui/helium/arcium_settings_model.h"
++#include "chrome/browser/ui/helium/arcium_settings_prefs.h"
 +#endif
 +
  #if BUILDFLAG(IS_LINUX)
@@ -14273,3 +14153,15 @@ Index: src/chrome/browser/themes/theme_service_browsertest.cc
  IN_PROC_BROWSER_TEST_F(ThemeServiceBrowserTest, GetColorForToolbarButton) {
  #if BUILDFLAG(IS_LINUX)
    // This test relies on toolbar buttons having no tint, which is not currently
+Index: src/chrome/browser/themes/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/themes/BUILD.gn
++++ src/chrome/browser/themes/BUILD.gn
+@@ -181,6 +181,7 @@ if (!is_android) {
+       ":themes",
+       "//base",
+       "//chrome/browser/ui",
++      "//chrome/browser/ui:arcium_settings_prefs",
+       "//chrome/browser/ui/color:color_headers",
+       "//chrome/test:test_support",
+       "//chrome/test:test_support_ui",

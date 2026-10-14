@@ -1,34 +1,6 @@
---- a/chrome/browser/ui/cocoa/arcium_settings_model.cc
-+++ b/chrome/browser/ui/cocoa/arcium_settings_model.cc
-@@ -24,6 +24,7 @@
- #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
- #include "chrome/browser/ui/cocoa/arcium_settings_prefs.h"
- #include "chrome/browser/ui/color/chrome_color_id.h"
-+#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
- #include "chrome/browser/ui/helium/helium_space.h"
- #include "chrome/browser/ui/helium/helium_space_service.h"
- #include "chrome/browser/ui/helium/helium_space_service_factory.h"
-@@ -45,7 +46,7 @@
- constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
- constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
- 
--constexpr std::array<std::string_view, 35> kProfilePreferences = {
-+constexpr std::array<std::string_view, 37> kProfilePreferences = {
-     prefs::kRestoreOnStartup,
-     prefs::kPromptForDownload,
-     prefs::kHeliumLittleArcExternalLinks,
-@@ -58,6 +59,8 @@
-     prefs::kHeliumLayout,
-     prefs::kVerticalTabsUncollapsedWidth,
-     arcium::kCollapsedSidebarStylePref,
-+    arcium::kArcSidebarNavigationEnabledPref,
-+    arcium::kSidebarExtensionsDrawerEnabledPref,
-     arcium::kChromeFrameBorderWidthPref,
-     arcium::kChromeUIScalePref,
-     prefs::kHeliumVerticalRightAligned,
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -376,6 +376,10 @@
+@@ -376,6 +376,10 @@ struct ArciumAppearanceSnapshot: Equatab
      var showVerticalTabsCollapseButton = false
      var showDynamicNewTabButton = false
      var verticalRightAligned = false
@@ -39,7 +11,7 @@
      var zenMode = false
      var zenModeSidebarPinned = false
      var zenModeTopChromePinned = false
-@@ -439,6 +443,10 @@
+@@ -439,6 +443,10 @@ struct ArciumAppearanceSnapshot: Equatab
          showVerticalTabsCollapseButton = boolean(dictionary["showVerticalTabsCollapseButton"])
          showDynamicNewTabButton = boolean(dictionary["showDynamicNewTabButton"])
          verticalRightAligned = boolean(dictionary["verticalRightAligned"])
@@ -50,7 +22,7 @@
          zenMode = boolean(dictionary["zenMode"])
          zenModeSidebarPinned = boolean(dictionary["zenModeSidebarPinned"])
          zenModeTopChromePinned = boolean(dictionary["zenModeTopChromePinned"])
-@@ -956,6 +964,8 @@
+@@ -956,6 +964,8 @@ final class ArciumSettingsStore: Observa
          case "show_vertical_tabs_collapse_button": snapshot.appearance.showVerticalTabsCollapseButton
          case "show_dynamic_new_tab_button": snapshot.appearance.showDynamicNewTabButton
          case "vertical_right_aligned": snapshot.appearance.verticalRightAligned
@@ -59,7 +31,7 @@
          case "zen_mode": snapshot.appearance.zenMode
          case "zen_mode_sidebar_pinned": snapshot.appearance.zenModeSidebarPinned
          case "zen_mode_top_chrome_pinned": snapshot.appearance.zenModeTopChromePinned
-@@ -971,7 +981,8 @@
+@@ -971,7 +981,8 @@ final class ArciumSettingsStore: Observa
              "show_menu_button", "show_media_button",
              "show_vertical_tabs_collapse_button", "show_dynamic_new_tab_button",
              "vertical_right_aligned", "zen_mode", "zen_mode_sidebar_pinned",
@@ -71,7 +43,7 @@
          }
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -252,11 +252,19 @@
+@@ -252,11 +252,19 @@ private struct BooleanSetting: View {
      let description: String
      let enabled: Bool
      @Binding var value: Bool
@@ -94,7 +66,7 @@
      }
  }
  
-@@ -483,19 +491,6 @@
+@@ -483,19 +491,6 @@ private struct TabsAndSpacesSettingsPage
                              )
                          )
                      }
@@ -114,7 +86,7 @@
                  } else {
                      SectionUnavailableView(title: "Tab settings")
                  }
-@@ -525,6 +520,13 @@
+@@ -525,6 +520,13 @@ private struct AppearanceSettingsPage: V
          ("show_media_button", "Media", "play.rectangle", "Show media controls.")
      ]
  
@@ -128,7 +100,7 @@
      private var appearanceBinding: Binding<SettingsAppearance> {
          Binding(get: { store.appearanceMode() }, set: { store.applyAppearanceMode($0) })
      }
-@@ -567,6 +569,28 @@
+@@ -567,6 +569,28 @@ private struct AppearanceSettingsPage: V
                  ), options: store.snapshot.tabs.layoutOptions.map { (value: $0.value, label: $0.label) },
                      description: "Choose a compact, classic, or sidebar layout.")
                  .disabled(!store.snapshot.tabs.hasValue("helium_layout") || store.snapshot.tabs.isManaged("helium_layout"))
@@ -157,7 +129,7 @@
                  SSlider("Browser UI scale", value: Binding(
                      get: { Double(store.snapshot.appearance.chromeUIScale) },
                      set: { store.setChromeUIScale($0) }
-@@ -600,12 +624,6 @@
+@@ -600,12 +624,6 @@ private struct AppearanceSettingsPage: V
                  }, description: "Choose an icon rail or fully hide the sidebar.")
                  .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
                      || store.snapshot.appearance.collapsedSidebarStyleManaged)
@@ -170,7 +142,7 @@
                  BooleanSetting(title: "Rounded frame", description: "Round the browser frame corners.", enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
                  SSlider("Border width", value: Binding(
                      get: { store.displayedChromeFrameBorderWidth },
-@@ -620,16 +638,50 @@
+@@ -620,16 +638,50 @@ private struct AppearanceSettingsPage: V
                  .disabled(!store.snapshot.appearance.chromeFrameBorderWidthAvailable
                      || store.snapshot.appearance.chromeFrameBorderWidthManaged
                      || !store.snapshot.appearance.roundedFrame)
@@ -227,15 +199,15 @@
                      }
 --- a/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +++ b/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
-@@ -38,6 +38,7 @@
+@@ -36,6 +36,7 @@
  #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
  #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
  #include "chrome/browser/ui/color/chrome_color_id.h"
 +#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/helium/arcium_settings_model.h"
+ #include "chrome/browser/ui/helium/arcium_settings_prefs.h"
  #include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
- #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
- #include "chrome/browser/ui/helium/helium_space_service.h"
-@@ -109,6 +110,9 @@
+@@ -109,6 +110,9 @@ NSString* const kKeyRoundedFrame = @"rou
  NSString* const kKeyCenteredLocationBar = @"centered_location_bar";
  NSString* const kKeyMinimalLocationBar = @"minimal_location_bar";
  NSString* const kKeyZenMode = @"zen_mode";
@@ -245,7 +217,7 @@
  NSString* const kKeyShowHomeButton = @"show_home_button";
  NSString* const kKeyShowBackButton = @"show_back_button";
  NSString* const kKeyShowForwardButton = @"show_forward_button";
-@@ -146,6 +150,15 @@
+@@ -146,6 +150,15 @@ bool GetBooleanObject(id value, bool* re
    return true;
  }
  
@@ -261,7 +233,7 @@
  bool GetIntegerObject(id value, int* result) {
    if (!result || !IsBooleanObject(value)) {
      return false;
-@@ -382,6 +395,33 @@
+@@ -382,6 +395,33 @@ bool IsMatchingNormalBrowser(BrowserWind
    return browser_view && browser_view->GetIsNormalType();
  }
  
@@ -295,7 +267,7 @@
  std::optional<SettingsChromeVisualState> GetBrowserChromeVisualState(
      Profile* profile) {
    if (!profile) {
-@@ -1188,6 +1228,15 @@
+@@ -1188,6 +1228,15 @@ void SettingsModelProfileWillBeDestroyed
        model && model->HasPreference(prefs::kHeliumMinimalLocationBar);
    const bool zen_available =
        model && model->HasPreference(prefs::kHeliumZenMode);
@@ -311,7 +283,7 @@
    const bool sidebar_width_available = model && model->HasSidebarWidth();
    const bool sidebar_width_managed =
        sidebar_width_available && model->IsSidebarWidthManaged();
-@@ -1339,6 +1388,14 @@
+@@ -1339,6 +1388,14 @@ void SettingsModelProfileWillBeDestroyed
      @"minimalLocationBar" :
          @(model && minimal_available &&
            model->GetBoolean(prefs::kHeliumMinimalLocationBar)),
@@ -326,7 +298,7 @@
      @"zenMode" :
          @(model && zen_available && model->GetBoolean(prefs::kHeliumZenMode)),
      @"showHomeButton" :
-@@ -1389,6 +1446,12 @@
+@@ -1389,6 +1446,12 @@ void SettingsModelProfileWillBeDestroyed
        kKeyMinimalLocationBar :
            @(model && minimal_available &&
              model->IsManaged(prefs::kHeliumMinimalLocationBar)),
@@ -339,7 +311,7 @@
        kKeyZenMode :
            @(model && zen_available && model->IsManaged(prefs::kHeliumZenMode)),
        kKeyShowHomeButton : @(model && home_available &&
-@@ -1435,6 +1498,9 @@
+@@ -1435,6 +1498,9 @@ void SettingsModelProfileWillBeDestroyed
        kKeyRoundedFrame : @(rounded_available),
        kKeyCenteredLocationBar : @(centered_available),
        kKeyMinimalLocationBar : @(minimal_available),
@@ -349,7 +321,7 @@
        kKeyZenMode : @(zen_available),
        kKeyShowHomeButton : @(home_available),
        kKeyShowBackButton : @(back_available),
-@@ -1599,6 +1665,12 @@
+@@ -1599,6 +1665,12 @@ void SettingsModelProfileWillBeDestroyed
    [self.window close];
  }
  
@@ -362,7 +334,7 @@
  - (void)windowWillClose:(NSNotification*)notification {
    window_closing_ = YES;
    [content_controller_ setEffectiveAppearanceChangedHandler:nil];
-@@ -1817,10 +1889,32 @@
+@@ -1817,10 +1889,32 @@ void SettingsModelProfileWillBeDestroyed
      }
      return;
    }
@@ -396,7 +368,7 @@
        model_->SetBoolean(prefs::kHeliumZenModeTopChromePinned, boolean_value);
        [self modelDidChange];
      }
-@@ -1839,7 +1933,8 @@
+@@ -1839,7 +1933,8 @@ void SettingsModelProfileWillBeDestroyed
    if ([key isEqualToString:kKeyCenteredLocationBar] &&
        GetBooleanObject(value, &boolean_value)) {
      if (model_->HasPreference(prefs::kHeliumCenteredLocationBar) &&
@@ -408,7 +380,7 @@
      }
 --- a/chrome/browser/ui/views/frame/browser_frame_view_mac.mm
 +++ b/chrome/browser/ui/views/frame/browser_frame_view_mac.mm
-@@ -213,11 +213,12 @@
+@@ -213,11 +213,12 @@ bool BrowserFrameViewMac::CaptionButtons
  
  BrowserLayoutParams BrowserFrameViewMac::GetBrowserLayoutParams() const {
    auto params = BrowserFrameView::GetBrowserLayoutParams();
