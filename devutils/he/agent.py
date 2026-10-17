@@ -62,7 +62,8 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
     import sys
     print(f"he agent build: dry run of {' '.join(targets)} to check the edge budget "
           "(loading the build graph takes 30-60 s)", file=sys.stderr, flush=True)
-    result = subprocess.run(command, cwd=paths.src, env=environment, capture_output=True, text=True, check=False)
+    result = subprocess.run(command, cwd=paths.src, env=environment, capture_output=True,
+                            text=True, errors="replace", check=False)
     if result.returncode:
         raise HeError(f"dry run failed:\n{(result.stdout + result.stderr).strip()[-2000:]}")
     output = result.stdout + result.stderr
