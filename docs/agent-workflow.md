@@ -21,7 +21,7 @@ build graph cannot see. Each problem names the command that fixes it.
 | Compile | `he agent build TARGET...` (it spends 30-60 s on a dry run first) |
 | Run the native Settings Swift package tests | Copy the package out of the source tree first: `cp -cR "$HELIUM_DEV_BUILD_ROOT/src/chrome/browser/ui/cocoa/arcium_settings_swift" /tmp/NAME`, then `swift test --package-path /tmp/NAME --filter TEST` |
 | Refresh build inputs `he check` names | `he agent version`, `he agent resources`, or `he agent configure --refresh-defaults` |
-| Test without touching real profiles | `he agent run --profile NAME`, then `he agent stop --profile NAME` |
+| Test without touching real profiles | `he agent run --profile NAME`, then `he agent stop --profile NAME`; a new profile starts with the sidebar, Favorites, Pins, and open tabs (`--empty` for a blank one) |
 | Run several Dev apps at once | add `--labeled` to each `he agent run` |
 | Install the build as the daily browser | `he agent arcium`, plus `--approved` if Arcium is running |
 | Check whether the installed app is the current build | `he agent arcium status` (`matches_build`) |
@@ -77,12 +77,17 @@ uses, unless that is already established:
 
 - **build only**;
 - **isolated testing**: `he agent run --profile NAME` with a mock Keychain
-  (`--new` guarantees an empty profile, `--seed-from arcium` copies real data
-  once);
+  (`--new` refuses an existing profile; a new profile gets the sidebar,
+  Favorites, Pins, and tabs unless `--empty`; `--seed-from arcium` copies real
+  data once, with Arcium quit);
 - **installed app**: `he agent arcium`, with the persistent profile and the
   real Keychain.
 
 Use the contract in `devutils/scenarios/` for the feature when one exists.
+
+Verify visible changes with a GPT-6.1-Sol computer-use agent: it drives the
+running Dev app, takes screenshots, and reports what looks wrong. Report its
+findings with the behavior gates.
 
 ## Report proof gates separately
 
