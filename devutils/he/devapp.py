@@ -39,6 +39,53 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 _OWNED_SWITCHES = ("user-data-dir", "profile-directory", "use-mock-keychain")
 RECORD = "dev-bundles.json"
 
+# A new profile starts like a lived-in Arcium window: the vertical sidebar,
+# Favorites, one Space with Pins and a folder, and a few open tabs. --empty
+# skips all of it.
+FIXTURE_TABS = ("https://example.com/", "https://en.wikipedia.org/wiki/Web_browser",
+                "https://news.ycombinator.com/")
+
+
+def _link(item_id: str, title: str, url: str) -> dict:
+    return {"type": "link", "id": item_id, "title": title, "url": url}
+
+
+FIXTURE_PREFERENCES = {
+    "helium": {
+        "browser": {"layout": 2},
+        "completed_onboarding": True,
+        "favorites": [
+            _link("fixture-favorite-google", "Google", "https://www.google.com/"),
+            _link("fixture-favorite-github", "GitHub", "https://github.com/"),
+            _link("fixture-favorite-youtube", "YouTube", "https://www.youtube.com/"),
+            _link("fixture-favorite-maps", "Maps", "https://www.openstreetmap.org/"),
+        ],
+        "spaces": [{
+            "id": "fixture-space",
+            "name": "Space",
+            "pins": [
+                _link("fixture-pin-mdn", "MDN Web Docs", "https://developer.mozilla.org/"),
+                _link("fixture-pin-chromium", "Chromium", "https://www.chromium.org/"),
+                {"type": "folder", "id": "fixture-pin-reading", "title": "Reading", "collapsed": False,
+                 "children": [
+                     _link("fixture-pin-verge", "The Verge", "https://www.theverge.com/"),
+                     _link("fixture-pin-ars", "Ars Technica", "https://arstechnica.com/"),
+                 ]},
+            ],
+        }],
+        "active_space_id": "fixture-space",
+    },
+    "vertical_tabs": {"collapsed_state": False, "uncollapsed_width": 240},
+    "session": {"restore_on_startup": 1},
+}
+
+
+def write_fixture(profile: Path) -> None:
+    """Preferences for a new profile; the caller opens FIXTURE_TABS once."""
+    default = profile / "Default"
+    default.mkdir(mode=0o700, parents=True, exist_ok=True)
+    write_json(default / "Preferences", FIXTURE_PREFERENCES)
+
 
 def support(home: Path | None = None) -> Path:
     return (home or Path.home()) / "Library" / "Application Support"
@@ -139,7 +186,8 @@ def _features(passthrough: list[str]) -> tuple[list[str], list[str], list[str]]:
 
 
 def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = False,
-        seed: str | None = None, passthrough: list[str] | None = None, home: Path | None = None) -> dict:
+        seed: str | None = None, empty: bool = False, passthrough: list[str] | None = None,
+        home: Path | None = None) -> dict:
     """Launch a Dev app on a profile and return once it owns that profile."""
     if labeled and name is None:
         raise HeError("--labeled needs --profile NAME")
@@ -154,13 +202,19 @@ def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = Fa
         raise HeError(f"profile {profile} is already running (pid {owner}); he stop --profile {name or ''} first".rstrip())
     if new and profile.exists():
         raise HeError(f"profile {name} already exists: {profile}; pick a new name")
+    if seed is not None and empty:
+        raise HeError("--empty and --seed-from both choose a new profile's contents; pick one")
+    first_tabs: list[str] = []
     if not profile.exists():
         if seed is not None:
             clone_once(seed_source(seed, home), profile)
         else:
             profile.mkdir(mode=0o700, parents=True)
-    elif seed is not None:
-        raise HeError(f"profile {profile} already exists; --seed-from only applies to a new profile")
+            if not empty and name is not None:
+                write_fixture(profile)
+                first_tabs = list(FIXTURE_TABS)
+    elif seed is not None or empty:
+        raise HeError(f"profile {profile} already exists; --seed-from and --empty only apply to a new profile")
     bundle = prepare_bundle(paths, name if labeled else None)
     executable = apps.executable(bundle)
     logs = (home or Path.home()) / "Library" / "Logs" / "Arcium"
@@ -169,7 +223,8 @@ def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = Fa
     with log.open("ab") as handle:
         process = subprocess.Popen(
             [str(executable), f"--user-data-dir={profile}", "--profile-directory=Default", *DEV_FLAGS,
-             f"--enable-features={','.join(enabled)}", f"--disable-features={','.join(disabled)}", *rest],
+             f"--enable-features={','.join(enabled)}", f"--disable-features={','.join(disabled)}", *rest,
+             *first_tabs],
             stdin=subprocess.DEVNULL, stdout=handle, stderr=handle, start_new_session=True,
         )
     if not apps.wait_for_owner(profile, process.pid, executable, timeout=30):

@@ -566,7 +566,7 @@ ___helium_lint() {
     ___helium_tidy;
 }
 
-# he run [--profile NAME [--new] [--labeled] [--seed-from installed|dev|arcium|PATH]]
+# he run [--profile NAME [--new] [--labeled] [--empty | --seed-from installed|dev|arcium|PATH]]
 #        [--json] [browser flags...]
 # Without profile options this is upstream's he run.
 ___helium_run_profile() {
@@ -577,9 +577,9 @@ ___helium_run_profile() {
             --profile) options+=(--profile "$2"); shift 2 ;;
             --profile=*) options+=(--profile "${1#*=}"); shift ;;
             --seed-from) options+=(--seed-from "$2"); shift 2 ;;
-            --new|--labeled|--json) options+=("$1"); shift ;;
+            --new|--labeled|--empty|--json) options+=("$1"); shift ;;
             --fresh|--fresh=*|--isolated|--isolated=*)
-                echo "error: ${1%%=*} was replaced by --profile NAME (add --new for an empty profile)" >&2
+                echo "error: ${1%%=*} was replaced by --profile NAME (add --new for a new profile, --empty for a blank one)" >&2
                 return 2 ;;
             *) passthrough+=("$1"); shift ;;
         esac
@@ -730,7 +730,7 @@ __helium_menu() {
             echo "\n" >&2
             echo "\tbuild [--jobs N] [TARGET...] - builds a development binary" >&2
             echo "\trun - runs a development build of helium with dev data dir & ui devtools enabled" >&2
-            echo "\trun --profile NAME [--new] [--labeled] [--seed-from SRC] [flags] - runs Helium Dev on a named profile" >&2
+            echo "\trun --profile NAME [--new] [--labeled] [--empty | --seed-from SRC] [flags] - runs Helium Dev on a named profile" >&2
             echo "\tstop [--profile NAME] - quits the Helium Dev app using that profile" >&2
             echo "\tarcium [--no-build] - builds and installs /Applications/Arcium.app, restarting it if running" >&2
             echo "\tarcium status - shows the installed app's identity, signature, and process" >&2

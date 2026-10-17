@@ -139,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--new", action="store_true")
     run.add_argument("--labeled", action="store_true")
     run.add_argument("--seed-from")
+    run.add_argument("--empty", action="store_true")
     run.add_argument("--json", action="store_true")
     run.add_argument("passthrough", nargs=argparse.REMAINDER)
     stop = commands.add_parser("stop")
@@ -224,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
             from . import devapp
             extra = args.passthrough[1:] if args.passthrough[:1] == ["--"] else args.passthrough
             launched = devapp.run(paths, args.profile, new=args.new, labeled=args.labeled,
-                                  seed=args.seed_from, passthrough=extra)
+                                  seed=args.seed_from, empty=args.empty, passthrough=extra)
             print(devapp.describe(launched) if args.json else
                   f"running {Path(launched['app']).name} pid {launched['pid']} on {launched['profile']}\nlog: {launched['log']}")
         elif args.command == "stop":

@@ -105,6 +105,25 @@ class AppsTest(unittest.TestCase):
         self.assertIn("already exists", self.m.he("run", "--profile", "gamma", "--new", check=False).stderr)
         self.assertNotEqual(self.m.he("run", "--fresh", "delta", check=False).returncode, 0)
 
+    def test_new_profiles_start_with_the_sidebar_items_and_tabs(self) -> None:
+        self.m.he("run", "--profile", "lived-in")
+        prefs = json.loads((self.profile("lived-in") / "Default" / "Preferences").read_text())
+        self.assertEqual(prefs["helium"]["browser"]["layout"], 2)
+        self.assertEqual(len(prefs["helium"]["favorites"]), 4)
+        self.assertEqual(prefs["helium"]["spaces"][0]["pins"][2]["type"], "folder")
+        args = (self.profile("lived-in") / "stub-args").read_text().splitlines()
+        self.assertIn("https://example.com/", args)
+        self.m.he("stop", "--profile", "lived-in")
+        self.m.he("run", "--profile", "lived-in")
+        self.assertNotIn("https://example.com/",
+                         (self.profile("lived-in") / "stub-args").read_text().splitlines())
+
+    def test_empty_profiles_start_blank(self) -> None:
+        self.m.he("run", "--profile", "blank", "--empty")
+        self.assertFalse((self.profile("blank") / "Default" / "Preferences").exists())
+        self.assertNotIn("https://example.com/",
+                         (self.profile("blank") / "stub-args").read_text().splitlines())
+
     def test_seeding_copies_a_stopped_profile_once(self) -> None:
         seed = self.m.root / "seed"
         (seed / "Default").mkdir(parents=True)
