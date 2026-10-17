@@ -1,0 +1,61 @@
+{
+  "schema": 1,
+  "id": "space-profiles",
+  "description": "Create Spaces in two profiles from the sidebar, give them icons and themes, switch between them, fold Pins under the Space header, and verify persistence and teardown.",
+  "profile": {
+    "policy": "isolated",
+    "name": "space-profiles"
+  },
+  "feature_flags": [
+    "HeliumFavoritesAndPins"
+  ],
+  "tests": [],
+  "preconditions": [
+    "Build and launch the exact Helium Dev.app from the selected lane with the isolated space-profiles profile",
+    "Keep one browser window open with the vertical sidebar expanded",
+    "Create at least one Pin in the starting Space"
+  ],
+  "steps": [
+    "Click the + button in the sidebar's bottom Space bar",
+    "Click the dashed icon slot, type house in the search field, and choose the house icon",
+    "Type Personal as the name, leave the profile on the current profile, pick the Orange swatch for the selected glow, raise Grain, set Browser to Dark, then click Create Space",
+    "Click + again, choose an emoji by typing it into the icon search field, name the Space Work, choose New profile, pick the Blue swatch, set Grain to zero, and click Create Space",
+    "Click the Personal icon in the bottom bar, then the Work icon, then the Personal icon again",
+    "Right-click the Work icon, choose Edit Space, change the icon to briefcase, and click Save",
+    "In a Space with Pins, click the Space name above the Pins, then click it again",
+    "Resize the sidebar, then switch Spaces; move the window, then switch again",
+    "In Personal, open Edit Space, set Pages to Light with Browser Dark, save, and load a page that honors prefers-color-scheme",
+    "Collapse the sidebar to the icon rail, click another Space's icon in the rail, then expand the sidebar",
+    "Create a Space named Scratch with one Pin, right-click it, choose Delete Space…, click Keep Space, then choose Delete Space… again and confirm",
+    "Open Edit Space for the current window's Space in a profile with other Spaces, click Delete Space… and confirm",
+    "Create a Space in a new profile, then delete it and confirm the profile deletion",
+    "Quit Helium Dev normally, relaunch the same isolated profile, and inspect the bottom bar, Space themes, and the Pins header",
+    "Stop the isolated profile after the restored state has been checked"
+  ],
+  "observables": [
+    "The + button replaces the tab list with the Create a Space form; Cancel or Escape restores the tab list and the window's own theme",
+    "The icon picker filters as you type, offers a typed emoji as the first choice, and supports arrow keys and Enter",
+    "Choosing a swatch or mode previews it on the current window before Create Space",
+    "Creating Personal opens its window at the same frame; the bottom bar lists one icon per Space and highlights the window's Space",
+    "Creating Work in a new profile creates that profile without an extra empty Space and opens Work at the same frame with a green theme",
+    "Switching Spaces raises the target Space's window at the current window's frame; its Favorites and sign-ins come from its own profile",
+    "Hovering a Space icon shows its name, plus its profile name when Spaces span profiles",
+    "Clicking the Space name hides the Pins and shows a right-pointing chevron; clicking again shows the Pins",
+    "The compact sidebar hides the Space header and shows only the current Space's icon in the bottom bar",
+    "After normal quit and relaunch, every Space keeps its icon, theme, profile, and folded Pins state, and the bottom bar lists Spaces from both profiles",
+    "Stopping the profile leaves no matching Helium Dev process and no newly timestamped crash report",
+    "The Theme card's preview shows the window background's glows; clicking adds a glow, dragging or arrow keys move it, Delete removes it, and the header + adds one by keyboard up to four",
+    "Glow color, intensity, and grain preview live on the window background, using the same effect as Settings > Appearance, so Personal and Work look clearly different",
+    "Browser and Pages modes apply separately: dark chrome with a light page, and the reverse",
+    "Switching or creating a Space carries the window frame, sidebar width, and collapsed state; windows still stacked at the previous frame follow, windows the user placed elsewhere keep their frames",
+    "The collapsed rail stacks every Space icon and switches on click; overflowing Spaces scroll, and the selected Space stays in view",
+    "Opening the form from the rail expands the sidebar and returns to the rail on Save or Cancel",
+    "The icon picker exposes named list box options for the visible rows and stays readable while scrolling",
+    "Delete Space confirms inline and says what goes; Keep Space and Escape delete nothing",
+    "A deleted Space leaves the bar, its Pins are gone after relaunch, and its windows close with their tabs",
+    "Deleting the current window's Space opens the neighbouring Space at the same frame first",
+    "Deleting a profile's only Space deletes that profile; the last Space anywhere cannot be deleted"
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}
