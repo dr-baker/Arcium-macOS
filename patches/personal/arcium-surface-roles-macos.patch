@@ -1,0 +1,235 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -388,6 +388,7 @@ struct ArciumCommandPanelLayout: Equatab
+ }
+ 
+ struct ArciumAppearanceSnapshot: Equatable {
++    static let surfaceSetValues = ["glass", "refractive", "quiet", "solid"]
+     static let defaultCollapsedSidebarStyleOptions = [
+         ArciumChoice(value: 0, label: "Icon rail"),
+         ArciumChoice(value: 1, label: "Fully hidden (Arc)")
+@@ -431,6 +432,12 @@ struct ArciumAppearanceSnapshot: Equatab
+     var canEditCommandBarAppearance: Bool {
+         commandBarAppearanceAvailable && !commandBarAppearanceManaged
+     }
++    var surfaceSet = "glass"
++    var surfaceSetAvailable = false
++    var surfaceSetManaged = false
++    var canEditSurfaceSet: Bool {
++        surfaceSetAvailable && !surfaceSetManaged
++    }
+     var collapsedSidebarStyle = 0
+     var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
+     var collapsedSidebarStyleAvailable = false
+@@ -457,7 +464,15 @@ struct ArciumAppearanceSnapshot: Equatab
+         commandPanelLayout = ArciumCommandPanelLayout(dictionaryValues(dictionary["commandPanelLayout"]))
+         commandPanelLayoutAvailable = strictBoolean(dictionary["commandPanelLayoutAvailable"]) ?? false
+         commandPanelLayoutManaged = strictBoolean(dictionary["commandPanelLayoutManaged"]) ?? false
+-        commandBarAppearance = exactIntegerOptional(dictionary["commandBarAppearance"]) == 1 ? 1 : 0
++        // 0 is Solid, 1 Glass, and 2 Automatic (follows the surface set).
++        // Malformed values never become glass.
++        let commandBarValue = exactIntegerOptional(dictionary["commandBarAppearance"])
++        commandBarAppearance = commandBarValue == 1 || commandBarValue == 2 ? commandBarValue ?? 0 : 0
++        if let value = dictionary["surfaceSet"] as? String, Self.surfaceSetValues.contains(value) {
++            surfaceSet = value
++        }
++        surfaceSetAvailable = strictBoolean(dictionary["surfaceSetAvailable"]) ?? false
++        surfaceSetManaged = strictBoolean(dictionary["surfaceSetManaged"]) ?? false
+         commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
+         commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
+         collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
+@@ -882,10 +897,16 @@ final class ArciumSettingsStore: Observa
+ 
+     func setCommandBarAppearance(_ appearance: Int) {
+         guard snapshot.appearance.canEditCommandBarAppearance,
+-              (0...1).contains(appearance) else { return }
++              (0...2).contains(appearance) else { return }
+         settingChanged(key: "command_bar_appearance", value: appearance)
+     }
+ 
++    func setSurfaceSet(_ surfaceSet: String) {
++        guard snapshot.appearance.canEditSurfaceSet,
++              ArciumAppearanceSnapshot.surfaceSetValues.contains(surfaceSet) else { return }
++        settingChanged(key: "surface_set", value: surfaceSet)
++    }
++
+     func setCollapsedSidebarStyle(_ style: Int) {
+         guard snapshot.appearance.collapsedSidebarStyleAvailable,
+               !snapshot.appearance.collapsedSidebarStyleManaged,
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -571,14 +571,26 @@ private struct AppearanceSettingsPage: V
+             }
+             backgroundEditor
+ 
+-            SSectionCard(title: "Command bar") {
+-                SPicker("Command bar appearance", selection: Binding(
++            SSectionCard(title: "Floating surfaces") {
++                SPicker("Surface style", selection: Binding(
++                    get: { store.snapshot.appearance.surfaceSet },
++                    set: { store.setSurfaceSet($0) }
++                ), options: [
++                    (value: "glass", label: "Glass"), (value: "refractive", label: "Refractive"),
++                    (value: "quiet", label: "Quiet"), (value: "solid", label: "Solid")],
++                    description: "Styles panels, floating buttons, and Peek backdrops together.")
++                .disabled(!store.snapshot.appearance.canEditSurfaceSet)
++                .accessibilityIdentifier("surface-set")
++                SPicker("Panels", selection: Binding(
+                     get: { store.snapshot.appearance.commandBarAppearance },
+                     set: { store.setCommandBarAppearance($0) }
+-                ), options: [(value: 0, label: "Solid"), (value: 1, label: "Glass")],
+-                    description: "Glass uses your saved window background style.")
++                ), options: [(value: 2, label: "Automatic"), (value: 0, label: "Solid"), (value: 1, label: "Glass")],
++                    description: "The command bar and tab switcher. Automatic follows the surface style; Glass uses your window's material without its colors or grain.")
+                 .disabled(!store.snapshot.appearance.canEditCommandBarAppearance)
+                 .accessibilityIdentifier("command-bar-appearance")
++            }
++
++            SSectionCard(title: "Command bar") {
+                 Group {
+                     SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
+                         (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -1193,7 +1193,7 @@ final class ArciumSettingsUIContractTest
+     func testCommandBarAppearanceRejectsMalformedSnapshotValues() {
+         let invalidValues: [Any] = [
+             true, false, NSNumber(value: true), NSNumber(value: false),
+-            1.5, NSNumber(value: 1.5), Float(1.25), -1, 2, "glass", "1",
++            1.5, NSNumber(value: 1.5), Float(1.25), -1, 3, "glass", "1",
+             Double.infinity, -Double.infinity, Double.nan,
+             Double.greatestFiniteMagnitude, NSNull()
+         ]
+@@ -1207,6 +1207,45 @@ final class ArciumSettingsUIContractTest
+         for value: Any in [0, 0.0, NSNumber(value: 0)] {
+             XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 0)
+         }
++        for value: Any in [2, 2.0, NSNumber(value: 2)] {
++            XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 2)
++        }
++    }
++
++    @MainActor
++    func testSurfaceSetUsesTypedCallbackAndRejectsUnknownNames() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "surfaceSet": "glass",
++            "surfaceSetAvailable": true,
++            "surfaceSetManaged": false,
++            "commandBarAppearance": 2,
++            "commandBarAppearanceAvailable": true
++        ]], delegate: delegate)
++        XCTAssertEqual(store.snapshot.appearance.surfaceSet, "glass")
++        XCTAssertEqual(store.snapshot.appearance.commandBarAppearance, 2)
++        store.setSurfaceSet("quiet")
++        store.setSurfaceSet("liquid")
++        store.setSurfaceSet("")
++        store.setCommandBarAppearance(2)
++        XCTAssertEqual(delegate.settings.map(\.key), ["surface_set", "command_bar_appearance"])
++        XCTAssertEqual(delegate.settings.first?.value as? String, "quiet")
++
++        for value: Any in ["liquid", 1, true, NSNull()] {
++            XCTAssertEqual(ArciumAppearanceSnapshot(["surfaceSet": value]).surfaceSet, "glass")
++        }
++        for value in ArciumAppearanceSnapshot.surfaceSetValues {
++            XCTAssertEqual(ArciumAppearanceSnapshot(["surfaceSet": value]).surfaceSet, value)
++        }
++
++        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "surfaceSet": "solid",
++            "surfaceSetAvailable": true,
++            "surfaceSetManaged": true
++        ]], delegate: delegate)
++        managed.setSurfaceSet("glass")
++        XCTAssertFalse(managed.snapshot.appearance.canEditSurfaceSet)
++        XCTAssertEqual(delegate.settings.count, 2)
+     }
+ 
+     @MainActor
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -50,6 +50,7 @@
+ #include "chrome/browser/ui/views/helium/glass_surface.h"
+ #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "chrome/browser/ui/views/helium/glass_surface_mac.h"
++#include "chrome/browser/ui/views/helium/surface_style.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/prefs/pref_service.h"
+ #include "third_party/blink/public/common/features.h"
+@@ -103,6 +104,7 @@ NSString* const kKeyZenModeTopChromePinn
+ NSString* const kKeyAppearance = @"settings_appearance";
+ NSString* const kKeyChromeAppearance = @"chrome_appearance";
+ NSString* const kKeyCommandBarAppearance = @"command_bar_appearance";
++NSString* const kKeySurfaceSet = @"surface_set";
+ NSString* const kKeyCommandPanelLayout = @"command_panel_layout";
+ NSString* const kKeySidebarWidth = @"sidebar_width";
+ NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
+@@ -1245,12 +1247,22 @@ void SettingsModelProfileWillBeDestroyed
+   const bool command_bar_appearance_managed =
+       command_bar_appearance_available &&
+       model->IsManaged(arcium::kCommandBarAppearancePref);
++  const int saved_command_bar_appearance =
++      command_bar_appearance_available
++          ? model->GetInteger(arcium::kCommandBarAppearancePref)
++          : arcium::kCommandBarAppearanceSolid;
+   const int command_bar_appearance =
+-      command_bar_appearance_available &&
+-              model->GetInteger(arcium::kCommandBarAppearancePref) ==
+-                  arcium::kCommandBarAppearanceGlass
+-          ? arcium::kCommandBarAppearanceGlass
++      saved_command_bar_appearance == arcium::kCommandBarAppearanceGlass ||
++              saved_command_bar_appearance ==
++                  arcium::kCommandBarAppearanceAutomatic
++          ? saved_command_bar_appearance
+           : arcium::kCommandBarAppearanceSolid;
++  const bool surface_set_available =
++      model && model->HasPreference(helium::kArciumSurfaceSetPref);
++  const bool surface_set_managed =
++      surface_set_available && model->IsManaged(helium::kArciumSurfaceSetPref);
++  const std::string surface_set =
++      model ? model->GetSurfaceSet() : helium::kSurfaceSetGlass;
+   const bool sidebar_width_available = model && model->HasSidebarWidth();
+   const bool sidebar_width_managed =
+       sidebar_width_available && model->IsSidebarWidthManaged();
+@@ -1383,6 +1395,9 @@ void SettingsModelProfileWillBeDestroyed
+     @"commandBarAppearance" : @(command_bar_appearance),
+     @"commandBarAppearanceAvailable" : @(command_bar_appearance_available),
+     @"commandBarAppearanceManaged" : @(command_bar_appearance_managed),
++    @"surfaceSet" : base::SysUTF8ToNSString(surface_set),
++    @"surfaceSetAvailable" : @(surface_set_available),
++    @"surfaceSetManaged" : @(surface_set_managed),
+     @"sidebarWidth" : @(sidebar_width),
+     @"sidebarWidthAvailable" : @(sidebar_width_available),
+     @"sidebarWidthManaged" : @(sidebar_width_managed),
+@@ -2124,13 +2139,22 @@ void SettingsModelProfileWillBeDestroyed
+         CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
+         [value doubleValue] == integer_value &&
+         (integer_value == arcium::kCommandBarAppearanceSolid ||
+-         integer_value == arcium::kCommandBarAppearanceGlass) &&
++         integer_value == arcium::kCommandBarAppearanceGlass ||
++         integer_value == arcium::kCommandBarAppearanceAutomatic) &&
+         model_->HasPreference(arcium::kCommandBarAppearancePref) &&
+         !model_->IsManaged(arcium::kCommandBarAppearancePref)) {
+       model_->SetInteger(arcium::kCommandBarAppearancePref, integer_value);
+       [self modelDidChange];
+     }
+     return;
++  }
++  if ([key isEqualToString:kKeySurfaceSet]) {
++    // The model rejects unknown names and managed preferences.
++    if ([value isKindOfClass:[NSString class]] &&
++        model_->SetSurfaceSet(base::SysNSStringToUTF8(value))) {
++      [self modelDidChange];
++    }
++    return;
+   }
+   if ([key isEqualToString:kKeyChromeUIScale]) {
+     if (GetIntegerObject(value, &integer_value) &&

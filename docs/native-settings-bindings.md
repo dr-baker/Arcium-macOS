@@ -29,7 +29,8 @@ implementation history (on the `archive/dated-docs-2026-10-11` branch).
 | Show Extensions button | `arcium.appearance.sidebar_extensions_drawer` / `kSidebarExtensionsDrawerEnabledPref`; profile boolean, default `false` | The sidebar navigation feature patch connects the optional header button to the existing Extensions menu. It is independent of `prefs::kShowExtensionsButton`. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
-| Command bar appearance | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice and the existing browser glass dictionary for both search and results widgets. Solid keeps the themed opaque panel. Glass uses the existing native resolver, factory, and updater. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
+| Surface style | `arcium.appearance.surface_set` / `helium::kArciumSurfaceSetPref`; original profile string, default `glass` (`refractive`, `quiet`, `solid`) | Resolved by `helium::ResolveSurfaceStyle` for panels, controls, and scrims. See [Floating surfaces](#floating-surfaces). |
+| Panels | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `2` for Automatic, `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice, the surface style, and the browser glass dictionary for the command bar, its results, and the native switcher window. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
 | Show Home / Back / Forward / Reload buttons | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`; profile | `ToolbarView` binds each pref and updates the corresponding button visibility (`chrome/browser/ui/views/toolbar/toolbar_view.cc:725-757,2327-2346`). |
 | Show profile / Extensions / menu / media controls | `prefs::kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton`; profile | `ToolbarView` binds each pref and updates the matching view/controller (`toolbar_view.cc:769-806,2348-2365`). Extensions has an additional pref/command-line visibility gate (`chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc:478-483,1002-1010`); avatar is intentionally always visible for incognito/guest (`toolbar_view.cc:774-780`). |
@@ -97,22 +98,52 @@ Arcium writes the saved role through `shared_palette` and chrome values through
 acknowledged reset colors; custom accents remain independent. A fresh native
 snapshot clears pending edits even when the host rejects or clamps a write.
 
-## Command bar appearance
+## Floating surfaces
 
-**Command bar appearance** changes only the floating command bar. **Solid** is
-its default. **Glass** follows the original profile's existing window background
-style, including material, tint, color points, and grain. Glass enables that style
-for the command bar even when window effects are off, without changing the window
-setting. The shared resolver still applies renderer overrides and Reduce
-Transparency. Unsupported or opaque outcomes keep the panel readable
-and retain the saved Glass choice.
+Floating surfaces are styled by role, not by feature. Core owns the roles and
+their resolution in `surface_style.{h,cc}`; each surface keeps its own corner
+radius and geometry.
 
-The `command_bar_appearance` bridge action accepts exact integers `0` and `1`.
-Both native widgets own `arcium::CommandBarMaterial` observers, which update their
-native backgrounds without rebuilding the input or results. Clipping follows the
-painted Views bounds and corners. The results material excludes the search-bar
-cutout to avoid applying blur twice. Closing a widget removes its native decoration
-and preference and accessibility observers.
+- **Panels:** the command bar, its results, and the Ctrl+Tab switcher.
+- **Controls:** floating buttons over page content, such as Peek's actions.
+- **Scrims:** the backdrop behind a modal surface, such as Peek's source page.
+
+**Surface style** (`arcium.appearance.surface_set`, default `glass`) chooses
+every role at once:
+
+| Set | Panels | Controls | Scrim |
+| --- | --- | --- | --- |
+| Glass | glass | glass | blur and light dim |
+| Refractive | glass; refraction shader where Chromium draws it | refraction shader | blur and light dim |
+| Quiet | solid | glass | light blur and dim |
+| Solid | solid | solid | dim only |
+
+**Panels** reuses `arcium.appearance.command_bar` as the panel role's choice:
+`0` Solid, `1` Glass, and `2` Automatic, which follows the surface style. The
+registered default is Automatic; saved `0` and `1` keep their meaning, and unknown
+values are Solid. Because the switcher shares the panel role, a profile that saved
+Solid for the command bar also gets a solid switcher; Automatic or Glass restores
+its glass. Panel glass uses the window's material family, style, opacity,
+and tint, but not its color points or grain. A solid window gives panels the
+platform's automatic glass. It never changes the window setting.
+
+A panel in its own window uses native glass when the shared resolver finds one;
+the command bar and switcher then share `arcium::CommandBarMaterial`. The switcher
+moves into a non-activatable, mouse-transparent child window for this, so the
+browser keeps keyboard focus and its cycling event monitor. Without native glass
+the switcher stays inside the browser window and Chromium draws it. Reduce
+Transparency and renderer overrides make embedded surfaces solid and scrims dim.
+
+Peek blurs the inactive source page's own layer, which the compositor caches
+while the preview animates, and its buttons are Chromium glass circles over it.
+
+The `surface_set` bridge action accepts the four names; `command_bar_appearance`
+accepts exact integers `0`, `1`, and `2`. Managed or missing preferences disable
+both rows. Both native command widgets update their backgrounds without
+rebuilding the input or results. Clipping follows the painted Views bounds and
+corners. The results material excludes the search-bar cutout to avoid applying
+blur twice. Closing a widget removes its native decoration and preference and
+accessibility observers.
 
 ## Browser layout and size
 
