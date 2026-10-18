@@ -157,6 +157,13 @@ The [First day](#first-day) steps set everything up. After that, each session
 starts with `source dev.sh`. The daily loop is: edit a patch, `he build`, and
 `he run --profile NAME`. Run `he` to list every command.
 
+Development commands default to diagnostic builds in `out/Diagnostics`.
+They keep DCHECKs and expensive consistency checks enabled. The installed
+daily browser uses optimized `out/Default` with those checks disabled.
+Both are component builds, with separate caches; the first diagnostic build
+needs its own compilation. The shared build-dir lock still permits only one
+build at a time.
+
 ### Creating a new patch
 
 1. Go to the source dir:
@@ -227,7 +234,7 @@ If someone else changed patches in your checkout (a pull, a branch switch),
 
 ### Run Dev profiles
 
-`he run` runs `out/Default/Helium.app` on the default Dev profile, as upstream.
+`he run` runs `out/Diagnostics/Helium.app` on the default Dev profile.
 Named profiles run a `Helium Dev.app` copy with its own bundle identifier and a
 mock Keychain, so they never interfere with installed Helium or Arcium:
 
@@ -238,6 +245,22 @@ he run --profile import --seed-from arcium  # copy a stopped profile once
 he run --profile b --labeled                # its own Dock icon, for running side by side
 he stop --profile pins-test
 ```
+
+Configure and build the diagnostic output before its first launch:
+
+```sh
+he configure --diagnostics --refresh-defaults
+he build --diagnostics chrome
+he run --profile pins-test --labeled
+```
+
+`--diagnostics` is the default for `configure`, `build`, `check`, and `run`.
+Use `--daily` on those commands to test the faster daily binary on a Dev
+profile. This selects a compiled binary; a Chromium launch flag cannot restore
+checks that were compiled out. `he run --json --profile NAME` reports the mode
+and output directory. Reconfiguring alone does not certify a binary: a
+successful `he build chrome` records its configuration and artifacts, which
+the launcher verifies before creating a profile.
 
 Browser flags pass through, for example `--enable-features=Name`. Profiles live
 in `~/Library/Application Support/Helium Development/profiles/`.
@@ -254,6 +277,12 @@ and relaunches:
 he arcium              # --no-build to package the current build output
 he arcium status
 ```
+
+This command always selects the daily output in `out/Default`, refreshes its
+defaults when needed, and builds with DCHECKs and expensive checks disabled.
+`--no-build` requires an already completed daily build with a matching build
+record. `he arcium status --json` reports whether the output is verified and
+whether the installed app matches it.
 
 The first install copies the Helium profile into the Arcium profile once.
 Signing needs a Developer ID identity, or set `ARCIUM_CODESIGN_IDENTITY`. The

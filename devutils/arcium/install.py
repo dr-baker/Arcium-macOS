@@ -31,7 +31,7 @@ import sys
 import time
 import uuid
 
-from he import apps
+from he import apps, builds
 from he.common import HeError
 from he.profiles import clone_once
 
@@ -186,6 +186,7 @@ def _launch(app: Path, profile: Path) -> tuple[int, Path]:
 
 
 def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict:
+    receipt = builds.require_completed(out_dir, "daily")
     app = install_path()
     profile = arcium_profile()
     with install_lock():
@@ -239,9 +240,12 @@ def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict
         if previous is not None:
             shutil.rmtree(previous, ignore_errors=True)
         _record_path().write_text(json.dumps({"build_dir": str(out_dir.parents[2]), "build_fingerprint": built,
+                                              "build_mode": "daily", "output_dir": str(out_dir),
+                                              "args_hash": receipt["args_hash"],
                                               "installed_at": datetime.now().isoformat(timespec="seconds")},
                                              indent=2) + "\n")
     return {"app": str(app), "profile": str(profile), "profile_setup": migrated, "pid": pid,
+            "build_mode": "daily", "diagnostics": False, "output_dir": str(out_dir),
             "log": str(log) if log else None, "signing_identity": identity,
             "prepared_seconds": round(prepared, 1), "restarted": owner is not None, **packaged}
 
@@ -249,6 +253,8 @@ def update(out_dir: Path, *, launch: bool = True, approved: bool = True) -> dict
 def status(out_dir: Path | None = None) -> dict:
     app = install_path()
     result = {"app": str(app), "installed": app.is_dir(), "profile": str(arcium_profile())}
+    if out_dir is not None:
+        result.update(build_mode="daily", diagnostics=False, output_dir=str(out_dir))
     if not app.is_dir():
         return result
     try:
@@ -256,9 +262,19 @@ def status(out_dir: Path | None = None) -> dict:
     except (OSError, ValueError):
         record = None
     result["installed_from"] = record
+    verified = False
+    if out_dir is not None:
+        try:
+            builds.require_completed(out_dir, "daily")
+            verified = True
+        except HeError as error:
+            result["build_problem"] = str(error)
+        result["build_verified"] = verified
     if record and out_dir is not None and (out_dir / "Helium.app").is_dir():
         # True when the installed app came from this build dir's current output.
-        result["matches_build"] = (record.get("build_dir") == str(out_dir.parents[2])
+        result["matches_build"] = (verified and record.get("build_mode", "daily") == "daily"
+                                   and record.get("output_dir", str(out_dir)) == str(out_dir)
+                                   and record.get("build_dir") == str(out_dir.parents[2])
                                    and record.get("build_fingerprint") == apps.build_fingerprint(out_dir))
     try:
         info = verify_identity(app)

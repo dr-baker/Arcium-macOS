@@ -165,7 +165,8 @@ class MiniChromium:
         (tools / "autoninja.py").write_text(AUTONINJA)
         self.out.mkdir(parents=True)
         (self.out / "build.ninja").write_text(BUILD_NINJA)
-        (self.out / "args.gn").write_text("is_component_build=true\n")
+        (self.out / "args.gn").write_text("is_component_build=true\nis_debug=false\n"
+                                          "dcheck_always_on=false\nenable_expensive_dchecks=false\n")
 
     # Driving dev.sh ---------------------------------------------------------
 
@@ -176,6 +177,7 @@ class MiniChromium:
             "XDG_CONFIG_HOME": str(self.home / ".config"),
             "HELIUM_DEV_WORKTREE": str(self.worktree),
             "HELIUM_BUILD_DIR": str(self.build_dir),
+            "HELIUM_DEV_BUILD_MODE": "daily",
             "LANG": "C.UTF-8",
         }
         environment.update(extra)
@@ -237,6 +239,9 @@ class MiniChromium:
         for name in ("libone", "libtwo"):
             (work / f"{name}.c").write_text(f"int {name}(void) {{ return 1; }}\n")
             run(["clang", "-dynamiclib", "-o", str(self.out / f"{name}.dylib"), str(work / f"{name}.c")])
+        from he.builds import record_completed
+        from he.common import Paths
+        record_completed(Paths(self.worktree, self.build_dir), ["chrome"])
         return app
 
     def ready(self) -> None:

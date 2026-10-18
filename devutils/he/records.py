@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 import platform
 
-from . import quilt
+from . import builds, quilt
 from .common import HeError, Paths, read_json, sha256_bytes, sha256_file, write_json
 
 APPLIED = "applied.json"
@@ -126,19 +126,27 @@ def _hash_inputs(worktree: Path, inputs: tuple[str, ...]) -> str:
 
 def record_stamp(paths: Paths, name: str) -> None:
     stamps = read_json(paths.state / STAMPS) or {}
-    stamps[name] = _hash_inputs(paths.worktree, STAMP_INPUTS[name])
+    key = f"{name}:{paths.build_mode}" if name == "gn-defaults" else name
+    stamps[key] = _hash_inputs(paths.worktree, STAMP_INPUTS[name])
     write_json(paths.state / STAMPS, stamps)
 
 
-def stamp_drift(paths: Paths) -> list[str]:
+def stamp_drift(paths: Paths, names: tuple[str, ...] | None = None) -> list[str]:
     stamps = read_json(paths.state / STAMPS) or {}
     problems = []
     for name, inputs in STAMP_INPUTS.items():
-        recorded = stamps.get(name)
+        if names is not None and name not in names:
+            continue
+        key = f"{name}:{paths.build_mode}" if name == "gn-defaults" else name
+        recorded = stamps.get(key)
+        fix = (f"he configure --{paths.build_mode} --refresh-defaults"
+               if name == "gn-defaults" else STAMP_FIX[name])
         if recorded is None:
-            problems.append(f"{name}: not recorded for this build dir; run {STAMP_FIX[name]} once to record it")
+            problems.append(f"{key}: not recorded for this build dir; run {fix} once to record it")
         elif recorded != _hash_inputs(paths.worktree, inputs):
-            problems.append(f"{name} inputs changed since they were applied; run {STAMP_FIX[name]}")
+            problems.append(f"{key} inputs changed since they were applied; run {fix}")
+    if (names is None or "gn-defaults" in names) and (paths.out / "args.gn").is_file():
+        problems += builds.configuration_problems(paths.out, paths.build_mode)
     return problems
 
 

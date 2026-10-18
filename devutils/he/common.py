@@ -18,10 +18,19 @@ class HeError(RuntimeError):
 class Paths:
     worktree: Path
     build_dir: Path
+    build_mode: str = "daily"
+
+    def __post_init__(self) -> None:
+        if self.build_mode not in ("daily", "diagnostics"):
+            raise HeError(f"unknown build mode: {self.build_mode}")
 
     @property
     def src(self) -> Path:
         return self.build_dir / "src"
+
+    @property
+    def out(self) -> Path:
+        return self.src / "out" / ("Default" if self.build_mode == "daily" else "Diagnostics")
 
     @property
     def state(self) -> Path:
@@ -40,8 +49,9 @@ class Paths:
         return self.worktree / "patches"
 
 
-def make_paths(worktree: str | os.PathLike[str], build_dir: str | os.PathLike[str]) -> Paths:
-    return Paths(Path(worktree).expanduser().resolve(), Path(build_dir).expanduser().resolve())
+def make_paths(worktree: str | os.PathLike[str], build_dir: str | os.PathLike[str],
+               build_mode: str = "daily") -> Paths:
+    return Paths(Path(worktree).expanduser().resolve(), Path(build_dir).expanduser().resolve(), build_mode)
 
 
 def sha256_bytes(value: bytes) -> str:
