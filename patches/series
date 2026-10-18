@@ -37,3 +37,6 @@ personal/arcium-update-feed.patch
 # Command bar native material and Settings follow the shared appearance patch.
 personal/arcium-omnibox-appearance-macos.patch
 personal/arcium-live-resize-macos.patch
+
+# Surface style picker and panel material for the shared surface roles.
+personal/arcium-surface-roles-macos.patch
