@@ -9,6 +9,8 @@ fatal_linker_warnings=false
 ffmpeg_branding="Chrome"
 is_clang=true
 is_debug=false
+# Disable development checks when dev.sh switches to component linking.
+dcheck_always_on=false
 is_official_build=true
 proprietary_codecs=true
 symbol_level=1
