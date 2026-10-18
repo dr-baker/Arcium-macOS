@@ -91,6 +91,12 @@ Turn it off with `HELIUM_KEEP_TIMESTAMPS=0`.
 
 `he build` prints the same list as warnings and builds anyway.
 
+GN defaults are recorded separately for daily and diagnostic outputs. Each
+successful `chrome` build also writes `arcium-build.json` in its output
+directory, binding the mode, GN arguments, and app/component fingerprint.
+Launchers and the installer refuse an output whose record no longer matches;
+changing `args.gn` alone never makes an old binary a diagnostic build.
+
 ## Build-dir lock
 
 Commands that change the source tree, build output, or build-dir state take a
@@ -129,7 +135,14 @@ that one bundle. `--labeled` gives a profile its own bundle,
 icon, for example parallel UI automation. Its identifier ends in a 16-character
 hash so App Shim Mach service names stay under macOS's 128-byte limit.
 
-`he run` without profile options is upstream's.
+`he configure`, `he build`, and `he run` default to `out/Diagnostics`, with
+DCHECKs and expensive checks enabled. `--daily` selects `out/Default`, with
+both disabled; `--diagnostics` selects the default explicitly. The selection
+survives lock reexecution and applies only to that command. Each mode has its
+own Dev bundle cache. Profile names and `--labeled` still control profile and
+Dock identity, independently of compilation mode.
+
+`he run` without profile options uses the selected output directly.
 
 ## Installed Arcium
 
@@ -145,6 +158,11 @@ use:
   profile are bound to the signing identity;
 - on first install it copies the stopped Helium profile into the Arcium
   profile once.
+
+It always builds from `out/Default`, with diagnostic checks disabled, even
+when development commands select diagnostics. Its installed-build record
+includes the mode, output directory, and GN argument hash. Release `build.sh`
+keeps its existing configuration and output selection.
 
 When Arcium is running, `he arcium` prepares the replacement first, asks it to
 quit through macOS, and never forces it. A failure before the swap restores the

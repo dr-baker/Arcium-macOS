@@ -21,7 +21,8 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from minichromium import CORE_PATCH, TOOLS, MiniChromium, run  # noqa: E402
-from he import apps  # noqa: E402
+from he import apps, builds  # noqa: E402
+from he.common import Paths  # noqa: E402
 
 REQUIRED = all(shutil.which(tool) for tool in ("quilt", "ninja", "clang", "clang++", "codesign"))
 
@@ -135,6 +136,7 @@ class AppsTest(unittest.TestCase):
         self.m.he("run", "--profile", "alpha")
         (self.m.out / "Helium.app" / "Contents" / "Resources").mkdir()
         (self.m.out / "Helium.app" / "Contents" / "Resources" / "new").write_text("rebuilt")
+        builds.record_completed(Paths(self.m.worktree, self.m.build_dir), ["chrome"])
         refused = self.m.he("run", "--profile", "other", check=False)
         self.assertIn("running an older build", refused.stderr)
 
@@ -209,6 +211,7 @@ class AppsTest(unittest.TestCase):
         broken.unlink()
         broken.write_text("#!/bin/sh\nexit 1\n")
         broken.chmod(0o755)
+        builds.record_completed(Paths(self.m.worktree, self.m.build_dir), ["chrome"])
         history = (self.support / "Arcium" / "Default" / "History").read_text()
         failed = self.m.he("arcium", "--no-build", **self.arcium_env, check=False)
         self.assertIn("did not start cleanly", failed.stderr)

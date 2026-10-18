@@ -18,7 +18,8 @@ build graph cannot see. Each problem names the command that fixes it.
 | Pick up patch changes after a pull, branch switch, or merge | `he agent pop`, `he agent merge`, `he agent push` |
 | Rebuild the patched source, or prove the series applies with zero fuzz | `he agent replay` |
 | Repair a patch that `he agent push` stopped on | [Repair a patch that fails to apply](#repair-a-patch-that-fails-to-apply) |
-| Compile | `he agent build TARGET...` (it spends 30-60 s on a dry run first) |
+| Compile with diagnostic checks | `he agent configure --diagnostics --refresh-defaults` once, then `he agent build TARGET...` (it spends 30-60 s on a dry run first) |
+| Test the daily binary on a Dev profile | `he agent build --daily chrome`, then `he agent run --daily --profile NAME` |
 | Run the native Settings Swift package tests | Copy the package out of the source tree first: `cp -cR "$HELIUM_DEV_BUILD_ROOT/src/chrome/browser/ui/cocoa/arcium_settings_swift" /tmp/NAME`, then `swift test --package-path /tmp/NAME --filter TEST` |
 | Refresh build inputs `he check` names | `he agent version`, `he agent resources`, or `he agent configure --refresh-defaults` |
 | Test without touching real profiles | `he agent run --profile NAME`, then `he agent stop --profile NAME`; a new profile starts with the sidebar, Favorites, Pins, and open tabs (`--empty` for a blank one) |
@@ -54,12 +55,19 @@ Every command runs exactly as without the prefix, except two:
   plan above 500 edges (`--edge-budget N` changes the limit). The refusal
   prints the first planned commands and saves the full dry run to
   `.arcium/last-plan.txt`; Siso writes why each step is dirty to
-  `src/out/Default/siso_explain`. A large plan usually means a changed header
+  `src/out/Diagnostics/siso_explain` (`out/Default` with `--daily`). A large plan usually means a changed header
   or a regenerated build graph; fix the cause, and pass `--approved` only when
   the breadth is expected.
 - **`he agent arcium`** refuses to restart a running Arcium unless you pass
   `--approved`. Pass it only when the session has authorized replacing the
   browser Daniel is using.
+
+Development commands default to `out/Diagnostics`, with DCHECKs and expensive
+checks enabled. `--daily` selects the optimized `out/Default` cache.
+`he agent arcium` always selects daily and refreshes its configuration when
+needed. Launches require a matching completed-build record; after changing
+GN arguments, build `chrome` before running it. The modes share one source
+tree and one build-dir lock, so do not build them concurrently.
 
 ## Stay inside `he`
 

@@ -26,7 +26,7 @@ import signal
 import subprocess
 import uuid
 
-from . import apps
+from . import apps, builds
 from .common import HeError, Paths, read_json, sha256_bytes, write_json
 from .profiles import clone_once
 
@@ -128,7 +128,8 @@ def _fingerprint(app: Path) -> str:
 
 def prepare_bundle(paths: Paths, label: str | None) -> Path:
     """Copy Helium.app into its Dev identity when the build output changed."""
-    out = paths.src / "out" / "Default"
+    out = paths.out
+    builds.require_completed(out, paths.build_mode)
     source = out / "Helium.app"
     if not apps.executable(source).is_file():
         raise HeError(f"no built Helium.app in {out}; run he build first")
@@ -136,7 +137,8 @@ def prepare_bundle(paths: Paths, label: str | None) -> Path:
     target = out / app_name
     records = read_json(paths.state / RECORD) or {}
     fingerprint = _fingerprint(source)
-    current = target.is_dir() and records.get(app_name) == fingerprint
+    key = f"{paths.build_mode}:{app_name}"
+    current = target.is_dir() and records.get(key) == fingerprint
     if current:
         try:
             apps.verify_signature(target)
@@ -162,7 +164,7 @@ def prepare_bundle(paths: Paths, label: str | None) -> Path:
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    records[app_name] = fingerprint
+    records[key] = fingerprint
     write_json(paths.state / RECORD, records)
     return target
 
@@ -193,6 +195,7 @@ def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = Fa
         raise HeError("--labeled needs --profile NAME")
     if new and name is None:
         raise HeError("--new needs --profile NAME")
+    builds.require_completed(paths.out, paths.build_mode)
     profile = profile_dir(name, home=home)
     enabled, disabled, rest = _features(passthrough or [])
     apps.require_plain_profile(profile, [support(home) / "net.imput.helium", support(home) / "Arcium"])
@@ -229,7 +232,9 @@ def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = Fa
         )
     if not apps.wait_for_owner(profile, process.pid, executable, timeout=30):
         raise HeError(f"{bundle.name} did not take profile {profile}; see {log}")
-    return {"pid": process.pid, "app": str(bundle), "profile": str(profile), "log": str(log)}
+    return {"pid": process.pid, "app": str(bundle), "profile": str(profile), "log": str(log),
+            "build_mode": paths.build_mode, "diagnostics": paths.build_mode == "diagnostics",
+            "output_dir": str(paths.out)}
 
 
 def stop(name: str | None, *, home: Path | None = None, timeout: float = 15.0) -> str:

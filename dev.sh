@@ -43,6 +43,19 @@ export HELIUM_DEV_BUILD_ROOT="$_build_dir"
 
 source "$_root_dir/env.sh"
 
+# build.sh still uses out/Default. Development commands choose their own
+# output; the installed daily app keeps the existing optimized cache.
+___helium_select_build_mode() {
+    case "$1" in
+        daily) _out_dir="$_src_dir/out/Default" ;;
+        diagnostics) _out_dir="$_src_dir/out/Diagnostics" ;;
+        *) echo "error: build mode must be daily or diagnostics" >&2; return 2 ;;
+    esac
+    _he_build_mode="$1"
+    export HELIUM_DEV_BUILD_MODE="$1"
+}
+___helium_select_build_mode "${HELIUM_DEV_BUILD_MODE:-diagnostics}"
+
 _catalog_dir="$_build_dir/.arcium/patches"
 alias quilt='quilt --quiltrc -'
 export QUILT_PATCHES="$_catalog_dir"
@@ -58,7 +71,7 @@ export QUILT_PATCHES_ARGS="--color=auto"
 
 ___helium_he() {
     PYTHONPATH="$_he_tools_dir/devutils" PYTHONDONTWRITEBYTECODE=1 \
-        python3 -m he --worktree "$_root_dir" --build-dir "$_build_dir" "$@"
+        python3 -m he --worktree "$_root_dir" --build-dir "$_build_dir" --build-mode "$_he_build_mode" "$@"
 }
 
 ___helium_quilt() {
@@ -74,7 +87,7 @@ ___helium_locked() {
         return
     fi
     mkdir -p "$_build_dir/.arcium"
-    HELIUM_BUILD_DIR="$_build_dir" HELIUM_DEV_WORKTREE="$_root_dir" \
+    HELIUM_BUILD_DIR="$_build_dir" HELIUM_DEV_WORKTREE="$_root_dir" HELIUM_DEV_BUILD_MODE="$_he_build_mode" \
         ___helium_he lock --label "$label" -- \
         bash -c 'source "$1" >/dev/null || exit 2; shift; set -e; "$@"' bash "$_he_tools_dir/dev.sh" "$@"
 }
@@ -148,6 +161,10 @@ ___helium_setup_gn() {
     echo 'use_siso = true' >> "$OUT_FILE"
 
     sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE"
+    sed -i '' '/^[[:space:]]*dcheck_always_on[[:space:]]*=/d; /^[[:space:]]*enable_expensive_dchecks[[:space:]]*=/d' "$OUT_FILE"
+    local checks=false
+    [ "$_he_build_mode" != diagnostics ] || checks=true
+    printf 'dcheck_always_on = %s\nenable_expensive_dchecks = %s\n' "$checks" "$checks" >> "$OUT_FILE"
     ___helium_he stamp gn-defaults
 }
 
@@ -205,7 +222,7 @@ ___helium_configure() {
     fi
     ___helium_refuse_in_scratch
     ___helium_use_build_tmpdir
-    if [ "${1:-}" = --refresh-defaults ]; then
+    if [ "${1:-}" = --refresh-defaults ] || [ ! -f "$_out_dir/args.gn" ]; then
         ___helium_setup_gn
     fi
     cd "$_src_dir"
@@ -382,10 +399,12 @@ ___helium_build() {
     cd "$_src_dir"
     SISO_PATH="$_siso_path" python3 "$_depot_tools_dir/autoninja.py" \
     -k 0 "${jobs[@]}" -C "$_out_dir" "${targets[@]}"
+    ___helium_he completed-build -- "${targets[@]}"
 }
 
 ___helium_run() {
     ___helium_refuse_in_scratch
+    ___helium_he verify-build
     "$_out_dir/Helium.app/Contents/MacOS/Helium" \
     --user-data-dir="$HOME/Library/Application Support/net.imput.helium.dev" \
     --enable-ui-devtools \
@@ -597,6 +616,7 @@ ___helium_stop() {
 
 # he arcium [--no-build] [--no-launch] [--json] | he arcium status [--json]
 ___helium_arcium() {
+    ___helium_select_build_mode daily
     local action=install build=true argument
     local -a options=()
     for argument in "$@"; do
@@ -610,6 +630,9 @@ ___helium_arcium() {
     if [ "$action" = install ]; then
         ___helium_refuse_in_scratch
         if $build; then
+            if ! ___helium_he configuration-current; then
+                ___helium_configure --refresh-defaults
+            fi
             ___helium_build chrome
         fi
     fi
@@ -658,6 +681,31 @@ __helium_dispatch() {
 
 __helium_menu() {
     set -e
+    local command="${1:-}" argument selected="${HELIUM_DEV_BUILD_MODE:-diagnostics}" explicit_mode="" after_separator=false
+    local -a filtered=()
+    case "$command" in
+        setup|presetup|configure|build|run|check|tidy|lint)
+            shift
+            for argument in "$@"; do
+                if $after_separator; then
+                    filtered+=("$argument")
+                else
+                    case "$argument" in
+                        --daily|--diagnostics)
+                            selected="${argument#--}"
+                            if [ -n "$explicit_mode" ] && [ "$explicit_mode" != "$selected" ]; then
+                                echo "error: choose --daily or --diagnostics, not both" >&2; return 2
+                            fi
+                            explicit_mode="$selected" ;;
+                        --) after_separator=true; filtered+=("$argument") ;;
+                        *) filtered+=("$argument") ;;
+                    esac
+                fi
+            done
+            ___helium_select_build_mode "$selected"
+            set -- "$command" "${filtered[@]}" ;;
+        arcium) ___helium_select_build_mode daily ;;
+    esac
     case $1 in
         setup|presetup|configure|resources|version|sub|unsub|namesub|nameunsub|translate|transgen|\
         merge|unmerge|push|pop|replay|save-patch|pull|scratch|scratch-pull|format|tidy|lint|build|reset)
@@ -694,7 +742,7 @@ __helium_menu() {
             echo "\tsetup [--full-source] - sets up the dev environment fully for the first time" >&2
             echo "\t         equivalent of: [presetup, merge, push, configure]" >&2
             echo "\tpresetup [--full-source] [--force] - downloads sources, sets up GN, and prepares third-party dependencies" >&2
-            echo "\tconfigure [--refresh-defaults] - generates build configuration and tools" >&2
+            echo "\tconfigure [--daily|--diagnostics] [--refresh-defaults] - generates build configuration and tools" >&2
             echo "\tresources - generates and copies helium resources (such as icons)" >&2
             echo "\tversion - writes the current version metadata into the Chromium tree" >&2
 
@@ -728,9 +776,9 @@ __helium_menu() {
             echo "\tlint - he format + he tidy" >&2
 
             echo "\n" >&2
-            echo "\tbuild [--jobs N] [TARGET...] - builds a development binary" >&2
+            echo "\tbuild [--daily|--diagnostics] [--jobs N] [TARGET...] - builds a diagnostic binary by default" >&2
             echo "\trun - runs a development build of helium with dev data dir & ui devtools enabled" >&2
-            echo "\trun --profile NAME [--new] [--labeled] [--empty | --seed-from SRC] [flags] - runs Helium Dev on a named profile" >&2
+            echo "\trun [--daily|--diagnostics] --profile NAME [--new] [--labeled] [--empty | --seed-from SRC] [flags] - runs Helium Dev on a named profile" >&2
             echo "\tstop [--profile NAME] - quits the Helium Dev app using that profile" >&2
             echo "\tarcium [--no-build] - builds and installs /Applications/Arcium.app, restarting it if running" >&2
             echo "\tarcium status - shows the installed app's identity, signature, and process" >&2

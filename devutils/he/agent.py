@@ -56,7 +56,7 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
         raise HeError("a timestamp snapshot is pending; run he agent push to finish the stack before building")
     if problems:
         raise HeError("he check reports problems; fix them first:\n  " + "\n  ".join(problems))
-    out = paths.src / "out" / "Default"
+    out = paths.out
     command = ["python3", str(paths.src / "third_party" / "depot_tools" / "autoninja.py"), "-C", str(out), "-n", *targets]
     environment = {**os.environ, "SISO_PATH": str(paths.src / "third_party" / "siso" / "cipd" / "siso")}
     import sys
@@ -97,6 +97,8 @@ def status(paths: Paths, problems: list[str]) -> dict:
     return {
         "worktree": str(paths.worktree),
         "build_dir": str(paths.build_dir),
+        "build_mode": paths.build_mode,
+        "output_dir": str(paths.out),
         "scratch": (paths.state / "scratch.json").is_file(),
         "patches": {"series": len(series), "applied": len(applied), "top": applied[-1] if applied else None},
         "timestamp_snapshot_pending": timestamps.pending(paths),

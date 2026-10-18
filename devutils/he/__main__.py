@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-from . import catalog, quilt, records, scratch, timestamps
+from . import builds, catalog, quilt, records, scratch, timestamps
 from .common import HeError, Paths, make_paths, write_atomic
 from .lock import run_locked
 
@@ -99,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python3 -m he")
     parser.add_argument("--worktree", required=True)
     parser.add_argument("--build-dir", required=True)
+    parser.add_argument("--build-mode", choices=builds.MODES,
+                        default=os.environ.get("HELIUM_DEV_BUILD_MODE", "diagnostics"))
     commands = parser.add_subparsers(dest="command", required=True)
     lock = commands.add_parser("lock")
     lock.add_argument("--label", required=True)
@@ -145,6 +147,10 @@ def main(argv: list[str] | None = None) -> int:
     stop = commands.add_parser("stop")
     stop.add_argument("--profile")
     commands.add_parser("test-assets")
+    completed = commands.add_parser("completed-build")
+    completed.add_argument("targets", nargs="+")
+    commands.add_parser("verify-build")
+    commands.add_parser("configuration-current")
     guard = commands.add_parser("agent-guard")
     guard.add_argument("--edge-budget", type=int, default=None)
     guard.add_argument("--approved", action="store_true")
@@ -152,9 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     space = commands.add_parser("space")
     space.add_argument("--need-gib", type=float, required=True)
     args = parser.parse_args(argv)
-    paths = make_paths(args.worktree, args.build_dir)
-
     try:
+        paths = make_paths(args.worktree, args.build_dir, args.build_mode)
         if args.command == "lock":
             command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
             return run_locked(paths.state / "lane.lock", command, label=args.label)
@@ -185,6 +190,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if args.warn or not found else 1
         elif args.command == "stamp":
             records.record_stamp(paths, args.name)
+        elif args.command == "completed-build":
+            builds.record_completed(paths, args.targets)
+        elif args.command == "verify-build":
+            builds.require_completed(paths.out, paths.build_mode)
+        elif args.command == "configuration-current":
+            return 1 if (not (paths.out / "args.gn").is_file()
+                         or records.stamp_drift(paths, ("gn-defaults",))) else 0
         elif args.command == "acquisition":
             if args.action == "record":
                 records.record_acquisition(paths, args.source_mode)
