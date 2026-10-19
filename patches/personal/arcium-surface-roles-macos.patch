@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -387,7 +387,46 @@ struct ArciumCommandPanelLayout: Equatab
+@@ -387,7 +387,51 @@ struct ArciumCommandPanelLayout: Equatab
      }
  }
  
@@ -12,8 +12,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    static let maxScrimBlur = 30.0
 +    var panelGlass = true
 +    var panelTint = 0.3
++    var panelOpacity = 0.95
 +    var panelClear = false
 +    var panelRefractive = false
++    var panelEdge = 0.0
 +    var controlFinish = "glass"
 +    var controlTint = 0.55
 +    var controlEdge = 0.38
@@ -31,14 +33,17 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            return value
 +        }
 +        panelTint = unit("panelTint", panelTint)
++        panelOpacity = unit("panelOpacity", panelOpacity)
++        panelEdge = unit("panelEdge", panelEdge)
 +        controlTint = unit("controlTint", controlTint)
 +        controlEdge = unit("controlEdge", controlEdge)
 +        scrimBlur = unit("scrimBlur", scrimBlur, max: Self.maxScrimBlur)
 +        scrimDim = unit("scrimDim", scrimDim)
 +    }
 +    var dictionary: [String: Any] {
-+        ["panelGlass": panelGlass, "panelTint": panelTint, "panelClear": panelClear,
-+         "panelRefractive": panelRefractive,
++        ["panelGlass": panelGlass, "panelTint": panelTint, "panelOpacity": panelOpacity,
++         "panelClear": panelClear,
++         "panelRefractive": panelRefractive, "panelEdge": panelEdge,
 +         "controlFinish": controlFinish, "controlTint": controlTint, "controlEdge": controlEdge,
 +         "scrimBlur": scrimBlur, "scrimDim": scrimDim]
 +    }
@@ -49,7 +54,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      static let defaultCollapsedSidebarStyleOptions = [
          ArciumChoice(value: 0, label: "Icon rail"),
          ArciumChoice(value: 1, label: "Fully hidden (Arc)")
-@@ -431,6 +470,17 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -431,6 +475,17 @@ struct ArciumAppearanceSnapshot: Equatab
      var canEditCommandBarAppearance: Bool {
          commandBarAppearanceAvailable && !commandBarAppearanceManaged
      }
@@ -67,7 +72,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var collapsedSidebarStyle = 0
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
-@@ -457,7 +507,17 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -457,7 +512,17 @@ struct ArciumAppearanceSnapshot: Equatab
          commandPanelLayout = ArciumCommandPanelLayout(dictionaryValues(dictionary["commandPanelLayout"]))
          commandPanelLayoutAvailable = strictBoolean(dictionary["commandPanelLayoutAvailable"]) ?? false
          commandPanelLayoutManaged = strictBoolean(dictionary["commandPanelLayoutManaged"]) ?? false
@@ -86,7 +91,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
          commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
          collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
-@@ -882,10 +942,27 @@ final class ArciumSettingsStore: Observa
+@@ -882,10 +947,27 @@ final class ArciumSettingsStore: Observa
  
      func setCommandBarAppearance(_ appearance: Int) {
          guard snapshot.appearance.canEditCommandBarAppearance,
@@ -145,7 +150,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      private enum BackgroundMode: String, CaseIterable {
          case everyday = "Everyday"
-@@ -571,15 +583,76 @@ private struct AppearanceSettingsPage: V
+@@ -571,15 +583,87 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
@@ -187,10 +192,21 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  .accessibilityIdentifier("command-bar-appearance")
                  Group {
 +                    SSlider("Tint", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.05,
-+                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                            format: Self.percent,
++                            help: SHelp(description: "How strongly your theme color covers the glass. 100% is opaque."),
++                            commitMode: .debounced(milliseconds: 80))
 +                        .accessibilityIdentifier("surface-panel-tint")
++                    SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.05,
++                            format: Self.percent,
++                            help: SHelp(description: "How much of the glass itself shows beneath the tint. Lower values let more of the page through."),
++                            commitMode: .debounced(milliseconds: 80))
++                        .accessibilityIdentifier("surface-panel-opacity")
 +                    SToggle("Clear glass", isOn: surfaceTuningBinding(\.panelClear),
 +                            description: "Less frosting, so more of the page shows through.")
++                    SSlider("Border", value: surfaceTuningBinding(\.panelEdge), range: 0...1, step: 0.05,
++                            format: { $0 == 0 ? "Off" : "\(Int(($0 * 100).rounded()))%" },
++                            commitMode: .debounced(milliseconds: 80))
++                        .accessibilityIdentifier("surface-panel-edge")
 +                }
 +                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 +            }
@@ -239,7 +255,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
              Double.infinity, -Double.infinity, Double.nan,
              Double.greatestFiniteMagnitude, NSNull()
          ]
-@@ -1207,6 +1207,78 @@ final class ArciumSettingsUIContractTest
+@@ -1207,6 +1207,80 @@ final class ArciumSettingsUIContractTest
          for value: Any in [0, 0.0, NSNumber(value: 0)] {
              XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 0)
          }
@@ -270,7 +286,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        store.setSurfacePreview(true)
 +        XCTAssertEqual(delegate.settings.map(\.key), ["surface_tuning", "surface_preview"])
 +        let sent = delegate.settings.first?.value as? [String: Any] ?? [:]
-+        XCTAssertEqual(sent.count, 9)
++        XCTAssertEqual(sent.count, 11)
++        XCTAssertEqual(sent["panelOpacity"] as? Double, 0.95)
++        XCTAssertEqual(sent["panelEdge"] as? Double, 0)
 +        XCTAssertEqual(ArciumSurfaceTuning(sent), edited)
 +
 +        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
