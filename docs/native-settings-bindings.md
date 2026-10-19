@@ -67,9 +67,11 @@ grain travel with the Space recipe.
 The shared C++ OKLCH generator creates gamut-mapped ramps and semantic roles.
 Chroma controls preserve hue and lightness. Text targets 7:1, muted text 4.5:1,
 and outlines 3:1 against opaque surfaces. Native glass receives an opacity floor
-that keeps text at least 4.5:1 over black and white backdrops. Decorative glows
-use contrast-safe rendered lightness without rewriting the picker recipe.
-Forced colors and high-contrast providers retain Chromium's stock roles.
+below the decorative glows to stabilize its backdrop. Fields and panels pair
+generated surfaces with readable text. Authored glow colors, positions, size,
+and intensity render unchanged; appearance mode and panel saturation do not
+recolor them. Forced colors and high-contrast providers retain Chromium's stock
+roles.
 
 A browser's ColorProvider key uses the existing per-window initializer to carry
 an immutable, interned Space palette. Browser chrome,
@@ -89,6 +91,8 @@ Settings uses the browser's native background renderer with the same recipe
 and calculated contrast floor. The picker preserves harmony, point IDs,
 placement, size, intensity, and `matchColorAdjustments`. **Match all colors**
 links size and intensity while colors and positions remain independent.
+With effects enabled, releasing a dragged point updates that point's native
+glow. With effects off, placement remains saved for the next enabled render.
 
 ## Floating surfaces
 
