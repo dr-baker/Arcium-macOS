@@ -15,11 +15,12 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -437,6 +437,91 @@ struct ArciumSurfaceTuning: Equatable {
+@@ -437,6 +437,93 @@ struct ArciumSurfaceTuning: Equatable {
      }
  }
  
 +struct ArciumSpacePaletteSnapshot: Equatable {
++    var accentGlowID = ""
 +    var id = ""
 +    var name = ""
 +    var available = false
@@ -35,6 +36,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    init(_ dictionary: [String: Any] = [:]) {
 +        id = dictionary["id"] as? String ?? ""
 +        name = dictionary["name"] as? String ?? ""
++        accentGlowID = dictionary["accentGlowID"] as? String ?? ""
 +        available = strictBoolean(dictionary["available"]) == true && !id.isEmpty
 +        if let value = finiteDouble(dictionary["controlsChroma"]), (0...2).contains(value) {
 +            controlsChroma = value
@@ -107,7 +109,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  struct ArciumAppearanceSnapshot: Equatable {
      static let surfaceSetValues = ["glass", "refractive", "quiet", "solid", "custom"]
      static let defaultCollapsedSidebarStyleOptions = [
-@@ -470,6 +555,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -470,6 +557,7 @@ struct ArciumAppearanceSnapshot: Equatab
      var zenModeTopChromePinned = false
      var chrome: ArciumChromeAppearanceSnapshot
      var palette: ArciumSharedPaletteSnapshot
@@ -115,7 +117,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var sidebarWidth = 200
      var sidebarWidthAvailable = false
      var sidebarWidthManaged = false
-@@ -522,6 +608,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -522,6 +610,7 @@ struct ArciumAppearanceSnapshot: Equatab
  
      init(_ dictionary: [String: Any]) {
          palette = ArciumSharedPaletteSnapshot(dictionaryValues(dictionary["palette"]))
@@ -123,7 +125,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
          sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
          sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
-@@ -723,14 +810,21 @@ struct ArciumSettingsSnapshot: Equatable
+@@ -723,14 +812,27 @@ struct ArciumSettingsSnapshot: Equatable
  @MainActor
  final class ArciumSettingsStore: ObservableObject {
      @Published private(set) var snapshot: ArciumSettingsSnapshot
@@ -135,6 +137,12 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      /// this canonical native value so a stale snapshot cannot replace an
      /// in-flight editor change.
      @Published private(set) var pendingChromeAppearance: SettingsBackdropConfiguration?
++    @Published private var pendingSpaceAccent: (id: String, glowID: String)?
++    var currentSpaceAccentID: String {
++        let target = snapshot.appearance.spacePalette
++        if let pending = pendingSpaceAccent, pending.id == target.id { return pending.glowID }
++        return target.accentGlowID
++    }
 +    @Published private var pendingSpaceChroma: (id: String, controls: Double, panels: Double)?
 +    var currentSpaceChroma: (controls: Double, panels: Double) {
 +        let target = snapshot.appearance.spacePalette
@@ -147,7 +155,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      @Published private(set) var selectedCategory: ArciumSettingsCategory = .general
      @Published var selectedShortcutID: Int?
      @Published var shortcutQuery = "" {
-@@ -751,7 +845,6 @@ final class ArciumSettingsStore: Observa
+@@ -751,7 +853,6 @@ final class ArciumSettingsStore: Observa
      ) {
          self.delegate = delegate
          self.snapshot = ArciumSettingsSnapshot(dictionary: snapshot)
@@ -155,12 +163,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          self.pendingChromeAppearance = nil
  
          do {
-@@ -783,17 +876,10 @@ final class ArciumSettingsStore: Observa
+@@ -783,17 +884,11 @@ final class ArciumSettingsStore: Observa
          // draft; comparing values here would retain stale drafts forever when
          // the host rejects or clamps a write.
          pendingChromeAppearance = nil
 -        pendingSharedPalette = nil
 +        pendingSpaceChroma = nil
++        pendingSpaceAccent = nil
          snapshot = next
          normalizeShortcutSelection()
 -        if refreshControlAccentAfterChromeReset {
@@ -175,7 +184,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      }
  
      /// The configuration currently shown by the appearance page.
-@@ -842,41 +928,40 @@ final class ArciumSettingsStore: Observa
+@@ -842,41 +937,48 @@ final class ArciumSettingsStore: Observa
      }
  
      func actionInvoked(name: String, payload: [String: Any] = [:]) {
@@ -217,6 +226,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        ])
 +    }
 +
++    func setSpaceAccent(_ glowID: String, spaceID: String? = nil) {
++        let target = snapshot.appearance.spacePalette
++        guard target.available, (spaceID ?? target.id) == target.id,
++              currentChromeAppearance?.glows.contains(where: { $0.id == glowID }) == true else { return }
++        pendingSpaceAccent = (target.id, glowID)
++        settingChanged(key: "space_accent", value: ["spaceID": target.id, "glowID": glowID])
++    }
++
 +    func setSpaceChroma(controls: Double? = nil, panels: Double? = nil, spaceID: String? = nil) {
 +        let target = snapshot.appearance.spacePalette
 +        let current = currentSpaceChroma
@@ -241,7 +258,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      }
  
      private func canonicalChromeAppearance(
-@@ -899,56 +984,6 @@ final class ArciumSettingsStore: Observa
+@@ -899,56 +1001,6 @@ final class ArciumSettingsStore: Observa
          actionInvoked(name: name, payload: payload)
      }
  
@@ -298,7 +315,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      func setSidebarWidth(_ width: Double) {
          guard snapshot.appearance.sidebarWidthAvailable,
                !snapshot.appearance.sidebarWidthManaged, width.isFinite else { return }
-@@ -1069,14 +1104,16 @@ final class ArciumSettingsStore: Observa
+@@ -1069,14 +1121,16 @@ final class ArciumSettingsStore: Observa
          }
      }
  
@@ -384,7 +401,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                          .buttonStyle(.bordered)
                          .accessibilityLabel("Reset appearance")
                          .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
-@@ -593,19 +616,33 @@ private struct AppearanceSettingsPage: V
+@@ -593,19 +616,58 @@ private struct AppearanceSettingsPage: V
              }
  
              HStack {
@@ -405,7 +422,32 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  .frame(width: 210)
              }
              backgroundEditor
-+            SSectionCard(title: "Color intensity") {
++            SSectionCard(title: "Accent and intensity") {
++                HStack(spacing: SettingsSpacing.sm) {
++                    Text("Accent").settingsFont(\.body)
++                    Spacer()
++                    ForEach(Array((store.currentChromeAppearance?.glows ?? []).enumerated()), id: \.element.id) { index, glow in
++                        Button { [spaceID = store.snapshot.appearance.spacePalette.id] in
++                            store.setSpaceAccent(glow.id, spaceID: spaceID)
++                        } label: {
++                            Circle()
++                                .fill((SettingsRGB(hex: glow.colorHex) ?? SettingsRGB(red: 1, green: 1, blue: 1)).color)
++                                .frame(width: 26, height: 26)
++                                .overlay { Circle().strokeBorder(.primary.opacity(0.35), lineWidth: 1) }
++                                .overlay {
++                                    if store.currentSpaceAccentID == glow.id {
++                                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
++                                            .foregroundStyle((SettingsRGB(hex: glow.colorHex)?.contrastingText ?? SettingsRGB(red: 0, green: 0, blue: 0)).color)
++                                    }
++                                }
++                        }
++                        .buttonStyle(.plain)
++                        .accessibilityLabel("Accent color \(index + 1)")
++                        .accessibilityValue(store.currentSpaceAccentID == glow.id ? "Selected" : "")
++                        .help("Use color \(index + 1) for this Space's accent")
++                    }
++                }
++
 +                SSlider("Controls saturation", value: Binding(
 +                    get: { store.currentSpaceChroma.controls },
 +                    set: { [spaceID = store.snapshot.appearance.spacePalette.id] in
@@ -427,7 +469,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
              SSectionCard(title: "Floating surfaces") {
                  SPicker("Preset", selection: Binding(
-@@ -657,31 +694,6 @@ private struct AppearanceSettingsPage: V
+@@ -657,31 +719,6 @@ private struct AppearanceSettingsPage: V
                                  commitMode: .debounced(milliseconds: 80))
                              .accessibilityIdentifier("surface-panel-blur")
                      }
@@ -459,7 +501,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      SToggle("Shadow", isOn: surfaceTuningBinding(\.panelShadow),
                              description: "A soft shadow around the panel.")
                          .accessibilityIdentifier("surface-panel-shadow")
-@@ -890,18 +902,16 @@ private struct AppearanceSettingsPage: V
+@@ -890,18 +927,16 @@ private struct AppearanceSettingsPage: V
                  )
              }
          }
@@ -480,7 +522,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      colorsOnly: true,
                      showsIntensity: false,
                      glowRadiusRange: 0.1...1.5,
-@@ -927,15 +937,13 @@ private struct AppearanceSettingsPage: V
+@@ -927,15 +962,13 @@ private struct AppearanceSettingsPage: V
                              next.material = .liquidGlass
                              store.setChromeAppearance(next)
                          }
@@ -498,7 +540,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      glowRadiusRange: 0.1...1.5,
                      canReset: store.snapshot.appearance.chrome.canReset,
                      activeMaterial: activeMaterial,
-@@ -954,15 +962,6 @@ private struct AppearanceSettingsPage: V
+@@ -954,15 +987,6 @@ private struct AppearanceSettingsPage: V
          }
      }
  
@@ -514,7 +556,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      private func editable(_ key: String) -> Bool {
          store.snapshot.appearance.hasValue(key) && !store.snapshot.appearance.isManaged(key)
-@@ -972,13 +971,11 @@ private struct AppearanceSettingsPage: V
+@@ -972,13 +996,11 @@ private struct AppearanceSettingsPage: V
          Binding(get: { store.appearanceBoolean(key) }, set: { store.setAppearanceBoolean(key, value: $0) })
      }
  
@@ -531,7 +573,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      }
  
      private var activeMaterial: SettingsBackdropMaterial? {
-@@ -1043,8 +1040,7 @@ private struct ShortcutPageHeader: View
+@@ -1043,8 +1065,7 @@ private struct ShortcutPageHeader: View
                      store.actionInvoked(name: "apply_arc_defaults")
                  }
                  .help("Apply Arc shortcuts and make the sidebar fully hide when collapsed. You can change the collapse style in Appearance.")
@@ -541,7 +583,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  .disabled(!store.snapshot.shortcuts.canModify || store.isRecordingShortcut)
  
                  Menu("More") {
-@@ -1279,8 +1275,7 @@ private struct ShortcutEditor: View {
+@@ -1279,8 +1300,7 @@ private struct ShortcutEditor: View {
                          Button("Add shortcut") {
                              store.emitShortcutAction("add_shortcut", command: command)
                          }
@@ -578,7 +620,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      func testSharedHarmonyOffsetsAndColorGeneration() {
          XCTAssertEqual(SettingsColorHarmony.complementary.offsets(for: 2), [0, 0.5])
          XCTAssertEqual(SettingsColorHarmony.splitComplementary.offsets(for: 3), [0, 5.0 / 12.0, 7.0 / 12.0])
-@@ -17,4 +33,33 @@ final class ArciumColorHarmonyTests: XCT
+@@ -17,4 +33,77 @@ final class ArciumColorHarmonyTests: XCT
          XCTAssertEqual(result.count, 2)
          XCTAssertTrue(result.allSatisfy { SettingsRGB(hex: $0) != nil })
      }
@@ -609,6 +651,50 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +            to: colors, selectedIndex: 0, mode: .complementary)
 +        for color in neutral {
 +            XCTAssertLessThan(try XCTUnwrap(SettingsRGB(hex: color)).oklch.chroma, 0.001)
++        }
++    }
++    @MainActor
++    func testWheelCapturesSecondaryDotWithoutChangingItOnSelection() throws {
++        let colors = ["#FF0000", "#00FF00", "#0000FF"]
++        let size = CGSize(width: 220, height: 220)
++        for index in colors.indices {
++            let hsv = try XCTUnwrap(SettingsHarmonyColorHSV(hex: colors[index]))
++            let marker = SColorHarmonyPicker.wheelPoint(hue: hsv.hue, saturation: hsv.saturation, in: size)
++            let pointer = CGPoint(x: marker.x + 4, y: marker.y - 3)
++            var drag = try XCTUnwrap(SColorHarmonyPicker.beginWheelDrag(
++                colors: colors, selectedIndex: 0, at: pointer, in: size))
++            XCTAssertEqual(drag.selectedIndex, index)
++            XCTAssertNil(drag.location(at: pointer))
++            let moved = try XCTUnwrap(drag.location(at: CGPoint(x: pointer.x + 30, y: pointer.y - 20)))
++            XCTAssertEqual(moved.x, marker.x + 30, accuracy: 0.001)
++            XCTAssertEqual(moved.y, marker.y - 20, accuracy: 0.001)
++            // Crossing another dot must keep the captured target.
++            _ = drag.location(at: SColorHarmonyPicker.wheelPoint(hue: 0, saturation: 1, in: size))
++            XCTAssertEqual(drag.selectedIndex, index)
++            XCTAssertEqual(drag.location(at: pointer), marker)
++        }
++        var background = try XCTUnwrap(SColorHarmonyPicker.beginWheelDrag(
++            colors: colors, selectedIndex: 2, at: CGPoint(x: 110, y: 110), in: size))
++        XCTAssertEqual(background.selectedIndex, 2)
++        XCTAssertEqual(background.location(at: CGPoint(x: 115, y: 120)), CGPoint(x: 115, y: 120))
++    }
++
++    @MainActor
++    func testNearbyPairingsPreserveSelectedColorAndPerceptualLightness() throws {
++        let picked = SettingsOKLCH(lightness: 0.7, chroma: 0.08, hue: 48).rgb.hex
++        let pairings: [(SettingsColorHarmony, Double)] = [(.close, 15), (.analogous, 30)]
++        for (mode, degrees) in pairings {
++            for index in 0...1 {
++                var colors = ["#808080", "#808080"]
++                colors[index] = picked
++                let result = SColorHarmonyPicker.applyingHarmony(to: colors, selectedIndex: index, mode: mode)
++                XCTAssertEqual(result[index], picked)
++                let a = try XCTUnwrap(SettingsRGB(hex: result[0])).oklch
++                let b = try XCTUnwrap(SettingsRGB(hex: result[1])).oklch
++                let distance = abs((a.hue - b.hue + 540).truncatingRemainder(dividingBy: 360) - 180)
++                XCTAssertEqual(distance, degrees, accuracy: 3)
++                XCTAssertEqual(a.lightness, b.lightness, accuracy: 0.006)
++            }
 +        }
 +    }
  }
@@ -1234,10 +1320,45 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      func testChromeUIScaleSnapshotUsesEffectiveScaleAndDefaultState() {
          let snapshot = ArciumSettingsSnapshot(dictionary: NSDictionary(dictionary: [
              "available": true,
-@@ -1935,6 +1416,127 @@ final class ArciumSettingsUIContractTest
+@@ -1935,6 +1416,162 @@ final class ArciumSettingsUIContractTest
          }
      }
  
++    @MainActor
++    func testAccentSelectionUsesOneTargetedWriteAndPreservesGlowRecipe() throws {
++        let delegate = TestDelegate()
++        let original = makeConfiguration()
++        let store = ArciumSettingsStore(snapshot: snapshot(chrome: original,
++            managed: false, available: true), delegate: delegate)
++        let glowID = try XCTUnwrap(original.glows.last?.id)
++        store.setSpaceAccent(glowID, spaceID: "space-a")
++        XCTAssertEqual(store.currentSpaceAccentID, glowID)
++        XCTAssertEqual(store.currentChromeAppearance, original)
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_accent"])
++        let payload = try XCTUnwrap(delegate.settings.first?.value as? [String: String])
++        XCTAssertEqual(payload, ["spaceID": "space-a", "glowID": glowID])
++        store.setSpaceAccent("deleted", spaceID: "space-a")
++        XCTAssertEqual(delegate.settings.count, 1)
++        store.updateSnapshot(snapshot(chrome: original, managed: false, available: true, spaceID: "space-b"))
++        store.setSpaceAccent(glowID, spaceID: "space-a")
++        XCTAssertEqual(delegate.settings.count, 1)
++        XCTAssertNotEqual(store.currentSpaceAccentID, glowID)
++        store.updateSnapshot(snapshot(chrome: original, managed: false, available: true, spaceAvailable: false))
++        store.setSpaceAccent(glowID)
++        XCTAssertEqual(delegate.settings.count, 1)
++    }
++
++    @MainActor
++    func testNearbyPairingsRoundTripThroughNativeAdapter() throws {
++        for mode in [SettingsColorHarmony.close, .analogous] {
++            var configuration = makeConfiguration()
++            configuration.colorHarmony = mode
++            let dictionary = ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: configuration)
++            let restored = try XCTUnwrap(ArciumChromeAppearanceSnapshot.Configuration(dictionary).backdropConfiguration)
++            XCTAssertEqual(restored.colorHarmony, mode)
++        }
++    }
++
 +    @MainActor
 +    func testSpaceChromaPreservesRecipeAndUsesOneTargetedWrite() throws {
 +        let delegate = TestDelegate()
@@ -1362,7 +1483,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      private func makeConfiguration() -> SettingsBackdropConfiguration {
          SettingsBackdropConfiguration(
              enabled: true,
-@@ -2008,7 +1610,9 @@ final class ArciumSettingsUIContractTest
+@@ -2008,7 +1645,9 @@ final class ArciumSettingsUIContractTest
          managed: Bool,
          available: Bool,
          paletteAvailable: Bool = false,
@@ -1373,7 +1494,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      ) -> NSDictionary {
          var palette: [String: Any] = [
              "available": paletteAvailable,
-@@ -2032,7 +1636,9 @@ final class ArciumSettingsUIContractTest
+@@ -2032,7 +1671,9 @@ final class ArciumSettingsUIContractTest
                      "activeMaterial": "liquidGlass",
                      "effectsAvailable": true
                  ],
@@ -1388,7 +1509,61 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SColorHarmonyPicker.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SColorHarmonyPicker.swift
-@@ -149,18 +149,20 @@ public struct SColorHarmonyPicker: View
+@@ -8,7 +8,7 @@ import SwiftUI
+ /// external host update arriving during a drag is applied after that drag.
+ public struct SColorHarmonyPicker: View {
+     @Binding private var colors: [String]
+-    public let selectedIndex: Int
++    @Binding public var selectedIndex: Int
+     @Binding private var mode: SettingsColorHarmony
+     public let title: String
+ 
+@@ -19,6 +19,8 @@ public struct SColorHarmonyPicker: View
+     @State private var lastObservedColors: [String]
+     @State private var deferredExternalColors: [String]?
+     @State private var isDragging = false
++    @State private var wheelDrag: WheelDrag?
++    @GestureState private var wheelGestureActive = false
+     @State private var brightness = 1.0
+     @State private var hueFallback = 0.0
+     @State private var hexText = "#FFFFFF"
+@@ -27,21 +29,21 @@ public struct SColorHarmonyPicker: View
+ 
+     public init(
+         colors: Binding<[String]>,
+-        selectedIndex: Int,
++        selectedIndex: Binding<Int>,
+         mode: Binding<SettingsColorHarmony>,
+         title: String = "Colors",
+         onAddColor: (() -> Void)? = nil,
+         onRemoveColor: (() -> Void)? = nil
+     ) {
+         _colors = colors
+-        self.selectedIndex = selectedIndex
++        _selectedIndex = selectedIndex
+         _mode = mode
+         self.title = title
+         self.onAddColor = onAddColor
+         self.onRemoveColor = onRemoveColor
+ 
+         let normalized = Self.normalizedColors(colors.wrappedValue)
+-        let index = Self.activeIndex(selectedIndex, count: normalized.count)
++        let index = Self.activeIndex(selectedIndex.wrappedValue, count: normalized.count)
+         let selected = index.flatMap { SettingsHarmonyColorHSV(hex: normalized[$0]) }
+         _draftColors = State(initialValue: normalized)
+         _lastObservedColors = State(initialValue: normalized)
+@@ -138,6 +140,10 @@ public struct SColorHarmonyPicker: View
+         .onAppear { syncTransientState() }
+         .onChange(of: colors) { _, next in receiveExternalColors(next) }
+         .onChange(of: selectedIndex) { _, _ in syncTransientState() }
++        .onChange(of: wheelGestureActive) { _, active in
++            if !active { finishInteraction() }
++        }
++        .onDisappear { finishInteraction() }
+     }
+ 
+     /// Applies the selected color's hue to a palette while preserving order,
+@@ -149,18 +155,20 @@ public struct SColorHarmonyPicker: View
          fallbackHue: Double = 0
      ) -> [String] {
          guard let index = activeIndex(selectedIndex, count: colors.count),
@@ -1418,7 +1593,70 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
      }
  
      /// Returns a point in the hue/saturation wheel. Hue zero is at the top
-@@ -265,20 +267,13 @@ public struct SColorHarmonyPicker: View
+@@ -203,6 +211,46 @@ public struct SColorHarmonyPicker: View
+         return SettingsHarmonyWheelValue(hue: (angle + .pi / 2) / (2 * .pi), saturation: saturation)
+     }
+ 
++    public struct WheelDrag: Equatable {
++        public let selectedIndex: Int
++        private let start: CGPoint
++        private let marker: CGPoint?
++        private var hasMoved = false
++
++        fileprivate init(selectedIndex: Int, start: CGPoint, marker: CGPoint?) {
++            self.selectedIndex = selectedIndex
++            self.start = start
++            self.marker = marker
++        }
++
++        public mutating func location(at pointer: CGPoint) -> CGPoint? {
++            guard let marker else { return pointer }
++            let delta = CGSize(width: pointer.x - start.x, height: pointer.y - start.y)
++            // A click selects a marker without rounding or changing its color.
++            guard hasMoved || hypot(delta.width, delta.height) > 1 else { return nil }
++            hasMoved = true
++            return CGPoint(x: marker.x + delta.width, y: marker.y + delta.height)
++        }
++    }
++
++    public static func beginWheelDrag(
++        colors: [String], selectedIndex: Int, at start: CGPoint, in size: CGSize,
++        fallbackHue: Double = 0, hitRadius: Double = 18
++    ) -> WheelDrag? {
++        guard let selected = activeIndex(selectedIndex, count: colors.count) else { return nil }
++        let hits = colors.indices.compactMap { index -> (Int, CGPoint, Double)? in
++            guard let hsv = SettingsHarmonyColorHSV(hex: colors[index], fallbackHue: fallbackHue) else { return nil }
++            let point = wheelPoint(hue: hsv.hue, saturation: hsv.saturation, in: size)
++            let distance = Double(hypot(point.x - start.x, point.y - start.y))
++            return distance <= hitRadius ? (index, point, distance) : nil
++        }
++        let hit = hits.min { a, b in
++            if abs(a.2 - b.2) < 0.001 { return a.0 == selected && b.0 != selected }
++            return a.2 < b.2
++        }
++        return WheelDrag(selectedIndex: hit?.0 ?? selected, start: start, marker: hit?.1)
++    }
++
+     public static func randomizedColors(
+         count: Int,
+         mode: SettingsColorHarmony,
+@@ -215,13 +263,13 @@ public struct SColorHarmonyPicker: View
+     }
+ 
+     private var activePointIndex: Int? {
+-        Self.activeIndex(selectedIndex, count: draftColors.count)
++        Self.activeIndex(wheelDrag?.selectedIndex ?? selectedIndex, count: draftColors.count)
+     }
+ 
+     private var harmonyOptions: [SettingsColorHarmony] {
+         let canonical: [SettingsColorHarmony] = switch draftColors.count {
+         case 0, 1: [.custom]
+-        case 2: [.custom, .complementary]
++        case 2: [.custom, .close, .analogous, .complementary]
+         case 3: [.custom, .splitComplementary, .triadic]
+         case 4: [.custom, .tetradic]
+         default: SettingsColorHarmony.allCases
+@@ -265,20 +313,13 @@ public struct SColorHarmonyPicker: View
                  guard nextMode != mode else { return }
                  mode = nextMode
                  guard nextMode != .custom,
@@ -1442,7 +1680,66 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
                  updateDraft(nextColors, commit: true, force: true)
              }
          )
-@@ -411,15 +406,12 @@ public struct SColorHarmonyPicker: View
+@@ -350,9 +391,25 @@ public struct SColorHarmonyPicker: View
+         }
+         .gesture(
+             DragGesture(minimumDistance: 0)
++                .updating($wheelGestureActive) { _, active, _ in active = true }
+                 .onChanged { value in
++                    if wheelDrag == nil {
++                        let start = CGPoint(x: value.startLocation.x - wheelOrigin.x,
++                                            y: value.startLocation.y - wheelOrigin.y)
++                        wheelDrag = Self.beginWheelDrag(colors: draftColors,
++                            selectedIndex: selectedIndex, at: start, in: wheelSize,
++                            fallbackHue: hueFallback)
++                        if let wheelDrag {
++                            selectedIndex = wheelDrag.selectedIndex
++                            syncTransientState()
++                        }
++                    }
+                     isDragging = true
+-                    updateWheel(location: value.location, size: wheelSize, origin: wheelOrigin)
++                    let pointer = CGPoint(x: value.location.x - wheelOrigin.x,
++                                          y: value.location.y - wheelOrigin.y)
++                    if let location = wheelDrag?.location(at: pointer) {
++                        updateWheel(location: location, size: wheelSize, origin: .zero)
++                    }
+                 }
+                 .onEnded { _ in finishInteraction() }
+         )
+@@ -371,6 +428,8 @@ public struct SColorHarmonyPicker: View
+             @unknown default: break
+             }
+         }
++        .accessibilityAction(named: "Next color") { selectColor(offset: 1) }
++        .accessibilityAction(named: "Previous color") { selectColor(offset: -1) }
+         .accessibilityAction(named: "Increase hue") { adjustSelected(hueBy: 0.025, saturationBy: 0) }
+         .accessibilityAction(named: "Decrease hue") { adjustSelected(hueBy: -0.025, saturationBy: 0) }
+         .accessibilityAction(named: "Increase saturation") { adjustSelected(hueBy: 0, saturationBy: 0.05) }
+@@ -391,35 +450,20 @@ public struct SColorHarmonyPicker: View
+ 
+     private var markers: [HarmonyMarker] {
+         guard !draftColors.isEmpty, let activePointIndex else { return [] }
+-        let selected = selectedHSV ?? SettingsHarmonyColorHSV(hue: hueFallback, saturation: 1, brightness: brightness)
+-        let offsets = mode.offsets(for: draftColors.count)
+-        if mode == .custom {
+-            return draftColors.indices.compactMap { index in
+-                guard let hsv = SettingsHarmonyColorHSV(hex: draftColors[index], fallbackHue: hueFallback) else { return nil }
+-                return HarmonyMarker(index: index, color: hsv, isSelected: index == activePointIndex)
+-            }
+-        }
+-        let baseHue = SettingsHarmonyColorHSV.wrapped(selected.hue - offsets[activePointIndex])
+-        return draftColors.indices.map { index in
+-            HarmonyMarker(
+-                index: index,
+-                color: SettingsHarmonyColorHSV(hue: baseHue + offsets[index], saturation: selected.saturation, brightness: selected.brightness),
+-                isSelected: index == activePointIndex
+-            )
++        return draftColors.indices.compactMap { index in
++            guard let hsv = SettingsHarmonyColorHSV(hex: draftColors[index], fallbackHue: hueFallback) else { return nil }
++            return HarmonyMarker(index: index, color: hsv, isSelected: index == activePointIndex)
+         }
+     }
  
      private func harmonyMarker(_ marker: HarmonyMarker) -> some View {
          let size: CGFloat = marker.isSelected ? 26 : 20
@@ -1460,7 +1757,29 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
          }
          .frame(width: size, height: size)
          .overlay { Circle().stroke(.white.opacity(0.96), lineWidth: marker.isSelected ? 2.5 : 2) }
-@@ -464,15 +456,10 @@ public struct SColorHarmonyPicker: View
+@@ -431,7 +475,7 @@ public struct SColorHarmonyPicker: View
+ 
+     private var fieldAccessibilityValue: String {
+         guard let selectedHSV else { return "No color selected" }
+-        return "Hue \(Int((selectedHSV.hue * 360).rounded())) degrees, saturation \(percent(selectedHSV.saturation))"
++        return "Color \((activePointIndex ?? 0) + 1), hue \(Int((selectedHSV.hue * 360).rounded())) degrees, saturation \(percent(selectedHSV.saturation))"
+     }
+ 
+     private func updateWheel(location: CGPoint, size: CGSize, origin: CGPoint) {
+@@ -444,6 +488,12 @@ public struct SColorHarmonyPicker: View
+         )
+     }
+ 
++    private func selectColor(offset: Int) {
++        guard !draftColors.isEmpty else { return }
++        selectedIndex = (selectedIndex + offset + draftColors.count) % draftColors.count
++        syncTransientState()
++    }
++
+     private func adjustSelected(hueBy: Double, saturationBy: Double) {
+         guard let selectedHSV else { return }
+         applySelected(
+@@ -464,15 +514,10 @@ public struct SColorHarmonyPicker: View
              updateDraft(next, commit: commit)
              return
          }
@@ -1480,6 +1799,23 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
          updateDraft(next, commit: commit)
      }
  
+@@ -487,6 +532,7 @@ public struct SColorHarmonyPicker: View
+     private func finishInteraction() {
+         guard isDragging else { return }
+         isDragging = false
++        wheelDrag = nil
+         if let deferredExternalColors {
+             draftColors = deferredExternalColors
+             self.deferredExternalColors = nil
+@@ -560,6 +606,8 @@ private extension SettingsColorHarmony {
+     var shortTitle: String {
+         switch self {
+         case .custom: "Free"
++        case .close: "Close"
++        case .analogous: "Related"
+         case .complementary: "Opposite"
+         case .splitComplementary: "Split"
+         case .triadic: "Triad"
 Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
@@ -1703,7 +2039,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      @"chrome" : chrome_appearance,
      @"chromeUIScale" : @(chrome_ui_scale),
      @"chromeUIScaleIsDefault" : @(chrome_ui_scale_is_default),
-@@ -1806,14 +1824,39 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1806,14 +1824,44 @@ void SettingsModelProfileWillBeDestroyed
    if (profile_destroying_ || !model_ || !key.length) {
      return;
    }
@@ -1713,6 +2049,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 -      payload = BaseDictFromNSObject((NSDictionary*)value);
 +  if ([key isEqualToString:@"space_colors"] ||
 +      [key isEqualToString:@"space_chroma"] ||
++      [key isEqualToString:@"space_accent"] ||
 +      [key isEqualToString:@"space_mode"]) {
 +    if (![value isKindOfClass:[NSDictionary class]]) {
 +      [self modelDidChange];
@@ -1725,12 +2062,16 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +        ![payload[@"spaceID"] isEqualToString:base::SysUTF8ToNSString(space->id())]) {
        [self modelDidChange];
 +      return;
-     }
++    }
 +    if ([key isEqualToString:@"space_colors"]) {
 +      auto colors = [payload[@"configuration"] isKindOfClass:[NSDictionary class]]
 +          ? BaseDictFromNSObject(payload[@"configuration"]) : std::nullopt;
 +      if (colors) {
 +        model_->SetChromeAppearance(*colors);
++      }
++    } else if ([key isEqualToString:@"space_accent"]) {
++      if ([payload[@"glowID"] isKindOfClass:[NSString class]]) {
++        model_->SetSpaceAccent(base::SysNSStringToUTF8(payload[@"glowID"]));
 +      }
 +    } else if ([key isEqualToString:@"space_chroma"]) {
 +      auto tuning = BaseDictFromNSObject(@{
@@ -1743,12 +2084,12 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +      if (auto mode = AppearanceModeValue(payload[@"mode"])) {
 +        model_->SetAppearanceMode(*mode);
 +      }
-+    }
+     }
 +    [self modelDidChange];
      return;
    }
    // The Swift facade is a projection of this model. Re-publish even when the
-@@ -2227,23 +2270,6 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2227,23 +2275,6 @@ void SettingsModelProfileWillBeDestroyed
      }
      return;
    }
@@ -1772,7 +2113,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if ([key isEqualToString:kKeyActiveSpace] &&
        [value isKindOfClass:[NSString class]]) {
      NSString* requested_id = (NSString*)value;
-@@ -2291,13 +2317,10 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2291,13 +2322,10 @@ void SettingsModelProfileWillBeDestroyed
      if (profile) {
        chrome::ShowSettingsSubPageForProfile(profile, "");
      }
@@ -1790,7 +2131,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
        model_->ResetChromeAppearance();
      }
    } else if ([name isEqualToString:@"cancel_recording"]) {
-@@ -2626,7 +2649,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2626,7 +2654,7 @@ void SettingsModelProfileWillBeDestroyed
  
  namespace arcium_settings {
  
@@ -1799,7 +2140,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (!profile) {
      return false;
    }
-@@ -2645,10 +2668,29 @@ bool ShowForProfile(Profile* profile) {
+@@ -2645,10 +2673,29 @@ bool ShowForProfile(Profile* profile) {
      }
      Controllers()[key] = controller;
    }
@@ -2185,7 +2526,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
                  }
              }
          }
-@@ -460,9 +452,37 @@ public struct SBackdropEditor: View {
+@@ -460,9 +452,40 @@ public struct SBackdropEditor: View {
          .accessibilityElement(children: .contain)
      }
  
@@ -2197,7 +2538,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +                    get: { draft.glows.map(\.colorHex) },
 +                    set: { values in applyHarmonyColors(values) }
 +                ),
-+                selectedIndex: index,
++                selectedIndex: Binding(
++                    get: { draft.glows.firstIndex(where: { $0.id == selectedGlowID }) ?? index },
++                    set: { if draft.glows.indices.contains($0) { selectedGlowID = draft.glows[$0].id } }
++                ),
 +                mode: harmonyBinding,
 +                onAddColor: addGlow,
 +                onRemoveColor: { if draft.glows.count > 1 { removeSelectedGlow() } }
@@ -2224,7 +2568,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
          colorPickerPresented = true
      }
  
-@@ -475,7 +495,16 @@ public struct SBackdropEditor: View {
+@@ -475,7 +498,16 @@ public struct SBackdropEditor: View {
      }
  
      private var isCustomEditingEnabled: Bool { editable && (colorsOnly || draft.enabled) }
@@ -2242,7 +2586,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
      private var isSurfaceEditingEnabled: Bool { isCustomEditingEnabled && effectsAvailable }
      private var resolvedActiveMaterial: SettingsBackdropMaterial {
          let material = activeMaterial ?? draft.material
-@@ -679,7 +708,7 @@ public struct SBackdropEditor: View {
+@@ -679,7 +711,7 @@ public struct SBackdropEditor: View {
      }
  
      private func commitSlider(_ mutation: (inout SettingsBackdropConfiguration) -> Void) {
@@ -2251,7 +2595,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
          var next = deferredSliderConfiguration ?? draft
          mutation(&next)
          sliderPreviewActive = false
-@@ -856,7 +885,8 @@ public struct SBackdropEditor: View {
+@@ -856,7 +888,8 @@ public struct SBackdropEditor: View {
              glowID: id,
              startGlow: dragStartGlow,
              localConfiguration: draft,
@@ -2261,7 +2605,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
          )
          draggingGlowID = nil
          dragStartGlow = nil
-@@ -873,7 +903,8 @@ public struct SBackdropEditor: View {
+@@ -873,7 +906,8 @@ public struct SBackdropEditor: View {
          glowID: String,
          startGlow: SettingsStyleGlow?,
          localConfiguration: SettingsBackdropConfiguration,
@@ -2271,7 +2615,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
      ) -> (configuration: SettingsBackdropConfiguration, shouldCommit: Bool) {
          let final = localConfiguration.normalized()
          let localGlow = final.glows.first { $0.id == glowID }
-@@ -882,7 +913,9 @@ public struct SBackdropEditor: View {
+@@ -882,7 +916,9 @@ public struct SBackdropEditor: View {
          } else { false }
  
          if let deferredConfiguration {
@@ -2282,7 +2626,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
              guard let localGlow,
                    let index = deferredConfiguration.glows.firstIndex(where: { $0.id == glowID }) else {
                  return (deferredConfiguration.normalized(), false)
-@@ -1034,13 +1067,13 @@ private struct SettingsBackdropEditorGlo
+@@ -1034,13 +1070,13 @@ private struct SettingsBackdropEditorGlo
      }
  
      private var marker: some View {
@@ -2419,3 +2763,49 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
  }
  
  public struct SInventoryRow<Label: View>: View {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SControlAccentPicker.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SControlAccentPicker.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SControlAccentPicker.swift
+@@ -81,7 +81,7 @@ public struct SControlAccentPicker: View
+         .popover(isPresented: $customColorPopoverPresented, arrowEdge: .bottom) {
+             SColorHarmonyPicker(
+                 colors: customColorHexBinding,
+-                selectedIndex: 0,
++                selectedIndex: .constant(0),
+                 mode: .constant(.custom),
+                 title: "Controls accent"
+             )
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SettingsColorHarmony.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SettingsColorHarmony.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SettingsColorHarmony.swift
+@@ -4,6 +4,8 @@ import SwiftUI
+ /// Color relationships used by ``SColorHarmonyPicker``.
+ public enum SettingsColorHarmony: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
+     case custom
++    case close
++    case analogous
+     case complementary
+     case splitComplementary
+     case triadic
+@@ -14,6 +16,8 @@ public enum SettingsColorHarmony: String
+     public var title: String {
+         switch self {
+         case .custom: "Custom"
++        case .close: "Close"
++        case .analogous: "Analogous"
+         case .complementary: "Complementary"
+         case .splitComplementary: "Split complementary"
+         case .triadic: "Triadic"
+@@ -27,6 +31,10 @@ public enum SettingsColorHarmony: String
+         switch self {
+         case .custom:
+             return Array(repeating: 0, count: count)
++        case .close:
++            return (0..<count).map { Double($0) * 15 / 360 }
++        case .analogous:
++            return (0..<count).map { Double($0) * 30 / 360 }
+         case .complementary:
+             return count == 2 ? [0, 0.5] : Self.evenOffsets(for: count)
+         case .splitComplementary:
