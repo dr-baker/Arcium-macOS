@@ -103,6 +103,16 @@ links size and intensity while colors and positions remain independent.
 With effects enabled, releasing a dragged point updates that point's native
 glow. With effects off, placement remains saved for the next enabled render.
 
+## Settings layout
+
+The existing General, Tabs & Spaces, Appearance and Keyboard Shortcuts navigation
+stays in place. Common settings use unboxed sections and aligned adaptive rows.
+Appearance keeps mode, palette summary, accent/intensity, presets, layout, Zen
+and toolbar controls visible. Space colors/backdrop and command-bar styling open
+focused live-edit sheets. Everyday and Advanced color views are inside the color
+sheet. The native backdrop and shortcut recorder remain app-owned. A Space
+change closes customization; profile guards and captured Space IDs remain in force.
+
 ## Floating surfaces
 
 Core resolves surface groups in `surface_style.{h,cc}`. Appearance provides
@@ -124,9 +134,11 @@ saves the complete tuning in `arcium.appearance.surface_tuning` and selects Cust
 in `arcium.appearance.surface_set`.
 Saved Refractive and Solid recipes appear as Custom while retaining their values.
 
-**Customize…** reveals Text surfaces, Containers, Peek backdrop, Shadows and
-Preview controls. **Done** hides them. Opening or hiding customization does not
-change the preset or saved tuning. Hiding it also ends an active switcher preview.
+**Customize…** opens a sheet for Text surfaces, Containers, Peek backdrop,
+Shadows and Preview. Changes apply live through the same profile owner. **Done**
+or Escape closes the sheet and ends an active switcher preview. Opening or
+closing it does not itself change the preset or tuning. Keyboard adjustments
+commit immediately; drag updates are bounded and finish with the exact value.
 
 | Preset | Text surfaces | Containers | Peek backdrop |
 | --- | --- | --- | --- |

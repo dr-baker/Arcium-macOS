@@ -28,7 +28,7 @@ the authorities for persistence, validation, and runtime changes. SwiftUI receiv
 snapshots and sends edits back through an Objective-C-compatible delegate.
 An AppKit `NSWindowController` owns each profile's settings window and installs
 a native background container with an `NSHostingController` child. The native window uses
-full-size content. SwiftUI renders the SettingsUI workspace, sidebar, cards, and
+full-size content. SwiftUI renders the SettingsUI workspace, sidebar, grouped sections, and
 controls using the bundled product design. SwiftUI also owns presentation state,
 including page selection and shortcut search. The existing AppKit window
 lifecycle supports the native shortcut recorder and validation sheets directly. Closing the window releases
@@ -58,8 +58,14 @@ windows while existing windows retain their Space.
 The Settings host follows SettingsUI's hidden-title-bar layout. The SwiftUI root
 extends into the title-bar area and reserves 84 points for native window buttons
 beside its single 32-point header. The host removes the native toolbar and
-title-bar separator. The page workspace, cards, controls, and product preset
-retain their SettingsUI design.
+title-bar separator. The navigation and four categories remain app-owned. Pages use SettingsUI's
+shared page scrolling, aligned rows and unboxed grouped sections. Cards are
+reserved for substantial editors rather than every small settings group.
+Space colors/backdrop, floating-surface details and command-bar styling open
+focused sheets. Their controls apply live through the existing profile store;
+Done and Escape close the sheet without implying rollback. Closing a surface
+sheet also ends its MRU preview. Changing Space dismisses customization so
+captured Space-specific bindings cannot continue in another Space.
 
 The vendored `SettingsColumnResizeHandle` retains pointer dragging, arrow-key
 resizing, and accessibility adjustments. Its focus state draws a small 2 by
@@ -84,26 +90,26 @@ See [Shared appearance](native-settings-bindings.md#shared-appearance) for owner
 
 ## Dependency provenance
 
-The original local SettingsUI source snapshot comes from commit
-`164b8920aa7fd388d560d3e7e706f65e477d21ff` of the SettingsUI
-repository. The exported product preset includes the
-user's uncommitted design changes and is preserved byte for byte.
+The vendored SettingsUI source is selected from canonical revision
+`b8f1fc81b91a48be3fdc4ea6f31e63e14ca62475`. Arcium uses three local modules:
+Core controls/layout, Style models/presets, and Authoring editors. The selected
+subset contains 81 Swift source files. The manifest
+has no external package dependencies. Optional shortcut integration, examples,
+labs, unused controls and library glass renderers are omitted. Arcium retains
+its native shortcut recorder and AppKit background renderer.
 
-The additive `SettingsPaletteEditor` and `SettingsColorAdjustmentSection`
-components are ported from SettingsUI commit `5cfbc34` on
-`feature/public-palette-controls`. The example adopts the same components.
-Existing Arcium vendor adaptations remain in place.
+The exact compiled source list is `arcium_settings_ui_vendor_inputs.gni` in
+the Swift package. `VENDOR_PROVENANCE.md` records retained product adaptations,
+including the Space palette accent, OKLCH harmonies, targeted dot selection,
+editing guards, contrast markers and keyboard-accessible segments. The host
+continues using `SettingsStylePreset.decodeJSON` to migrate older preset schemas.
+The bundled product preset remains byte for byte unchanged.
 
-ColorTokensKit-Swift is version 0.3.0, commit
-`cba1f4c857412f9f241efce4ce79302c487710f2`. Both dependencies are copied into
-local Swift packages with their resources and license notices. The vendored
-SettingsUI manifest uses the local ColorTokensKit package instead of fetching it.
-Trailing whitespace in seven vendored text files is normalized for Chromium
-patch checks. ColorTokensKit resolves its resource bundle from the signed app
-Resources directory; only standalone SwiftPM tests use the generated module
-bundle lookup. These revision and preset identifiers attribute the original
-vendor import. Subsequent adaptations are recorded in the vendored `VENDOR_PROVENANCE.md`.
-The source checkout was not modified by that import.
+ColorTokensKit is no longer a dependency or app resource. The build stages only
+`ArciumSettingsUI_ArciumSettingsUI.bundle/yellow-blue grain.json`, alongside the
+native library. The modular package uses a fresh `arcium_settings_ui_modules`
+SwiftPM scratch directory so obsolete generated resource bundles cannot enter
+the new exact resource contract.
 
 ## Patch ownership and dependencies
 
@@ -113,7 +119,10 @@ Spaces, Little Arc, and shortcut authorities. The production SettingsUI patch
 refines the native-settings baseline. `arcium-surface-groups.patch` owns the
 Text/Container schema, defaults, resolution, and Views consumers;
 `arcium-surface-groups-macos.patch` owns their native material hosts and Settings
-cards. Both use the existing profile preference bridge.
+controls. Both use the existing profile preference bridge.
+`arcium-settingsui-modules-macos.patch` refreshes the selected library modules,
+imports and build resources. `arcium-settings-layout-macos.patch` owns the compact
+page sections and live customization sheets.
 
 The merged catalog in the build dir is generated; the core and macOS personal
 patches remain the source owners. Include-only relocation of Spaces and Little
@@ -139,7 +148,7 @@ Chromium's PrefService validates, saves, and observes the profile values.
 The SwiftUI editor does not add another preferences store.
 
 Browser and Settings window chrome use `ApplyNativeGlassBackgroundView`.
-The shared SwiftUI glass renderer remains available to other SettingsUI hosts.
+Arcium omits unused SettingsUI glass renderer sources from its selected vendor copy.
 Window chrome has one native glass background. Floating surfaces selected as
 Liquid use a separate noninteractive SwiftUI host with public `Glass.tint`
 and `.glassEffect`.
