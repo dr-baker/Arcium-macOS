@@ -35,6 +35,7 @@
   "steps": [
     "Create two Spaces; open Settings from the first and choose a saturated color with the existing Space colors picker",
     "Inspect chrome, Command-L address field and results, Command-T panel, MRU, Peek, and Settings; change controls and panels saturation",
+    "Inspect New Tab and the main Settings canvas, cards, and fields in Light and Dark with a saturated seed and maximum Panels saturation; verify restrained tint while window chrome and glow colors stay vivid",
     "Enable decorative effects, keep the main glow fixed, and drag each secondary glow independently; on release verify the native window uses that point's saved color and new position",
     "Change Panels saturation and Light/Dark mode; verify derived UI roles change while authored glow colors, placement, size, and intensity remain intact",
     "Switch to the second Space, choose a different color, and confirm both Spaces retain their own palettes",
@@ -48,6 +49,7 @@
     "The existing Settings picker and Space creation/editor write the same Space recipe; no independent Controls accent or panel Tint color picker remains",
     "Palette changes propagate live to the initiating Space's windows and panels",
     "Chroma dials preserve chosen colors and lightness while changing derived saturation",
+    "Large New Tab and Settings content surfaces remain mostly neutral, using dedicated OKLCH roles capped at chroma 0.012; this does not neutralize window chrome, floating panels, accents, or authored glows",
     "The palette derives from the authored glow colors; the renderer never replaces those colors with generated tones or scales them with Panels saturation",
     "Each glow keeps its own position, size, and intensity; moving a secondary point updates its native glow without moving the main point",
     "Paired field and panel surfaces keep text and selection readable over black and white content, including minimum material opacity",
