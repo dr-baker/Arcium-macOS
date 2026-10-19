@@ -76,6 +76,11 @@ uses the first remaining color. Choosing a control accent never rewrites chrome
 colors, harmony, placement, size, intensity, or material effects. Existing saved
 accents remain custom until the user chooses a glow.
 
+Command-panel selection, hover fills, interface glyphs, and tinted badges and
+scopes follow the profile's Controls accent. MRU's selected item uses the same
+accent. Site favicons keep their own colors. Theme changes repaint the floating
+panel without replacing its input or results.
+
 Settings uses the browser's native background renderer
 with the same configuration and profile theme color. Color points use the same
 normalized coordinates in each window. SettingsUI renders the content above
