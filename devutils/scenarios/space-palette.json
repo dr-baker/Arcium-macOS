@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "id": "space-palette",
+  "description": "Validate one OKLCH palette per Space across browser chrome, address fields, panels, and native Settings, including contrast and restart.",
+  "profile": {
+    "policy": "isolated",
+    "name": "space-palette"
+  },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_space_palette_unittests",
+      "filters": [
+        "*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_space_color_mixer_unittests",
+      "filters": [
+        "ArciumSpaceColorMixer.*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "HeliumSpaceServiceTest.*Palette*",
+        "HeliumSpaceServiceTest.*Theme*"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Replay, compile, and package the exact recorded bundle; launch only the isolated Dev profile",
+    "Use acceptance-owned Spaces and record their names and colors"
+  ],
+  "steps": [
+    "Create two Spaces; open Settings from the first and choose a saturated color with the existing Space colors picker",
+    "Inspect chrome, Command-L address field and results, Command-T panel, MRU, Peek, and Settings; change controls and panels saturation",
+    "Switch to the second Space, choose a different color, and confirm both Spaces retain their own palettes",
+    "Open Settings from each Space; retarget while a picker interaction is pending and confirm no edit reaches the other Space",
+    "Check Auto, Light, and Dark; inspect black and white pages with bright and dark seeds, minimum opacity, visible glows, and grain",
+    "Check Solid and native glass materials; verify text, icons, focus, and selected results remain readable",
+    "Disable decorative background customization; edit a Space color and verify palette updates without glows or grain, then re-enable effects and verify the saved recipe returns",
+    "Quit normally, relaunch the same profile, verify both recipes and dials, then close and quit"
+  ],
+  "observables": [
+    "The existing Settings picker and Space creation/editor write the same Space recipe; no independent Controls accent or panel Tint color picker remains",
+    "Palette changes propagate live to the initiating Space's windows and panels",
+    "Chroma dials preserve chosen colors and lightness while changing derived saturation",
+    "Text and selection remain readable over black and white content, including minimum material opacity",
+    "Color edits preserve material enablement; disabled decoration keeps its saved recipe while the palette and contrast floor still apply",
+    "Edits and delayed callbacks never change another Space or a deleted Space",
+    "Normal restart preserves colors, harmony, mode, and chroma dials; closing surfaces and quitting causes no new crash"
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

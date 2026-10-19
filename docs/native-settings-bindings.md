@@ -54,54 +54,41 @@ from Objective-C numeric zero and one.
 
 `HeliumSpaceService::SetActiveSpace` writes the observed active-Space preference synchronously. The model therefore needs no second explicit change notification after calling it. The redesign removes that duplicate notification.
 
-## Shared appearance
+## Space appearance
 
-Auto, Light, and Dark use `ThemeService::GetBrowserColorScheme` and
-`SetBrowserColorScheme`. The service owns `browser.theme.color_scheme2`.
-Both browser windows and Settings use this mode. Theme service notifications
-refresh the native Settings snapshot. Reset selects Auto.
+Each Space owns its color recipe, harmony, light/dark mode, and controls and
+panels chroma multipliers. The existing Colors picker is the color-selection
+entry point. The first point supplies the primary seed; additional points keep
+their stable identities and decorative placement. Legacy Space colors and then
+legacy profile glow colors supply migration inputs until the Space is edited.
+Material, blur, and opacity settings remain profile-owned; glow strength and
+grain travel with the Space recipe.
 
-`arcium.appearance.palette` stores the SettingsUI palette configuration and its
-resolved accent and light/dark chrome colors. The native model validates the
-complete dictionary and writes the accent through `ThemeService::SetUserColor`.
-Native browser glass uses the resolved chrome color. SettingsUI uses the same
-palette recipe for its theme and control accent. A policy theme or a different
-browser user color disables the saved palette projection.
+The shared C++ OKLCH generator creates gamut-mapped ramps and semantic roles.
+Chroma controls preserve hue and lightness. Text targets 7:1, muted text 4.5:1,
+and outlines 3:1 against opaque surfaces. Native glass receives an opacity floor
+that keeps text at least 4.5:1 over black and white backdrops. Decorative glows
+use contrast-safe rendered lightness without rewriting the picker recipe.
+Forced colors and high-contrast providers retain Chromium's stock roles.
 
-The Colors editor owns the actual chrome color points and harmony. Its compact
-Controls accent row assigns an existing glow to controls, or retains a custom
-accent. The optional `controlColorID` is stored in the existing shared palette
-configuration. A linked accent follows that stable point ID; removing the point
-uses the first remaining color. Choosing a control accent never rewrites chrome
-colors, harmony, placement, size, intensity, or material effects. Existing saved
-accents remain custom until the user chooses a glow.
+A browser's ColorProvider key uses the existing per-window initializer to carry
+an immutable, interned Space palette. Browser chrome,
+address fields, floating results, MRU, and Peek controls consume that provider.
+Settings receives the same generated light/dark roles and opacity floors in
+`spacePalette`; Swift does not generate a second palette. Changes refresh the
+owning browser and its panels without replacing their input or selection.
 
-Command-panel selection, hover fills, interface glyphs, and tinted badges and
-scopes follow the profile's Controls accent. MRU's selected item uses the same
-accent. Site favicons keep their own colors. Theme changes repaint the floating
-panel without replacing its input or results.
+Settings captures the initiating browser's Space. `space_colors`,
+`space_chroma`, `space_mode`, and `reset_space_colors` carry that Space ID, and
+the native bridge rejects stale targets and deleted Spaces. Opening Settings
+from another Space deliberately retargets it. Pending interactions retain their
+original target. A fresh native snapshot clears pending edits. The obsolete
+shared-palette write API refuses independent color writes.
 
-Settings uses the browser's native background renderer
-with the same configuration and profile theme color. Color points use the same
-normalized coordinates in each window. SettingsUI renders the content above
-that surface without a separate preset material, glow, or grain layer.
-
-The color preview and its connected Size and Intensity sliders use public
-SettingsUI components. `matchColorAdjustments` belongs to the existing chrome
-configuration dictionary. Enabling **Match all colors** copies the selected
-point's size and intensity to all points. Subsequent adjustments and new points
-keep those values linked. Colors and positions stay independent.
-
-The shared Colors editor is the decorative color editor. The palette remains
-its token-generation and persistence representation. Existing unlinked accents
-remain custom. SettingsUI imports materialize legacy palette-linked backdrop
-colors once to preserve the imported appearance.
-
-Arcium writes the saved role through `shared_palette` and chrome values through
-`chrome_appearance`. The native validator accepts the optional bounded
-`controlColorID`. Resetting chrome resolves a linked accent against the
-acknowledged reset colors; custom accents remain independent. A fresh native
-snapshot clears pending edits even when the host rejects or clamps a write.
+Settings uses the browser's native background renderer with the same recipe
+and calculated contrast floor. The picker preserves harmony, point IDs,
+placement, size, intensity, and `matchColorAdjustments`. **Match all colors**
+links size and intensity while colors and positions remain independent.
 
 ## Floating surfaces
 
@@ -144,13 +131,13 @@ from the product patch and provides a Metal preview of the Chromium shader.
   through to `Glass.tint`. It follows the window's appearance and uses no private
   glass variant. The packaged SwiftUI module loads even before Settings opens.
 - **Frosted:** untinted clear native glass, always drawn in its inactive state.
-  Tint, Window tint and Tint color are hidden for this material. Its resolved
-  tint strength is zero; the saved tint remains available to other materials.
+  The material tint strength is zero; the Space contrast floor remains above
+  the material so text stays readable.
 - **Chromium (glassmorphic):** Chromium's refraction shader with the switcher's
   original refraction settings and the chosen panel tint. Only the switcher can
   use it, inside the browser window; the command bar draws Liquid.
-- **Solid:** an opaque fill blending the chosen tint over the panel's charcoal
-  base. Text contrast follows the resulting fill.
+- **Solid:** the opaque panel role from the Space palette, with paired text
+  and selection colors.
 
 Fast paints its tint in a separate view above AppKit's blur. AppKit owns the
 effect's own backing layers, so their background color is not used for tint.
@@ -161,20 +148,19 @@ panel window's class and consult a per-window override, because AppKit observes
 these windows with KVO. Panels draw no outline. The window server shadow is off;
 **Shadow** paints a soft shadow in a transparent margin instead.
 
-The values are `panelMaterial`, `panelTint`, `panelBlur`, `panelTintColor` (`#RRGGBB`, or
-empty to follow the first window glass color), `panelShadow`, `controlFinish` (`glass`,
+The stored values are `panelMaterial`, `panelTint`, `panelBlur`, legacy
+`panelTintColor`, `panelShadow`, `controlFinish` (`glass`,
 `refractive`, `solid`), `controlTint`, `controlEdge`, `scrimBlur` (0–30 pt), and
 `scrimDim`. Runtime parsing clamps saved values; the Settings bridge requires
 the original nine with exact types and accepts optional `panelBlur` for older
 clients. New snapshots include all ten.
 
-**Window tint** follows the first color in the window glass editor, including
-later edits to that color. With no window colors it falls back to the browser
-theme. Turning Window tint off reveals a separate **Tint color** picker. The
-**Tint** slider controls its strength for every tinted panel material. The stored
-identifier `liquid` now displays Clear, preserving existing choices and presets;
-`systemLiquid` selects public SwiftUI Liquid. Chromium's identifier remains
-`glassmorphic`.
+Panel colors derive from the Space palette. The **Panels saturation** dial
+changes their OKLCH chroma; there is no separate panel color picker. The **Tint**
+slider still controls material strength, subject to the calculated contrast
+floor. Legacy `panelTintColor` is retained in stored data but does not override
+the resolved Space color. The stored identifier `liquid` displays Clear;
+`systemLiquid` selects public SwiftUI Liquid, and `glassmorphic` selects Chromium.
 
 Chromium's **Blur** adds 0–30 pt of Gaussian backdrop blur before the refraction
 shader, default 9 pt, without changing tint strength. Both the shader's sharp
@@ -296,15 +282,18 @@ saved preference from the standard toolbar's Extensions button.
 
 ## Browser window chrome
 
-The Appearance page edits the original profile's `arcium.chrome.appearance`
-dictionary through `ArciumSettingsModel::SetChromeAppearance`. Core owns its
-registered defaults, strict write validation, tolerant runtime parsing, and
-material resolution in `glass_surface_configuration.{h,cc}`. Reset clears the
-user value. SwiftUI owns only the draft while a color point is being dragged.
-An external reset, removal, or managed-state change cancels that draft.
+The Appearance page edits material settings and decorative-effect enablement in
+the original profile's `arcium.chrome.appearance` dictionary through
+`ArciumSettingsModel::SetChromeAppearance`. Core owns its registered defaults,
+strict write validation, tolerant runtime parsing, and material resolution in
+`glass_surface_configuration.{h,cc}`. Color, harmony, point placement, strength,
+and grain edits use the captured Space recipe described above. SwiftUI owns
+only the draft while a color point is being dragged. An external reset,
+removal, or managed-state change cancels that draft.
 
-`BrowserNativeWidgetMac` observes the same preference and applies it to normal
-browser windows. Incognito windows use their original profile's appearance.
+`BrowserNativeWidgetMac` observes the material preference and resolves the
+window's Space recipe for normal browser windows. Incognito windows use their
+original profile's appearance.
 Popups, Little Arc, and web app windows retain their existing material policy.
 Color and grain edits update the existing native decoration view. A change to
 whether Chrome Views paint transparently also refreshes the widget theme.
@@ -323,7 +312,7 @@ user overrides remain authoritative.
 
 Material opacity changes only the native background view. Page content, browser
 controls, color points, and grain keep their own opacity. Liquid Glass exposes
-Regular/Clear styles and an independent browser-theme color overlay. Its tint
+Regular/Clear styles and a palette-derived color overlay. Its tint
 opacity stays constant across active and inactive windows; 100% is opaque.
 Material opacity fades only the glass underneath that overlay. Frosted chrome exposes semantic
 macOS materials and scales its existing browser-theme tint. Automatic frosted
@@ -340,29 +329,18 @@ choices without claiming a numeric blur control.
 
 ## Everyday and Advanced appearance
 
-Everyday Colors provides placement, linked size, harmony selection, and location
-randomization. Controls accent assigns one of those colors to buttons and
-selection, with a custom-color option. Color edits update a linked control
-accent; accent edits preserve decorative colors and harmony. Opening the custom
-accent picker retains the link; committing a custom color changes only the
-accent role.
+Everyday Colors provides placement, linked size, OKLCH harmony selection, and
+location randomization. The picker owns color selection throughout the Space.
+**Controls saturation** and **Panels saturation** adjust derived chroma without
+changing the chosen seeds, perceptual lightness, or contrast targets.
 
-Saturation is the single Everyday control for color strength and intensity;
-Advanced retains independent intensity editing. Background Effects provides
-Reflective Glass, normalized opacity, saturation, and a two-axis grain control.
-Advanced exposes the material and individual rendering values. The segmented
-Everyday/Advanced selector uses the shared saved controls accent.
-
-Everyday and Advanced use the same decorative-editing availability and reason.
-When customization is off, both explain that Advanced enables backdrop
-customization. A renderer override can also make color effects unavailable;
-the guidance directs the user to the Automatic backend and a normal relaunch.
-Managed and unavailable settings retain their saved values.
-
-The disabled canvas displays saved markers but blocks selection, color editing,
-and movement callbacks. Re-enabling customization restores the visible saved
-colors. Controls accent uses its own availability and remains independent of
-decorative editing.
+Background Effects provides Reflective Glass, normalized opacity, saturation,
+and grain. Advanced exposes material and individual rendering values. Both
+views preserve saved values while customization is unavailable. The disabled
+Background Effects canvas shows saved markers and blocks decorative editing.
+Everyday Colors remains editable with effects off or an unavailable material;
+editing colors preserves effect enablement. Re-enabling customization restores
+the saved decorative recipe. Changing a material does not select a color.
 
 Arcium owns its fitted Clear-glass opacity curve:
 
@@ -385,13 +363,13 @@ different noise patterns.
 
 ## Color harmony
 
-The chrome color swatches now open a harmony picker. The placement canvas
-continues to select and move spatial points. `colorHarmony` is metadata in the
-existing chrome appearance preference; old values without it decode as Custom.
-The core parser accepts only Custom, Complementary, Split complementary,
-Triadic, and Tetradic raw values. Recoloring preserves point IDs, positions,
-size, intensity, and material effects. Control accent assignment leaves the
-chrome harmony unchanged.
+The Space color swatches open the existing harmony picker. The placement canvas
+selects and moves spatial points. Harmony belongs to the Space recipe; old
+values without it decode as Custom. The core parser accepts only Custom,
+Complementary, Split complementary, Triadic, and Tetradic raw values. Harmony
+uses OKLCH hue offsets and gamut mapping. Recoloring preserves point IDs,
+positions, size, intensity, and material effects. Controls derive their accent
+from the same recipe, with a separate chroma multiplier.
 
 ## Keyboard shortcuts
 
