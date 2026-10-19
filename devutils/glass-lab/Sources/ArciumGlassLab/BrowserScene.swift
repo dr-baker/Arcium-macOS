@@ -84,7 +84,7 @@ struct BrowserPage: View {
                     case .documentation: documentation
                     case .contrast: contrast(phase: phase)
                     }
-                }.frame(width: geometry.size.width, height: geometry.size.height).clipped()
+                }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading).clipped()
             }
         }
         .background(document.dark ? Color(red: 0.105, green: 0.12, blue: 0.13) : Color.white)
@@ -201,7 +201,7 @@ struct Landscape: View {
                         .position(x: size.width * Double((index * 37) % 100) / 100, y: size.height * (0.78 + Double(index) * 0.006))
                 }
             }
-        }
+        }.clipped()
     }
 }
 
