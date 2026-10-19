@@ -10,9 +10,10 @@ struct PanelContent: View {
         if recipe.ink == .dark { return .black }
         if recipe.material == .glassmorphic { return store.document.dark ? .white : .black }
         let tint = recipe.windowTint ? store.document.windowColor : recipe.tintColor
-        let alpha = recipe.effectiveTint
-        let luminance = (tint.red * 0.2126 + tint.green * 0.7152 + tint.blue * 0.0722) * alpha + 0.115 * (1-alpha)
-        return luminance > 0.38 ? Color(red: 0.08, green: 0.09, blue: 0.1) : .white
+        let base = Recipe.baseColor(dark: store.document.dark)
+        let resolved = recipe.solidColor(dark: store.document.dark, tint: tint).mixed(with: base, amount: recipe.intensity)
+        let luminance = resolved.red * 0.2126 + resolved.green * 0.7152 + resolved.blue * 0.0722
+        return luminance > 0.5 ? Color(red: 0.08, green: 0.09, blue: 0.1) : .white
     }
     var body: some View {
         Group {

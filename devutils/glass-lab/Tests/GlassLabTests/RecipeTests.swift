@@ -79,4 +79,15 @@ final class RecipeTests: XCTestCase {
         XCTAssertEqual(store.sceneDocument.recipe.scrimDim, 0.1)
         XCTAssertTrue(store.sceneDocument.moving)
     }
+    func testSolidBaseAndIntensityFollowAppearance() {
+        var recipe = Recipe(); recipe.tint = 0
+        XCTAssertEqual(recipe.solidColor(dark: true, tint: RGB("#FF0000")), RGB("#1D1E1C"))
+        XCTAssertEqual(recipe.solidColor(dark: false, tint: RGB("#FF0000")), RGB("#F2F2F0"))
+        XCTAssertEqual(recipe.intensity, 0)
+        recipe.neutralIntensity = 3
+        XCTAssertEqual(recipe.clamped().intensity, 1)
+        recipe.neutralIntensity = .nan
+        XCTAssertEqual(recipe.clamped().intensity, 0)
+        XCTAssertNil(recipe.productionTuning(windowColor: RGB("#FFFFFF"))["neutralIntensity"])
+    }
 }

@@ -7,10 +7,11 @@ private final class ControlTile: NSView {
     let native = LabCreateMaterialView()!
     let solid = NSView()
     let image = NSImageView()
+    let tone = NSView()
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        for view in [solid, native, image] {
+        for view in [solid, native, image, tone] {
             addSubview(view)
             view.wantsLayer = true
             view.layer?.cornerRadius = 20
@@ -19,10 +20,12 @@ private final class ControlTile: NSView {
         image.imageScaling = .scaleAxesIndependently
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-    func update(recipe: Recipe, tint: RGB) {
-        for view in [solid, native, image] { view.frame = bounds }
+    func update(recipe: Recipe, tint: RGB, dark: Bool) {
+        for view in [solid, native, image, tone] { view.frame = bounds }
         let alpha = recipe.effectiveTint
-        solid.layer?.backgroundColor = NSColor(srgbRed: tint.red*alpha+0.114*(1-alpha), green: tint.green*alpha+0.118*(1-alpha), blue: tint.blue*alpha+0.110*(1-alpha), alpha: 1).cgColor
+        solid.layer?.backgroundColor = NSColor(recipe.solidColor(dark: dark, tint: tint).color).cgColor
+        let base = Recipe.baseColor(dark: dark)
+        tone.layer?.backgroundColor = NSColor(srgbRed: base.red, green: base.green, blue: base.blue, alpha: recipe.intensity).cgColor
         solid.isHidden = recipe.material != .solid
         native.isHidden = recipe.material == .solid || recipe.material == .glassmorphic
         image.isHidden = recipe.material != .glassmorphic
@@ -42,6 +45,7 @@ final class PanelController {
     private let native = LabCreateMaterialView()!
     private let shaderView = NSImageView()
     private let solid = NSView()
+    private let tone = NSView()
     private let container = NSView()
     private let foreground: NSHostingView<PanelContent>
     private let shader = ShaderRenderer()
@@ -61,7 +65,7 @@ final class PanelController {
         let root = NSView(); root.wantsLayer = true; panel.contentView = root
         root.addSubview(container)
         container.wantsLayer = true
-        for view in [solid, native, shaderView, foreground] { container.addSubview(view) }
+        for view in [solid, native, shaderView, tone, foreground] { container.addSubview(view) }
         for tile in controlTiles { container.addSubview(tile, positioned: .below, relativeTo: foreground) }
         solid.wantsLayer = true; shaderView.imageScaling = .scaleAxesIndependently
     }
@@ -84,11 +88,15 @@ final class PanelController {
         let screen = parent.convertToScreen(anchor.convert(rect.insetBy(dx: -22, dy: -22), to: nil))
         panel.setFrame(screen, display: true)
         container.frame = CGRect(origin: CGPoint(x: 22, y: 22), size: surfaceSize)
-        for view in [solid, native, shaderView, foreground] { view.frame = container.bounds }
+        for view in [solid, native, shaderView, tone, foreground] { view.frame = container.bounds }
         let tint = recipe.windowTint ? store.document.windowColor : recipe.tintColor
         let effective = recipe.effectiveTint
-        solid.layer?.backgroundColor = NSColor(srgbRed: tint.red*effective+0.114*(1-effective), green: tint.green*effective+0.118*(1-effective), blue: tint.blue*effective+0.110*(1-effective), alpha: 1).cgColor
-        for view in [solid, native, shaderView] {
+        solid.layer?.backgroundColor = NSColor(recipe.solidColor(dark: store.document.dark, tint: tint).color).cgColor
+        let base = Recipe.baseColor(dark: store.document.dark)
+        tone.wantsLayer = true
+        tone.layer?.backgroundColor = NSColor(srgbRed: base.red, green: base.green, blue: base.blue, alpha: recipe.intensity).cgColor
+        tone.isHidden = controls
+        for view in [solid, native, shaderView, tone] {
             view.wantsLayer = true
             view.layer?.cornerRadius = recipe.radius
             view.layer?.cornerCurve = .continuous
@@ -126,7 +134,7 @@ final class PanelController {
             guard controls else { continue }
             let tileRect = CGRect(x: 23+Double(index)*66, y: 15, width: 40, height: 40)
             tile.frame = tileRect
-            tile.update(recipe: recipe, tint: tint)
+            tile.update(recipe: recipe, tint: tint, dark: store.document.dark)
             tile.native.appearance = recipe.material == .systemLiquid ? panel.appearance : nil
             if recipe.material == .glassmorphic, key != lastShaderKey {
                 var circle = recipe; circle.radius = 20

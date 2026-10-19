@@ -106,6 +106,9 @@ struct LabView: View {
                     Divider()
                 }
                 VStack(alignment: .leading, spacing: 13) {
+                    slider("Base intensity", value: Binding(get: { store.document.recipe.intensity }, set: { store.document.recipe.neutralIntensity = $0 }),
+                           range: 0...1, id: "lab-intensity", percentage: true)
+                        .help("Adds neutral light or dark backing independently of theme tint. 0% keeps the native material; 100% is opaque.")
                     if store.document.preview != .controls {
                         slider("Corner radius", value: $store.document.recipe.radius, range: 0...48, id: "lab-radius")
                     }

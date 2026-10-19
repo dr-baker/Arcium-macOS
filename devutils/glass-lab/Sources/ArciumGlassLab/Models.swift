@@ -27,7 +27,7 @@ enum Material: String, Codable, CaseIterable, Identifiable {
         case .systemLiquid: "Public SwiftUI Glass.regular and glassEffect."
         case .frosted: "AppKit clear glass, inactive appearance, no tint."
         case .glassmorphic: "Production shader equations in Metal. Chromium compositing is simulated."
-        case .solid: "Tint blended over the browser's #1D1E1C panel color."
+        case .solid: "Tint over a dark or light neutral base, following page appearance."
         }
     }
 }
@@ -75,15 +75,27 @@ struct RGB: Codable, Equatable {
     init(_ color: Color) {
         let c = NSColor(color).usingColorSpace(.sRGB) ?? .systemPurple
         red = c.redComponent; green = c.greenComponent; blue = c.blueComponent
+        self = clamped()
     }
     var color: Color { Color(red: red, green: green, blue: blue) }
-    var hex: String { String(format: "#%02X%02X%02X", Int(red * 255), Int(green * 255), Int(blue * 255)) }
+    var hex: String {
+        let rgb = clamped()
+        return String(format: "#%02X%02X%02X", Int((rgb.red*255).rounded()), Int((rgb.green*255).rounded()), Int((rgb.blue*255).rounded()))
+    }
     func clamped() -> Self {
         var copy = self
         copy.red = red.isFinite ? min(1, max(0, red)) : 0
         copy.green = green.isFinite ? min(1, max(0, green)) : 0
         copy.blue = blue.isFinite ? min(1, max(0, blue)) : 0
         return copy
+    }
+    func mixed(with other: RGB, amount: Double) -> RGB {
+        var result = self
+        let alpha = min(1, max(0, amount))
+        result.red = red*(1-alpha)+other.red*alpha
+        result.green = green*(1-alpha)+other.green*alpha
+        result.blue = blue*(1-alpha)+other.blue*alpha
+        return result
     }
 }
 
@@ -100,6 +112,7 @@ struct Recipe: Codable, Equatable {
     var textShadow: Double = 0.45
     var textSize: Double = 15
     var ink: InkStyle?
+    var neutralIntensity: Double?
     var edge: Double = 18
     var refraction: Double = 7
     var dispersion: Double = 0.15
@@ -108,6 +121,14 @@ struct Recipe: Codable, Equatable {
     var scrimDim: Double = 0.28
     var scrimBlur: Double = 9
     var effectiveTint: Double { material == .frosted ? 0 : tint }
+    var intensity: Double {
+        guard let value = neutralIntensity, value.isFinite else { return 0 }
+        return min(1, max(0, value))
+    }
+    static func baseColor(dark: Bool) -> RGB { RGB(dark ? "#1D1E1C" : "#F2F2F0") }
+    func solidColor(dark: Bool, tint: RGB) -> RGB {
+        Self.baseColor(dark: dark).mixed(with: tint, amount: effectiveTint)
+    }
     func clamped() -> Self {
         var copy = self
         func bound(_ value: Double, _ range: ClosedRange<Double>, _ fallback: Double) -> Double {
@@ -119,6 +140,7 @@ struct Recipe: Codable, Equatable {
         copy.itemBacking = bound(itemBacking, 0...0.6, 0.12)
         copy.textShadow = bound(textShadow, 0...1, 0.45)
         copy.textSize = bound(textSize, 11...22, 15)
+        if let neutralIntensity { copy.neutralIntensity = bound(neutralIntensity, 0...1, 0) }
         copy.edge = bound(edge, 1...80, 18)
         copy.refraction = bound(refraction, 0...40, 7)
         copy.dispersion = bound(dispersion, 0...1, 0.15)
