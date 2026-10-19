@@ -2,15 +2,54 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -388,6 +388,7 @@ struct ArciumCommandPanelLayout: Equatab
+@@ -387,7 +387,46 @@ struct ArciumCommandPanelLayout: Equatab
+     }
  }
  
++/// Values a floating-surface preset fills in; Custom stores its own.
++struct ArciumSurfaceTuning: Equatable {
++    static let finishes = ["glass", "refractive", "solid"]
++    static let maxScrimBlur = 30.0
++    var panelGlass = true
++    var panelTint = 0.3
++    var panelClear = false
++    var panelRefractive = false
++    var controlFinish = "glass"
++    var controlTint = 0.55
++    var controlEdge = 0.38
++    var scrimBlur = 9.0
++    var scrimDim = 0.28
++    init(_ dictionary: [String: Any] = [:]) {
++        panelGlass = strictBoolean(dictionary["panelGlass"]) ?? panelGlass
++        panelClear = strictBoolean(dictionary["panelClear"]) ?? panelClear
++        panelRefractive = strictBoolean(dictionary["panelRefractive"]) ?? panelRefractive
++        if let value = dictionary["controlFinish"] as? String, Self.finishes.contains(value) {
++            controlFinish = value
++        }
++        func unit(_ key: String, _ fallback: Double, max: Double = 1) -> Double {
++            guard let value = finiteDouble(dictionary[key]), (0...max).contains(value) else { return fallback }
++            return value
++        }
++        panelTint = unit("panelTint", panelTint)
++        controlTint = unit("controlTint", controlTint)
++        controlEdge = unit("controlEdge", controlEdge)
++        scrimBlur = unit("scrimBlur", scrimBlur, max: Self.maxScrimBlur)
++        scrimDim = unit("scrimDim", scrimDim)
++    }
++    var dictionary: [String: Any] {
++        ["panelGlass": panelGlass, "panelTint": panelTint, "panelClear": panelClear,
++         "panelRefractive": panelRefractive,
++         "controlFinish": controlFinish, "controlTint": controlTint, "controlEdge": controlEdge,
++         "scrimBlur": scrimBlur, "scrimDim": scrimDim]
++    }
++}
++
  struct ArciumAppearanceSnapshot: Equatable {
-+    static let surfaceSetValues = ["glass", "refractive", "quiet", "solid"]
++    static let surfaceSetValues = ["glass", "refractive", "quiet", "solid", "custom"]
      static let defaultCollapsedSidebarStyleOptions = [
          ArciumChoice(value: 0, label: "Icon rail"),
          ArciumChoice(value: 1, label: "Fully hidden (Arc)")
-@@ -431,6 +432,12 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -431,6 +470,17 @@ struct ArciumAppearanceSnapshot: Equatab
      var canEditCommandBarAppearance: Bool {
          commandBarAppearanceAvailable && !commandBarAppearanceManaged
      }
@@ -20,10 +59,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    var canEditSurfaceSet: Bool {
 +        surfaceSetAvailable && !surfaceSetManaged
 +    }
++    var surfaceTuning = ArciumSurfaceTuning()
++    var surfaceTuningAvailable = false
++    var canEditSurfaceTuning: Bool {
++        surfaceTuningAvailable && canEditSurfaceSet
++    }
      var collapsedSidebarStyle = 0
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
-@@ -457,7 +464,15 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -457,7 +507,17 @@ struct ArciumAppearanceSnapshot: Equatab
          commandPanelLayout = ArciumCommandPanelLayout(dictionaryValues(dictionary["commandPanelLayout"]))
          commandPanelLayoutAvailable = strictBoolean(dictionary["commandPanelLayoutAvailable"]) ?? false
          commandPanelLayoutManaged = strictBoolean(dictionary["commandPanelLayoutManaged"]) ?? false
@@ -37,10 +81,12 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        }
 +        surfaceSetAvailable = strictBoolean(dictionary["surfaceSetAvailable"]) ?? false
 +        surfaceSetManaged = strictBoolean(dictionary["surfaceSetManaged"]) ?? false
++        surfaceTuning = ArciumSurfaceTuning(dictionaryValues(dictionary["surfaceTuning"]))
++        surfaceTuningAvailable = strictBoolean(dictionary["surfaceTuningAvailable"]) ?? false
          commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
          commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
          collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
-@@ -882,10 +897,16 @@ final class ArciumSettingsStore: Observa
+@@ -882,10 +942,27 @@ final class ArciumSettingsStore: Observa
  
      func setCommandBarAppearance(_ appearance: Int) {
          guard snapshot.appearance.canEditCommandBarAppearance,
@@ -49,6 +95,17 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          settingChanged(key: "command_bar_appearance", value: appearance)
      }
  
++    /// Saves every value and switches the preset to Custom.
++    func setSurfaceTuning(_ tuning: ArciumSurfaceTuning) {
++        guard snapshot.appearance.canEditSurfaceTuning else { return }
++        settingChanged(key: "surface_tuning", value: tuning.dictionary)
++    }
++
++    /// Holds the Ctrl+Tab switcher open in the browser window behind Settings.
++    func setSurfacePreview(_ visible: Bool) {
++        settingChanged(key: "surface_preview", value: visible)
++    }
++
 +    func setSurfaceSet(_ surfaceSet: String) {
 +        guard snapshot.appearance.canEditSurfaceSet,
 +              ArciumAppearanceSnapshot.surfaceSetValues.contains(surfaceSet) else { return }
@@ -62,37 +119,113 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -571,14 +571,26 @@ private struct AppearanceSettingsPage: V
+@@ -500,6 +500,17 @@ private struct TabsAndSpacesSettingsPage
+ }
+ 
+ private struct AppearanceSettingsPage: View {
++    private static let percent: (Double) -> String = { "\(Int(($0 * 100).rounded()))%" }
++
++    private func surfaceTuningBinding<Value>(_ key: WritableKeyPath<ArciumSurfaceTuning, Value>) -> Binding<Value> {
++        Binding(get: { store.snapshot.appearance.surfaceTuning[keyPath: key] },
++                set: { value in
++                    var tuning = store.snapshot.appearance.surfaceTuning
++                    tuning[keyPath: key] = value
++                    store.setSurfaceTuning(tuning)
++                })
++    }
++
+     private func commandLayoutBinding<Value>(_ key: WritableKeyPath<ArciumCommandPanelLayout, Value>) -> Binding<Value> {
+         Binding(get: { store.snapshot.appearance.commandPanelLayout[keyPath: key] },
+                 set: { value in
+@@ -512,6 +523,7 @@ private struct AppearanceSettingsPage: V
+     @ObservedObject var store: ArciumSettingsStore
+     @Environment(\.settingsTheme) private var theme
+     @State private var backgroundMode: BackgroundMode = .everyday
++    @State private var surfacePreview = false
+ 
+     private enum BackgroundMode: String, CaseIterable {
+         case everyday = "Everyday"
+@@ -571,15 +583,76 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
 -            SSectionCard(title: "Command bar") {
 -                SPicker("Command bar appearance", selection: Binding(
 +            SSectionCard(title: "Floating surfaces") {
-+                SPicker("Surface style", selection: Binding(
++                SPicker("Preset", selection: Binding(
 +                    get: { store.snapshot.appearance.surfaceSet },
 +                    set: { store.setSurfaceSet($0) }
 +                ), options: [
 +                    (value: "glass", label: "Glass"), (value: "refractive", label: "Refractive"),
-+                    (value: "quiet", label: "Quiet"), (value: "solid", label: "Solid")],
-+                    description: "Styles panels, floating buttons, and Peek backdrops together.")
++                    (value: "quiet", label: "Quiet"), (value: "solid", label: "Solid"),
++                    (value: "custom", label: "Custom")],
++                    description: "Fills in the three cards below. Changing any value switches to Custom.")
 +                .disabled(!store.snapshot.appearance.canEditSurfaceSet)
 +                .accessibilityIdentifier("surface-set")
-+                SPicker("Panels", selection: Binding(
++                SToggle("Preview the tab switcher", isOn: Binding(
++                    get: { surfacePreview },
++                    set: { surfacePreview = $0; store.setSurfacePreview($0) }
++                ), description: "Holds the Ctrl+Tab switcher open in the browser window behind Settings. To see Peek changes, open a link in Peek first.")
++                .accessibilityIdentifier("surface-preview")
++            }
++            .onDisappear {
++                if surfacePreview {
++                    surfacePreview = false
++                    store.setSurfacePreview(false)
++                }
++            }
++
++            SSectionCard(title: "Command bar and tab switcher") {
++                SPicker("Material", selection: Binding(
                      get: { store.snapshot.appearance.commandBarAppearance },
                      set: { store.setCommandBarAppearance($0) }
 -                ), options: [(value: 0, label: "Solid"), (value: 1, label: "Glass")],
 -                    description: "Glass uses your saved window background style.")
-+                ), options: [(value: 2, label: "Automatic"), (value: 0, label: "Solid"), (value: 1, label: "Glass")],
-+                    description: "The command bar and tab switcher. Automatic follows the surface style; Glass uses your window's material without its colors or grain.")
++                ), options: [(value: 2, label: "From preset"), (value: 1, label: "Glass"), (value: 0, label: "Solid")],
++                    description: "The \u{2318}T command bar and the Ctrl+Tab switcher. Glass uses your window's material, without its colors or grain.")
                  .disabled(!store.snapshot.appearance.canEditCommandBarAppearance)
                  .accessibilityIdentifier("command-bar-appearance")
+                 Group {
++                    SSlider("Tint", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.05,
++                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                        .accessibilityIdentifier("surface-panel-tint")
++                    SToggle("Clear glass", isOn: surfaceTuningBinding(\.panelClear),
++                            description: "Less frosting, so more of the page shows through.")
++                }
++                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++            }
++
++            SSectionCard(title: "Peek buttons") {
++                Group {
++                    SPicker("Material", selection: surfaceTuningBinding(\.controlFinish), options: [
++                        (value: "glass", label: "Glass"), (value: "refractive", label: "Refractive"),
++                        (value: "solid", label: "Solid")],
++                        description: "Close, open in a tab, and open in the sidebar, beside a Peek preview.")
++                    SSlider("Tint", value: surfaceTuningBinding(\.controlTint), range: 0...1, step: 0.05,
++                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                    SSlider("Edge highlight", value: surfaceTuningBinding(\.controlEdge), range: 0...1, step: 0.05,
++                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                }
++                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++            }
++
++            SSectionCard(title: "Peek backdrop") {
++                Group {
++                    SSlider("Blur", value: surfaceTuningBinding(\.scrimBlur),
++                            range: 0...ArciumSurfaceTuning.maxScrimBlur, step: 1,
++                            format: { "\(Int($0.rounded())) pt" }, commitMode: .debounced(milliseconds: 80))
++                        .accessibilityIdentifier("surface-scrim-blur")
++                    SSlider("Dim", value: surfaceTuningBinding(\.scrimDim), range: 0...1, step: 0.05,
++                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                }
++                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 +            }
 +
 +            SSectionCard(title: "Command bar") {
-                 Group {
++                Group {
                      SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
                          (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
+                     SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
@@ -106,13 +239,46 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
              Double.infinity, -Double.infinity, Double.nan,
              Double.greatestFiniteMagnitude, NSNull()
          ]
-@@ -1207,6 +1207,45 @@ final class ArciumSettingsUIContractTest
+@@ -1207,6 +1207,78 @@ final class ArciumSettingsUIContractTest
          for value: Any in [0, 0.0, NSNumber(value: 0)] {
              XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 0)
          }
 +        for value: Any in [2, 2.0, NSNumber(value: 2)] {
 +            XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 2)
 +        }
++    }
++
++    @MainActor
++    func testSurfaceTuningParsesSafelyAndSendsCompleteValues() {
++        let defaults = ArciumSurfaceTuning()
++        XCTAssertEqual(ArciumSurfaceTuning(["scrimBlur": 99, "panelTint": -1, "controlFinish": "metal",
++                                            "panelGlass": 1]), defaults)
++        let parsed = ArciumSurfaceTuning(["scrimBlur": 12, "controlFinish": "refractive", "panelClear": true])
++        XCTAssertEqual(parsed.scrimBlur, 12)
++        XCTAssertEqual(parsed.controlFinish, "refractive")
++        XCTAssertTrue(parsed.panelClear)
++        XCTAssertEqual(ArciumSurfaceTuning(parsed.dictionary), parsed)
++
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "surfaceSet": "glass", "surfaceSetAvailable": true,
++            "surfaceTuning": parsed.dictionary, "surfaceTuningAvailable": true
++        ]], delegate: delegate)
++        var edited = store.snapshot.appearance.surfaceTuning
++        edited.scrimDim = 0.5
++        store.setSurfaceTuning(edited)
++        store.setSurfacePreview(true)
++        XCTAssertEqual(delegate.settings.map(\.key), ["surface_tuning", "surface_preview"])
++        let sent = delegate.settings.first?.value as? [String: Any] ?? [:]
++        XCTAssertEqual(sent.count, 9)
++        XCTAssertEqual(ArciumSurfaceTuning(sent), edited)
++
++        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "surfaceSet": "glass", "surfaceSetAvailable": true, "surfaceSetManaged": true,
++            "surfaceTuningAvailable": true
++        ]], delegate: delegate)
++        managed.setSurfaceTuning(edited)
++        XCTAssertEqual(delegate.settings.count, 2)
 +    }
 +
 +    @MainActor
@@ -164,15 +330,17 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "chrome/common/pref_names.h"
  #include "components/prefs/pref_service.h"
  #include "third_party/blink/public/common/features.h"
-@@ -103,6 +104,7 @@ NSString* const kKeyZenModeTopChromePinn
+@@ -103,6 +104,9 @@ NSString* const kKeyZenModeTopChromePinn
  NSString* const kKeyAppearance = @"settings_appearance";
  NSString* const kKeyChromeAppearance = @"chrome_appearance";
  NSString* const kKeyCommandBarAppearance = @"command_bar_appearance";
 +NSString* const kKeySurfaceSet = @"surface_set";
++NSString* const kKeySurfaceTuning = @"surface_tuning";
++NSString* const kKeySurfacePreview = @"surface_preview";
  NSString* const kKeyCommandPanelLayout = @"command_panel_layout";
  NSString* const kKeySidebarWidth = @"sidebar_width";
  NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
-@@ -1245,12 +1247,22 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1245,12 +1249,22 @@ void SettingsModelProfileWillBeDestroyed
    const bool command_bar_appearance_managed =
        command_bar_appearance_available &&
        model->IsManaged(arcium::kCommandBarAppearancePref);
@@ -199,17 +367,34 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    const bool sidebar_width_available = model && model->HasSidebarWidth();
    const bool sidebar_width_managed =
        sidebar_width_available && model->IsSidebarWidthManaged();
-@@ -1383,6 +1395,9 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1383,6 +1397,16 @@ void SettingsModelProfileWillBeDestroyed
      @"commandBarAppearance" : @(command_bar_appearance),
      @"commandBarAppearanceAvailable" : @(command_bar_appearance_available),
      @"commandBarAppearanceManaged" : @(command_bar_appearance_managed),
 +    @"surfaceSet" : base::SysUTF8ToNSString(surface_set),
 +    @"surfaceSetAvailable" : @(surface_set_available),
 +    @"surfaceSetManaged" : @(surface_set_managed),
++    @"surfaceTuning" : NSDictionaryFromBaseDict(
++        model ? model->GetSurfaceTuning()
++              : helium::SerializeSurfaceTuning(helium::PresetSurfaceTuning(
++                    helium::SurfaceSet::kGlass))),
++    @"surfaceTuningAvailable" :
++        @(model && model->HasPreference(helium::kArciumSurfaceTuningPref) &&
++          !model->IsManaged(helium::kArciumSurfaceTuningPref)),
      @"sidebarWidth" : @(sidebar_width),
      @"sidebarWidthAvailable" : @(sidebar_width_available),
      @"sidebarWidthManaged" : @(sidebar_width_managed),
-@@ -2124,13 +2139,22 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1695,6 +1719,9 @@ void SettingsModelProfileWillBeDestroyed
+ 
+ - (void)windowWillClose:(NSNotification*)notification {
+   window_closing_ = YES;
++  if (model_) {
++    model_->SetSurfacePreview(false);
++  }
+   [content_controller_ setEffectiveAppearanceChangedHandler:nil];
+   [self removeNativeGlassBackground];
+   [self restoreNativeWindowAppearance];
+@@ -2124,13 +2151,39 @@ void SettingsModelProfileWillBeDestroyed
          CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID() &&
          [value doubleValue] == integer_value &&
          (integer_value == arcium::kCommandBarAppearanceSolid ||
@@ -222,6 +407,23 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
        [self modelDidChange];
      }
      return;
++  }
++  if ([key isEqualToString:kKeySurfaceTuning]) {
++    if ([value isKindOfClass:[NSDictionary class]]) {
++      std::optional<base::DictValue> tuning =
++          BaseDictFromNSObject((NSDictionary*)value);
++      if (tuning && model_->SetSurfaceTuning(*tuning)) {
++        [self modelDidChange];
++      }
++    }
++    return;
++  }
++  if ([key isEqualToString:kKeySurfacePreview]) {
++    if ([value isKindOfClass:[NSNumber class]] &&
++        CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) {
++      model_->SetSurfacePreview([value boolValue]);
++    }
++    return;
 +  }
 +  if ([key isEqualToString:kKeySurfaceSet]) {
 +    // The model rejects unknown names and managed preferences.
