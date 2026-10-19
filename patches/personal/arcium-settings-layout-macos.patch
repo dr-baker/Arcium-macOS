@@ -1,0 +1,740 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -38,6 +38,10 @@ struct ArciumSettingsRootView: View {
+                 .ignoresSafeArea(.container, edges: .top)
+                 .preferredColorScheme(store.appearanceMode().colorScheme)
+                 .settingsTheme(theme)
++                .settingsFont(preset.font)
++                .settingsLayout(SettingsLayoutConfiguration(
++                    pageGutter: 24, compactPageGutter: 16, maximumPageWidth: 960,
++                    cardPadding: 14, sectionSpacing: 20, rowSpacing: 7, inputWidth: 260))
+                 .settingsFontScale(CGFloat(style.surface.fontScale))
+                 .labelStyle(SettingsIconLabelStyle())
+         } else if let error = store.presetError {
+@@ -240,15 +244,7 @@ private struct ArciumPageHeader: View {
+     let description: String
+ 
+     var body: some View {
+-        VStack(alignment: .leading, spacing: SettingsSpacing.xs) {
+-            Text(title)
+-                .settingsFont(\.title)
+-            Text(description)
+-                .settingsFont(\.body)
+-                .foregroundStyle(.secondary)
+-                .fixedSize(horizontal: false, vertical: true)
+-        }
+-        .frame(maxWidth: .infinity, alignment: .leading)
++        SettingsPageHeader(title: title, description: description)
+     }
+ }
+ 
+@@ -258,21 +254,52 @@ private struct SettingsPageScroll<Conten
+     @ViewBuilder let content: Content
+ 
+     var body: some View {
+-        ScrollView {
+-            VStack(alignment: .leading, spacing: SettingsSpacing.lg) {
+-                ArciumPageHeader(title: title, description: description)
+-                content
++        SettingsPageScrollView {
++            ArciumPageHeader(title: title, description: description)
++            SGroupedSections(showsSurfaces: false) { content }
++        }
++    }
++}
++
++/// These controls apply live through the existing profile-bound settings store.
++/// Dismissal closes the editor; it does not promise to roll back saved changes.
++private struct ArciumLiveSettingsSheet<Content: View>: View {
++    let title: String
++    @ViewBuilder let content: Content
++    @Environment(\.dismiss) private var dismiss
++    @Environment(\.settingsTheme) private var theme
++
++    var body: some View {
++        VStack(spacing: 0) {
++            HStack {
++                Text(title).settingsFont(\.section)
++                    .foregroundStyle(theme.textPrimary)
++                    .accessibilityAddTraits(.isHeader)
++                Spacer()
+             }
+-            .padding(SettingsSpacing.xl)
+-            .frame(maxWidth: .infinity, alignment: .leading)
++            .padding(.horizontal, 24).padding(.vertical, 16)
++            ScrollView {
++                VStack(alignment: .leading, spacing: 20) { content }
++                    .frame(maxWidth: .infinity, alignment: .leading)
++                    .padding(.horizontal, 24).padding(.vertical, 8)
++            }
++            HStack {
++                Spacer()
++                Button("Done") { dismiss() }
++                    .buttonStyle(ArciumAccentButtonStyle())
++                    .keyboardShortcut(.defaultAction)
++            }
++            .padding(.horizontal, 24).padding(.vertical, 16)
+         }
+-        .scrollIndicators(.automatic)
++        .settingsSheetSurface()
++        .frame(minWidth: 520, idealWidth: 680, minHeight: 400, idealHeight: 620)
++        .onExitCommand { dismiss() }
+     }
+ }
+ 
+ private struct BooleanSetting: View {
+     let title: String
+-    let description: String
++    let description: String?
+     let enabled: Bool
+     @Binding var value: Bool
+     var unavailableReason: String? = nil
+@@ -302,7 +329,7 @@ private struct GeneralSettingsPage: View
+             if !store.snapshot.general.isAvailable {
+                 SectionUnavailableView(title: "General settings")
+             } else {
+-                SSectionCard(title: "Startup") {
++                Section("Startup") {
+                     if store.snapshot.general.startupOptions.isEmpty {
+                         Text("Startup choices are unavailable for this profile.")
+                             .foregroundStyle(.secondary)
+@@ -316,7 +343,7 @@ private struct GeneralSettingsPage: View
+                             options: store.snapshot.general.startupOptions.map {
+                                 (value: $0.value, label: $0.label)
+                             },
+-                            description: "Choose what opens when Arcium starts.",
++                            description: nil,
+                             help: SHelp(description: "Your specific-page choices stay saved when you switch this option.")
+                         )
+                         .disabled(!store.snapshot.general.hasValue("startup_type") || store.snapshot.general.isManaged("startup_type"))
+@@ -324,10 +351,10 @@ private struct GeneralSettingsPage: View
+                     }
+                 }
+ 
+-                SSectionCard(title: "Behavior") {
++                Section("Behavior") {
+                     BooleanSetting(
+                         title: "Ask where to save each download",
+-                        description: "Choose a destination whenever a download starts.",
++                        description: nil,
+                         enabled: store.snapshot.general.hasValue("prompt_for_download")
+                             && !store.snapshot.general.isManaged("prompt_for_download"),
+                         value: Binding(
+@@ -355,9 +382,22 @@ private struct GeneralSettingsPage: View
+                             set: { store.setGeneralBoolean("show_spaces_in_dock_menu", value: $0) }
+                         )
+                     )
++
++                    BooleanSetting(
++                        title: "Enter Picture-in-Picture automatically",
++                        description: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
++                            ? "Keep a playing video in a floating Picture-in-Picture window when you switch tabs."
++                            : "The experimental browser-initiated Picture-in-Picture feature is unavailable in this browser configuration.",
++                        enabled: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
++                            && !store.snapshot.general.isManaged("auto_picture_in_picture_enabled"),
++                        value: Binding(
++                            get: { store.snapshot.general.autoPictureInPictureEnabled },
++                            set: { store.setGeneralBoolean("auto_picture_in_picture_enabled", value: $0) }
++                        )
++                    )
+                 }
+ 
+-                SSectionCard(title: "Links and address bar") {
++                Section("Links and address bar") {
+                     BooleanSetting(
+                         title: "Open external links in Little Arc",
+                         description: "Open links from other apps in a compact Little Arc window.",
+@@ -380,7 +420,7 @@ private struct GeneralSettingsPage: View
+                     )
+                     BooleanSetting(
+                         title: "Suggest Favorites and Pins in the address bar",
+-                        description: "Include saved Favorites and Pins in address-bar suggestions.",
++                        description: nil,
+                         enabled: store.snapshot.general.hasValue("persistent_items_enabled")
+                             && !store.snapshot.general.isManaged("persistent_items_enabled"),
+                         value: Binding(
+@@ -390,20 +430,7 @@ private struct GeneralSettingsPage: View
+                     )
+                 }
+ 
+-                SSectionCard(title: "Picture-in-Picture") {
+-                    BooleanSetting(
+-                        title: "Enter Picture-in-Picture automatically",
+-                        description: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
+-                            ? "Keep a playing video in a floating Picture-in-Picture window when you switch tabs."
+-                            : "The experimental browser-initiated Picture-in-Picture feature is unavailable in this browser configuration.",
+-                        enabled: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
+-                            && !store.snapshot.general.isManaged("auto_picture_in_picture_enabled"),
+-                        value: Binding(
+-                            get: { store.snapshot.general.autoPictureInPictureEnabled },
+-                            set: { store.setGeneralBoolean("auto_picture_in_picture_enabled", value: $0) }
+-                        )
+-                    )
+-                }
++
+ 
+                 Button("More settings…") {
+                     store.actionInvoked(name: "open_advanced")
+@@ -434,7 +461,7 @@ private struct TabsAndSpacesSettingsPage
+                 SectionUnavailableView(title: "Tabs & Spaces")
+             } else {
+                 if store.snapshot.spaces.isAvailable {
+-                    SSectionCard(title: "Spaces") {
++                    Section("Spaces") {
+                         if !store.snapshot.spaces.items.isEmpty {
+                             SPicker(
+                                 "Default Space",
+@@ -454,7 +481,7 @@ private struct TabsAndSpacesSettingsPage
+                 }
+ 
+                 if store.snapshot.tabs.isAvailable {
+-                    SSectionCard(title: "Tabs") {
++                    Section("Tabs") {
+                         if store.snapshot.tabs.layoutOptions.isEmpty {
+                             Text("Tab layout choices are unavailable for this profile.")
+                                 .foregroundStyle(.secondary)
+@@ -468,14 +495,14 @@ private struct TabsAndSpacesSettingsPage
+                                 options: store.snapshot.tabs.layoutOptions.map {
+                                     (value: $0.value, label: $0.label)
+                                 },
+-                                description: "Choose the browser tab layout."
++                                description: nil
+                             )
+                             .disabled(!store.snapshot.tabs.hasValue("helium_layout") || store.snapshot.tabs.isManaged("helium_layout"))
+                             .accessibilityLabel("Tab layout")
+                         }
+                         BooleanSetting(
+                             title: "Open new tabs next to the active tab",
+-                            description: "Place new tabs beside the active tab.",
++                            description: nil,
+                             enabled: store.snapshot.tabs.hasValue("new_tab_next_to_active")
+                                 && !store.snapshot.tabs.isManaged("new_tab_next_to_active"),
+                             value: Binding(
+@@ -575,8 +602,19 @@ private struct AppearanceSettingsPage: V
+     @Environment(\.settingsTheme) private var theme
+     @State private var backgroundMode: BackgroundMode = .everyday
+     @State private var surfacePreview = false
+-    // TODO: Present surface customization in a sheet from the Customize button.
+-    @State private var surfaceCustomizationVisible = false
++    @State private var customization: Customization?
++
++    private enum Customization: String, Identifiable {
++        case colors, surfaces, commandBar
++        var id: String { rawValue }
++        var title: String {
++            switch self {
++            case .colors: "Space colors and backdrop"
++            case .surfaces: "Floating surfaces"
++            case .commandBar: "Command bar"
++            }
++        }
++    }
+ 
+     private enum BackgroundMode: String, CaseIterable {
+         case everyday = "Everyday"
+@@ -601,14 +639,18 @@ private struct AppearanceSettingsPage: V
+         }
+     }
+ 
+-    private func setSurfaceCustomizationVisible(_ visible: Bool) {
+-        surfaceCustomizationVisible = visible
+-        if !visible && surfacePreview {
++    private func stopSurfacePreview() {
++        if surfacePreview {
+             surfacePreview = false
+             store.setSurfacePreview(false)
+         }
+     }
+ 
++    private func showCustomization(_ next: Customization?) {
++        if next != .surfaces { stopSurfacePreview() }
++        customization = next
++    }
++
+     private var appearanceBinding: Binding<SettingsAppearance> {
+         let spaceID = store.snapshot.appearance.spacePalette.id
+         return Binding(get: { store.appearanceMode() },
+@@ -617,7 +659,7 @@ private struct AppearanceSettingsPage: V
+ 
+     var body: some View {
+         SettingsPageScroll(title: "Appearance", description: "Colors for \(store.snapshot.appearance.spacePalette.name.isEmpty ? "this Space" : store.snapshot.appearance.spacePalette.name).") {
+-            SSectionCard(title: "Appearance") {
++            Section("Color scheme") {
+                 SettingsAppearancePicker(selection: appearanceBinding, showsLabels: true)
+                     .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
+                 HStack {
+@@ -631,39 +673,47 @@ private struct AppearanceSettingsPage: V
+                 }
+             }
+ 
+-            HStack {
+-                Text("Space colors").settingsFont(\.section)
+-                Spacer(minLength: 12)
+-                SSegmentedControl("Background controls",
+-                    options: BackgroundMode.allCases.map { (value: $0, label: $0.rawValue) },
+-                    selection: $backgroundMode)
+-                .frame(width: 210)
++            Section("Space colors") {
++                SLabeledControl("Palette") {
++                    HStack(spacing: 8) {
++                        ForEach(Array((store.currentChromeAppearance?.glows ?? []).prefix(4))) { glow in
++                            Circle().fill(glow.color.color)
++                                .frame(width: 18, height: 18)
++                                .overlay(Circle().strokeBorder(theme.borderControl, lineWidth: 0.5))
++                                .accessibilityLabel("Space color")
++                                .accessibilityValue(glow.colorHex)
++                        }
++                        Button("Customize…") { showCustomization(.colors) }
++                            .buttonStyle(.bordered)
++                            .accessibilityIdentifier("space-colors-customize")
++                    }
++                }
+             }
+-            backgroundEditor
+-            SSectionCard(title: "Accent and intensity") {
+-                HStack(spacing: SettingsSpacing.sm) {
+-                    Text("Accent").settingsFont(\.body)
+-                    Spacer()
+-                    ForEach(Array((store.currentChromeAppearance?.glows ?? []).enumerated()), id: \.element.id) { index, glow in
+-                        Button { [spaceID = store.snapshot.appearance.spacePalette.id] in
+-                            store.setSpaceAccent(glow.id, spaceID: spaceID)
+-                        } label: {
+-                            Circle()
+-                                .fill((SettingsRGB(hex: glow.colorHex) ?? SettingsRGB(red: 1, green: 1, blue: 1)).color)
+-                                .frame(width: 26, height: 26)
+-                                .overlay { Circle().strokeBorder(.primary.opacity(0.35), lineWidth: 1) }
+-                                .overlay {
+-                                    if store.currentSpaceAccentID == glow.id {
+-                                        Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
+-                                            .foregroundStyle((SettingsRGB(hex: glow.colorHex)?.contrastingText ?? SettingsRGB(red: 0, green: 0, blue: 0)).color)
++            Section("Accent and intensity") {
++                SLabeledControl("Accent") {
++                    HStack(spacing: SettingsSpacing.sm) {
++                        ForEach(Array((store.currentChromeAppearance?.glows ?? []).enumerated()), id: \.element.id) { index, glow in
++                            Button { [spaceID = store.snapshot.appearance.spacePalette.id] in
++                                store.setSpaceAccent(glow.id, spaceID: spaceID)
++                            } label: {
++                                Circle()
++                                    .fill((SettingsRGB(hex: glow.colorHex) ?? SettingsRGB(red: 1, green: 1, blue: 1)).color)
++                                    .frame(width: 26, height: 26)
++                                    .overlay { Circle().strokeBorder(.primary.opacity(0.35), lineWidth: 1) }
++                                    .overlay {
++                                        if store.currentSpaceAccentID == glow.id {
++                                            Image(systemName: "checkmark").font(.system(size: 11, weight: .bold))
++                                                .foregroundStyle((SettingsRGB(hex: glow.colorHex)?.contrastingText ?? SettingsRGB(red: 0, green: 0, blue: 0)).color)
++                                        }
+                                     }
+-                                }
++                            }
++                            .buttonStyle(.plain)
++                            .accessibilityLabel("Accent color \(index + 1)")
++                            .accessibilityValue(store.currentSpaceAccentID == glow.id ? "Selected" : "")
++                            .help("Use color \(index + 1) for this Space's accent")
+                         }
+-                        .buttonStyle(.plain)
+-                        .accessibilityLabel("Accent color \(index + 1)")
+-                        .accessibilityValue(store.currentSpaceAccentID == glow.id ? "Selected" : "")
+-                        .help("Use color \(index + 1) for this Space's accent")
+                     }
++                    .frame(maxWidth: .infinity, alignment: .trailing)
+                 }
+ 
+                 SSlider("Controls saturation", value: Binding(
+@@ -672,7 +722,7 @@ private struct AppearanceSettingsPage: V
+                         store.setSpaceChroma(controls: $0, spaceID: spaceID) }
+                 ), range: 0...2, step: 0.05, format: Self.percent,
+                     help: SHelp(description: "Changes chroma while keeping the Space's hue and readable lightness."),
+-                    commitMode: .debounced(milliseconds: 80))
++                    commitMode: .throttled(milliseconds: 80))
+                     .accessibilityIdentifier("space-controls-chroma")
+                 SSlider("Panels saturation", value: Binding(
+                     get: { store.currentSpaceChroma.panels },
+@@ -680,17 +730,17 @@ private struct AppearanceSettingsPage: V
+                         store.setSpaceChroma(panels: $0, spaceID: spaceID) }
+                 ), range: 0...2, step: 0.05, format: Self.percent,
+                     help: SHelp(description: "Tints surfaces from the same Space palette. Text contrast is preserved."),
+-                    commitMode: .debounced(milliseconds: 80))
++                    commitMode: .throttled(milliseconds: 80))
+                     .accessibilityIdentifier("space-panels-chroma")
+             }
+             .disabled(!store.snapshot.appearance.spacePalette.available)
+ 
+-            SSectionCard(title: "Floating surfaces") {
++            Section("Floating surfaces") {
+                 SPicker("Preset", selection: Binding(
+                     get: { store.snapshot.appearance.surfacePresetSelection },
+                     set: {
+                         store.setSurfaceSet($0)
+-                        setSurfaceCustomizationVisible(false)
++                        showCustomization(nil)
+                     }
+                 ), options: [
+                     (value: "glass", label: "Glass"), (value: "quiet", label: "Quiet"),
+@@ -698,22 +748,10 @@ private struct AppearanceSettingsPage: V
+                     description: "Materials for text surfaces, containers and Peek.")
+                 .disabled(!store.snapshot.appearance.canEditSurfaceSet)
+                 .accessibilityIdentifier("surface-set")
+-                Button(surfaceCustomizationVisible ? "Done" : "Customize…") {
+-                    setSurfaceCustomizationVisible(!surfaceCustomizationVisible)
+-                }
++                Button("Customize…") { showCustomization(.surfaces) }
+                 .buttonStyle(.bordered)
+                 .accessibilityIdentifier("surface-customize")
+-                if surfaceCustomizationVisible {
+-                    SToggle("Shadows", isOn: surfaceTuningBinding(\.panelShadow),
+-                            description: "Soft shadows around floating surfaces.")
+-                        .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+-                        .accessibilityIdentifier("surface-panel-shadow")
+-                    SToggle("Preview the tab switcher", isOn: Binding(
+-                        get: { surfacePreview },
+-                        set: { surfacePreview = $0; store.setSurfacePreview($0) }
+-                    ), description: "Holds the Ctrl+Tab switcher open in the browser window behind Settings. To see Peek changes, open a link in Peek first.")
+-                    .accessibilityIdentifier("surface-preview")
+-                }
++
+             }
+             .onDisappear {
+                 if surfacePreview {
+@@ -722,102 +760,17 @@ private struct AppearanceSettingsPage: V
+                 }
+             }
+ 
+-            if surfaceCustomizationVisible {
+-                SSectionCard(title: "Text surfaces") {
+-                    Group {
+-                        Text("Command bar and floating controls").foregroundStyle(.secondary)
+-                        SPicker("Material", selection: Binding(
+-                            get: { store.snapshot.appearance.effectiveTextMaterial },
+-                            set: { store.setTextMaterial($0) }
+-                        ), options: Self.materialOptions,
+-                            description: Self.panelMaterialDescription(store.snapshot.appearance.effectiveTextMaterial))
+-                            .disabled(store.snapshot.appearance.commandBarAppearance != 2 &&
+-                                      !store.snapshot.appearance.canEditCommandBarAppearance)
+-                            .accessibilityIdentifier("surface-text-material")
+-                        SSlider("Tint Intensity", value: surfaceTuningBinding(\.textTint), range: 0...1, step: 0.01,
+-                                format: Self.percent,
+-                                help: SHelp(description: "Strength of the theme color in the material."),
+-                                commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-text-tint")
+-                        SSlider("Opacity", value: surfaceTuningBinding(\.textOpacity), range: 0...1, step: 0.01,
+-                                format: Self.percent,
+-                                help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
+-                                commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-text-opacity")
+-                    }
+-                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+-                }
+ 
+-                SSectionCard(title: "Containers") {
+-                    Group {
+-                        Text("Tab switcher and Peek").foregroundStyle(.secondary)
+-                        SPicker("Material", selection: Binding(
+-                            get: { store.snapshot.appearance.effectivePanelMaterial },
+-                            set: { store.setPanelMaterial($0) }
+-                        ), options: Self.materialOptions,
+-                            description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
+-                            .accessibilityIdentifier("surface-container-material")
+-                        SSlider("Tint Intensity", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.01,
+-                                format: Self.percent,
+-                                help: SHelp(description: "Strength of the theme color in the material."),
+-                                commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-panel-tint")
+-                        SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.01,
+-                                format: Self.percent,
+-                                help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
+-                                commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-container-opacity")
+-                        if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
+-                            SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,
+-                                    format: { "\(Int($0)) pt" }, commitMode: .debounced(milliseconds: 80))
+-                                .accessibilityIdentifier("surface-panel-blur")
+-                        }
+-                    }
+-                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+-                }
+ 
+-                SSectionCard(title: "Peek backdrop") {
+-                    Group {
+-                        SSlider("Blur", value: surfaceTuningBinding(\.scrimBlur),
+-                                range: 0...ArciumSurfaceTuning.maxScrimBlur, step: 1,
+-                                format: { "\(Int($0.rounded())) pt" }, commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-scrim-blur")
+-                        SSlider("Dim", value: surfaceTuningBinding(\.scrimDim), range: 0...1, step: 0.05,
+-                                format: Self.percent, commitMode: .debounced(milliseconds: 80))
+-                    }
+-                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+-                }
+-            }
+-
+-            SSectionCard(title: "Command bar") {
+-                Group {
+-                    SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
+-                        (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
+-                    SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
+-                        (value: 0, label: "Actions"), (value: 1, label: "Arrows"),
+-                        (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
+-                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
+-                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
+-                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
+-                        (value: 4, label: "Flush"), (value: 5, label: "Divot")])
+-                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
+-                    SToggle("Full width scopes", isOn: commandLayoutBinding(\.fullWidth))
+-                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+-                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
+-                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
+-                            range: 0...2, step: 0.05,
+-                            format: { "\(Int(($0 * 100).rounded()))%" },
+-                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 100% is the default strength."))
+-                        .accessibilityIdentifier("omnibox-scope-glow-strength")
+-                    }
+-                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
++            Section("Command bar") {
++                SLabeledControl("Style", description: "Categories, destination icons and scopes.") {
++                    Button("Customize…") { showCustomization(.commandBar) }
++                        .buttonStyle(.bordered)
++                        .accessibilityIdentifier("command-bar-customize")
+                 }
+-                .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
+-                          || store.snapshot.appearance.commandPanelLayoutManaged)
+-
+             }
+ 
+-            SSectionCard(title: "Browser layout and size") {
++            Section("Browser layout and size") {
+                 SPicker("Browser layout", selection: Binding(
+                     get: { store.snapshot.tabs.layout },
+                     set: { store.setLayout($0) }
+@@ -879,7 +832,7 @@ private struct AppearanceSettingsPage: V
+                 }, description: "Choose an icon rail or fully hide the sidebar.")
+                 .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
+                     || store.snapshot.appearance.collapsedSidebarStyleManaged)
+-                BooleanSetting(title: "Rounded frame", description: "Round the browser frame corners.", enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
++                BooleanSetting(title: "Rounded frame", description: nil, enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
+                 SSlider("Border width", value: Binding(
+                     get: { store.displayedChromeFrameBorderWidth },
+                     set: { store.setDisplayedChromeFrameBorderWidth($0) }
+@@ -895,17 +848,17 @@ private struct AppearanceSettingsPage: V
+                     || !store.snapshot.appearance.roundedFrame)
+                 BooleanSetting(
+                     title: "Centered address bar",
+-                    description: "Keep the address bar centered in the toolbar.",
++                    description: nil,
+                     enabled: editable("centered_location_bar")
+                         && !store.snapshot.appearance.sidebarNavigationConfigured,
+                     value: booleanBinding("centered_location_bar"),
+                     unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
+                         ? "Sidebar navigation uses a fixed address bar position." : nil
+                 )
+-                BooleanSetting(title: "Minimal address bar", description: "Use a compact address bar.", enabled: editable("minimal_location_bar"), value: booleanBinding("minimal_location_bar"))
++                BooleanSetting(title: "Minimal address bar", description: nil, enabled: editable("minimal_location_bar"), value: booleanBinding("minimal_location_bar"))
+             }
+ 
+-            SSectionCard(title: "Zen mode") {
++            Section("Zen mode") {
+                 BooleanSetting(
+                     title: "Zen mode",
+                     description: "Hide optional browser chrome for a focused workspace.",
+@@ -930,7 +883,7 @@ private struct AppearanceSettingsPage: V
+                 )
+             }
+ 
+-            SSectionCard(title: "Toolbar buttons") {
++            Section("Toolbar buttons") {
+                 Text(store.snapshot.appearance.sidebarNavigationConfigured
+                     ? "Choose what appears in your sidebar navigation."
+                     : "Choose what appears in your browser toolbar.")
+@@ -943,7 +896,7 @@ private struct AppearanceSettingsPage: V
+                 }
+             }
+ 
+-            SSectionCard(title: "Layout-specific toolbar buttons") {
++            Section("Layout-specific toolbar buttons") {
+                 BooleanSetting(
+                     title: "Show sidebar collapse button",
+                     description: "Show the toolbar button for collapsing the sidebar. Available with Vertical tabs.",
+@@ -965,6 +918,136 @@ private struct AppearanceSettingsPage: V
+             }
+         }
+         .id(store.snapshot.appearance.spacePalette.id)
++        .sheet(item: $customization, onDismiss: stopSurfacePreview) { destination in
++            ArciumLiveSettingsSheet(title: destination.title) {
++                switch destination {
++                case .colors:
++                    SSegmentedControl("Background controls",
++                        options: BackgroundMode.allCases.map { (value: $0, label: $0.rawValue) },
++                        selection: $backgroundMode)
++                    backgroundEditor
++                case .surfaces:
++                    surfaceCustomization
++                case .commandBar:
++                    commandBarCustomization
++                }
++            }
++        }
++        .onChange(of: store.snapshot.appearance.spacePalette.id) { _, _ in
++            showCustomization(nil)
++        }
++        .onDisappear(perform: stopSurfacePreview)
++    }
++
++    private var surfaceCustomization: some View {
++        SGroupedSections(showsSurfaces: false) {
++            Section("General") {
++                SToggle("Shadows", isOn: surfaceTuningBinding(\.panelShadow),
++                        description: "Soft shadows around floating surfaces.")
++                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++                    .accessibilityIdentifier("surface-panel-shadow")
++                SToggle("Preview the tab switcher", isOn: Binding(
++                    get: { surfacePreview },
++                    set: { surfacePreview = $0; store.setSurfacePreview($0) }
++                ), description: "Holds the Ctrl+Tab switcher open in the browser window behind Settings. To see Peek changes, open a link in Peek first.")
++                .accessibilityIdentifier("surface-preview")
++            }
++            Section("Text surfaces") {
++                Group {
++                    Text("Command bar and floating controls").foregroundStyle(.secondary)
++                    SPicker("Material", selection: Binding(
++                        get: { store.snapshot.appearance.effectiveTextMaterial },
++                        set: { store.setTextMaterial($0) }
++                    ), options: Self.materialOptions,
++                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectiveTextMaterial))
++                        .disabled(store.snapshot.appearance.commandBarAppearance != 2 &&
++                                  !store.snapshot.appearance.canEditCommandBarAppearance)
++                        .accessibilityIdentifier("surface-text-material")
++                    SSlider("Tint Intensity", value: surfaceTuningBinding(\.textTint), range: 0...1, step: 0.01,
++                            format: Self.percent,
++                            help: SHelp(description: "Strength of the theme color in the material."),
++                            commitMode: .throttled(milliseconds: 80))
++                        .accessibilityIdentifier("surface-text-tint")
++                    SSlider("Opacity", value: surfaceTuningBinding(\.textOpacity), range: 0...1, step: 0.01,
++                            format: Self.percent,
++                            help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
++                            commitMode: .throttled(milliseconds: 80))
++                        .accessibilityIdentifier("surface-text-opacity")
++                }
++                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++            }
++
++            Section("Containers") {
++                Group {
++                    Text("Tab switcher and Peek").foregroundStyle(.secondary)
++                    SPicker("Material", selection: Binding(
++                        get: { store.snapshot.appearance.effectivePanelMaterial },
++                        set: { store.setPanelMaterial($0) }
++                    ), options: Self.materialOptions,
++                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
++                        .accessibilityIdentifier("surface-container-material")
++                    SSlider("Tint Intensity", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.01,
++                            format: Self.percent,
++                            help: SHelp(description: "Strength of the theme color in the material."),
++                            commitMode: .throttled(milliseconds: 80))
++                        .accessibilityIdentifier("surface-panel-tint")
++                    SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.01,
++                            format: Self.percent,
++                            help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
++                            commitMode: .throttled(milliseconds: 80))
++                        .accessibilityIdentifier("surface-container-opacity")
++                    if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
++                        SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,
++                                format: { "\(Int($0)) pt" }, commitMode: .throttled(milliseconds: 80))
++                            .accessibilityIdentifier("surface-panel-blur")
++                    }
++                }
++                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++            }
++
++            Section("Peek backdrop") {
++                Group {
++                    SSlider("Blur", value: surfaceTuningBinding(\.scrimBlur),
++                            range: 0...ArciumSurfaceTuning.maxScrimBlur, step: 1,
++                            format: { "\(Int($0.rounded())) pt" }, commitMode: .throttled(milliseconds: 80))
++                        .accessibilityIdentifier("surface-scrim-blur")
++                    SSlider("Dim", value: surfaceTuningBinding(\.scrimDim), range: 0...1, step: 0.05,
++                            format: Self.percent, commitMode: .throttled(milliseconds: 80))
++                }
++                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++            }
++        }
++    }
++
++    private var commandBarCustomization: some View {
++        SGroupedSections(showsSurfaces: false) {
++            Section("Style") {
++                Group {
++                    SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
++                        (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
++                    SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
++                        (value: 0, label: "Actions"), (value: 1, label: "Arrows"),
++                        (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
++                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
++                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
++                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
++                        (value: 4, label: "Flush"), (value: 5, label: "Divot")])
++                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
++                    SToggle("Full width scopes", isOn: commandLayoutBinding(\.fullWidth))
++                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
++                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
++                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
++                            range: 0...2, step: 0.05,
++                            format: { "\(Int(($0 * 100).rounded()))%" },
++                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 100% is the default strength."))
++                        .accessibilityIdentifier("omnibox-scope-glow-strength")
++                    }
++                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
++                }
++                .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
++                          || store.snapshot.appearance.commandPanelLayoutManaged)
++            }
++        }
+     }
+ 
+     @ViewBuilder
+@@ -990,16 +1073,18 @@ private struct AppearanceSettingsPage: V
+                 if !backgroundEffectsAvailable,
+                    store.snapshot.appearance.chrome.canEdit,
+                    store.snapshot.appearance.chrome.effectsAvailable {
+-                    SSectionCard(title: "Background Effects unavailable") {
+-                        Text("Use Liquid Glass to adjust reflection and opacity.")
+-                            .settingsFont(\.caption).foregroundStyle(.secondary)
+-                        Button("Use Liquid Glass") {
+-                            var next = chrome
+-                            next.enabled = true
+-                            next.material = .liquidGlass
+-                            store.setChromeAppearance(next)
++                    SGroupedSections(showsSurfaces: false) {
++                        Section("Background Effects unavailable") {
++                            Text("Use Liquid Glass to adjust reflection and opacity.")
++                                .settingsFont(\.caption).foregroundStyle(.secondary)
++                            Button("Use Liquid Glass") {
++                                var next = chrome
++                                next.enabled = true
++                                next.material = .liquidGlass
++                                store.setChromeAppearance(next)
++                            }
++                            .buttonStyle(ArciumAccentButtonStyle())
+                         }
+-                        .buttonStyle(ArciumAccentButtonStyle())
+                     }
+                 }
+             } else {
+@@ -1015,11 +1100,13 @@ private struct AppearanceSettingsPage: V
+                 )
+             }
+         } else if store.snapshot.appearance.chrome.isAvailable {
+-            SSectionCard(title: "Window background") {
+-                Text("Custom window chrome could not be loaded.").settingsFont(\.body)
+-                Button("Restore default appearance", action: store.resetChromeAppearance)
+-                    .buttonStyle(.bordered)
+-                    .disabled(!store.snapshot.appearance.chrome.canReset)
++            SGroupedSections(showsSurfaces: false) {
++                Section("Window background") {
++                    Text("Custom window chrome could not be loaded.").settingsFont(\.body)
++                    Button("Restore default appearance", action: store.resetChromeAppearance)
++                        .buttonStyle(.bordered)
++                        .disabled(!store.snapshot.appearance.chrome.canReset)
++                }
+             }
+         }
+     }

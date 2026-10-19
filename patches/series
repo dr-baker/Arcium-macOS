@@ -42,3 +42,5 @@ personal/arcium-live-resize-macos.patch
 personal/arcium-surface-roles-macos.patch
 personal/arcium-space-palette-macos.patch
 personal/arcium-surface-groups-macos.patch
+personal/arcium-settingsui-modules-macos.patch
+personal/arcium-settings-layout-macos.patch
