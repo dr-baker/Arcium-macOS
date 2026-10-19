@@ -83,6 +83,8 @@ control accents, and authored glows keep their existing ramps and colors.
 A browser's ColorProvider key uses the existing per-window initializer to carry
 an immutable, interned Space palette. Browser chrome,
 address fields, floating results, MRU, and Peek controls consume that provider.
+New Tab also observes its WebContents color provider, sending live Space color
+and mode changes to the visible page instead of waiting for a profile theme change.
 Settings receives the same generated light/dark roles and opacity floors in
 `spacePalette`; Swift does not generate a second palette. Changes refresh the
 owning browser and its panels without replacing their input or selection.
