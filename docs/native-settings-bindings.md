@@ -118,16 +118,21 @@ stays independent of the theme color and Tint Intensity. Solid is always opaque;
 its two values blend the theme tint with that neutral base. The window editor
 and Peek backdrop remain separate. **Shadows** applies to both surface groups.
 
-**Preset** (`arcium.appearance.surface_set`, default `glass`) fills in both
-groups and the Peek backdrop. Editing a value saves the complete tuning and
-selects Custom in `arcium.appearance.surface_tuning`.
+**Preset** (`arcium.appearance.surface_set`, default `glass`) offers Glass,
+Quiet and Custom. It fills in both groups and the Peek backdrop. Editing a value
+saves the complete tuning in `arcium.appearance.surface_tuning` and selects Custom
+in `arcium.appearance.surface_set`.
+Saved Refractive and Solid recipes appear as Custom while retaining their values.
+
+**Customize…** reveals Text surfaces, Containers, Peek backdrop, Shadows and
+Preview controls. **Done** hides them. Opening or hiding customization does not
+change the preset or saved tuning. Hiding it also ends an active switcher preview.
 
 | Preset | Text surfaces | Containers | Peek backdrop |
 | --- | --- | --- | --- |
 | Glass | Liquid | Clear | 9 pt blur, 28% dim |
-| Refractive | Chromium refraction; command bar uses Liquid | Chromium refraction | 9 pt blur, 28% dim |
-| Quiet | Flat | Solid | 4 pt blur, 50% dim |
-| Solid | Solid | Solid | Dim only, 72% |
+| Quiet | Solid | Flat | 4 pt blur, 50% dim |
+| Custom | Saved values | Saved values | Saved values |
 
 The [standalone Glass Lab](../devutils/glass-lab/README.md) compares material
 rendering without rebuilding Chromium. Its experimental controls are independent

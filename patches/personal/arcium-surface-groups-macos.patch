@@ -78,7 +78,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
           "controlFinish": controlFinish, "controlTint": controlTint, "controlEdge": controlEdge,
           "scrimBlur": scrimBlur, "scrimDim": scrimDim]
      }
-@@ -574,13 +591,13 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -569,18 +586,21 @@ struct ArciumAppearanceSnapshot: Equatab
+         commandBarAppearanceAvailable && !commandBarAppearanceManaged
+     }
+     var surfaceSet = "glass"
++    var surfacePresetSelection: String {
++        ["glass", "quiet", "custom"].contains(surfaceSet) ? surfaceSet : "custom"
++    }
+     var surfaceSetAvailable = false
+     var surfaceSetManaged = false
      var canEditSurfaceSet: Bool {
          surfaceSetAvailable && !surfaceSetManaged
      }
@@ -98,7 +106,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          }
      }
      var surfaceTuning = ArciumSurfaceTuning()
-@@ -1002,13 +1019,21 @@ final class ArciumSettingsStore: Observa
+@@ -1002,13 +1022,21 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "command_bar_appearance", value: appearance)
      }
  
@@ -122,7 +130,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          if snapshot.appearance.commandBarAppearance != 2 {
              setCommandBarAppearance(2)
          }
-@@ -1029,6 +1054,9 @@ final class ArciumSettingsStore: Observa
+@@ -1029,6 +1057,9 @@ final class ArciumSettingsStore: Observa
          guard snapshot.appearance.canEditSurfaceSet,
                ArciumAppearanceSnapshot.surfaceSetValues.contains(surfaceSet) else { return }
          settingChanged(key: "surface_set", value: surfaceSet)
@@ -161,98 +169,158 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          }
      }
  
-@@ -652,9 +656,13 @@ private struct AppearanceSettingsPage: V
-                     (value: "glass", label: "Glass"), (value: "refractive", label: "Refractive"),
-                     (value: "quiet", label: "Quiet"), (value: "solid", label: "Solid"),
+@@ -569,6 +573,8 @@ private struct AppearanceSettingsPage: V
+     @Environment(\.settingsTheme) private var theme
+     @State private var backgroundMode: BackgroundMode = .everyday
+     @State private var surfacePreview = false
++    // TODO: Present surface customization in a sheet from the Customize button.
++    @State private var surfaceCustomizationVisible = false
+ 
+     private enum BackgroundMode: String, CaseIterable {
+         case everyday = "Everyday"
+@@ -593,6 +599,14 @@ private struct AppearanceSettingsPage: V
+         }
+     }
+ 
++    private func setSurfaceCustomizationVisible(_ visible: Bool) {
++        surfaceCustomizationVisible = visible
++        if !visible && surfacePreview {
++            surfacePreview = false
++            store.setSurfacePreview(false)
++        }
++    }
++
+     private var appearanceBinding: Binding<SettingsAppearance> {
+         let spaceID = store.snapshot.appearance.spacePalette.id
+         return Binding(get: { store.appearanceMode() },
+@@ -646,20 +660,33 @@ private struct AppearanceSettingsPage: V
+ 
+             SSectionCard(title: "Floating surfaces") {
+                 SPicker("Preset", selection: Binding(
+-                    get: { store.snapshot.appearance.surfaceSet },
+-                    set: { store.setSurfaceSet($0) }
++                    get: { store.snapshot.appearance.surfacePresetSelection },
++                    set: {
++                        store.setSurfaceSet($0)
++                        setSurfaceCustomizationVisible(false)
++                    }
+                 ), options: [
+-                    (value: "glass", label: "Glass"), (value: "refractive", label: "Refractive"),
+-                    (value: "quiet", label: "Quiet"), (value: "solid", label: "Solid"),
++                    (value: "glass", label: "Glass"), (value: "quiet", label: "Quiet"),
                      (value: "custom", label: "Custom")],
 -                    description: "Fills in the three cards below. Changing any value switches to Custom.")
-+                    description: "Coordinates the materials and Peek backdrop. Editing a value switches to Custom.")
++                    description: "Materials for text surfaces, containers and Peek.")
                  .disabled(!store.snapshot.appearance.canEditSurfaceSet)
                  .accessibilityIdentifier("surface-set")
-+                SToggle("Shadows", isOn: surfaceTuningBinding(\.panelShadow),
-+                        description: "Soft shadows around floating surfaces.")
-+                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
-+                    .accessibilityIdentifier("surface-panel-shadow")
-                 SToggle("Preview the tab switcher", isOn: Binding(
-                     get: { surfacePreview },
-                     set: { surfacePreview = $0; store.setSurfacePreview($0) }
-@@ -668,49 +676,55 @@ private struct AppearanceSettingsPage: V
+-                SToggle("Preview the tab switcher", isOn: Binding(
+-                    get: { surfacePreview },
+-                    set: { surfacePreview = $0; store.setSurfacePreview($0) }
+-                ), description: "Holds the Ctrl+Tab switcher open in the browser window behind Settings. To see Peek changes, open a link in Peek first.")
+-                .accessibilityIdentifier("surface-preview")
++                Button(surfaceCustomizationVisible ? "Done" : "Customize…") {
++                    setSurfaceCustomizationVisible(!surfaceCustomizationVisible)
++                }
++                .buttonStyle(.bordered)
++                .accessibilityIdentifier("surface-customize")
++                if surfaceCustomizationVisible {
++                    SToggle("Shadows", isOn: surfaceTuningBinding(\.panelShadow),
++                            description: "Soft shadows around floating surfaces.")
++                        .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++                        .accessibilityIdentifier("surface-panel-shadow")
++                    SToggle("Preview the tab switcher", isOn: Binding(
++                        get: { surfacePreview },
++                        set: { surfacePreview = $0; store.setSurfacePreview($0) }
++                    ), description: "Holds the Ctrl+Tab switcher open in the browser window behind Settings. To see Peek changes, open a link in Peek first.")
++                    .accessibilityIdentifier("surface-preview")
++                }
+             }
+             .onDisappear {
+                 if surfacePreview {
+@@ -668,63 +695,71 @@ private struct AppearanceSettingsPage: V
                  }
              }
  
 -            SSectionCard(title: "Command bar and tab switcher") {
-+            SSectionCard(title: "Text surfaces") {
-+                Group {
-+                    Text("Command bar and floating controls").foregroundStyle(.secondary)
-+                    SPicker("Material", selection: Binding(
-+                        get: { store.snapshot.appearance.effectiveTextMaterial },
-+                        set: { store.setTextMaterial($0) }
-+                    ), options: Self.materialOptions,
-+                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectiveTextMaterial))
-+                        .disabled(store.snapshot.appearance.commandBarAppearance != 2 &&
-+                                  !store.snapshot.appearance.canEditCommandBarAppearance)
-+                        .accessibilityIdentifier("surface-text-material")
-+                    SSlider("Tint Intensity", value: surfaceTuningBinding(\.textTint), range: 0...1, step: 0.01,
-+                            format: Self.percent,
-+                            help: SHelp(description: "Strength of the theme color in the material."),
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-text-tint")
-+                    SSlider("Opacity", value: surfaceTuningBinding(\.textOpacity), range: 0...1, step: 0.01,
-+                            format: Self.percent,
-+                            help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-text-opacity")
-+                }
-+                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
-+            }
-+
-+            SSectionCard(title: "Containers") {
-                 Group {
-+                    Text("Tab switcher and Peek").foregroundStyle(.secondary)
-                     SPicker("Material", selection: Binding(
-                         get: { store.snapshot.appearance.effectivePanelMaterial },
-                         set: { store.setPanelMaterial($0) }
+-                Group {
+-                    SPicker("Material", selection: Binding(
+-                        get: { store.snapshot.appearance.effectivePanelMaterial },
+-                        set: { store.setPanelMaterial($0) }
 -                    ), options: [
 -                        (value: "fast", label: "Fast"), (value: "liquid", label: "Clear"),
 -                        (value: "systemLiquid", label: "Liquid"),
 -                        (value: "frosted", label: "Frosted"), (value: "glassmorphic", label: "Chromium (glassmorphic)"),
 -                        (value: "solid", label: "Solid")],
-+                    ), options: Self.materialOptions,
-                         description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
+-                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
 -                        .accessibilityIdentifier("command-bar-appearance")
 -                    if store.snapshot.appearance.effectivePanelMaterial != "frosted" {
 -                        SSlider("Tint", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.05,
--                                format: Self.percent,
++            if surfaceCustomizationVisible {
++                SSectionCard(title: "Text surfaces") {
++                    Group {
++                        Text("Command bar and floating controls").foregroundStyle(.secondary)
++                        SPicker("Material", selection: Binding(
++                            get: { store.snapshot.appearance.effectiveTextMaterial },
++                            set: { store.setTextMaterial($0) }
++                        ), options: Self.materialOptions,
++                            description: Self.panelMaterialDescription(store.snapshot.appearance.effectiveTextMaterial))
++                            .disabled(store.snapshot.appearance.commandBarAppearance != 2 &&
++                                      !store.snapshot.appearance.canEditCommandBarAppearance)
++                            .accessibilityIdentifier("surface-text-material")
++                        SSlider("Tint Intensity", value: surfaceTuningBinding(\.textTint), range: 0...1, step: 0.01,
+                                 format: Self.percent,
 -                                help: SHelp(description: "How strongly the tint color covers the glass. 100% is opaque."),
--                                commitMode: .debounced(milliseconds: 80))
++                                help: SHelp(description: "Strength of the theme color in the material."),
+                                 commitMode: .debounced(milliseconds: 80))
 -                            .accessibilityIdentifier("surface-panel-tint")
--                    }
-+                        .accessibilityIdentifier("surface-container-material")
-+                    SSlider("Tint Intensity", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.01,
-+                            format: Self.percent,
-+                            help: SHelp(description: "Strength of the theme color in the material."),
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-panel-tint")
-+                    SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.01,
-+                            format: Self.percent,
-+                            help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-container-opacity")
-                     if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
-                         SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,
++                            .accessibilityIdentifier("surface-text-tint")
++                        SSlider("Opacity", value: surfaceTuningBinding(\.textOpacity), range: 0...1, step: 0.01,
++                                format: Self.percent,
++                                help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
++                                commitMode: .debounced(milliseconds: 80))
++                            .accessibilityIdentifier("surface-text-opacity")
+                     }
+-                    if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
+-                        SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,
 -                                format: { "\(Int($0)) pt" },
 -                                help: SHelp(description: "Obscures page detail without strengthening the tint."),
--                                commitMode: .debounced(milliseconds: 80))
-+                                format: { "\(Int($0)) pt" }, commitMode: .debounced(milliseconds: 80))
-                             .accessibilityIdentifier("surface-panel-blur")
++                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
++                }
++
++                SSectionCard(title: "Containers") {
++                    Group {
++                        Text("Tab switcher and Peek").foregroundStyle(.secondary)
++                        SPicker("Material", selection: Binding(
++                            get: { store.snapshot.appearance.effectivePanelMaterial },
++                            set: { store.setPanelMaterial($0) }
++                        ), options: Self.materialOptions,
++                            description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
++                            .accessibilityIdentifier("surface-container-material")
++                        SSlider("Tint Intensity", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.01,
++                                format: Self.percent,
++                                help: SHelp(description: "Strength of the theme color in the material."),
++                                commitMode: .debounced(milliseconds: 80))
++                            .accessibilityIdentifier("surface-panel-tint")
++                        SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.01,
++                                format: Self.percent,
++                                help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
+                                 commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-panel-blur")
++                            .accessibilityIdentifier("surface-container-opacity")
++                        if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
++                            SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,
++                                    format: { "\(Int($0)) pt" }, commitMode: .debounced(milliseconds: 80))
++                                .accessibilityIdentifier("surface-panel-blur")
++                        }
                      }
 -                    SToggle("Shadow", isOn: surfaceTuningBinding(\.panelShadow),
 -                            description: "A soft shadow around the panel.")
 -                        .accessibilityIdentifier("surface-panel-shadow")
--                }
++                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+                 }
 -                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 -            }
--
+ 
 -            SSectionCard(title: "Peek buttons") {
 -                Group {
 -                    SPicker("Material", selection: surfaceTuningBinding(\.controlFinish), options: [
@@ -263,9 +331,33 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
 -                    SSlider("Edge highlight", value: surfaceTuningBinding(\.controlEdge), range: 0...1, step: 0.05,
 -                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
+-                }
+-                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+-            }
+-
+-            SSectionCard(title: "Peek backdrop") {
+-                Group {
+-                    SSlider("Blur", value: surfaceTuningBinding(\.scrimBlur),
+-                            range: 0...ArciumSurfaceTuning.maxScrimBlur, step: 1,
+-                            format: { "\(Int($0.rounded())) pt" }, commitMode: .debounced(milliseconds: 80))
+-                        .accessibilityIdentifier("surface-scrim-blur")
+-                    SSlider("Dim", value: surfaceTuningBinding(\.scrimDim), range: 0...1, step: 0.05,
+-                            format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                SSectionCard(title: "Peek backdrop") {
++                    Group {
++                        SSlider("Blur", value: surfaceTuningBinding(\.scrimBlur),
++                                range: 0...ArciumSurfaceTuning.maxScrimBlur, step: 1,
++                                format: { "\(Int($0.rounded())) pt" }, commitMode: .debounced(milliseconds: 80))
++                            .accessibilityIdentifier("surface-scrim-blur")
++                        SSlider("Dim", value: surfaceTuningBinding(\.scrimDim), range: 0...1, step: 0.05,
++                                format: Self.percent, commitMode: .debounced(milliseconds: 80))
++                    }
++                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
                  }
-                 .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
+-                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
              }
+ 
+             SSectionCard(title: "Command bar") {
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
@@ -352,6 +444,37 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +
 +    @MainActor
      func testSurfaceSetUsesTypedCallbackAndRejectsUnknownNames() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
+@@ -821,6 +849,30 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
++    func testSurfacePresetSelectionPreservesLegacyRecipes() {
++        for value in ArciumAppearanceSnapshot.surfaceSetValues {
++            let material = value == "solid" ? "solid" : "glassmorphic"
++            let delegate = TestDelegate()
++            let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++                "surfaceSet": value,
++                "surfaceSetAvailable": true,
++                "surfaceTuningAvailable": true,
++                "surfaceTuning": ["panelMaterial": material, "textMaterial": material,
++                                  "panelTint": 0.37, "textOpacity": 0.23]
++            ]], delegate: delegate)
++            let appearance = store.snapshot.appearance
++            XCTAssertEqual(appearance.surfaceSet, value)
++            XCTAssertEqual(appearance.surfacePresetSelection,
++                           ["glass", "quiet", "custom"].contains(value) ? value : "custom")
++            XCTAssertEqual(appearance.effectivePanelMaterial, material)
++            XCTAssertEqual(appearance.effectiveTextMaterial, material)
++            XCTAssertEqual(appearance.surfaceTuning.panelTint, 0.37)
++            XCTAssertEqual(appearance.surfaceTuning.textOpacity, 0.23)
++            XCTAssertTrue(delegate.settings.isEmpty)
++        }
++    }
++
++    @MainActor
+     func testCollapsedSidebarAndFrameBorderUseTypedHostCallbacks() {
          let delegate = TestDelegate()
          let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SBackdropEditor.swift
