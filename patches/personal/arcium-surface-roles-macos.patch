@@ -161,7 +161,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        case "fast": "The \u{2318}T command bar and Ctrl+Tab switcher. Fast: the system blur material, with no live refraction."
 +        case "liquid": "The \u{2318}T command bar and Ctrl+Tab switcher. Liquid: clear Liquid Glass, always lit as if active."
 +        case "frosted": "The \u{2318}T command bar and Ctrl+Tab switcher. Frosted: clear Liquid Glass in its quieter inactive look."
-+        case "glassmorphic": "The \u{2318}T command bar and Ctrl+Tab switcher. Glassmorphic: the switcher's original refraction shader; the command bar uses Liquid."
++        case "glassmorphic": "The \u{2318}T command bar and Ctrl+Tab switcher. Chromium (glassmorphic): the switcher's original refraction shader; the command bar uses Liquid."
 +        default: "The \u{2318}T command bar and Ctrl+Tab switcher, drawn as a solid panel."
 +        }
 +    }
@@ -234,7 +234,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                        set: { store.setPanelMaterial($0) }
 +                    ), options: [
 +                        (value: "fast", label: "Fast"), (value: "liquid", label: "Liquid"),
-+                        (value: "frosted", label: "Frosted"), (value: "glassmorphic", label: "Glassmorphic"),
++                        (value: "frosted", label: "Frosted"), (value: "glassmorphic", label: "Chromium (glassmorphic)"),
 +                        (value: "solid", label: "Solid")],
 +                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
 +                        .accessibilityIdentifier("command-bar-appearance")
@@ -243,14 +243,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                            help: SHelp(description: "How strongly the tint color covers the glass. 100% is opaque."),
 +                            commitMode: .debounced(milliseconds: 80))
 +                        .accessibilityIdentifier("surface-panel-tint")
-+                    SToggle("Theme tint", isOn: Binding(
++                    SToggle("Window tint", isOn: Binding(
 +                        get: { store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty },
 +                        set: { useTheme in
 +                            var tuning = store.snapshot.appearance.surfaceTuning
 +                            tuning.panelTintColor = useTheme ? "" : "#1D1E1C"
 +                            store.setSurfaceTuning(tuning)
 +                        }
-+                    ), description: "Tint with the browser theme's color, or choose your own.")
++                    ), description: "Use the first window glass color. Change it in the window color editor above, or turn this off to choose a separate tint. With no window colors, use the browser theme.")
 +                        .accessibilityIdentifier("surface-panel-theme-tint")
 +                    if !store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty {
 +                        SLabeledControl("Tint color") {
@@ -833,3 +833,15 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
    CAShapeLayer* __strong mask_ = nil;
    SkPath contour_;
    bool contour_changed_ = false;
+Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/arcium_settings_model.cc
++++ src/chrome/browser/ui/helium/arcium_settings_model.cc
+@@ -965,6 +965,7 @@ void ArciumSettingsModel::OnProfilePrefe
+   if (surface_preview_ &&
+       (name == helium::kArciumSurfaceSetPref ||
+        name == helium::kArciumSurfaceTuningPref ||
++       name == helium::kArciumChromeAppearancePref ||
+        name == arcium::kCommandBarAppearancePref)) {
+     // The switcher chooses its host when it opens; rebuild it.
+     RefreshSurfacePreview();

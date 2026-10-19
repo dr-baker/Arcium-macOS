@@ -116,7 +116,7 @@ them and selects Custom.
 | Preset | Panels | Peek buttons | Peek backdrop |
 | --- | --- | --- | --- |
 | Glass | Liquid, 30% theme tint, shadow | glass | 9 pt blur, 28% dim |
-| Refractive | Glassmorphic | refraction shader | 9 pt blur, 28% dim |
+| Refractive | Chromium (glassmorphic) | refraction shader | 9 pt blur, 28% dim |
 | Quiet | solid | glass | 4 pt blur, 50% dim |
 | Solid | solid | solid | dim only, 72% |
 
@@ -129,9 +129,9 @@ Panel materials:
 - **Liquid:** public `NSGlassEffectView` with the clear style, the tint as its
   `tintColor`, and the panel's corner radius, always drawn in its active state.
 - **Frosted:** the same glass, always drawn in its inactive state.
-- **Glassmorphic:** Chromium's refraction shader with the switcher's original
-  values. Only the switcher can use it, inside the browser window; the command
-  bar draws Liquid.
+- **Chromium (glassmorphic):** Chromium's refraction shader with the switcher's
+  original refraction settings and the chosen panel tint. Only the switcher can
+  use it, inside the browser window; the command bar draws Liquid.
 - **Solid:** the command panel's solid color.
 
 Active and inactive appearance follow SettingsUI's `SettingsGlassAppearanceBridge`
@@ -141,10 +141,16 @@ these windows with KVO. Panels draw no outline. The window server shadow is off;
 **Shadow** paints a soft shadow in a transparent margin instead.
 
 The values are `panelMaterial`, `panelTint`, `panelTintColor` (`#RRGGBB`, or
-empty for the browser theme's color), `panelShadow`, `controlFinish` (`glass`,
+empty to follow the first window glass color), `panelShadow`, `controlFinish` (`glass`,
 `refractive`, `solid`), `controlTint`, `controlEdge`, `scrimBlur` (0–30 pt), and
 `scrimDim`. Runtime parsing clamps saved values; the Settings bridge requires
 all nine with exact types.
+
+**Window tint** follows the first color in the window glass editor, including
+later edits to that color. With no window colors it falls back to the browser
+theme. Turning Window tint off reveals a separate **Tint color** picker. The
+**Tint** slider controls its strength for every glass panel material. The stored
+material identifier remains `glassmorphic`.
 
 `arcium.appearance.command_bar` remains the panel role's explicit choice: `0`
 Solid, `1` Glass (the preset's glass material, or Liquid), and `2` follows the
