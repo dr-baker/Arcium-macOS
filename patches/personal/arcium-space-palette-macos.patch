@@ -57,7 +57,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    // Rendering consumes the browser's resolved colors. Swift never generates
 +    // another palette from a profile-wide accent or a separate color recipe.
 +    func theme(fallback: SettingsTheme) -> SettingsTheme {
-+        let roles = ["chrome", "field", "hover", "panel", "text", "mutedText",
++        let roles = ["canvas", "canvasPanel", "canvasField", "canvasHover", "text", "mutedText",
 +                     "outline", "accent", "onAccent"]
 +        guard roles.allSatisfy({ SettingsRGB(hex: light[$0] ?? "") != nil
 +                                && SettingsRGB(hex: dark[$0] ?? "") != nil }) else { return fallback }
@@ -71,13 +71,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        }
 +        return SettingsTheme(
 +            accent: color("accent"),
-+            windowFrame: color("chrome"), windowCanvas: color("chrome"),
-+            windowCanvasWash: color("panel"), panel: color("panel"),
-+            panelRaised: color("panel"), panelInset: color("field"),
-+            sidebarRail: color("chrome"), sidebarPanel: color("panel"),
-+            card: color("panel"), cardElevated: color("panel"),
-+            control: color("field"), controlSecondary: color("field"),
-+            controlHover: color("hover"), controlSelectionFill: color("accent"),
++            windowFrame: color("canvas"), windowCanvas: color("canvas"),
++            windowCanvasWash: color("canvasPanel"), panel: color("canvasPanel"),
++            panelRaised: color("canvasPanel"), panelInset: color("canvasField"),
++            sidebarRail: color("canvas"), sidebarPanel: color("canvasPanel"),
++            card: color("canvasPanel"), cardElevated: color("canvasPanel"),
++            control: color("canvasField"), controlSecondary: color("canvasField"),
++            controlHover: color("canvasHover"), controlSelectionFill: color("accent"),
 +            selection: color("accent"), selectionHover: color("accent"),
 +            selectionText: color("onAccent"),
 +            borderSubtle: color("outline"), borderEmphasis: color("outline"),
@@ -1234,7 +1234,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      func testChromeUIScaleSnapshotUsesEffectiveScaleAndDefaultState() {
          let snapshot = ArciumSettingsSnapshot(dictionary: NSDictionary(dictionary: [
              "available": true,
-@@ -1935,6 +1416,123 @@ final class ArciumSettingsUIContractTest
+@@ -1935,6 +1416,127 @@ final class ArciumSettingsUIContractTest
          }
      }
  
@@ -1344,10 +1344,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +    }
 +
 +    private static func spacePaletteFixture(id: String = "space-a", available: Bool = true) -> [String: Any] {
-+        let light = ["chrome": "#F8F3FB", "field": "#EDE6F1", "hover": "#E5DEEB",
++        let light = ["canvas": "#F5F3F6", "canvasPanel": "#F8F7F9",
++                     "canvasField": "#E9E7EA", "canvasHover": "#E1DFE2",
++                     "chrome": "#F8F3FB", "field": "#EDE6F1", "hover": "#E5DEEB",
 +                     "panel": "#FBF8FD", "text": "#17111C", "mutedText": "#514659",
 +                     "outline": "#6C6074", "accent": "#704A92", "onAccent": "#FFFFFF"]
-+        let dark = ["chrome": "#110E13", "field": "#241D2A", "hover": "#2B2332",
++        let dark = ["canvas": "#0E0D10", "canvasPanel": "#1B191D",
++                    "canvasField": "#201E22", "canvasHover": "#29272B",
++                    "chrome": "#110E13", "field": "#241D2A", "hover": "#2B2332",
 +                    "panel": "#211B26", "text": "#F5ECFC", "mutedText": "#C2AFCF",
 +                    "outline": "#A18BAC", "accent": "#C99CE5", "onAccent": "#17111C"]
 +        return ["id": id, "name": "Work", "available": available,
@@ -1358,7 +1362,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      private func makeConfiguration() -> SettingsBackdropConfiguration {
          SettingsBackdropConfiguration(
              enabled: true,
-@@ -2008,7 +1606,9 @@ final class ArciumSettingsUIContractTest
+@@ -2008,7 +1610,9 @@ final class ArciumSettingsUIContractTest
          managed: Bool,
          available: Bool,
          paletteAvailable: Bool = false,
@@ -1369,7 +1373,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      ) -> NSDictionary {
          var palette: [String: Any] = [
              "available": paletteAvailable,
-@@ -2032,7 +1632,9 @@ final class ArciumSettingsUIContractTest
+@@ -2032,7 +1636,9 @@ final class ArciumSettingsUIContractTest
                      "activeMaterial": "liquidGlass",
                      "effectsAvailable": true
                  ],

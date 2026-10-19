@@ -73,6 +73,13 @@ and intensity render unchanged; appearance mode and panel saturation do not
 recolor them. Forced colors and high-contrast providers retain Chromium's stock
 roles.
 
+New Tab and the main Settings surfaces use dedicated content roles from the
+same seed. Their OKLCH chroma follows the same lightness taper at 15% of the normal
+surface ramp, capped at 0.012, keeping the large canvases, cards, and fields
+mostly neutral in either mode. The Panels dial can reduce
+that tint to zero but cannot exceed the cap. Window chrome, floating panels,
+control accents, and authored glows keep their existing ramps and colors.
+
 A browser's ColorProvider key uses the existing per-window initializer to carry
 an immutable, interned Space palette. Browser chrome,
 address fields, floating results, MRU, and Peek controls consume that provider.
