@@ -126,13 +126,19 @@ Panel materials:
   background, behind the window), SettingsUI's AppKit floor for SwiftUI's
   ultra-thin material. It is also the fallback before macOS 26 and whenever the
   shared resolver finds no native Liquid Glass.
-- **Liquid:** public `NSGlassEffectView` with the clear style, the tint as its
-  `tintColor`, and the panel's corner radius, always drawn in its active state.
-- **Frosted:** the same glass, always drawn in its inactive state.
+- **Liquid:** `NSGlassEffectView` with the regular style and experimental private
+  `set_variant:9`, the tint as its `tintColor`, and the panel's corner radius,
+  always drawn in its active state. The setter's ABI is checked before calling;
+  unavailable variants keep regular glass.
+- **Frosted:** clear native glass, always drawn in its inactive state.
 - **Chromium (glassmorphic):** Chromium's refraction shader with the switcher's
   original refraction settings and the chosen panel tint. Only the switcher can
   use it, inside the browser window; the command bar draws Liquid.
-- **Solid:** the command panel's solid color.
+- **Solid:** an opaque fill blending the chosen tint over the panel's charcoal
+  base. Text contrast follows the resulting fill.
+
+Fast paints its tint in a separate view above AppKit's blur. AppKit owns the
+effect's own backing layers, so their background color is not used for tint.
 
 Active and inactive appearance follow SettingsUI's `SettingsGlassAppearanceBridge`
 on macOS 26: the four AppKit key-appearance queries are overridden once on the
@@ -140,17 +146,25 @@ panel window's class and consult a per-window override, because AppKit observes
 these windows with KVO. Panels draw no outline. The window server shadow is off;
 **Shadow** paints a soft shadow in a transparent margin instead.
 
-The values are `panelMaterial`, `panelTint`, `panelTintColor` (`#RRGGBB`, or
+The values are `panelMaterial`, `panelTint`, `panelBlur`, `panelTintColor` (`#RRGGBB`, or
 empty to follow the first window glass color), `panelShadow`, `controlFinish` (`glass`,
 `refractive`, `solid`), `controlTint`, `controlEdge`, `scrimBlur` (0–30 pt), and
 `scrimDim`. Runtime parsing clamps saved values; the Settings bridge requires
-all nine with exact types.
+the original nine with exact types and accepts optional `panelBlur` for older
+clients. New snapshots include all ten.
 
 **Window tint** follows the first color in the window glass editor, including
 later edits to that color. With no window colors it falls back to the browser
 theme. Turning Window tint off reveals a separate **Tint color** picker. The
 **Tint** slider controls its strength for every glass panel material. The stored
 material identifier remains `glassmorphic`.
+
+Chromium's **Blur** adds 0–30 pt of Gaussian backdrop blur before the refraction
+shader, default 9 pt, without changing tint strength. Both the shader's sharp
+and softened samples therefore receive the obscured backdrop. Both Gaussian
+inputs stay inside the root glass filter so refraction can sample outside its
+final crop without a dark rim. Other Chromium glass controls retain their
+configured radius, but also sample a softened backdrop rather than a sharp one.
 
 `arcium.appearance.command_bar` remains the panel role's explicit choice: `0`
 Solid, `1` Glass (the preset's glass material, or Liquid), and `2` follows the
