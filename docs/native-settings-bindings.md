@@ -127,6 +127,10 @@ them and selects Custom.
 
 Panel materials:
 
+The [standalone Glass Lab](../devutils/glass-lab/README.md) compares these
+materials without rebuilding Chromium. It extracts the native panel renderers
+from the product patch and provides a Metal preview of the Chromium shader.
+
 - **Fast:** the system blur material (`NSVisualEffectView`, under-window
   background, behind the window), SettingsUI's AppKit floor for SwiftUI's
   ultra-thin material. It is also the fallback before macOS 26 and whenever the

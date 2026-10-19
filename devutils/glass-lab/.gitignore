@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+Sources/GlassNative/ProductionMaterial.mm
+Sources/ArciumGlassLab/ProductionGlass.swift
