@@ -175,8 +175,9 @@ returns it afterward. Native switcher and control windows are nonactivating and
 mouse-transparent. Original browser views retain keyboard focus, input,
 accessibility, and callbacks. Chromium supplies embedded fallbacks.
 
-Peek's Clear frame sits behind the ordinary live preview WebContents. Changing
-material never recreates or reparents that page. Its inactive source remains in
+Peek's Clear material is clipped to a narrow frame around the ordinary live
+preview WebContents. Native subview ordering cannot cover or blur the live card.
+Changing material never recreates or reparents that page. Its inactive source remains in
 the backdrop, whose blur is cached while the preview animates. The preview fades
 in after first paint or a 600 ms timeout. Closing Peek releases native hosts,
 passive control windows, and appearance observers.

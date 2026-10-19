@@ -94,7 +94,8 @@
     "Preferences and shortcuts persist after a normal quit and relaunch.",
     "MRU and Peek use Container values; command bar and floating controls use Text values. Legacy command-bar overrides affect only Text surfaces.",
     "Native and fallback material changes keep the original input, live Peek WebContents and original action callbacks. Closing releases passive native windows and hosts.",
-    "Opacity uses neutral light/dark backing independent of theme tint; Solid remains opaque. Old frosted values resolve to Clear and old fast values display Flat."
+    "Opacity uses neutral light/dark backing independent of theme tint; Solid remains opaque. Old frosted values resolve to Clear and old fast values display Flat.",
+    "The live Peek page remains crisp with native Clear and Liquid, including after resizing; only the source backdrop is blurred and the container material is limited to its frame."
   ],
   "verify_persistence": true,
   "verify_teardown": true

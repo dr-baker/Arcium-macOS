@@ -572,45 +572,62 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
  - (void)replaceEffect:(NSView*)effect {
    [_effect removeFromSuperview];
    _effect = effect;
-@@ -194,6 +222,37 @@ const PublicLiquidBridge& GetPublicLiqui
+@@ -194,6 +222,54 @@ const PublicLiquidBridge& GetPublicLiqui
  
  @end
  
 +// Keep the outer host unmarked: remote_cocoa sorts this wrapper with native
 +// WebContents views instead of forcing it below the entire window compositor.
 +@interface ArciumEmbeddedMaterialHost : NSView
-+- (void)configureRadius:(CGFloat)radius shadow:(BOOL)shadow;
++- (void)configureRadius:(CGFloat)radius rimWidth:(CGFloat)rimWidth;
 +@end
 +@implementation ArciumEmbeddedMaterialHost {
 +  CGFloat _radius;
++  CGFloat _rimWidth;
++  CAShapeLayer* __strong _materialMask;
 +}
 +- (NSView*)hitTest:(NSPoint)point {
 +  return nil;
 +}
-+- (void)updateShadowPath {
-+  CGPathRef path = CGPathCreateWithRoundedRect(NSRectToCGRect(self.bounds),
-+                                               _radius, _radius, nullptr);
-+  self.layer.shadowPath = path;
++- (void)updateGeometry {
++  [CATransaction begin];
++  [CATransaction setDisableActions:YES];
++  const CGRect bounds = NSRectToCGRect(self.bounds);
++  CGMutablePathRef path = CGPathCreateMutable();
++  CGPathAddRoundedRect(path, nullptr, bounds, _radius, _radius);
++  const CGRect inner = CGRectInset(bounds, _rimWidth, _rimWidth);
++  if (!CGRectIsEmpty(inner)) {
++    const CGFloat innerRadius = std::max(CGFloat(0), _radius - _rimWidth);
++    CGPathAddRoundedRect(path, nullptr, inner, innerRadius, innerRadius);
++  }
++  if (!_materialMask) {
++    _materialMask = [CAShapeLayer layer];
++    _materialMask.fillRule = kCAFillRuleEvenOdd;
++  }
++  _materialMask.frame = bounds;
++  _materialMask.path = path;
++  // Only material pixels surround the live card. The browser underlay owns
++  // the shadow, so a native host above the card never dims the document.
++  self.subviews.firstObject.layer.mask = _materialMask;
 +  CGPathRelease(path);
++  [CATransaction commit];
 +}
 +- (void)setFrameSize:(NSSize)size {
 +  [super setFrameSize:size];
-+  [self updateShadowPath];
++  [self updateGeometry];
 +}
-+- (void)configureRadius:(CGFloat)radius shadow:(BOOL)shadow {
++- (void)configureRadius:(CGFloat)radius rimWidth:(CGFloat)rimWidth {
 +  _radius = radius;
-+  self.layer.shadowColor = NSColor.blackColor.CGColor;
-+  self.layer.shadowOpacity = shadow ? 0.16f : 0.0f;
-+  self.layer.shadowRadius = 8;
-+  self.layer.shadowOffset = CGSizeMake(0, -2);
-+  [self updateShadowPath];
++  _rimWidth = std::max(CGFloat(0), rimWidth);
++  self.layer.shadowOpacity = 0;
++  [self updateGeometry];
 +}
 +@end
 +
  namespace arcium {
  namespace {
  
-@@ -272,10 +331,9 @@ void SetForcedAppearance(NSWindow* windo
+@@ -272,10 +348,9 @@ void SetForcedAppearance(NSWindow* windo
      return;
    }
    NSNumber* current = objc_getAssociatedObject(window, &kForcedAppearanceKey);
@@ -624,7 +641,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
    if (current == wanted || [current isEqual:wanted]) {
      return;
    }
-@@ -294,8 +352,6 @@ ForcedAppearance AppearanceFor(helium::P
+@@ -294,8 +369,6 @@ ForcedAppearance AppearanceFor(helium::P
    switch (material) {
      case helium::PanelMaterial::kLiquid:
        return ForcedAppearance::kActive;
@@ -633,7 +650,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
      case helium::PanelMaterial::kSolid:
      case helium::PanelMaterial::kFast:
      case helium::PanelMaterial::kSystemLiquid:
-@@ -358,6 +414,100 @@ CGMutablePathRef ContourToCGPath(const S
+@@ -358,6 +431,102 @@ CGMutablePathRef ContourToCGPath(const S
    return path;
  }
  
@@ -670,7 +687,9 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +    return gfx::NativeView(host_);
 +  }
 +
-+  bool Update(const helium::SurfaceStyle& style, float radius) override {
++  bool Update(const helium::SurfaceStyle& style,
++              float radius,
++              float rim_width) override {
 +    const auto availability = helium::GetNativeFrameGlassAvailability();
 +    const auto configuration = helium::PanelGlassConfiguration(
 +        helium::DefaultGlassSurfaceConfiguration(), style);
@@ -690,7 +709,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +            ? style.panel_material
 +            : helium::PanelMaterial::kFast;
 +    const SkColor neutral = style.neutral_base;
-+    [host_ configureRadius:radius shadow:style.panel_shadow];
++    [host_ configureRadius:radius rimWidth:rim_width];
 +    material_.layer.cornerRadius = radius;
 +    host_.appearance = [NSAppearance
 +        appearanceNamed:SkColorGetR(neutral) < 128 ? NSAppearanceNameDarkAqua
@@ -734,7 +753,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
  class CommandBarNativeBackgroundMac : public CommandBarNativeBackground {
   public:
    CommandBarNativeBackgroundMac(views::Widget* widget,
-@@ -422,12 +572,10 @@ class CommandBarNativeBackgroundMac : pu
+@@ -422,12 +591,10 @@ class CommandBarNativeBackgroundMac : pu
      // resized its NSView. Use the same target height as the clip so a shorter
      // result list cannot cache a frame offset derived from the previous size.
      const CGFloat content_height = widget_->GetWindowBoundsInScreen().height();
@@ -751,7 +770,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
      const auto color_mode = widget_->GetColorMode();
      const SkColor theme_color =
          widget_->GetColorProvider()->GetColor(kColorToolbar);
-@@ -465,12 +613,9 @@ class CommandBarNativeBackgroundMac : pu
+@@ -465,12 +632,9 @@ class CommandBarNativeBackgroundMac : pu
              : helium::PanelMaterial::kFast;
      const SkColor tint = style_.panel_tint_color.value_or(theme_color);
      background_view_.appearance =
@@ -767,7 +786,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
      [background_view_
          applyMaterial:material
                   tint:[NSColor colorWithSRGBRed:SkColorGetR(tint) / 255.0
-@@ -481,6 +626,14 @@ class CommandBarNativeBackgroundMac : pu
+@@ -481,6 +645,14 @@ class CommandBarNativeBackgroundMac : pu
                                  corner_radii.upper_right(),
                                  corner_radii.lower_left(),
                                  corner_radii.lower_right()})];
@@ -782,7 +801,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
      SetForcedAppearance(window, AppearanceFor(material));
      background_view_.wantsLayer = YES;
      // The results top edge is square below the search-bar cutout. Preserve
-@@ -563,6 +716,13 @@ class CommandBarNativeBackgroundMac : pu
+@@ -563,6 +735,13 @@ class CommandBarNativeBackgroundMac : pu
  
  }  // namespace
  
