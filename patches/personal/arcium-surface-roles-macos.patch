@@ -8,7 +8,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
 +/// Values a floating-surface preset fills in; Custom stores its own.
 +struct ArciumSurfaceTuning: Equatable {
-+    static let materials = ["fast", "liquid", "frosted", "glassmorphic", "solid"]
++    static let materials = ["fast", "liquid", "systemLiquid", "frosted", "glassmorphic", "solid"]
 +    static let finishes = ["glass", "refractive", "solid"]
 +    static let maxScrimBlur = 30.0
 +    var panelMaterial = "liquid"
@@ -152,7 +152,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -500,6 +500,40 @@ private struct TabsAndSpacesSettingsPage
+@@ -500,6 +500,41 @@ private struct TabsAndSpacesSettingsPage
  }
  
  private struct AppearanceSettingsPage: View {
@@ -161,8 +161,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    private static func panelMaterialDescription(_ material: String) -> String {
 +        switch material {
 +        case "fast": "The \u{2318}T command bar and Ctrl+Tab switcher. Fast: the system blur material, with no live refraction."
-+        case "liquid": "The \u{2318}T command bar and Ctrl+Tab switcher. Liquid: regular Liquid Glass with variant 9, always lit as if active."
-+        case "frosted": "The \u{2318}T command bar and Ctrl+Tab switcher. Frosted: clear Liquid Glass in its quieter inactive look."
++        case "liquid": "The \u{2318}T command bar and Ctrl+Tab switcher. Clear: bright, transparent glass with refraction."
++        case "systemLiquid": "The \u{2318}T command bar and Ctrl+Tab switcher. Liquid: Apple’s standard Liquid Glass, with the selected tint."
++        case "frosted": "The \u{2318}T command bar and Ctrl+Tab switcher. Frosted: quiet, untinted glass."
 +        case "glassmorphic": "The \u{2318}T command bar and Ctrl+Tab switcher. Chromium (glassmorphic): the switcher's original refraction shader; the command bar uses Liquid."
 +        default: "The \u{2318}T command bar and Ctrl+Tab switcher, drawn as a solid panel."
 +        }
@@ -193,7 +194,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      private func commandLayoutBinding<Value>(_ key: WritableKeyPath<ArciumCommandPanelLayout, Value>) -> Binding<Value> {
          Binding(get: { store.snapshot.appearance.commandPanelLayout[keyPath: key] },
                  set: { value in
-@@ -512,6 +546,7 @@ private struct AppearanceSettingsPage: V
+@@ -512,6 +547,7 @@ private struct AppearanceSettingsPage: V
      @ObservedObject var store: ArciumSettingsStore
      @Environment(\.settingsTheme) private var theme
      @State private var backgroundMode: BackgroundMode = .everyday
@@ -201,7 +202,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      private enum BackgroundMode: String, CaseIterable {
          case everyday = "Everyday"
-@@ -571,14 +606,110 @@ private struct AppearanceSettingsPage: V
+@@ -571,14 +607,115 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
@@ -235,16 +236,19 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                        get: { store.snapshot.appearance.effectivePanelMaterial },
 +                        set: { store.setPanelMaterial($0) }
 +                    ), options: [
-+                        (value: "fast", label: "Fast"), (value: "liquid", label: "Liquid"),
++                        (value: "fast", label: "Fast"), (value: "liquid", label: "Clear"),
++                        (value: "systemLiquid", label: "Liquid"),
 +                        (value: "frosted", label: "Frosted"), (value: "glassmorphic", label: "Chromium (glassmorphic)"),
 +                        (value: "solid", label: "Solid")],
 +                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
 +                        .accessibilityIdentifier("command-bar-appearance")
-+                    SSlider("Tint", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.05,
-+                            format: Self.percent,
-+                            help: SHelp(description: "How strongly the tint color covers the glass. 100% is opaque."),
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-panel-tint")
++                    if store.snapshot.appearance.effectivePanelMaterial != "frosted" {
++                        SSlider("Tint", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.05,
++                                format: Self.percent,
++                                help: SHelp(description: "How strongly the tint color covers the glass. 100% is opaque."),
++                                commitMode: .debounced(milliseconds: 80))
++                            .accessibilityIdentifier("surface-panel-tint")
++                    }
 +                    if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
 +                        SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,
 +                                format: { "\(Int($0)) pt" },
@@ -252,28 +256,30 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                                commitMode: .debounced(milliseconds: 80))
 +                            .accessibilityIdentifier("surface-panel-blur")
 +                    }
-+                    SToggle("Window tint", isOn: Binding(
-+                        get: { store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty },
-+                        set: { useTheme in
-+                            var tuning = store.snapshot.appearance.surfaceTuning
-+                            tuning.panelTintColor = useTheme ? "" : "#1D1E1C"
-+                            store.setSurfaceTuning(tuning)
++                    if store.snapshot.appearance.effectivePanelMaterial != "frosted" {
++                        SToggle("Window tint", isOn: Binding(
++                            get: { store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty },
++                            set: { useTheme in
++                                var tuning = store.snapshot.appearance.surfaceTuning
++                                tuning.panelTintColor = useTheme ? "" : "#1D1E1C"
++                                store.setSurfaceTuning(tuning)
++                            }
++                        ), description: "Use the first window glass color. Change it in the window color editor above, or turn this off to choose a separate tint. With no window colors, use the browser theme.")
++                            .accessibilityIdentifier("surface-panel-theme-tint")
++                        if !store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty {
++                            SLabeledControl("Tint color") {
++                                ColorPicker("Tint color", selection: Binding(
++                                    get: { Self.color(hex: store.snapshot.appearance.surfaceTuning.panelTintColor) },
++                                    set: { color in
++                                        var tuning = store.snapshot.appearance.surfaceTuning
++                                        tuning.panelTintColor = Self.hex(color)
++                                        store.setSurfaceTuning(tuning)
++                                    }
++                                ), supportsOpacity: false)
++                                .labelsHidden()
++                            }
++                            .accessibilityIdentifier("surface-panel-tint-color")
 +                        }
-+                    ), description: "Use the first window glass color. Change it in the window color editor above, or turn this off to choose a separate tint. With no window colors, use the browser theme.")
-+                        .accessibilityIdentifier("surface-panel-theme-tint")
-+                    if !store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty {
-+                        SLabeledControl("Tint color") {
-+                            ColorPicker("Tint color", selection: Binding(
-+                                get: { Self.color(hex: store.snapshot.appearance.surfaceTuning.panelTintColor) },
-+                                set: { color in
-+                                    var tuning = store.snapshot.appearance.surfaceTuning
-+                                    tuning.panelTintColor = Self.hex(color)
-+                                    store.setSurfaceTuning(tuning)
-+                                }
-+                            ), supportsOpacity: false)
-+                            .labelsHidden()
-+                        }
-+                        .accessibilityIdentifier("surface-panel-tint-color")
 +                    }
 +                    SToggle("Shadow", isOn: surfaceTuningBinding(\.panelShadow),
 +                            description: "A soft shadow around the panel.")
@@ -332,7 +338,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
              Double.infinity, -Double.infinity, Double.nan,
              Double.greatestFiniteMagnitude, NSNull()
          ]
-@@ -1207,6 +1207,91 @@ final class ArciumSettingsUIContractTest
+@@ -1207,6 +1207,104 @@ final class ArciumSettingsUIContractTest
          for value: Any in [0, 0.0, NSNumber(value: 0)] {
              XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 0)
          }
@@ -342,6 +348,19 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +    }
 +
 +    @MainActor
++    func testPublicLiquidAndLegacyClearKeepTheSavedTint() {
++        XCTAssertEqual(ArciumSurfaceTuning().panelMaterial, "liquid")
++        for material in ["liquid", "systemLiquid", "frosted"] {
++            let tuning = ArciumSurfaceTuning(["panelMaterial": material,
++                                             "panelTint": 0.65,
++                                             "panelTintColor": "#B261E1"])
++            XCTAssertEqual(tuning.panelMaterial, material)
++            XCTAssertEqual(tuning.panelTint, 0.65)
++            XCTAssertEqual(tuning.panelTintColor, "#B261E1")
++            XCTAssertEqual(ArciumSurfaceTuning(tuning.dictionary), tuning)
++        }
++    }
++
 +    func testSurfaceTuningParsesSafelyAndSendsCompleteValues() {
 +        let defaults = ArciumSurfaceTuning()
 +        XCTAssertEqual(ArciumSurfaceTuning(["scrimBlur": 99, "panelTint": -1, "controlFinish": "metal",
@@ -545,11 +564,12 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
-@@ -6,20 +6,237 @@
+@@ -6,20 +6,304 @@
  
  #import <Cocoa/Cocoa.h>
  #import <QuartzCore/QuartzCore.h>
 +#include <objc/runtime.h>
++#include <dlfcn.h>
  
  #include <algorithm>
  #include <optional>
@@ -566,7 +586,40 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
  #include "ui/color/color_provider.h"
  #include "ui/views/widget/widget.h"
  
-+// A panel's glass: native Liquid/Frosted glass on macOS 26, or the system blur
++namespace {
++struct PublicLiquidBridge {
++  using Create = void* (*)(double, double, double, double, double);
++  using Update = void (*)(void*, double, double, double, double, double);
++  void* module = nullptr;
++  Create create = nullptr;
++  Update update = nullptr;
++};
++
++const PublicLiquidBridge& GetPublicLiquidBridge() {
++  // The same packaged SwiftUI module also owns Settings. Load it independently
++  // so Liquid works before Settings has opened, and retain its Swift metadata
++  // for the lifetime of the process.
++  static const PublicLiquidBridge bridge = [] {
++    PublicLiquidBridge result;
++    NSURL* library = [NSBundle.mainBundle.privateFrameworksURL
++        URLByAppendingPathComponent:@"libArciumSettingsUI.dylib"];
++    if (!library) {
++      return result;
++    }
++    result.module = dlopen(library.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL);
++    if (result.module) {
++      result.create = reinterpret_cast<PublicLiquidBridge::Create>(
++          dlsym(result.module, "ArciumPublicGlassCreate"));
++      result.update = reinterpret_cast<PublicLiquidBridge::Update>(
++          dlsym(result.module, "ArciumPublicGlassUpdate"));
++    }
++    return result;
++  }();
++  return bridge;
++}
++}  // namespace
++
++// A panel's glass: public SwiftUI Liquid, AppKit Clear/Frosted, or system blur
 +// material for Fast and on older systems. It never takes events, and the
 +// marker protocol keeps remote_cocoa from sorting it above Views content.
 +@interface ArciumPanelMaterialView : NSView <NativeWindowBackgroundView>
@@ -579,6 +632,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +  NSView* __strong _effect;
 +  NSView* __strong _tintOverlay;
 +  bool _liquidVariant;
++  bool _systemLiquid;
 +}
 +
 +- (NSView*)hitTest:(NSPoint)point {
@@ -589,14 +643,44 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +                 tint:(NSColor*)tint
 +         cornerRadius:(CGFloat)cornerRadius {
 +  if (@available(macOS 26.0, *)) {
-+    if (material != helium::PanelMaterial::kFast) {
-+      [self applyGlassWithTint:tint
++    if (material == helium::PanelMaterial::kSystemLiquid ||
++        material == helium::PanelMaterial::kGlassmorphic) {
++      if ([self applySystemGlassWithTint:tint cornerRadius:cornerRadius]) {
++        return;
++      }
++    } else if (material != helium::PanelMaterial::kFast) {
++      [self applyGlassWithTint:material == helium::PanelMaterial::kFrosted
++                                   ? nil : tint
 +                 cornerRadius:cornerRadius
-+                liquidVariant:material != helium::PanelMaterial::kFrosted];
++                liquidVariant:material == helium::PanelMaterial::kLiquid];
 +      return;
 +    }
 +  }
 +  [self applyBlurWithTint:tint cornerRadius:cornerRadius];
++}
++
++- (BOOL)applySystemGlassWithTint:(NSColor*)tint
++                     cornerRadius:(CGFloat)cornerRadius API_AVAILABLE(macos(26.0)) {
++  const auto& bridge = GetPublicLiquidBridge();
++  if (!bridge.create || !bridge.update) {
++    return NO;
++  }
++  _tintOverlay.hidden = YES;
++  NSColor* rgba = [tint colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
++  if (!_systemLiquid) {
++    void* retained = bridge.create(rgba.redComponent, rgba.greenComponent,
++                                  rgba.blueComponent, rgba.alphaComponent,
++                                  cornerRadius);
++    if (!retained) {
++      return NO;
++    }
++    [self replaceEffect:(__bridge_transfer NSView*)retained];
++    _systemLiquid = true;
++  } else {
++    bridge.update((__bridge void*)_effect, rgba.redComponent, rgba.greenComponent,
++                  rgba.blueComponent, rgba.alphaComponent, cornerRadius);
++  }
++  return YES;
 +}
 +
 +- (void)applyGlassWithTint:(NSColor*)tint
@@ -612,7 +696,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +  glass.style = liquidVariant ? NSGlassEffectViewStyleRegular
 +                             : NSGlassEffectViewStyleClear;
 +  if (liquidVariant) {
-+    // Experimental variant requested for Liquid. Guard the private selector's
++    // Existing Clear variant. Guard the private selector's
 +    // ABI and keep regular glass when this OS does not implement it.
 +    const SEL selector = sel_registerName("set_variant:");
 +    Method method = class_getInstanceMethod([glass class], selector);
@@ -664,6 +748,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +- (void)replaceEffect:(NSView*)effect {
 +  [_effect removeFromSuperview];
 +  _effect = effect;
++  _systemLiquid = false;
 +  _effect.frame = self.bounds;
 +  _effect.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 +  [self addSubview:_effect];
@@ -770,12 +855,13 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +ForcedAppearance AppearanceFor(helium::PanelMaterial material) {
 +  switch (material) {
 +    case helium::PanelMaterial::kLiquid:
-+    case helium::PanelMaterial::kGlassmorphic:
 +      return ForcedAppearance::kActive;
 +    case helium::PanelMaterial::kFrosted:
 +      return ForcedAppearance::kInactive;
 +    case helium::PanelMaterial::kSolid:
 +    case helium::PanelMaterial::kFast:
++    case helium::PanelMaterial::kSystemLiquid:
++    case helium::PanelMaterial::kGlassmorphic:
 +      return ForcedAppearance::kFollow;
 +  }
 +}
@@ -783,7 +869,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
  CGMutablePathRef ContourToCGPath(const SkPath& contour,
                                   const gfx::Rect& bounds,
                                   CGFloat height,
-@@ -95,6 +312,10 @@ class CommandBarNativeBackgroundMac : pu
+@@ -95,6 +379,10 @@ class CommandBarNativeBackgroundMac : pu
      [background_view_ removeFromSuperview];
    }
  
@@ -794,7 +880,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
    void SetContour(const SkPath& contour) override {
      if (contour_ == contour) {
        return;
-@@ -116,11 +337,17 @@ class CommandBarNativeBackgroundMac : pu
+@@ -116,11 +404,17 @@ class CommandBarNativeBackgroundMac : pu
              configuration, helium::GetRequestedGlassBackend(),
              availability.native_liquid_glass, availability.native_material,
              availability.reduce_transparency);
@@ -814,7 +900,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
        return false;
      }
  
-@@ -141,7 +368,7 @@ class CommandBarNativeBackgroundMac : pu
+@@ -141,7 +435,7 @@ class CommandBarNativeBackgroundMac : pu
          last_configuration_ == configuration &&
          last_active_material_ == resolution.active && last_bounds_ == bounds &&
          last_corner_radii_ == corner_radii && last_color_mode_ == color_mode &&
@@ -823,7 +909,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
          !(contour_changed_ && contour_.isEmpty())) {
        if (contour_changed_ && !contour_.isEmpty()) {
          CGMutablePathRef path =
-@@ -157,21 +384,30 @@ class CommandBarNativeBackgroundMac : pu
+@@ -157,21 +451,37 @@ class CommandBarNativeBackgroundMac : pu
        return true;
      }
      if (!background_view_) {
@@ -851,6 +937,13 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +            ? style_.panel_material
 +            : helium::PanelMaterial::kFast;
 +    const SkColor tint = style_.panel_tint_color.value_or(theme_color);
++    background_view_.appearance =
++        material == helium::PanelMaterial::kSystemLiquid ||
++                material == helium::PanelMaterial::kGlassmorphic
++            ? [NSAppearance appearanceNamed:
++                  color_mode == ui::ColorProviderKey::ColorMode::kDark
++                      ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua]
++            : nil;
 +    [background_view_
 +        applyMaterial:material
 +                 tint:[NSColor colorWithSRGBRed:SkColorGetR(tint) / 255.0
@@ -865,7 +958,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
      background_view_.wantsLayer = YES;
      // The results top edge is square below the search-bar cutout. Preserve
      // each painted corner rather than imposing a second rounded silhouette.
-@@ -229,12 +465,15 @@ class CommandBarNativeBackgroundMac : pu
+@@ -229,12 +539,15 @@ class CommandBarNativeBackgroundMac : pu
      last_corner_radii_ = corner_radii;
      last_color_mode_ = color_mode;
      last_theme_color_ = theme_color;
@@ -894,3 +987,89 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
         name == arcium::kCommandBarAppearancePref)) {
      // The switcher chooses its host when it opens; rebuild it.
      RefreshSurfacePreview();
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+@@ -41,6 +41,7 @@ action("build") {
+     "Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsViews.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsUIController.swift",
++    "Sources/ArciumSettingsUI/ArciumPublicGlass.swift",
+     "Sources/ArciumSettingsUI/Resources/yellow-blue grain.json",
+     _swift,
+     _swift_frontend,
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumPublicGlass.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumPublicGlass.swift
+@@ -0,0 +1,69 @@
++// Copyright 2026 The Helium Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++import AppKit
++import SwiftUI
++
++@available(macOS 26.0, *)
++private struct PublicPanelGlass: View {
++    let tint: NSColor
++    let radius: CGFloat
++
++    var body: some View {
++        Color.clear
++            .frame(maxWidth: .infinity, maxHeight: .infinity)
++            .glassEffect(
++                Glass.regular.tint(Color(nsColor: tint)).interactive(false),
++                in: RoundedRectangle(cornerRadius: radius, style: .continuous))
++            .allowsHitTesting(false)
++            .ignoresSafeArea()
++    }
++}
++
++@available(macOS 26.0, *)
++private final class PublicPanelGlassHostingView: NSHostingView<PublicPanelGlass> {
++    override func hitTest(_ point: NSPoint) -> NSView? { nil }
++    override var acceptsFirstResponder: Bool { false }
++    override var isOpaque: Bool { false }
++}
++
++@available(macOS 26.0, *)
++@MainActor
++private func panelGlassRoot(_ red: Double, _ green: Double, _ blue: Double,
++                            _ alpha: Double, _ radius: Double) -> PublicPanelGlass {
++    PublicPanelGlass(
++        tint: NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha),
++        radius: radius)
++}
++
++// Returns a retained NSView pointer. An ARC Objective-C++ caller adopts it with
++// (__bridge_transfer NSView*), then passes an unretained bridge to Update.
++@_cdecl("ArciumPublicGlassCreate")
++@MainActor
++public func createPublicPanelGlass(
++    _ red: Double, _ green: Double, _ blue: Double, _ alpha: Double,
++    _ radius: Double
++) -> UnsafeMutableRawPointer? {
++    precondition(Thread.isMainThread)
++    guard #available(macOS 26.0, *) else { return nil }
++    let root = panelGlassRoot(red, green, blue, alpha, radius)
++    let host = PublicPanelGlassHostingView(rootView: root)
++    host.sizingOptions = []
++    host.safeAreaRegions = []
++    host.autoresizingMask = [.width, .height]
++    return Unmanaged.passRetained(host).toOpaque()
++}
++
++@_cdecl("ArciumPublicGlassUpdate")
++@MainActor
++public func updatePublicPanelGlass(
++    _ pointer: UnsafeMutableRawPointer?,
++    _ red: Double, _ green: Double, _ blue: Double, _ alpha: Double,
++    _ radius: Double
++) {
++    precondition(Thread.isMainThread)
++    guard #available(macOS 26.0, *), let pointer else { return }
++    let view = Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
++    guard let host = view as? PublicPanelGlassHostingView else { return }
++    host.rootView = panelGlassRoot(red, green, blue, alpha, radius)
++}

@@ -131,11 +131,17 @@ Panel materials:
   background, behind the window), SettingsUI's AppKit floor for SwiftUI's
   ultra-thin material. It is also the fallback before macOS 26 and whenever the
   shared resolver finds no native Liquid Glass.
-- **Liquid:** `NSGlassEffectView` with the regular style and experimental private
+- **Clear:** the existing `NSGlassEffectView` with the regular style and experimental private
   `set_variant:9`, the tint as its `tintColor`, and the panel's corner radius,
   always drawn in its active state. The setter's ABI is checked before calling;
   unavailable variants keep regular glass.
-- **Frosted:** clear native glass, always drawn in its inactive state.
+- **Liquid:** public SwiftUI `Glass.regular.tint(...)` and `.glassEffect`, hosted
+  in a noninteractive `NSHostingView`. The selected tint's RGB and alpha pass
+  through to `Glass.tint`. It follows the window's appearance and uses no private
+  glass variant. The packaged SwiftUI module loads even before Settings opens.
+- **Frosted:** untinted clear native glass, always drawn in its inactive state.
+  Tint, Window tint and Tint color are hidden for this material. Its resolved
+  tint strength is zero; the saved tint remains available to other materials.
 - **Chromium (glassmorphic):** Chromium's refraction shader with the switcher's
   original refraction settings and the chosen panel tint. Only the switcher can
   use it, inside the browser window; the command bar draws Liquid.
@@ -145,7 +151,7 @@ Panel materials:
 Fast paints its tint in a separate view above AppKit's blur. AppKit owns the
 effect's own backing layers, so their background color is not used for tint.
 
-Active and inactive appearance follow SettingsUI's `SettingsGlassAppearanceBridge`
+Clear and Frosted's active and inactive appearance follow SettingsUI's `SettingsGlassAppearanceBridge`
 on macOS 26: the four AppKit key-appearance queries are overridden once on the
 panel window's class and consult a per-window override, because AppKit observes
 these windows with KVO. Panels draw no outline. The window server shadow is off;
@@ -161,8 +167,10 @@ clients. New snapshots include all ten.
 **Window tint** follows the first color in the window glass editor, including
 later edits to that color. With no window colors it falls back to the browser
 theme. Turning Window tint off reveals a separate **Tint color** picker. The
-**Tint** slider controls its strength for every glass panel material. The stored
-material identifier remains `glassmorphic`.
+**Tint** slider controls its strength for every tinted panel material. The stored
+identifier `liquid` now displays Clear, preserving existing choices and presets;
+`systemLiquid` selects public SwiftUI Liquid. Chromium's identifier remains
+`glassmorphic`.
 
 Chromium's **Blur** adds 0–30 pt of Gaussian backdrop blur before the refraction
 shader, default 9 pt, without changing tint strength. Both the shader's sharp
