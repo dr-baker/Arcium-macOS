@@ -21,11 +21,11 @@ final class ShaderRenderer {
         }
     }
     static func sigma(extraBlur: Double) -> Double { sqrt(0.6 * 10 * 10 + extraBlur * extraBlur) }
-    func render(document: LabDocument, recipe: Recipe, stageSize: CGSize, panelRect: CGRect) -> NSImage? {
+    func render(document: LabDocument, recipe: Recipe, stageSize: CGSize, panelRect: CGRect, phase: Double = 0) -> NSImage? {
         guard let kernel else { return nil }
-        let sceneKey = String(describing: document) + String(describing: stageSize)
+        let sceneKey = String(describing: document) + String(describing: stageSize) + String(phase)
         if sceneKey != cachedSceneKey {
-            let renderer = ImageRenderer(content: StageScene(document: document).frame(width: stageSize.width, height: stageSize.height))
+            let renderer = ImageRenderer(content: StageScene(document: document, phase: phase).frame(width: stageSize.width, height: stageSize.height))
             renderer.scale = 1 // All shader distances use logical points, like the core inputs.
             guard let image = renderer.cgImage else { return nil }
             cachedScene = CIImage(cgImage: image).clampedToExtent()

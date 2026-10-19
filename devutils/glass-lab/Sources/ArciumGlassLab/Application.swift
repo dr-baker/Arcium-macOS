@@ -39,6 +39,7 @@ final class LabDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.controller.refresh()
             }
         }
+        store.onAnimationFrame = { [weak self] in self?.controller.renderAnimationFrame() }
         let menu = NSMenu()
         let application = NSMenuItem(); let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About Arcium Glass Lab", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
@@ -54,6 +55,7 @@ final class LabDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if NSApplication.shared.modalWindow != nil { return event }
+            if let eventWindow = event.window, eventWindow !== self.window && eventWindow !== self.controller.panel { return event }
             if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "l" {
                 self.store.document.preview = .command; self.store.panelVisible = true; return nil
             }
@@ -69,13 +71,21 @@ final class LabDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async { [weak self] in self?.controller.refresh() }
     }
     func windowWillClose(_ notification: Notification) { NSApplication.shared.terminate(nil) }
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        let imported = filenames.first.map { store.importBackgroundImage(URL(fileURLWithPath: $0)) } ?? false
+        sender.reply(toOpenOrPrint: imported ? .success : .failure)
+        if imported { window?.makeKeyAndOrderFront(nil); sender.activate(ignoringOtherApps: true) }
+    }
     func windowDidResize(_ notification: Notification) { controller?.refresh() }
     func windowDidMove(_ notification: Notification) { controller?.refresh() }
     func windowDidBecomeKey(_ notification: Notification) { controller?.refresh() }
     func windowDidResignKey(_ notification: Notification) { controller?.refresh() }
     func applicationDidBecomeActive(_ notification: Notification) { controller?.refresh() }
     func applicationDidResignActive(_ notification: Notification) { controller?.refresh() }
+    func windowDidMiniaturize(_ notification: Notification) { store.suspendAnimation(true) }
+    func windowDidDeminiaturize(_ notification: Notification) { store.suspendAnimation(false) }
     func applicationWillTerminate(_ notification: Notification) {
+        store.stopAnimation()
         store.save()
         controller?.close()
         if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }

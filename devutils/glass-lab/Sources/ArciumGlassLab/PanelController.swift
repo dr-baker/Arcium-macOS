@@ -52,6 +52,7 @@ final class PanelController {
     private let controlTiles = (0..<5).map { _ in ControlTile(frame: .zero) }
     weak var anchor: NSView?
     private var lastShaderKey = ""
+    private var shaderGeometry: (size: CGSize, rect: CGRect)?
 
     init(store: LabStore) {
         self.store = store
@@ -85,6 +86,7 @@ final class PanelController {
         case .window: surfaceSize = CGSize(width: min(830, size.width-56), height: min(590, size.height-80))
         }
         let rect = CGRect(x: (size.width-surfaceSize.width)/2, y: (size.height-surfaceSize.height)/2, width: surfaceSize.width, height: surfaceSize.height)
+        shaderGeometry = (size, rect)
         let screen = parent.convertToScreen(anchor.convert(rect.insetBy(dx: -22, dy: -22), to: nil))
         panel.setFrame(screen, display: true)
         container.frame = CGRect(origin: CGPoint(x: 22, y: 22), size: surfaceSize)
@@ -118,17 +120,6 @@ final class PanelController {
         if !native.isHidden {
             LabApplyMaterial(native, recipe.material.nativeCode, tint.red, tint.green, tint.blue, effective, recipe.radius)
         }
-        let key = String(describing: store.document) + String(describing: recipe) + String(describing: size)
-        if !shaderView.isHidden {
-            if key != lastShaderKey {
-                shaderView.image = shader.render(document: store.sceneDocument, recipe: recipe, stageSize: size, panelRect: rect)
-                if shaderView.image == nil {
-                    solid.isHidden = false
-                    store.status = shader.error ?? "Shader rendering failed"
-                }
-                lastShaderKey = key
-            }
-        }
         for (index, tile) in controlTiles.enumerated() {
             tile.isHidden = !controls
             guard controls else { continue }
@@ -136,19 +127,34 @@ final class PanelController {
             tile.frame = tileRect
             tile.update(recipe: recipe, tint: tint, dark: store.document.dark)
             tile.native.appearance = recipe.material == .systemLiquid ? panel.appearance : nil
-            if recipe.material == .glassmorphic, key != lastShaderKey {
-                var circle = recipe; circle.radius = 20
-                tile.image.image = shader.render(document: store.sceneDocument, recipe: circle, stageSize: size,
-                    panelRect: tileRect.offsetBy(dx: rect.minX, dy: rect.minY))
-                if tile.image.image == nil { tile.solid.isHidden = false; store.status = shader.error ?? "Shader rendering failed" }
-            }
         }
-        if controls && recipe.material == .glassmorphic { lastShaderKey = key }
+        renderAnimationFrame()
         foreground.rootView = PanelContent(store: store, recipe: recipe)
         if store.panelVisible {
             if panel.parent !== parent { parent.addChildWindow(panel, ordered: .above) }
             panel.orderFront(nil)
         } else { panel.orderOut(nil) }
+    }
+    func renderAnimationFrame() {
+        guard store.panelVisible, store.displayedRecipe.material == .glassmorphic,
+              let geometry = shaderGeometry else { return }
+        let recipe = store.displayedRecipe
+        let phase = store.phase
+        let key = String(describing: store.sceneDocument) + String(describing: geometry.size) + String(phase)
+        guard key != lastShaderKey else { return }
+        if store.document.preview == .controls {
+            for tile in controlTiles {
+                var circle = recipe; circle.radius = 20
+                tile.image.image = shader.render(document: store.sceneDocument, recipe: circle, stageSize: geometry.size,
+                    panelRect: tile.frame.offsetBy(dx: geometry.rect.minX, dy: geometry.rect.minY), phase: phase)
+                if tile.image.image == nil { tile.solid.isHidden = false; store.status = shader.error ?? "Shader rendering failed" }
+            }
+        } else {
+            shaderView.image = shader.render(document: store.sceneDocument, recipe: recipe, stageSize: geometry.size,
+                panelRect: geometry.rect, phase: phase)
+            if shaderView.image == nil { solid.isHidden = false; store.status = shader.error ?? "Shader rendering failed" }
+        }
+        lastShaderKey = key
     }
     func close() {
         panel.parent?.removeChildWindow(panel)
@@ -171,7 +177,14 @@ struct StageAnchor: NSViewRepresentable {
     func updateNSView(_ view: AnchorView, context: Context) {}
     final class AnchorView: NSView {
         var changed: (() -> Void)?
-        override func layout() { super.layout(); changed?() }
+        private var lastPlacement: NSRect?
+        override func layout() {
+            super.layout()
+            let placement = convert(bounds, to: nil)
+            guard placement != lastPlacement else { return }
+            lastPlacement = placement
+            changed?()
+        }
         override func viewDidMoveToWindow() { super.viewDidMoveToWindow(); DispatchQueue.main.async { [weak self] in self?.changed?() } }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }

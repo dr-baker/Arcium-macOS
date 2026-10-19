@@ -64,6 +64,11 @@ cat > "$lab_app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleVersion</key><string>1</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>CFBundleDocumentTypes</key><array><dict>
+<key>CFBundleTypeName</key><string>Background image</string>
+<key>CFBundleTypeRole</key><string>Viewer</string>
+<key>LSItemContentTypes</key><array><string>public.image</string></array>
+</dict></array>
 </dict></plist>
 PLIST
 codesign --force --sign - "$lab_app" >/dev/null

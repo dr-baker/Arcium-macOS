@@ -36,8 +36,15 @@ struct LabView: View {
             .buttonStyle(.borderless).padding(.horizontal, 20).frame(height: 56)
             Divider()
             HStack(spacing: 0) {
-                StageScene(document: store.sceneDocument, scrimVisible: store.panelVisible)
+                VStack(spacing: 0) {
+                    backgroundControls
+                    Divider()
+                    StageScene(document: store.sceneDocument, scrimVisible: store.panelVisible, phase: store.phase)
                     .background(StageAnchor(controller: controller))
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard let url = urls.first else { return false }
+                        return store.importBackgroundImage(url)
+                    }
                     .overlay(alignment: .bottomLeading) {
                         HStack(spacing: 7) {
                             Circle().fill(store.showingReference ? .orange : .green).frame(width: 6, height: 6)
@@ -47,6 +54,7 @@ struct LabView: View {
                         .font(.system(size: 11, weight: .medium)).padding(.horizontal, 12).padding(.vertical, 7)
                         .background(.regularMaterial, in: Capsule()).padding(14)
                     }
+                }
                 Divider()
                 inspector.frame(width: 310)
             }
@@ -61,6 +69,38 @@ struct LabView: View {
         .frame(minWidth: 1140, minHeight: 760)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.colorScheme, store.document.dark ? .dark : .light)
+    }
+
+    private var backgroundControls: some View {
+        HStack(spacing: 12) {
+            Picker("Background", selection: Binding(get: { store.document.backdrop }, set: { value in
+                if value == .image && BackgroundAssets.image(store.document.backgroundAssetID) == nil {
+                    store.chooseBackgroundImage()
+                } else { store.document.backdrop = value }
+            })) {
+                ForEach(Backdrop.allCases) { Text($0.title).tag($0) }
+            }.frame(width: 235).accessibilityIdentifier("lab-backdrop")
+            Button("Image…", systemImage: "photo.badge.plus", action: store.chooseBackgroundImage)
+                .accessibilityIdentifier("lab-background-image")
+                .help(store.document.backgroundAssetName ?? "Choose a custom background image, or drop one onto the page.")
+            Spacer(minLength: 5)
+            Button {
+                store.setPlaying(!store.document.moving)
+            } label: {
+                Label(store.document.moving ? "Pause" : "Scroll", systemImage: store.document.moving ? "pause.fill" : "play.fill")
+            }.accessibilityIdentifier("lab-animate").help("Scroll the page down and back up.")
+            Picker("Speed", selection: Binding(get: { store.document.playbackSpeed }, set: { store.document.backgroundSpeed = $0 })) {
+                Text("Slow").tag(0.5); Text("Normal").tag(1.0); Text("Fast").tag(2.0)
+            }.labelsHidden().frame(width: 90).accessibilityIdentifier("lab-background-speed").help("Scroll speed")
+            Button { store.document.dark.toggle() } label: {
+                Label(store.document.dark ? "Dark" : "Light", systemImage: store.document.dark ? "moon.fill" : "sun.max.fill")
+            }.accessibilityLabel(store.document.dark ? "Use light page" : "Use dark page")
+                .accessibilityIdentifier("lab-dark")
+                .help("Switch light/dark appearance without changing the theme color.")
+        }
+        .font(.system(size: 12)).controlSize(.small).buttonStyle(.borderless)
+        .padding(.horizontal, 16).frame(height: 42)
+        .background(Color(nsColor: .controlBackgroundColor))
     }
 
     private var inspector: some View {
@@ -159,16 +199,9 @@ struct LabView: View {
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 13) {
-                    Text("Behind the glass").fontWeight(.semibold)
-                    Picker("Page", selection: $store.document.backdrop) { ForEach(Backdrop.allCases) { Text($0.title).tag($0) } }
-                        .accessibilityIdentifier("lab-backdrop")
+                    Text("Window tint").fontWeight(.semibold)
                     ColorPicker("Window color", selection: Binding(get: { store.document.windowColor.color }, set: { store.document.windowColor = RGB($0) }), supportsOpacity: false)
                         .accessibilityIdentifier("lab-window-color")
-                    Toggle("Dark page", isOn: $store.document.dark).toggleStyle(.switch).controlSize(.small).accessibilityIdentifier("lab-dark")
-                    Toggle("Animate page", isOn: $store.document.moving).toggleStyle(.switch).controlSize(.small)
-                        .disabled(store.document.recipe.material == .glassmorphic)
-                        .accessibilityIdentifier("lab-animate")
-                    if store.document.recipe.material == .glassmorphic { Text("Shader mode uses a still backdrop. Native modes sample the live page.").font(.system(size: 11)).foregroundStyle(.secondary) }
                 }
                 Divider()
                 DisclosureGroup("Appearance override") {

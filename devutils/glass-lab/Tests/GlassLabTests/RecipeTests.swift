@@ -60,11 +60,12 @@ final class RecipeTests: XCTestCase {
         XCTAssertEqual(Recipe().dispersion, 0.15)
     }
     @MainActor
-    func testReferenceUsesItsOwnScrimAndFreezesShaderScene() throws {
+    func testReferenceUsesItsOwnScrimAndKeepsSharedPlayback() throws {
         let name = "GlassLabTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         let store = LabStore(defaults: defaults)
+        defer { store.stopAnimation() }
         store.document.preview = .peek
         store.document.recipe.scrimDim = 0.7
         store.document.recipe.material = .glassmorphic
@@ -74,10 +75,17 @@ final class RecipeTests: XCTestCase {
         store.document.moving = true
         store.showingReference = true
         XCTAssertEqual(store.sceneDocument.recipe.scrimDim, 0.7)
-        XCTAssertFalse(store.sceneDocument.moving)
+        XCTAssertTrue(store.sceneDocument.moving)
         store.showingReference = false
         XCTAssertEqual(store.sceneDocument.recipe.scrimDim, 0.1)
         XCTAssertTrue(store.sceneDocument.moving)
+    }
+    func testScrollMovesDownAndReturnsToTop() {
+        XCTAssertEqual(BackgroundScroll.offset(phase: 0, viewport: 600, content: 1200), 0, accuracy: 0.001)
+        XCTAssertEqual(BackgroundScroll.offset(phase: 0.25, viewport: 600, content: 1200), 300, accuracy: 0.001)
+        XCTAssertEqual(BackgroundScroll.offset(phase: 0.5, viewport: 600, content: 1200), 600, accuracy: 0.001)
+        XCTAssertEqual(BackgroundScroll.offset(phase: 0.75, viewport: 600, content: 1200), 300, accuracy: 0.001)
+        XCTAssertEqual(BackgroundScroll.offset(phase: 1, viewport: 600, content: 1200), 0, accuracy: 0.001)
     }
     func testSolidBaseAndIntensityFollowAppearance() {
         var recipe = Recipe(); recipe.tint = 0
@@ -89,5 +97,32 @@ final class RecipeTests: XCTestCase {
         recipe.neutralIntensity = .nan
         XCTAssertEqual(recipe.clamped().intensity, 0)
         XCTAssertNil(recipe.productionTuning(windowColor: RGB("#FFFFFF"))["neutralIntensity"])
+    }
+    func testOlderRecipesStillDecode() throws {
+        var document = LabDocument(); document.recipe.tint = 0.65; document.preview = .mru
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(document)) as? [String: Any])
+        for key in ["backgroundAssetID", "backgroundAssetName", "backgroundImageData", "backgroundSpeed", "backgroundPhase"] { fields.removeValue(forKey: key) }
+        let decoded = try JSONDecoder().decode(LabDocument.self, from: JSONSerialization.data(withJSONObject: fields))
+        XCTAssertEqual(decoded.recipe.tint, 0.65)
+        XCTAssertEqual(decoded.preview, .mru)
+        XCTAssertEqual(decoded.playbackSpeed, 1)
+        XCTAssertNil(decoded.backgroundImageData)
+    }
+    @MainActor
+    func testPauseAndImagePreferenceStorage() throws {
+        let name = "GlassLabTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        var document = LabDocument(); document.backgroundPhase = 0.4
+        defaults.set(try JSONEncoder().encode(document), forKey: "lab-document-v1")
+        let store = LabStore(defaults: defaults)
+        defer { store.stopAnimation() }
+        store.setPlaying(true); store.setPlaying(false)
+        XCTAssertEqual(store.phase, 0.4)
+        XCTAssertFalse(store.document.moving)
+        store.document.backgroundImageData = Data([1, 2, 3])
+        let saved = try JSONDecoder().decode(LabDocument.self, from: XCTUnwrap(defaults.data(forKey: "lab-document-v1")))
+        XCTAssertNil(saved.backgroundImageData)
+        XCTAssertEqual(saved.backgroundPhase, 0.4)
     }
 }

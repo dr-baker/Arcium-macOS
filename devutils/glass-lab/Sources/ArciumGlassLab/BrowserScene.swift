@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BrowserStage: View {
     let document: LabDocument
+    var phase: Double = 0
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 9) {
@@ -21,7 +22,7 @@ struct BrowserStage: View {
             .padding(.horizontal, 16).frame(height: 44)
             HStack(spacing: 0) {
                 sidebar.frame(width: 172)
-                BrowserPage(document: document)
+                BrowserPage(document: document, phase: phase)
             }
         }
         .foregroundStyle(document.dark ? .white : .black)
@@ -74,22 +75,25 @@ struct SiteIcon: View {
 
 struct BrowserPage: View {
     let document: LabDocument
+    var phase: Double = 0
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 24, paused: !document.moving)) { context in
-            GeometryReader { geometry in
-                let phase = document.moving ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 30) / 30 : 0.28
-                Group {
-                    switch document.backdrop {
-                    case .editorial: editorial(size: geometry.size, phase: phase)
-                    case .documentation: documentation
-                    case .contrast: contrast(phase: phase)
-                    }
-                }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading).clipped()
+        GeometryReader { geometry in
+            let height = geometry.size.height + max(480, geometry.size.height*0.65)
+            Group {
+                switch document.backdrop {
+                case .editorial: editorial(size: geometry.size)
+                case .documentation: documentation
+                case .contrast: contrast
+                case .image: customImage
+                }
             }
+            .frame(width: geometry.size.width, height: height, alignment: .topLeading)
+            .offset(y: -BackgroundScroll.offset(phase: phase, viewport: geometry.size.height, content: height))
         }
+        .clipped()
         .background(document.dark ? Color(red: 0.105, green: 0.12, blue: 0.13) : Color.white)
     }
-    private func editorial(size: CGSize, phase: Double) -> some View {
+    private func editorial(size: CGSize) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Fieldnotes").font(.system(size: 28, weight: .semibold, design: .serif))
@@ -97,7 +101,7 @@ struct BrowserPage: View {
                 Text("Places     Architecture     Objects").font(.system(size: 11))
             }.padding(.horizontal, 34).frame(height: 72)
             ZStack(alignment: .bottomLeading) {
-                Landscape(phase: phase).frame(height: max(320, size.height * 0.57))
+                Landscape(phase: 0.28).frame(height: max(320, size.height * 0.57))
                 LinearGradient(colors: [.clear, .black.opacity(0.62)], startPoint: .center, endPoint: .bottom)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("A slower way of seeing").font(.system(size: 44, weight: .medium, design: .serif))
@@ -113,6 +117,19 @@ struct BrowserPage: View {
                         Text("Stories, observations and places to return to.").font(.system(size: 12)).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
+            }.padding(30)
+            Divider().padding(.horizontal, 30)
+            HStack(alignment: .top, spacing: 30) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Along the shore").font(.system(size: 31, weight: .medium, design: .serif))
+                    Text("Water gives every place a different rhythm. The shoreline changes with each turn, and the paths between small towns reveal details a faster journey would miss.")
+                    Text("We followed the light through the afternoon, stopping where the road met the water. Some places ask for nothing more than a little time.")
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                Landscape(phase: 0.7).frame(maxWidth: .infinity).frame(height: 230)
+            }.font(.system(size: 15)).lineSpacing(6).padding(30)
+            Text("More places to return to").font(.system(size: 26, weight: .medium, design: .serif)).padding(.horizontal, 30)
+            HStack(spacing: 20) {
+                ForEach(0..<3) { index in Landscape(phase: Double(index)*0.3).frame(height: 140) }
             }.padding(30)
             Spacer(minLength: 0)
         }
@@ -130,7 +147,7 @@ struct BrowserPage: View {
             HStack { Image(systemName: "magnifyingglass"); Text("Search MDN"); Spacer(); Text("⌘ K").foregroundStyle(.secondary) }
                 .padding(15).overlay(RoundedRectangle(cornerRadius: 24).stroke(.secondary.opacity(0.5)))
             Text("Featured articles").font(.system(size: 25, weight: .medium)).padding(.top, 15)
-            ForEach(["A guide to modern CSS", "Making the web work for everyone", "JavaScript reference", "Web performance fundamentals"], id: \.self) { title in
+            ForEach(["A guide to modern CSS", "Making the web work for everyone", "JavaScript reference", "Web performance fundamentals", "Accessible interfaces", "CSS layout cookbook", "Browser APIs", "Learning web development"], id: \.self) { title in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(title).font(.system(size: 18, weight: .medium))
                     Text("Explore the technologies that build the web. Examples, tutorials and reference documentation.")
@@ -141,7 +158,7 @@ struct BrowserPage: View {
             Spacer(minLength: 0)
         }.padding(.horizontal, 42)
     }
-    private func contrast(phase: Double) -> some View {
+    private var contrast: some View {
         GeometryReader { geometry in
             Canvas { context, size in
                 let tile = 44.0
@@ -162,8 +179,27 @@ struct BrowserPage: View {
                 Text("0123456789     Aa Bb Cc Dd").font(.system(size: 30, weight: .semibold))
             }
             .padding(28).foregroundStyle(.white).shadow(color: .black, radius: 1)
-            .offset(x: document.moving ? sin(phase * .pi * 2) * 70 : 0)
         }
+    }
+    private var customImage: some View {
+        GeometryReader { geometry in
+            if let image = BackgroundAssets.image(document.backgroundAssetID) {
+                Image(nsImage: image).resizable().scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height).clipped()
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "photo").font(.system(size: 42))
+                    Text("Choose an image above, or drop one onto the preview.")
+                }.foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+}
+
+enum BackgroundScroll {
+    static func offset(phase: Double, viewport: Double, content: Double) -> Double {
+        let progress = phase.isFinite ? phase : 0
+        return max(0, content-viewport) * (1-cos(progress * .pi * 2))/2
     }
 }
 
@@ -208,8 +244,9 @@ struct Landscape: View {
 struct StageScene: View {
     let document: LabDocument
     var scrimVisible = true
+    var phase: Double = 0
     var body: some View {
-        BrowserStage(document: document)
+        BrowserStage(document: document, phase: phase)
             .blur(radius: document.preview == .peek && scrimVisible ? document.recipe.scrimBlur : 0)
             .overlay {
                 if document.preview == .peek && scrimVisible {

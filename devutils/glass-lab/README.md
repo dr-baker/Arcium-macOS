@@ -30,9 +30,26 @@ Text can use automatic, light or dark ink for contrast experiments. Floating
 controls use separate 40-point circles, each with its own material.
 Frosted hides tint controls and preserves their saved values for other modes.
 
-Use the Editorial, Documentation and Contrast test pages to check bright
-areas, text, fine detail and strong colors. Native effects sample a live page;
-Animate page makes that visible. The shader preview uses a still backdrop.
+The Background bar above the preview stays visible while you tune materials.
+Choose Editorial, Documentation or Contrast test, or use Image to choose a file.
+You can also drop an image onto the visible page. Images are downsampled and
+copied into the lab's Application Support folder, so moving the original file
+does not break the background. Exported recipes embed the image for portability.
+Opening an image with the lab, or dropping it onto the lab's Dock icon, also
+selects it as the background.
+
+Scroll moves the page down and back up beneath the stationary glass. Pause
+holds the current position; Slow, Normal and Fast control the speed. The sidebar
+and toolbar stay fixed. Native backdrops update at 24 fps; the snapshot-based
+Metal preview updates at up to 12 fps. Both use the same scroll position.
+Playback continues when you switch apps and pauses when the lab is minimized.
+The Dark/Light button changes the
+page and material appearance without changing the selected theme color.
+
+Base intensity adds neutral backing independently of theme tint. It uses
+`#1D1E1C` in dark mode and `#F2F2F0` in light mode. At 0% the native effect is
+unchanged; at 100% the extra backing is opaque. This is a lab-only overlay, not
+an undocumented native glass setting. Solid uses the same mode-aware base.
 
 Pin reference saves the current material settings. Switch between Live and
 Reference to compare them over the same page, with identical geometry. Changes
@@ -48,8 +65,9 @@ Keyboard shortcuts:
 Recipes and the reference persist in the lab's own preferences domain,
 `org.arcium.GlassLab`. Export recipe and Import recipe exchange JSON files.
 Copy browser tuning copies a `surface_tuning` dictionary with supported browser
-fields. The lab never writes browser profiles or settings. Text styling and
-experimental shader controls remain lab-only and are omitted from that dictionary.
+fields. The lab never writes browser profiles or settings. Text styling, base
+intensity and experimental shader controls remain lab-only and are omitted from
+that dictionary.
 
 ## What matches the browser
 
@@ -65,7 +83,7 @@ process-lifetime holder and Settings module loader; rendering methods stay intac
 | Clear | Production AppKit regular glass with guarded variant 9 and active appearance |
 | Liquid | Production public SwiftUI `Glass.regular.tint(...)` and `.glassEffect` |
 | Frosted | Production AppKit clear glass, inactive and untinted |
-| Solid | Selected tint blended over the browser's `#1D1E1C` panel base |
+| Solid | Selected tint blended over a dark or light neutral base |
 | Chromium | Current production shader equations ported to Metal/Core Image |
 
 Clear retains the saved identifier `liquid`; public Liquid uses `systemLiquid`.
@@ -84,6 +102,8 @@ They reproduce the layout and contrast problems without linking browser code.
 Floating controls and Window chrome let you try the panel materials in those
 shapes. They do not reproduce the production controls' basic/refractive shader
 selection or the browser frame's separate glow/grain composition.
+The mode-aware Solid base and optional extra neutral backing are lab experiments;
+the browser's current Solid base remains fixed dark.
 
 The Chromium preview uses the current two-image shader path:
 

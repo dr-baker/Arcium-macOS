@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum Material: String, Codable, CaseIterable, Identifiable {
     case fast, liquid, systemLiquid, frosted, glassmorphic, solid
@@ -51,10 +52,13 @@ enum Preview: String, Codable, CaseIterable, Identifiable {
 }
 
 enum Backdrop: String, Codable, CaseIterable, Identifiable {
-    case editorial, documentation, contrast
+    case editorial, documentation, contrast, image
     var id: String { rawValue }
     var title: String {
-        switch self { case .editorial: "Editorial"; case .documentation: "Documentation"; case .contrast: "Contrast test" }
+        switch self {
+        case .editorial: "Editorial"; case .documentation: "Documentation"
+        case .contrast: "Contrast test"; case .image: "Custom image"
+        }
     }
 }
 
@@ -169,36 +173,129 @@ struct LabDocument: Codable, Equatable {
     var dark = true
     var moving = false
     var windowColor = RGB("#B261E1")
+    var backgroundAssetID: String?
+    var backgroundAssetName: String?
+    // Image bytes travel with exported recipes, never with normal preferences.
+    var backgroundImageData: Data?
+    var backgroundSpeed: Double?
+    var backgroundPhase: Double?
+    var playbackSpeed: Double {
+        guard let speed = backgroundSpeed, speed.isFinite else { return 1 }
+        return min(3, max(0.25, speed))
+    }
 }
 
 @MainActor
 final class LabStore: ObservableObject {
-    @Published var document: LabDocument { didSet { save(); onChange?() } }
+    @Published var document: LabDocument { didSet { save(); configureAnimation(); onChange?() } }
+    @Published private(set) var phase: Double = 0
     @Published var status = ""
     @Published var selectedItem = 0
     @Published var panelVisible = true { didSet { onChange?() } }
     @Published var activeAppearance = 0 { didSet { onChange?() } }
     @Published var showingReference = false { didSet { onChange?() } }
     var onChange: (() -> Void)?
+    var onAnimationFrame: (() -> Void)?
     private let defaults: UserDefaults
     private let key = "lab-document-v1"
+    private var animationTimer: Timer?
+    private var lastTick: TimeInterval = 0
+    private var lastShaderFrame: TimeInterval = 0
+    private var animationSuspended = false
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         document = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(LabDocument.self, from: $0) } ?? LabDocument()
         document.recipe = document.recipe.clamped()
         document.reference = document.reference?.clamped()
         document.windowColor = document.windowColor.clamped()
+        phase = Self.validPhase(document.backgroundPhase)
+        configureAnimation()
     }
     func save() {
-        if let data = try? JSONEncoder().encode(document) { defaults.set(data, forKey: key) }
+        var saved = document
+        saved.backgroundImageData = nil
+        saved.backgroundPhase = phase
+        if let data = try? JSONEncoder().encode(saved) { defaults.set(data, forKey: key) }
     }
     var resolvedTint: RGB { document.recipe.windowTint ? document.windowColor : document.recipe.tintColor }
     var displayedRecipe: Recipe { showingReference ? document.reference ?? document.recipe : document.recipe }
     var sceneDocument: LabDocument {
         var scene = document
         scene.recipe = displayedRecipe
-        if displayedRecipe.material == .glassmorphic { scene.moving = false }
         return scene
+    }
+    static func validPhase(_ value: Double?) -> Double {
+        guard let value, value.isFinite else { return 0 }
+        return value - floor(value)
+    }
+    func setPlaying(_ playing: Bool) {
+        var next = document
+        next.backgroundPhase = phase
+        next.moving = playing
+        document = next
+    }
+    private func configureAnimation() {
+        guard document.moving && !animationSuspended else {
+            animationTimer?.invalidate(); animationTimer = nil
+            return
+        }
+        guard animationTimer == nil else { return }
+        lastTick = ProcessInfo.processInfo.systemUptime
+        let timer = Timer(timeInterval: 1.0/24, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.advanceAnimation() }
+        }
+        animationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+    private func advanceAnimation() {
+        guard document.moving else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        phase = Self.validPhase(phase + min(now-lastTick, 0.25)*document.playbackSpeed/12)
+        lastTick = now
+        // Snapshot-based shader rendering is capped separately from native
+        // backdrop animation. Both sample the exact same phase for each frame.
+        if displayedRecipe.material == .glassmorphic && panelVisible && now-lastShaderFrame >= 1.0/12 {
+            lastShaderFrame = now
+            onAnimationFrame?()
+        }
+    }
+    func stopAnimation() {
+        animationTimer?.invalidate(); animationTimer = nil
+    }
+    func suspendAnimation(_ suspended: Bool) {
+        animationSuspended = suspended
+        configureAnimation()
+    }
+    func chooseBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        let completion: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            _ = self?.importBackgroundImage(url)
+        }
+        if let window = NSApp.mainWindow {
+            guard window.attachedSheet == nil else { return }
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+        }
+    }
+    @discardableResult
+    func importBackgroundImage(_ url: URL) -> Bool {
+        guard url.isFileURL else { status = "Drop an image file."; return false }
+        do {
+            let id = try BackgroundAssets.store(file: url)
+            var next = document
+            next.backgroundAssetID = id
+            next.backgroundAssetName = url.lastPathComponent
+            next.backgroundImageData = nil
+            next.backdrop = .image
+            document = next
+            status = "Background: \(url.lastPathComponent)"
+            return true
+        } catch { status = error.localizedDescription; return false }
     }
     func reset() { showingReference = false; document.recipe = Recipe(); status = "Material reset" }
     func pin() { document.reference = document.recipe; status = "Reference saved" }
@@ -221,7 +318,10 @@ final class LabStore: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(document).write(to: url, options: .atomic)
+            var exported = document
+            exported.backgroundPhase = phase
+            exported.backgroundImageData = BackgroundAssets.data(document.backgroundAssetID)
+            try encoder.encode(exported).write(to: url, options: .atomic)
             status = "Recipe exported"
         } catch { status = "Could not export: \(error.localizedDescription)" }
     }
@@ -233,7 +333,12 @@ final class LabStore: ObservableObject {
             guard value.version == 1 else { status = "Unsupported recipe version"; return }
             value.recipe = value.recipe.clamped(); value.reference = value.reference?.clamped()
             value.windowColor = value.windowColor.clamped()
+            if let imageData = value.backgroundImageData {
+                value.backgroundAssetID = try BackgroundAssets.store(data: imageData)
+                value.backgroundImageData = nil
+            }
             showingReference = false
+            phase = Self.validPhase(value.backgroundPhase)
             document = value; panelVisible = true; status = "Recipe imported"
         } catch { status = "Could not import: \(error.localizedDescription)" }
     }
