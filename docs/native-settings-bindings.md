@@ -115,24 +115,42 @@ them and selects Custom.
 
 | Preset | Panels | Peek buttons | Peek backdrop |
 | --- | --- | --- | --- |
-| Glass | glass, 30% tint | glass | 9 pt blur, 28% dim |
-| Refractive | clear glass, 20% tint; refraction shader where Chromium draws it | refraction shader | 9 pt blur, 28% dim |
+| Glass | Liquid, 30% theme tint, shadow | glass | 9 pt blur, 28% dim |
+| Refractive | Glassmorphic | refraction shader | 9 pt blur, 28% dim |
 | Quiet | solid | glass | 4 pt blur, 50% dim |
 | Solid | solid | solid | dim only, 72% |
 
-The values are `panelGlass`, `panelTint`, `panelClear`, `panelRefractive`,
-`controlFinish` (`glass`, `refractive`, `solid`), `controlTint`, `controlEdge`,
-`scrimBlur` (0–30 pt), and `scrimDim`. Runtime parsing clamps saved values; the
-Settings bridge requires all nine with exact types.
+Panel materials:
 
-**Material** in the Command bar and tab switcher card reuses
-`arcium.appearance.command_bar` as the panel role's choice: `0` Solid, `1` Glass,
-and `2` From preset. The registered default is From preset; saved `0` and `1`
-keep their meaning, and unknown values are Solid. Because the switcher shares the
-panel role, a profile that saved Solid for the command bar also gets a solid
-switcher. Panel glass uses the window's material family and opacity with the
-panel's own tint and clarity, and without color points or grain. A solid window
-gives panels the platform's automatic glass. It never changes the window setting.
+- **Fast:** the system blur material (`NSVisualEffectView`, under-window
+  background, behind the window), SettingsUI's AppKit floor for SwiftUI's
+  ultra-thin material. It is also the fallback before macOS 26 and whenever the
+  shared resolver finds no native Liquid Glass.
+- **Liquid:** public `NSGlassEffectView` with the clear style, the tint as its
+  `tintColor`, and the panel's corner radius, always drawn in its active state.
+- **Frosted:** the same glass, always drawn in its inactive state.
+- **Glassmorphic:** Chromium's refraction shader with the switcher's original
+  values. Only the switcher can use it, inside the browser window; the command
+  bar draws Liquid.
+- **Solid:** the command panel's solid color.
+
+Active and inactive appearance follow SettingsUI's `SettingsGlassAppearanceBridge`
+on macOS 26: the four AppKit key-appearance queries are overridden once on the
+panel window's class and consult a per-window override, because AppKit observes
+these windows with KVO. Panels draw no outline. The window server shadow is off;
+**Shadow** paints a soft shadow in a transparent margin instead.
+
+The values are `panelMaterial`, `panelTint`, `panelTintColor` (`#RRGGBB`, or
+empty for the browser theme's color), `panelShadow`, `controlFinish` (`glass`,
+`refractive`, `solid`), `controlTint`, `controlEdge`, `scrimBlur` (0–30 pt), and
+`scrimDim`. Runtime parsing clamps saved values; the Settings bridge requires
+all nine with exact types.
+
+`arcium.appearance.command_bar` remains the panel role's explicit choice: `0`
+Solid, `1` Glass (the preset's glass material, or Liquid), and `2` follows the
+preset. Choosing a material in Settings stores it and sets the choice to `2`.
+Saved `0` and `1` keep their meaning, and unknown values are Solid. Panels never
+change the window's own appearance setting.
 
 Settings edits apply live. An open Peek restyles itself, and **Preview the tab
 switcher** holds the switcher open, floating near the top of the profile's

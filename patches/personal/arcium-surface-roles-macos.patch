@@ -2,29 +2,33 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -387,7 +387,51 @@ struct ArciumCommandPanelLayout: Equatab
+@@ -387,7 +387,56 @@ struct ArciumCommandPanelLayout: Equatab
      }
  }
  
 +/// Values a floating-surface preset fills in; Custom stores its own.
 +struct ArciumSurfaceTuning: Equatable {
++    static let materials = ["fast", "liquid", "frosted", "glassmorphic", "solid"]
 +    static let finishes = ["glass", "refractive", "solid"]
 +    static let maxScrimBlur = 30.0
-+    var panelGlass = true
++    var panelMaterial = "liquid"
 +    var panelTint = 0.3
-+    var panelOpacity = 0.95
-+    var panelClear = false
-+    var panelRefractive = false
-+    var panelEdge = 0.0
++    /// "#RRGGBB", or empty to follow the browser theme.
++    var panelTintColor = ""
++    var panelShadow = true
 +    var controlFinish = "glass"
 +    var controlTint = 0.55
 +    var controlEdge = 0.38
 +    var scrimBlur = 9.0
 +    var scrimDim = 0.28
 +    init(_ dictionary: [String: Any] = [:]) {
-+        panelGlass = strictBoolean(dictionary["panelGlass"]) ?? panelGlass
-+        panelClear = strictBoolean(dictionary["panelClear"]) ?? panelClear
-+        panelRefractive = strictBoolean(dictionary["panelRefractive"]) ?? panelRefractive
++        if let value = dictionary["panelMaterial"] as? String, Self.materials.contains(value) {
++            panelMaterial = value
++        }
++        if let value = dictionary["panelTintColor"] as? String, Self.isTintColor(value) {
++            panelTintColor = value
++        }
++        panelShadow = strictBoolean(dictionary["panelShadow"]) ?? panelShadow
 +        if let value = dictionary["controlFinish"] as? String, Self.finishes.contains(value) {
 +            controlFinish = value
 +        }
@@ -33,17 +37,18 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            return value
 +        }
 +        panelTint = unit("panelTint", panelTint)
-+        panelOpacity = unit("panelOpacity", panelOpacity)
-+        panelEdge = unit("panelEdge", panelEdge)
 +        controlTint = unit("controlTint", controlTint)
 +        controlEdge = unit("controlEdge", controlEdge)
 +        scrimBlur = unit("scrimBlur", scrimBlur, max: Self.maxScrimBlur)
 +        scrimDim = unit("scrimDim", scrimDim)
 +    }
++    static func isTintColor(_ value: String) -> Bool {
++        value.isEmpty || (value.count == 7 && value.first == "#"
++                          && value.dropFirst().allSatisfy(\.isHexDigit))
++    }
 +    var dictionary: [String: Any] {
-+        ["panelGlass": panelGlass, "panelTint": panelTint, "panelOpacity": panelOpacity,
-+         "panelClear": panelClear,
-+         "panelRefractive": panelRefractive, "panelEdge": panelEdge,
++        ["panelMaterial": panelMaterial, "panelTint": panelTint, "panelTintColor": panelTintColor,
++         "panelShadow": panelShadow,
 +         "controlFinish": controlFinish, "controlTint": controlTint, "controlEdge": controlEdge,
 +         "scrimBlur": scrimBlur, "scrimDim": scrimDim]
 +    }
@@ -54,7 +59,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      static let defaultCollapsedSidebarStyleOptions = [
          ArciumChoice(value: 0, label: "Icon rail"),
          ArciumChoice(value: 1, label: "Fully hidden (Arc)")
-@@ -431,6 +475,17 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -431,6 +480,26 @@ struct ArciumAppearanceSnapshot: Equatab
      var canEditCommandBarAppearance: Bool {
          commandBarAppearanceAvailable && !commandBarAppearanceManaged
      }
@@ -64,6 +69,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    var canEditSurfaceSet: Bool {
 +        surfaceSetAvailable && !surfaceSetManaged
 +    }
++    /// The panel material the browser draws, after the command bar's explicit
++    /// Solid or Glass choice.
++    var effectivePanelMaterial: String {
++        switch commandBarAppearance {
++        case 0: "solid"
++        case 1: surfaceTuning.panelMaterial == "solid" ? "liquid" : surfaceTuning.panelMaterial
++        default: surfaceTuning.panelMaterial
++        }
++    }
 +    var surfaceTuning = ArciumSurfaceTuning()
 +    var surfaceTuningAvailable = false
 +    var canEditSurfaceTuning: Bool {
@@ -72,7 +86,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var collapsedSidebarStyle = 0
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
-@@ -457,7 +512,17 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -457,7 +526,17 @@ struct ArciumAppearanceSnapshot: Equatab
          commandPanelLayout = ArciumCommandPanelLayout(dictionaryValues(dictionary["commandPanelLayout"]))
          commandPanelLayoutAvailable = strictBoolean(dictionary["commandPanelLayoutAvailable"]) ?? false
          commandPanelLayoutManaged = strictBoolean(dictionary["commandPanelLayoutManaged"]) ?? false
@@ -91,7 +105,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
          commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
          collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
-@@ -882,10 +947,27 @@ final class ArciumSettingsStore: Observa
+@@ -882,10 +961,39 @@ final class ArciumSettingsStore: Observa
  
      func setCommandBarAppearance(_ appearance: Int) {
          guard snapshot.appearance.canEditCommandBarAppearance,
@@ -100,6 +114,18 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          settingChanged(key: "command_bar_appearance", value: appearance)
      }
  
++    /// Picks the panel material; the command bar's explicit choice yields to it.
++    func setPanelMaterial(_ material: String) {
++        guard snapshot.appearance.canEditSurfaceTuning,
++              ArciumSurfaceTuning.materials.contains(material) else { return }
++        var tuning = snapshot.appearance.surfaceTuning
++        tuning.panelMaterial = material
++        setSurfaceTuning(tuning)
++        if snapshot.appearance.commandBarAppearance != 2 {
++            setCommandBarAppearance(2)
++        }
++    }
++
 +    /// Saves every value and switches the preset to Custom.
 +    func setSurfaceTuning(_ tuning: ArciumSurfaceTuning) {
 +        guard snapshot.appearance.canEditSurfaceTuning else { return }
@@ -124,11 +150,34 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -500,6 +500,17 @@ private struct TabsAndSpacesSettingsPage
+@@ -500,6 +500,40 @@ private struct TabsAndSpacesSettingsPage
  }
  
  private struct AppearanceSettingsPage: View {
 +    private static let percent: (Double) -> String = { "\(Int(($0 * 100).rounded()))%" }
++
++    private static func panelMaterialDescription(_ material: String) -> String {
++        switch material {
++        case "fast": "The \u{2318}T command bar and Ctrl+Tab switcher. Fast: the system blur material, with no live refraction."
++        case "liquid": "The \u{2318}T command bar and Ctrl+Tab switcher. Liquid: clear Liquid Glass, always lit as if active."
++        case "frosted": "The \u{2318}T command bar and Ctrl+Tab switcher. Frosted: clear Liquid Glass in its quieter inactive look."
++        case "glassmorphic": "The \u{2318}T command bar and Ctrl+Tab switcher. Glassmorphic: the switcher's original refraction shader; the command bar uses Liquid."
++        default: "The \u{2318}T command bar and Ctrl+Tab switcher, drawn as a solid panel."
++        }
++    }
++
++    private static func color(hex: String) -> Color {
++        guard hex.count == 7, let value = UInt32(hex.dropFirst(), radix: 16) else { return .black }
++        return Color(.sRGB, red: Double((value >> 16) & 0xFF) / 255,
++                     green: Double((value >> 8) & 0xFF) / 255, blue: Double(value & 0xFF) / 255)
++    }
++
++    private static func hex(_ color: Color) -> String {
++        guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return "#1D1E1C" }
++        func byte(_ component: CGFloat) -> Int { Int((min(max(component, 0), 1) * 255).rounded()) }
++        return String(format: "#%02X%02X%02X", byte(rgb.redComponent), byte(rgb.greenComponent),
++                      byte(rgb.blueComponent))
++    }
 +
 +    private func surfaceTuningBinding<Value>(_ key: WritableKeyPath<ArciumSurfaceTuning, Value>) -> Binding<Value> {
 +        Binding(get: { store.snapshot.appearance.surfaceTuning[keyPath: key] },
@@ -142,7 +191,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      private func commandLayoutBinding<Value>(_ key: WritableKeyPath<ArciumCommandPanelLayout, Value>) -> Binding<Value> {
          Binding(get: { store.snapshot.appearance.commandPanelLayout[keyPath: key] },
                  set: { value in
-@@ -512,6 +523,7 @@ private struct AppearanceSettingsPage: V
+@@ -512,6 +546,7 @@ private struct AppearanceSettingsPage: V
      @ObservedObject var store: ArciumSettingsStore
      @Environment(\.settingsTheme) private var theme
      @State private var backgroundMode: BackgroundMode = .everyday
@@ -150,12 +199,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      private enum BackgroundMode: String, CaseIterable {
          case everyday = "Everyday"
-@@ -571,15 +583,87 @@ private struct AppearanceSettingsPage: V
+@@ -571,14 +606,103 @@ private struct AppearanceSettingsPage: V
              }
              backgroundEditor
  
--            SSectionCard(title: "Command bar") {
--                SPicker("Command bar appearance", selection: Binding(
 +            SSectionCard(title: "Floating surfaces") {
 +                SPicker("Preset", selection: Binding(
 +                    get: { store.snapshot.appearance.surfaceSet },
@@ -181,32 +228,47 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            }
 +
 +            SSectionCard(title: "Command bar and tab switcher") {
-+                SPicker("Material", selection: Binding(
-                     get: { store.snapshot.appearance.commandBarAppearance },
-                     set: { store.setCommandBarAppearance($0) }
--                ), options: [(value: 0, label: "Solid"), (value: 1, label: "Glass")],
--                    description: "Glass uses your saved window background style.")
-+                ), options: [(value: 2, label: "From preset"), (value: 1, label: "Glass"), (value: 0, label: "Solid")],
-+                    description: "The \u{2318}T command bar and the Ctrl+Tab switcher. Glass uses your window's material, without its colors or grain.")
-                 .disabled(!store.snapshot.appearance.canEditCommandBarAppearance)
-                 .accessibilityIdentifier("command-bar-appearance")
-                 Group {
++                Group {
++                    SPicker("Material", selection: Binding(
++                        get: { store.snapshot.appearance.effectivePanelMaterial },
++                        set: { store.setPanelMaterial($0) }
++                    ), options: [
++                        (value: "fast", label: "Fast"), (value: "liquid", label: "Liquid"),
++                        (value: "frosted", label: "Frosted"), (value: "glassmorphic", label: "Glassmorphic"),
++                        (value: "solid", label: "Solid")],
++                        description: Self.panelMaterialDescription(store.snapshot.appearance.effectivePanelMaterial))
++                        .accessibilityIdentifier("command-bar-appearance")
 +                    SSlider("Tint", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.05,
 +                            format: Self.percent,
-+                            help: SHelp(description: "How strongly your theme color covers the glass. 100% is opaque."),
++                            help: SHelp(description: "How strongly the tint color covers the glass. 100% is opaque."),
 +                            commitMode: .debounced(milliseconds: 80))
 +                        .accessibilityIdentifier("surface-panel-tint")
-+                    SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.05,
-+                            format: Self.percent,
-+                            help: SHelp(description: "How much of the glass itself shows beneath the tint. Lower values let more of the page through."),
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-panel-opacity")
-+                    SToggle("Clear glass", isOn: surfaceTuningBinding(\.panelClear),
-+                            description: "Less frosting, so more of the page shows through.")
-+                    SSlider("Border", value: surfaceTuningBinding(\.panelEdge), range: 0...1, step: 0.05,
-+                            format: { $0 == 0 ? "Off" : "\(Int(($0 * 100).rounded()))%" },
-+                            commitMode: .debounced(milliseconds: 80))
-+                        .accessibilityIdentifier("surface-panel-edge")
++                    SToggle("Theme tint", isOn: Binding(
++                        get: { store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty },
++                        set: { useTheme in
++                            var tuning = store.snapshot.appearance.surfaceTuning
++                            tuning.panelTintColor = useTheme ? "" : "#1D1E1C"
++                            store.setSurfaceTuning(tuning)
++                        }
++                    ), description: "Tint with the browser theme's color, or choose your own.")
++                        .accessibilityIdentifier("surface-panel-theme-tint")
++                    if !store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty {
++                        SLabeledControl("Tint color") {
++                            ColorPicker("Tint color", selection: Binding(
++                                get: { Self.color(hex: store.snapshot.appearance.surfaceTuning.panelTintColor) },
++                                set: { color in
++                                    var tuning = store.snapshot.appearance.surfaceTuning
++                                    tuning.panelTintColor = Self.hex(color)
++                                    store.setSurfaceTuning(tuning)
++                                }
++                            ), supportsOpacity: false)
++                            .labelsHidden()
++                        }
++                        .accessibilityIdentifier("surface-panel-tint-color")
++                    }
++                    SToggle("Shadow", isOn: surfaceTuningBinding(\.panelShadow),
++                            description: "A soft shadow around the panel.")
++                        .accessibilityIdentifier("surface-panel-shadow")
 +                }
 +                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 +            }
@@ -237,11 +299,17 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 +            }
 +
-+            SSectionCard(title: "Command bar") {
-+                Group {
+             SSectionCard(title: "Command bar") {
+-                SPicker("Command bar appearance", selection: Binding(
+-                    get: { store.snapshot.appearance.commandBarAppearance },
+-                    set: { store.setCommandBarAppearance($0) }
+-                ), options: [(value: 0, label: "Solid"), (value: 1, label: "Glass")],
+-                    description: "Glass uses your saved window background style.")
+-                .disabled(!store.snapshot.appearance.canEditCommandBarAppearance)
+-                .accessibilityIdentifier("command-bar-appearance")
+                 Group {
                      SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
                          (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
-                     SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
@@ -255,7 +323,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
              Double.infinity, -Double.infinity, Double.nan,
              Double.greatestFiniteMagnitude, NSNull()
          ]
-@@ -1207,6 +1207,80 @@ final class ArciumSettingsUIContractTest
+@@ -1207,6 +1207,89 @@ final class ArciumSettingsUIContractTest
          for value: Any in [0, 0.0, NSNumber(value: 0)] {
              XCTAssertEqual(ArciumAppearanceSnapshot(["commandBarAppearance": value]).commandBarAppearance, 0)
          }
@@ -268,35 +336,44 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +    func testSurfaceTuningParsesSafelyAndSendsCompleteValues() {
 +        let defaults = ArciumSurfaceTuning()
 +        XCTAssertEqual(ArciumSurfaceTuning(["scrimBlur": 99, "panelTint": -1, "controlFinish": "metal",
-+                                            "panelGlass": 1]), defaults)
-+        let parsed = ArciumSurfaceTuning(["scrimBlur": 12, "controlFinish": "refractive", "panelClear": true])
++                                            "panelMaterial": "ribbon", "panelTintColor": "red",
++                                            "panelShadow": 1]), defaults)
++        let parsed = ArciumSurfaceTuning(["scrimBlur": 12, "panelMaterial": "frosted",
++                                          "panelTintColor": "#12ABEF", "panelShadow": false])
 +        XCTAssertEqual(parsed.scrimBlur, 12)
-+        XCTAssertEqual(parsed.controlFinish, "refractive")
-+        XCTAssertTrue(parsed.panelClear)
++        XCTAssertEqual(parsed.panelMaterial, "frosted")
++        XCTAssertEqual(parsed.panelTintColor, "#12ABEF")
++        XCTAssertFalse(parsed.panelShadow)
 +        XCTAssertEqual(ArciumSurfaceTuning(parsed.dictionary), parsed)
 +
 +        let delegate = TestDelegate()
 +        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
 +            "surfaceSet": "glass", "surfaceSetAvailable": true,
++            "commandBarAppearance": 0, "commandBarAppearanceAvailable": true,
 +            "surfaceTuning": parsed.dictionary, "surfaceTuningAvailable": true
 +        ]], delegate: delegate)
++        XCTAssertEqual(store.snapshot.appearance.effectivePanelMaterial, "solid")
 +        var edited = store.snapshot.appearance.surfaceTuning
 +        edited.scrimDim = 0.5
 +        store.setSurfaceTuning(edited)
 +        store.setSurfacePreview(true)
-+        XCTAssertEqual(delegate.settings.map(\.key), ["surface_tuning", "surface_preview"])
++        store.setPanelMaterial("liquid")
++        store.setPanelMaterial("ribbon")
++        XCTAssertEqual(delegate.settings.map(\.key),
++                       ["surface_tuning", "surface_preview", "surface_tuning", "command_bar_appearance"])
 +        let sent = delegate.settings.first?.value as? [String: Any] ?? [:]
-+        XCTAssertEqual(sent.count, 11)
-+        XCTAssertEqual(sent["panelOpacity"] as? Double, 0.95)
-+        XCTAssertEqual(sent["panelEdge"] as? Double, 0)
++        XCTAssertEqual(sent.count, 9)
 +        XCTAssertEqual(ArciumSurfaceTuning(sent), edited)
++        XCTAssertEqual((delegate.settings[2].value as? [String: Any])?["panelMaterial"] as? String, "liquid")
++        XCTAssertEqual(delegate.settings[3].value as? Int, 2)
 +
 +        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
 +            "surfaceSet": "glass", "surfaceSetAvailable": true, "surfaceSetManaged": true,
 +            "surfaceTuningAvailable": true
 +        ]], delegate: delegate)
 +        managed.setSurfaceTuning(edited)
-+        XCTAssertEqual(delegate.settings.count, 2)
++        managed.setPanelMaterial("fast")
++        XCTAssertEqual(delegate.settings.count, 4)
 +    }
 +
 +    @MainActor
@@ -453,3 +530,306 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    }
    if ([key isEqualToString:kKeyChromeUIScale]) {
      if (GetIntegerObject(value, &integer_value) &&
+Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
++++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
+@@ -6,20 +6,199 @@
+ 
+ #import <Cocoa/Cocoa.h>
+ #import <QuartzCore/QuartzCore.h>
++#include <objc/runtime.h>
+ 
+ #include <algorithm>
+ #include <optional>
++#include <set>
+ #include <utility>
+ 
++#include "base/no_destructor.h"
++
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/views/helium/glass_surface.h"
++#include "chrome/browser/ui/views/helium/surface_style.h"
+ #import "chrome/browser/ui/views/helium/glass_surface_mac.h"
++#import "components/remote_cocoa/app_shim/native_window_background_view.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/views/widget/widget.h"
+ 
++// A panel's glass: clear native Liquid Glass on macOS 26, or the system blur
++// material for Fast and on older systems. It never takes events, and the
++// marker protocol keeps remote_cocoa from sorting it above Views content.
++@interface ArciumPanelMaterialView : NSView <NativeWindowBackgroundView>
++- (void)applyMaterial:(helium::PanelMaterial)material
++                 tint:(NSColor*)tint
++         cornerRadius:(CGFloat)cornerRadius;
++@end
++
++@implementation ArciumPanelMaterialView {
++  NSView* __strong _effect;
++}
++
++- (NSView*)hitTest:(NSPoint)point {
++  return nil;
++}
++
++- (void)applyMaterial:(helium::PanelMaterial)material
++                 tint:(NSColor*)tint
++         cornerRadius:(CGFloat)cornerRadius {
++  if (@available(macOS 26.0, *)) {
++    if (material != helium::PanelMaterial::kFast) {
++      [self applyGlassWithTint:tint cornerRadius:cornerRadius];
++      return;
++    }
++  }
++  [self applyBlurWithTint:tint cornerRadius:cornerRadius];
++}
++
++- (void)applyGlassWithTint:(NSColor*)tint
++              cornerRadius:(CGFloat)cornerRadius API_AVAILABLE(macos(26.0)) {
++  if (![_effect isKindOfClass:[NSGlassEffectView class]]) {
++    [self replaceEffect:[[NSGlassEffectView alloc] initWithFrame:self.bounds]];
++  }
++  NSGlassEffectView* glass = (NSGlassEffectView*)_effect;
++  glass.style = NSGlassEffectViewStyleClear;
++  glass.tintColor = tint;
++  glass.cornerRadius = cornerRadius;
++}
++
++- (void)applyBlurWithTint:(NSColor*)tint cornerRadius:(CGFloat)cornerRadius {
++  if (![_effect isKindOfClass:[NSVisualEffectView class]]) {
++    NSVisualEffectView* blur =
++        [[NSVisualEffectView alloc] initWithFrame:self.bounds];
++    // SettingsUI's AppKit floor for SwiftUI's ultra-thin material.
++    blur.material = NSVisualEffectMaterialUnderWindowBackground;
++    blur.blendingMode = NSVisualEffectBlendingModeBehindWindow;
++    blur.state = NSVisualEffectStateActive;
++    blur.wantsLayer = YES;
++    blur.layer.cornerCurve = kCACornerCurveContinuous;
++    blur.layer.masksToBounds = YES;
++    [self replaceEffect:blur];
++  }
++  _effect.layer.backgroundColor = tint.CGColor;
++  _effect.layer.cornerRadius = cornerRadius;
++}
++
++- (void)replaceEffect:(NSView*)effect {
++  [_effect removeFromSuperview];
++  _effect = effect;
++  _effect.frame = self.bounds;
++  _effect.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  [self addSubview:_effect];
++}
++
++@end
++
+ namespace arcium {
+ namespace {
+ 
++// Port of SettingsUI's SettingsGlassAppearanceBridge. Native glass draws its
++// active or inactive look from the window's key appearance; NSGlassEffectView
++// has no `state` like NSVisualEffectView. Chromium owns these windows, and
++// AppKit observes them with KVO, so instead of a window subclass the four
++// queries are overridden once on the window's class and consult a per-window
++// override. Windows without one keep AppKit's answer. Validated on macOS 26.
++enum class ForcedAppearance { kFollow, kActive, kInactive };
++
++constexpr const char* kAppearanceSelectors[] = {
++    "hasKeyAppearance", "_hasKeyAppearance", "_hasActiveAppearance",
++    "_hasActiveAppearanceIgnoringKeyFocus"};
++const char kForcedAppearanceKey = 0;
++
++bool ForcedAppearanceSupported() {
++  static const bool supported = [] {
++    if (NSProcessInfo.processInfo.operatingSystemVersion.majorVersion != 26) {
++      return false;
++    }
++    for (const char* name : kAppearanceSelectors) {
++      Method method =
++          class_getInstanceMethod([NSWindow class], sel_registerName(name));
++      // Each query returns BOOL and takes no arguments.
++      if (!method || method_getNumberOfArguments(method) != 2) {
++        return false;
++      }
++      char result[8] = {};
++      method_getReturnType(method, result, sizeof(result));
++      if (result[0] != 'B' && result[0] != 'c') {
++        return false;
++      }
++    }
++    return true;
++  }();
++  return supported;
++}
++
++void InstallAppearanceOverrides(Class window_class) {
++  static base::NoDestructor<std::set<Class>> installed;
++  if (!installed->insert(window_class).second) {
++    return;
++  }
++  for (const char* name : kAppearanceSelectors) {
++    SEL selector = sel_registerName(name);
++    Method method = class_getInstanceMethod(window_class, selector);
++    using Query = BOOL (*)(id, SEL);
++    const Query original =
++        reinterpret_cast<Query>(method_getImplementation(method));
++    IMP forced = imp_implementationWithBlock(^BOOL(id window) {
++      if (NSNumber* value =
++              objc_getAssociatedObject(window, &kForcedAppearanceKey)) {
++        return value.boolValue;
++      }
++      return original(window, selector);
++    });
++    if (!class_addMethod(window_class, selector, forced,
++                         method_getTypeEncoding(method))) {
++      // The class implements the query itself; wrap that implementation.
++      method_setImplementation(method, forced);
++    }
++  }
++}
++
++void InvalidateAppearance(NSView* view) {
++  [view viewDidChangeEffectiveAppearance];
++  view.needsDisplay = YES;
++  for (NSView* child in view.subviews) {
++    InvalidateAppearance(child);
++  }
++}
++
++void SetForcedAppearance(NSWindow* window, ForcedAppearance appearance) {
++  if (!window || !ForcedAppearanceSupported()) {
++    return;
++  }
++  NSNumber* current = objc_getAssociatedObject(window, &kForcedAppearanceKey);
++  NSNumber* wanted =
++      appearance == ForcedAppearance::kFollow
++          ? nil
++          : @(appearance == ForcedAppearance::kActive);
++  if (current == wanted || [current isEqual:wanted]) {
++    return;
++  }
++  // -class reports the real class beneath any KVO subclass.
++  InstallAppearanceOverrides([window class]);
++  objc_setAssociatedObject(window, &kForcedAppearanceKey, wanted,
++                           OBJC_ASSOCIATION_RETAIN_NONATOMIC);
++  // As SettingsGlassAppearanceBridge.refresh: redraw for the new appearance.
++  if (window.contentView) {
++    InvalidateAppearance(window.contentView);
++  }
++  [window invalidateShadow];
++}
++
++ForcedAppearance AppearanceFor(helium::PanelMaterial material) {
++  switch (material) {
++    case helium::PanelMaterial::kLiquid:
++    case helium::PanelMaterial::kGlassmorphic:
++      return ForcedAppearance::kActive;
++    case helium::PanelMaterial::kFrosted:
++      return ForcedAppearance::kInactive;
++    case helium::PanelMaterial::kSolid:
++    case helium::PanelMaterial::kFast:
++      return ForcedAppearance::kFollow;
++  }
++}
++
+ CGMutablePathRef ContourToCGPath(const SkPath& contour,
+                                  const gfx::Rect& bounds,
+                                  CGFloat height,
+@@ -95,6 +274,10 @@ class CommandBarNativeBackgroundMac : pu
+     [background_view_ removeFromSuperview];
+   }
+ 
++  void SetPanelStyle(const helium::SurfaceStyle& style) override {
++    style_ = style;
++  }
++
+   void SetContour(const SkPath& contour) override {
+     if (contour_ == contour) {
+       return;
+@@ -116,11 +299,17 @@ class CommandBarNativeBackgroundMac : pu
+             configuration, helium::GetRequestedGlassBackend(),
+             availability.native_liquid_glass, availability.native_material,
+             availability.reduce_transparency);
+-    if (!requested || !resolution.paints_chrome_transparent || !content_view ||
+-        bounds.IsEmpty()) {
++    // Panels paint their own soft shadow; the window server's shadow has a
++    // hard rim that shows through clear glass.
++    if (window.hasShadow) {
++      window.hasShadow = NO;
++    }
++    if (!requested || !resolution.uses_translucent_native_base ||
++        !content_view || bounds.IsEmpty()) {
+       [background_view_ removeFromSuperview];
+       background_view_ = nil;
+       last_configuration_.reset();
++      SetForcedAppearance(window, ForcedAppearance::kFollow);
+       return false;
+     }
+ 
+@@ -141,7 +330,7 @@ class CommandBarNativeBackgroundMac : pu
+         last_configuration_ == configuration &&
+         last_active_material_ == resolution.active && last_bounds_ == bounds &&
+         last_corner_radii_ == corner_radii && last_color_mode_ == color_mode &&
+-        last_theme_color_ == theme_color &&
++        last_theme_color_ == theme_color && last_style_ == style_ &&
+         !(contour_changed_ && contour_.isEmpty())) {
+       if (contour_changed_ && !contour_.isEmpty()) {
+         CGMutablePathRef path =
+@@ -157,21 +346,30 @@ class CommandBarNativeBackgroundMac : pu
+       return true;
+     }
+     if (!background_view_) {
+-      background_view_ = helium::CreateNativeGlassBackgroundView(
+-          frame, color_mode, theme_color, configuration, resolution);
+-      if (!background_view_) {
+-        return false;
+-      }
+-      // Match the existing browser native-frame integration. This view is a
+-      // background effect, so remote_cocoa leaves it below Views content.
++      background_view_ = [[ArciumPanelMaterialView alloc] initWithFrame:frame];
++      // A background effect, so remote_cocoa leaves it below Views content.
+       [content_view addSubview:background_view_
+                     positioned:NSWindowBelow
+                     relativeTo:nil];
+-    } else {
+-      helium::ApplyNativeGlassBackgroundView(background_view_, frame,
+-                                             color_mode, theme_color,
+-                                             configuration, resolution);
+     }
++    background_view_.frame = frame;
++    // Liquid needs native glass; when the resolver falls back, use the blur.
++    const helium::PanelMaterial material =
++        resolution.active == helium::GlassSurfaceMaterial::kLiquidGlass
++            ? style_.panel_material
++            : helium::PanelMaterial::kFast;
++    const SkColor tint = style_.panel_tint_color.value_or(theme_color);
++    [background_view_
++        applyMaterial:material
++                 tint:[NSColor colorWithSRGBRed:SkColorGetR(tint) / 255.0
++                                          green:SkColorGetG(tint) / 255.0
++                                           blue:SkColorGetB(tint) / 255.0
++                                          alpha:style_.panel_tint]
++         cornerRadius:std::max({corner_radii.upper_left(),
++                                corner_radii.upper_right(),
++                                corner_radii.lower_left(),
++                                corner_radii.lower_right()})];
++    SetForcedAppearance(window, AppearanceFor(material));
+     background_view_.wantsLayer = YES;
+     // The results top edge is square below the search-bar cutout. Preserve
+     // each painted corner rather than imposing a second rounded silhouette.
+@@ -229,12 +427,15 @@ class CommandBarNativeBackgroundMac : pu
+     last_corner_radii_ = corner_radii;
+     last_color_mode_ = color_mode;
+     last_theme_color_ = theme_color;
++    last_style_ = style_;
+     return true;
+   }
+ 
+  private:
+   raw_ptr<views::Widget> widget_;
+-  NSView* __strong background_view_ = nil;
++  ArciumPanelMaterialView* __strong background_view_ = nil;
++  helium::SurfaceStyle style_;
++  std::optional<helium::SurfaceStyle> last_style_;
+   CAShapeLayer* __strong mask_ = nil;
+   SkPath contour_;
+   bool contour_changed_ = false;
