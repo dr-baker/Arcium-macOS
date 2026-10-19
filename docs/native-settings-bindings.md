@@ -30,7 +30,7 @@ implementation history (on the `archive/dated-docs-2026-10-11` branch).
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
 | Floating surface preset and values | `arcium.appearance.surface_set` / `helium::kArciumSurfaceSetPref`; original profile string, default `glass` (`refractive`, `quiet`, `solid`, `custom`); `arcium.appearance.surface_tuning` / `helium::kArciumSurfaceTuningPref`, the Custom values | Resolved by `helium::ResolveSurfaceStyle` for panels, controls, and scrims. See [Floating surfaces](#floating-surfaces). |
-| Panels | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `2` for Automatic, `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice, the surface style, and the browser glass dictionary for the command bar, its results, and the native switcher window. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
+| Text surface override | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `2` for Automatic, `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice, the surface style, and the browser glass dictionary for the command bar, its results, and floating controls. Containers resolve their own group independently. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
 | Show Home / Back / Forward / Reload buttons | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`; profile | `ToolbarView` binds each pref and updates the corresponding button visibility (`chrome/browser/ui/views/toolbar/toolbar_view.cc:725-757,2327-2346`). |
 | Show profile / Extensions / menu / media controls | `prefs::kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton`; profile | `ToolbarView` binds each pref and updates the matching view/controller (`toolbar_view.cc:769-806,2348-2365`). Extensions has an additional pref/command-line visibility gate (`chrome/browser/ui/views/extensions/extensions_toolbar_desktop.cc:478-483,1002-1010`); avatar is intentionally always visible for incognito/guest (`toolbar_view.cc:774-780`). |
@@ -103,114 +103,85 @@ glow. With effects off, placement remains saved for the next enabled render.
 
 ## Floating surfaces
 
-Floating surfaces are styled by role, not by feature. Core owns the roles and
-their resolution in `surface_style.{h,cc}`; each surface keeps its own corner
-radius and geometry.
+Core resolves surface groups in `surface_style.{h,cc}`. Appearance provides
+Material, **Tint Intensity**, and **Opacity** for each group:
 
-- **Panels:** the command bar, its results, and the Ctrl+Tab switcher.
-- **Controls:** floating buttons over page content, such as Peek's actions.
-- **Scrims:** the backdrop behind a modal surface, such as Peek's source page.
+| Group | Surfaces | Glass preset defaults |
+| --- | --- | --- |
+| Text surfaces | Command bar, its results, floating controls including Peek actions | Liquid, 40% Tint Intensity, 5% Opacity |
+| Containers | Ctrl+Tab switcher and Peek card | Clear, 60% Tint Intensity, 20% Opacity |
 
-**Preset** (`arcium.appearance.surface_set`, default `glass`) fills in every
-role at once. **Custom** (`custom`) uses the values saved in
-`arcium.appearance.surface_tuning`; changing any value in Settings saves all of
-them and selects Custom.
+Opacity adds neutral backing for the owning window's light or dark mode. It
+stays independent of the theme color and Tint Intensity. Solid is always opaque;
+its two values blend the theme tint with that neutral base. The window editor
+and Peek backdrop remain separate. **Shadows** applies to both surface groups.
 
-| Preset | Panels | Peek buttons | Peek backdrop |
+**Preset** (`arcium.appearance.surface_set`, default `glass`) fills in both
+groups and the Peek backdrop. Editing a value saves the complete tuning and
+selects Custom in `arcium.appearance.surface_tuning`.
+
+| Preset | Text surfaces | Containers | Peek backdrop |
 | --- | --- | --- | --- |
-| Glass | Liquid, 30% theme tint, shadow | glass | 9 pt blur, 28% dim |
-| Refractive | Chromium (glassmorphic) | refraction shader | 9 pt blur, 28% dim |
-| Quiet | solid | glass | 4 pt blur, 50% dim |
-| Solid | solid | solid | dim only, 72% |
+| Glass | Liquid | Clear | 9 pt blur, 28% dim |
+| Refractive | Chromium refraction; command bar uses Liquid | Chromium refraction | 9 pt blur, 28% dim |
+| Quiet | Flat | Solid | 4 pt blur, 50% dim |
+| Solid | Solid | Solid | Dim only, 72% |
 
-Panel materials:
+The [standalone Glass Lab](../devutils/glass-lab/README.md) compares material
+rendering without rebuilding Chromium. Its experimental controls are independent
+of production preferences.
 
-The [standalone Glass Lab](../devutils/glass-lab/README.md) compares these
-materials without rebuilding Chromium. It extracts the native panel renderers
-from the product patch and provides a Metal preview of the Chromium shader.
-
-- **Fast:** the system blur material (`NSVisualEffectView`, under-window
-  background, behind the window), SettingsUI's AppKit floor for SwiftUI's
-  ultra-thin material. It is also the fallback before macOS 26 and whenever the
-  shared resolver finds no native Liquid Glass.
-- **Clear:** the existing `NSGlassEffectView` with the regular style and experimental private
-  `set_variant:9`, the tint as its `tintColor`, and the panel's corner radius,
-  always drawn in its active state. The setter's ABI is checked before calling;
+- **Flat:** AppKit's `NSVisualEffectView` blur, also the fallback when native
+  Liquid Glass is unavailable. Its tint is a separate overlay above the blur.
+- **Clear:** `NSGlassEffectView` with regular style and experimental private
+  `set_variant:9`, drawn active. The setter's ABI is checked before calling;
   unavailable variants keep regular glass.
 - **Liquid:** public SwiftUI `Glass.regular.tint(...)` and `.glassEffect`, hosted
-  in a noninteractive `NSHostingView`. The selected tint's RGB and alpha pass
-  through to `Glass.tint`. It follows the window's appearance and uses no private
-  glass variant. The packaged SwiftUI module loads even before Settings opens.
-- **Frosted:** untinted clear native glass, always drawn in its inactive state.
-  The material tint strength is zero; the Space contrast floor remains above
-  the material so text stays readable.
-- **Chromium (glassmorphic):** Chromium's refraction shader with the switcher's
-  original refraction settings and the chosen panel tint. Only the switcher can
-  use it, inside the browser window; the command bar draws Liquid.
-- **Solid:** the opaque panel role from the Space palette, with paired text
-  and selection colors.
+  in a noninteractive `NSHostingView`. Tint RGB and alpha pass to `Glass.tint`.
+  The packaged SwiftUI module loads before Settings opens.
+- **Chromium (glassmorphic):** Chromium's refraction shader. Containers and
+  embedded controls use it; the command bar uses Liquid. The container Blur
+  control adds 0–30 pt of Gaussian blur before refraction, default 9 pt.
+- **Solid:** an opaque blend of the Space panel tint and neutral light/dark base.
 
-Fast paints its tint in a separate view above AppKit's blur. AppKit owns the
-effect's own backing layers, so their background color is not used for tint.
+Frosted is removed from the choices. Saved `frosted` values resolve to Clear.
+Flat retains the saved identifier `fast` and also accepts `flat`. Clear retains
+`liquid`; public SwiftUI Liquid uses `systemLiquid`.
 
-Clear and Frosted's active and inactive appearance follow SettingsUI's `SettingsGlassAppearanceBridge`
-on macOS 26: the four AppKit key-appearance queries are overridden once on the
-panel window's class and consult a per-window override, because AppKit observes
-these windows with KVO. Panels draw no outline. The window server shadow is off;
-**Shadow** paints a soft shadow in a transparent margin instead.
+Container fields are `panelMaterial`, `panelTint`, `panelOpacity`, and
+`panelBlur`. Text fields are `textMaterial`, `textTint`, and `textOpacity`.
+Shared fields are `panelShadow`, `scrimBlur`, and `scrimDim`. Legacy
+`panelTintColor`, `controlFinish`, `controlTint`, and `controlEdge` stay in the
+schema for compatibility. New snapshots contain all fourteen fields. Strict
+writes accept the original nine required fields, optional `panelBlur`, and the
+four new fields; older dictionaries receive the new group defaults. Runtime
+reads clamp finite numeric values; strict writes reject invalid values.
 
-The stored values are `panelMaterial`, `panelTint`, `panelBlur`, legacy
-`panelTintColor`, `panelShadow`, `controlFinish` (`glass`,
-`refractive`, `solid`), `controlTint`, `controlEdge`, `scrimBlur` (0–30 pt), and
-`scrimDim`. Runtime parsing clamps saved values; the Settings bridge requires
-the original nine with exact types and accepts optional `panelBlur` for older
-clients. New snapshots include all ten.
+Tint colors come from the owning Space palette. **Panels saturation** changes
+their chroma. Legacy `panelTintColor` does not override the resolved Space color.
+The new neutral backing replaces the former extra native-panel fill, so Opacity
+is applied once above the selected material.
 
-Panel colors derive from the Space palette. The **Panels saturation** dial
-changes their OKLCH chroma; there is no separate panel color picker. The **Tint**
-slider still controls material strength, subject to the calculated contrast
-floor. Legacy `panelTintColor` is retained in stored data but does not override
-the resolved Space color. The stored identifier `liquid` displays Clear;
-`systemLiquid` selects public SwiftUI Liquid, and `glassmorphic` selects Chromium.
+`arcium.appearance.command_bar` is a legacy override for Text surfaces: `0`
+Solid, `1` Glass, `2` follows the group. Container settings are independent.
+Choosing a Text material resets an editable legacy override to Automatic.
+Managed preferences preserve their effective override and disable that picker.
 
-Chromium's **Blur** adds 0–30 pt of Gaussian backdrop blur before the refraction
-shader, default 9 pt, without changing tint strength. Both the shader's sharp
-and softened samples therefore receive the obscured backdrop. Both Gaussian
-inputs stay inside the root glass filter so refraction can sample outside its
-final crop without a dark rim. Other Chromium glass controls retain their
-configured radius, but also sample a softened backdrop rather than a sharp one.
+Edits apply live, including an open Peek. **Preview the tab switcher** holds it
+open until switched off or Settings closes. Ctrl+Tab borrows the preview and
+returns it afterward. Native switcher and control windows are nonactivating and
+mouse-transparent. Original browser views retain keyboard focus, input,
+accessibility, and callbacks. Chromium supplies embedded fallbacks.
 
-`arcium.appearance.command_bar` remains the panel role's explicit choice: `0`
-Solid, `1` Glass (the preset's glass material, or Liquid), and `2` follows the
-preset. Choosing a material in Settings stores it and sets the choice to `2`.
-Saved `0` and `1` keep their meaning, and unknown values are Solid. Panels never
-change the window's own appearance setting.
+Peek's Clear frame sits behind the ordinary live preview WebContents. Changing
+material never recreates or reparents that page. Its inactive source remains in
+the backdrop, whose blur is cached while the preview animates. The preview fades
+in after first paint or a 600 ms timeout. Closing Peek releases native hosts,
+passive control windows, and appearance observers.
 
-Settings edits apply live. An open Peek restyles itself, and **Preview the tab
-switcher** holds the switcher open, floating near the top of the profile's
-browser window, until it is turned off or Settings closes. Ctrl+Tab cycling
-borrows the preview and returns it afterward.
-
-A panel in its own window uses native glass when the shared resolver finds one;
-the command bar and switcher then share `arcium::CommandBarMaterial`. The switcher
-moves into a non-activatable, mouse-transparent child window for this, so the
-browser keeps keyboard focus and its cycling event monitor. Without native glass
-the switcher stays inside the browser window and Chromium draws it. Reduce
-Transparency and renderer overrides make embedded surfaces solid and scrims dim.
-
-Peek blurs the inactive source page's own layer, which the compositor caches
-while the preview animates, and its buttons are Chromium glass circles over it.
-The backdrop fades in, and the preview card stays hidden until its page first
-paints (at most 600 ms), so Peek never flashes an empty card.
-
-The `surface_set` bridge action accepts the five names, `surface_tuning` accepts
-the complete values, and `surface_preview` accepts a boolean;
-`command_bar_appearance` accepts exact integers `0`, `1`, and `2`. Managed or
-missing preferences disable the matching rows. Both native command widgets update their backgrounds without
-rebuilding the input or results. Clipping follows the painted Views bounds and
-corners. The results material excludes the search-bar cutout to avoid applying
-blur twice. Closing a widget removes its native decoration and preference and
-accessibility observers.
+Reduce Transparency and renderer overrides retain their shared fallback policy.
+Command bar material changes preserve the input, query, selection, focus, and
+geometry. Results clipping excludes the search-bar cutout to avoid double blur.
 
 ## Browser layout and size
 
@@ -309,7 +280,7 @@ Popups, Little Arc, and web app windows retain their existing material policy.
 Color and grain edits update the existing native decoration view. A change to
 whether Chrome Views paint transparently also refreshes the widget theme.
 
-Auto selects an available native material. Liquid Glass, frosted material, and
+Auto selects an available native material. Liquid Glass, Flat material, and
 solid color are explicit choices. Reduce Transparency and command-line renderer
 overrides take precedence, and the bridge reports the active material and
 fallback reason. The editor disables decorative controls when opaque Chrome
@@ -325,7 +296,7 @@ Material opacity changes only the native background view. Page content, browser
 controls, color points, and grain keep their own opacity. Liquid Glass exposes
 Regular/Clear styles and a palette-derived color overlay. Its tint
 opacity stays constant across active and inactive windows; 100% is opaque.
-Material opacity fades only the glass underneath that overlay. Frosted chrome exposes semantic
+Material opacity fades only the glass underneath that overlay. Flat chrome exposes semantic
 macOS materials and scales its existing browser-theme tint. Automatic frosted
 material retains Sidebar in dark mode and Menu in light mode. Grain size scales
 the cached noise tile without adding a rendering timer.

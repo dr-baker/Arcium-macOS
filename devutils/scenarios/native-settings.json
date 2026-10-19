@@ -21,15 +21,22 @@
     },
     {
       "target": "//chrome/test:arcium_feature_settings_browser_tests",
-      "filters": ["PeekControllerBrowserTest.*", "SidePanelCustomizeChromeTest.Appearance"]
+      "filters": [
+        "PeekControllerBrowserTest.*",
+        "SidePanelCustomizeChromeTest.Appearance"
+      ]
     },
     {
       "target": "//content/test:arcium_media_session_impl_unittests",
-      "filters": ["MediaSessionImplTest.*BrowserInitiatedAutoPip*"]
+      "filters": [
+        "MediaSessionImplTest.*BrowserInitiatedAutoPip*"
+      ]
     },
     {
       "target": "//chrome/test:browser_tests",
-      "filters": ["ThemeServiceBrowserTest.ArciumPalettePreservesActiveExtensionTheme"]
+      "filters": [
+        "ThemeServiceBrowserTest.ArciumPalettePreservesActiveExtensionTheme"
+      ]
     }
   ],
   "preconditions": [
@@ -59,7 +66,11 @@
     "Capture the complete shortcut state, apply the Arc preset, inspect unsupported actions, and verify supported bindings, menu labels, and actual command behavior.",
     "Restore the captured shortcut state; confirm custom, default, and unassigned bindings exactly match the pre-preset state.",
     "Close the browser window that opened Settings and continue editing a harmless preference; confirm no callback reaches a destroyed browser or shortcut service.",
-    "Close Settings, quit normally, and relaunch the same profile; verify preferences and shortcuts persist and the window opens safely."
+    "Close Settings, quit normally, and relaunch the same profile; verify preferences and shortcuts persist and the window opens safely.",
+    "In Appearance, inspect Text surfaces and Containers: Material, Tint Intensity and Opacity. A fresh Glass preset uses Liquid/40%/5% for Text and Clear/60%/20% for Containers. Confirm Flat is present and Frosted absent.",
+    "Preview MRU and open Peek over acceptance-owned content. Edit each group independently, test Opacity at 0% and 100% in Light and Dark, and verify that tint does not intensify as backing increases.",
+    "With Peek open, switch Containers through Clear, Chromium and Solid, adjust Chromium blur and shared Shadows, and edit Text material. Exercise Close, Open in Tab and Open in Sidebar while checking page input, focus and source identity.",
+    "Quit and relaunch the isolated profile normally; verify both group materials, Tint Intensity and Opacity persist. Restore Glass defaults for handoff."
   ],
   "observables": [
     "Settings opens a native AppKit window without creating a settings tab.",
@@ -80,7 +91,10 @@
     "Full restore returns custom, default, and unassigned bindings to the captured state.",
     "Native controls, Chromium preferences, actual shortcuts, and menu labels agree.",
     "Profile teardown does not leave callbacks into destroyed browser or shortcut services.",
-    "Preferences and shortcuts persist after a normal quit and relaunch."
+    "Preferences and shortcuts persist after a normal quit and relaunch.",
+    "MRU and Peek use Container values; command bar and floating controls use Text values. Legacy command-bar overrides affect only Text surfaces.",
+    "Native and fallback material changes keep the original input, live Peek WebContents and original action callbacks. Closing releases passive native windows and hosts.",
+    "Opacity uses neutral light/dark backing independent of theme tint; Solid remains opaque. Old frosted values resolve to Clear and old fast values display Flat."
   ],
   "verify_persistence": true,
   "verify_teardown": true
