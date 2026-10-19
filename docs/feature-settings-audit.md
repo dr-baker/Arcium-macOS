@@ -43,8 +43,8 @@ it with the corresponding feature flag. Never force-enable it from Settings.
 | Navigation placement | `arcium.appearance.sidebar_navigation` (default `false`) | Top bar is the default. Sidebar moves the actual browser toolbar into a compact header above sidebar tabs and gives pages full height. Available in regular windows with left Vertical tabs outside fullscreen. Private, guest, and other window contexts use the standard toolbar and retain the choice. Command-L temporarily reveals collapsed navigation without rewriting collapse state. |
 | Show Extensions button in sidebar navigation | `arcium.appearance.sidebar_extensions_drawer` (default `false`) | Optional entry to the existing extensions menu. Sidebar presentation hides pinned action icons, the bookmark star, profile/media extras, and the horizontal bookmark bar without rewriting their saved values. Turning Sidebar navigation off restores the standard presentation. |
 | Toolbar controls | `prefs::kShowHomeButton`, `kShowBackButton`, `kShowForwardButton`, `kShowReloadButton`, `kShowAvatarButton`, `kShowExtensionsButton`, `kShowMenuButton`, `kShowMediaButton` | Already in Appearance. The two selected rows above fill the existing gap for vertical-collapse and dynamic-New-Tab buttons. |
-| Surface style and Panels | `arcium.appearance.surface_set` (`helium::kArciumSurfaceSetPref`), original-profile string, default `glass`; `arcium.appearance.command_bar` (`arcium::kCommandBarAppearancePref`), original-profile integer, default Automatic (`2`), Solid (`0`), Glass (`1`) | Appearance's Floating surfaces card picks one set for panels, floating controls, and scrims, plus an explicit panel choice for the command bar and switcher. Panel glass takes the window's material and tint without color points or grain, and never changes the window setting. Renderer and accessibility fallbacks still apply; both command widgets update live while retaining query, focus, selection, and dimensions. Missing or managed preferences disable edits. |
-| Window material, glass, colors, and frame | `helium::kArciumChromeAppearancePref`, shared ThemeService palette and appearance mode; `arcium.appearance.chrome_ui_scale`, sidebar width, rounded frame, frame border | Already in the native Appearance editor. Do not add a second global glass/material switch; the editor already enables/disables effects and preserves saved values when effects are inactive. |
+| Surface style and Panels | `arcium.appearance.surface_set` (`helium::kArciumSurfaceSetPref`), original-profile string, default `glass`; `arcium.appearance.command_bar` (`arcium::kCommandBarAppearancePref`), original-profile integer, default Automatic (`2`), Solid (`0`), Glass (`1`) | Appearance's Floating surfaces card picks one set for panels, floating controls, and scrims, plus an explicit panel choice for the command bar and switcher. Panel glass uses the profile's material policy and the Space palette's panel role and contrast floor, without color points or grain. Renderer and accessibility fallbacks still apply; both command widgets update live while retaining query, focus, selection, and dimensions. Missing or managed preferences disable edits. |
+| Window material, glass, colors, and frame | `helium::kArciumChromeAppearancePref` for profile material and effect enablement; captured Space recipe, chroma dials, and appearance mode; `arcium.appearance.chrome_ui_scale`, sidebar width, rounded frame, frame border | Already in the native Appearance editor. The existing color picker supplies one Space palette throughout chrome, controls, panels, and Settings. The material editor enables/disables decorative effects while retaining the Space recipe. |
 | Split tabs and browser shortcuts | Existing split-tab commands and `BrowserShortcutService` bindings | Keyboard Shortcuts already exposes bindings for split/focus actions. There is no separate Arcium master preference to expose. |
 | Helium Noise fingerprinting protection | `prefs::kHeliumNoiseEnabled` (`helium.noise.enabled`; profile) and per-origin `ContentSettingsType::HELIUM_NOISE` exceptions | Already available in Chromium WebUI at Privacy → Helium Noise (`settings/privacy_page/noise_page.html`). The global default is `true`; turning it off disables the protection globally but leaves site exceptions saved. Page Info can override eligible HTTP(S) sites independently. The Blink `kHeliumNoise` feature flag controls whether the feature is available at all. |
 | Import Arc sidebar data as Pins | Per-import `importArcAsPins_` option in `settings/people_page/import_data_dialog.ts` | One-time operation choice, default `false` and reset when the source selection changes. Off imports the hierarchy as tab groups; on imports it as dormant persistent Pins and Favorites. The import handler reports whether an Arc snapshot arrived and whether import succeeded; this diagnostic belongs to the operation, not a persistent on/off pref. |
@@ -59,15 +59,16 @@ snapshot/store/views in `chrome/browser/ui/cocoa/arcium_settings_swift`.
 
 ### Appearance availability and sidebar motion
 
-Everyday and Advanced share the availability decision and explanation for
-decorative edits. When customization is off, the guidance points to Advanced
-to enable it. Renderer-override guidance points to the Automatic backend and a
-normal Arcium relaunch. Managed or unavailable settings remain saved.
+Everyday Colors remains editable when decorative effects are off or the
+material is unavailable. Color edits preserve effect enablement. Advanced
+explains decorative availability and how to re-enable effects. Renderer-override
+guidance points to the Automatic backend and a relaunch in the authorized
+runtime mode. Managed or unavailable settings remain saved.
 
-A disabled color canvas keeps its markers visible but sends no selection,
-color-edit, or movement actions. Re-enabling customization restores saved
-colors. Controls accent has its own availability and remains independent of
-decorative editing.
+A disabled decorative canvas keeps its markers visible but sends no editing
+actions. Re-enabling customization restores the Space's saved decorative recipe.
+Controls and panels derive their colors from that same recipe; their saturation
+dials adjust chroma without changing the selected seeds or lightness.
 
 The macOS collapse and expand source uses a 320 ms critically damped
 approximation. Folder presentation stays expanded during the slide, and
@@ -145,12 +146,15 @@ checks; do not infer a runtime mode from branch ancestry.
    verify the separate sidebar pin remains independent. Return to Icon rail
    and verify its settled endpoint. Restore the original values.
 9. Disable backdrop customization and check Everyday and Advanced guidance.
-   Try selecting, editing, and dragging a saved canvas marker. Verify no
-   decorative action changes saved data. Enable customization in Advanced and
-   confirm saved colors return. Change Size, close and reopen Settings, and
-   verify the saved value. Restore the original value. If renderer-override
+   In Everyday Colors, select, recolor, and move a saved marker. Verify the
+   Space palette updates while effects remain off. In Advanced, verify the
+   disabled decorative canvas blocks edits. Enable customization and confirm
+   the saved decorative recipe returns. Change Size, close and reopen Settings,
+   and verify the saved value. Restore the original values. If renderer-override
    guidance is present, select Automatic and relaunch through the authorized
-   normal app path before checking effects again.
+   runtime mode before checking effects again. Follow
+   `devutils/scenarios/space-palette.json` for two-Space targeting, contrast,
+   persistence, and teardown checks.
 
 10. Select left Vertical tabs and Sidebar navigation. Confirm two navigation
     rows above the tabs and full-height page content. Use Command-L with the

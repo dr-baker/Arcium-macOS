@@ -1,0 +1,2417 @@
+Index: src/chrome/browser/ui/chrome_pages.cc
+===================================================================
+--- src.orig/chrome/browser/ui/chrome_pages.cc
++++ src/chrome/browser/ui/chrome_pages.cc
+@@ -461,7 +461,7 @@ bool IsTrustedPopupWindowWithScheme(cons
+ 
+ void ShowSettings(BrowserWindowInterface* browser) {
+ #if BUILDFLAG(IS_MAC)
+-  if (browser && arcium_settings::ShowForProfile(browser->GetProfile())) {
++  if (browser && arcium_settings::ShowForBrowser(browser)) {
+     return;
+   }
+ #endif
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -437,6 +437,91 @@ struct ArciumSurfaceTuning: Equatable {
+     }
+ }
+ 
++struct ArciumSpacePaletteSnapshot: Equatable {
++    var id = ""
++    var name = ""
++    var available = false
++    var controlsChroma = 1.0
++    var panelsChroma = 0.35
++    var lightChromeOpacity = 1.0
++    var darkChromeOpacity = 1.0
++    var lightPanelOpacity = 1.0
++    var darkPanelOpacity = 1.0
++    var light: [String: String] = [:]
++    var dark: [String: String] = [:]
++
++    init(_ dictionary: [String: Any] = [:]) {
++        id = dictionary["id"] as? String ?? ""
++        name = dictionary["name"] as? String ?? ""
++        available = strictBoolean(dictionary["available"]) == true && !id.isEmpty
++        if let value = finiteDouble(dictionary["controlsChroma"]), (0...2).contains(value) {
++            controlsChroma = value
++        }
++        if let value = finiteDouble(dictionary["panelsChroma"]), (0...2).contains(value) {
++            panelsChroma = value
++        }
++        func opacity(_ key: String) -> Double {
++            guard let value = finiteDouble(dictionary[key]), (0...1).contains(value) else { return 1 }
++            return value
++        }
++        lightChromeOpacity = opacity("lightChromeOpacity")
++        darkChromeOpacity = opacity("darkChromeOpacity")
++        lightPanelOpacity = opacity("lightPanelOpacity")
++        darkPanelOpacity = opacity("darkPanelOpacity")
++        light = dictionary["light"] as? [String: String] ?? [:]
++        dark = dictionary["dark"] as? [String: String] ?? [:]
++    }
++
++    // Rendering consumes the browser's resolved colors. Swift never generates
++    // another palette from a profile-wide accent or a separate color recipe.
++    func theme(fallback: SettingsTheme) -> SettingsTheme {
++        let roles = ["chrome", "field", "hover", "panel", "text", "mutedText",
++                     "outline", "accent", "onAccent"]
++        guard roles.allSatisfy({ SettingsRGB(hex: light[$0] ?? "") != nil
++                                && SettingsRGB(hex: dark[$0] ?? "") != nil }) else { return fallback }
++        func color(_ role: String) -> Color {
++            let a = SettingsRGB(hex: light[role]!)!
++            let b = SettingsRGB(hex: dark[role]!)!
++            return Color(nsColor: NSColor(name: nil) { appearance in
++                let rgb = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? b : a
++                return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
++            })
++        }
++        return SettingsTheme(
++            accent: color("accent"),
++            windowFrame: color("chrome"), windowCanvas: color("chrome"),
++            windowCanvasWash: color("panel"), panel: color("panel"),
++            panelRaised: color("panel"), panelInset: color("field"),
++            sidebarRail: color("chrome"), sidebarPanel: color("panel"),
++            card: color("panel"), cardElevated: color("panel"),
++            control: color("field"), controlSecondary: color("field"),
++            controlHover: color("hover"), controlSelectionFill: color("accent"),
++            selection: color("accent"), selectionHover: color("accent"),
++            selectionText: color("onAccent"),
++            borderSubtle: color("outline"), borderEmphasis: color("outline"),
++            borderControl: color("outline"),
++            borderDanger: fallback.borderDanger, borderWarning: fallback.borderWarning,
++            borderSuccess: fallback.borderSuccess,
++            shadowAmbient: fallback.shadowAmbient, shadowLifted: fallback.shadowLifted,
++            textPrimary: color("text"), textSecondary: color("mutedText"),
++            textTertiary: color("mutedText"),
++            error: fallback.error, warning: fallback.warning, success: fallback.success,
++            errorSurface: fallback.errorSurface, errorText: fallback.errorText,
++            warningSurface: fallback.warningSurface, warningText: fallback.warningText,
++            successSurface: fallback.successSurface, successText: fallback.successText,
++            borderWidth: fallback.borderWidth,
++            increasedContrastBorderWidth: fallback.increasedContrastBorderWidth,
++            windowChromeDarkOpacity: darkChromeOpacity, windowChromeLightOpacity: lightChromeOpacity,
++            sidebarRailDarkOpacity: darkChromeOpacity, sidebarRailLightOpacity: lightChromeOpacity,
++            windowFrameTintOpacity: max(lightChromeOpacity, darkChromeOpacity),
++            panelTintOpacity: max(lightPanelOpacity, darkPanelOpacity),
++            cardOpacity: 1, controlOpacity: 1, cardTintOpacity: 1,
++            controlTintOpacity: 1, navRailTintOpacity: max(lightChromeOpacity, darkChromeOpacity),
++            compactNavTintOpacity: max(lightChromeOpacity, darkChromeOpacity), radiusScale: fallback.radiusScale
++        )
++    }
++}
++
+ struct ArciumAppearanceSnapshot: Equatable {
+     static let surfaceSetValues = ["glass", "refractive", "quiet", "solid", "custom"]
+     static let defaultCollapsedSidebarStyleOptions = [
+@@ -470,6 +555,7 @@ struct ArciumAppearanceSnapshot: Equatab
+     var zenModeTopChromePinned = false
+     var chrome: ArciumChromeAppearanceSnapshot
+     var palette: ArciumSharedPaletteSnapshot
++    var spacePalette: ArciumSpacePaletteSnapshot
+     var sidebarWidth = 200
+     var sidebarWidthAvailable = false
+     var sidebarWidthManaged = false
+@@ -522,6 +608,7 @@ struct ArciumAppearanceSnapshot: Equatab
+ 
+     init(_ dictionary: [String: Any]) {
+         palette = ArciumSharedPaletteSnapshot(dictionaryValues(dictionary["palette"]))
++        spacePalette = ArciumSpacePaletteSnapshot(dictionaryValues(dictionary["spacePalette"]))
+         sidebarWidth = min(max(integerOptional(dictionary["sidebarWidth"]) ?? 200, 160), 400)
+         sidebarWidthAvailable = strictBoolean(dictionary["sidebarWidthAvailable"]) ?? false
+         sidebarWidthManaged = strictBoolean(dictionary["sidebarWidthManaged"]) ?? false
+@@ -723,14 +810,21 @@ struct ArciumSettingsSnapshot: Equatable
+ @MainActor
+ final class ArciumSettingsStore: ObservableObject {
+     @Published private(set) var snapshot: ArciumSettingsSnapshot
+-    @Published private(set) var pendingSharedPalette: SettingsPaletteConfiguration?
+-    private var refreshControlAccentAfterChromeReset = false
+     /// The last typed chrome value sent to the native host. The host applies a
+     /// setting synchronously, then publishes a fresh model snapshot on the
+     /// main actor. Until that snapshot arrives, views must keep displaying
+     /// this canonical native value so a stale snapshot cannot replace an
+     /// in-flight editor change.
+     @Published private(set) var pendingChromeAppearance: SettingsBackdropConfiguration?
++    @Published private var pendingSpaceChroma: (id: String, controls: Double, panels: Double)?
++    var currentSpaceChroma: (controls: Double, panels: Double) {
++        let target = snapshot.appearance.spacePalette
++        if let draft = pendingSpaceChroma, draft.id == target.id {
++            return (draft.controls, draft.panels)
++        }
++        return (target.controlsChroma, target.panelsChroma)
++    }
++
+     @Published private(set) var selectedCategory: ArciumSettingsCategory = .general
+     @Published var selectedShortcutID: Int?
+     @Published var shortcutQuery = "" {
+@@ -751,7 +845,6 @@ final class ArciumSettingsStore: Observa
+     ) {
+         self.delegate = delegate
+         self.snapshot = ArciumSettingsSnapshot(dictionary: snapshot)
+-        self.pendingSharedPalette = nil
+         self.pendingChromeAppearance = nil
+ 
+         do {
+@@ -783,17 +876,10 @@ final class ArciumSettingsStore: Observa
+         // draft; comparing values here would retain stale drafts forever when
+         // the host rejects or clamps a write.
+         pendingChromeAppearance = nil
+-        pendingSharedPalette = nil
++        pendingSpaceChroma = nil
+         snapshot = next
+         normalizeShortcutSelection()
+-        if refreshControlAccentAfterChromeReset {
+-            refreshControlAccentAfterChromeReset = false
+-            let palette = sharedPalette()
+-            if palette.controlColorID != nil,
+-               let configuration = currentChromeAppearance {
+-                writeSharedPalette(palette.resolvingControlAccent(from: configuration.glows))
+-            }
+-        }
++
+     }
+ 
+     /// The configuration currently shown by the appearance page.
+@@ -842,41 +928,40 @@ final class ArciumSettingsStore: Observa
+     }
+ 
+     func actionInvoked(name: String, payload: [String: Any] = [:]) {
+-        if name == "reset_shared_palette" {
+-            pendingSharedPalette = nil
+-        }
+         let dictionary = NSMutableDictionary(capacity: payload.count)
+         payload.forEach { dictionary[$0.key] = $0.value }
+         delegate?.actionInvoked(name: name, payload: dictionary)
+     }
+ 
+-    func setChromeAppearance(_ configuration: SettingsBackdropConfiguration) {
+-        guard snapshot.appearance.chrome.canEdit else { return }
+-        guard let canonical = canonicalChromeAppearance(configuration) else { return }
+-        let previousColors = currentChromeAppearance?.glows.map { ($0.id, $0.color) }
++    func setChromeAppearance(_ configuration: SettingsBackdropConfiguration, spaceID: String? = nil) {
++        let target = snapshot.appearance.spacePalette
++        guard target.available, (spaceID ?? target.id) == target.id,
++              snapshot.appearance.chrome.canEdit, let canonical = canonicalChromeAppearance(configuration) else { return }
+         pendingChromeAppearance = canonical
+-        settingChanged(
+-            key: "chrome_appearance",
+-            value: ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: canonical)
+-        )
+-        // Color roles follow the chosen swatches. Placement and effects never
+-        // regenerate colors or change a separately chosen control accent.
+-        let nextColors = canonical.glows.map { ($0.id, $0.color) }
+-        let colorsChanged = previousColors.map { previous in
+-            !previous.elementsEqual(nextColors) { old, new in
+-                old.0 == new.0 && old.1 == new.1
+-            }
+-        } ?? true
+-        if colorsChanged, snapshot.appearance.palette.canEdit {
+-            writeSharedPalette(sharedPalette().resolvingColors(from: canonical.glows))
+-        }
++        settingChanged(key: "space_colors", value: [
++            "spaceID": target.id,
++            "configuration": ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: canonical)
++        ])
++    }
++
++    func setSpaceChroma(controls: Double? = nil, panels: Double? = nil, spaceID: String? = nil) {
++        let target = snapshot.appearance.spacePalette
++        let current = currentSpaceChroma
++        let controls = controls ?? current.controls
++        let panels = panels ?? current.panels
++        guard target.available, (spaceID ?? target.id) == target.id, controls.isFinite, panels.isFinite,
++              (0...2).contains(controls), (0...2).contains(panels) else { return }
++        pendingSpaceChroma = (target.id, controls, panels)
++        settingChanged(key: "space_chroma", value: [
++            "spaceID": target.id, "controlsChroma": controls, "panelsChroma": panels
++        ])
+     }
+ 
+     func resetChromeAppearance() {
+-        guard snapshot.appearance.chrome.canReset else { return }
++        let target = snapshot.appearance.spacePalette
++        guard target.available, snapshot.appearance.chrome.canReset else { return }
+         pendingChromeAppearance = nil
+-        refreshControlAccentAfterChromeReset = true
+-        actionInvoked(name: "reset_chrome_appearance")
++        actionInvoked(name: "reset_space_colors", payload: ["spaceID": target.id])
+     }
+ 
+     private func canonicalChromeAppearance(
+@@ -899,56 +984,6 @@ final class ArciumSettingsStore: Observa
+         actionInvoked(name: name, payload: payload)
+     }
+ 
+-    func sharedBrand(from preset: SettingsStylePreset) -> SettingsStyleBrand {
+-        if let pendingSharedPalette {
+-            return SettingsStyleBrand(colorSource: .brand, palette: pendingSharedPalette)
+-        }
+-        let shared = snapshot.appearance.palette
+-        if let configuration = shared.configuration {
+-            return SettingsStyleBrand(colorSource: .brand, palette: configuration)
+-        }
+-        if let hex = shared.accent, let rgb = SettingsRGB(hex: hex) {
+-            var palette = preset.brand.palette
+-            palette.brand = rgb.oklch
+-            palette.accentSource = .brand
+-            return SettingsStyleBrand(colorSource: .brand, palette: palette)
+-        }
+-        return preset.brand
+-    }
+-
+-    func sharedPalette() -> SettingsPaletteConfiguration {
+-        if let pendingSharedPalette {
+-            return pendingSharedPalette
+-        }
+-        guard let preset else { return SettingsPaletteConfiguration() }
+-        return sharedBrand(from: preset).palette
+-    }
+-
+-    var controlAccent: SettingsControlAccent {
+-        sharedPalette().controlAccent
+-    }
+-
+-    func applyControlAccent(_ accent: SettingsControlAccent) {
+-        guard snapshot.appearance.palette.canEdit else { return }
+-        var palette = sharedPalette()
+-        palette.controlAccent = accent
+-        let glows = currentChromeAppearance?.glows ?? []
+-        writeSharedPalette(palette.resolvingControlAccent(from: glows))
+-    }
+-
+-    private func writeSharedPalette(_ palette: SettingsPaletteConfiguration) {
+-        guard snapshot.appearance.palette.canEdit, isValidSharedPalette(palette),
+-              let data = try? JSONEncoder().encode(palette),
+-              let configuration = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+-        pendingSharedPalette = palette
+-        settingChanged(key: "shared_palette", value: [
+-            "configuration": configuration,
+-            "accent": palette.resolvedAccent.rgb.hex,
+-            "lightChromeColor": palette.colors(dark: false)[.windowCanvas]!.hex,
+-            "darkChromeColor": palette.colors(dark: true)[.windowCanvas]!.hex
+-        ])
+-    }
+-
+     func setSidebarWidth(_ width: Double) {
+         guard snapshot.appearance.sidebarWidthAvailable,
+               !snapshot.appearance.sidebarWidthManaged, width.isFinite else { return }
+@@ -1069,14 +1104,16 @@ final class ArciumSettingsStore: Observa
+         }
+     }
+ 
+-    func applyAppearanceMode(_ mode: SettingsAppearance) {
++    func applyAppearanceMode(_ mode: SettingsAppearance, spaceID: String? = nil) {
+         let value: String
+         switch mode {
+         case .system: value = "system"
+         case .light: value = "light"
+         case .dark: value = "dark"
+         }
+-        settingChanged(key: "settings_appearance", value: value)
++        let target = snapshot.appearance.spacePalette
++        guard target.available, (spaceID ?? target.id) == target.id else { return }
++        settingChanged(key: "space_mode", value: ["spaceID": target.id, "mode": value])
+     }
+ 
+     func generalBoolean(_ key: String) -> Bool {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -1,6 +1,27 @@
+ import SwiftUI
+ import SettingsUI
+ 
++private struct ArciumAccentButtonStyle: ButtonStyle {
++    @Environment(\.settingsTheme) private var theme
++    @Environment(\.isEnabled) private var isEnabled
++    @Environment(\.accessibilityReduceMotion) private var reduceMotion
++
++    func makeBody(configuration: Configuration) -> some View {
++        configuration.label
++            .settingsFont(\.caption)
++            .foregroundStyle(theme.selectionText)
++            .padding(.horizontal, SettingsSpacing.sm)
++            .padding(.vertical, SettingsSpacing.xs)
++            .background(theme.selectionStrong, in: RoundedRectangle(cornerRadius: SettingsRadius.control))
++            .overlay {
++                RoundedRectangle(cornerRadius: SettingsRadius.control)
++                    .strokeBorder(theme.borderControl, lineWidth: 1)
++            }
++            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
++            .opacity(isEnabled ? 1 : 0.5)
++    }
++}
++
+ struct ArciumSettingsRootView: View {
+     @ObservedObject var store: ArciumSettingsStore
+     @Environment(\.colorScheme) private var systemColorScheme
+@@ -10,7 +31,7 @@ struct ArciumSettingsRootView: View {
+             SnapshotUnavailableView()
+         } else if let preset = store.preset,
+            let style = store.styleAppearance(systemColorScheme: systemColorScheme) {
+-            let theme = style.theme(brand: store.sharedBrand(from: preset))
++            let theme = store.snapshot.appearance.spacePalette.theme(fallback: style.theme(brand: preset.brand))
+             ArciumSettingsShell(store: store)
+                 .ignoresSafeArea(.container, edges: .top)
+                 .preferredColorScheme(store.appearanceMode().colorScheme)
+@@ -573,19 +594,21 @@ private struct AppearanceSettingsPage: V
+     }
+ 
+     private var appearanceBinding: Binding<SettingsAppearance> {
+-        Binding(get: { store.appearanceMode() }, set: { store.applyAppearanceMode($0) })
++        let spaceID = store.snapshot.appearance.spacePalette.id
++        return Binding(get: { store.appearanceMode() },
++                       set: { store.applyAppearanceMode($0, spaceID: spaceID) })
+     }
+ 
+     var body: some View {
+-        SettingsPageScroll(title: "Appearance", description: "Make browser windows and Settings your own.") {
++        SettingsPageScroll(title: "Appearance", description: "Colors for \(store.snapshot.appearance.spacePalette.name.isEmpty ? "this Space" : store.snapshot.appearance.spacePalette.name).") {
+             SSectionCard(title: "Appearance") {
+                 SettingsAppearancePicker(selection: appearanceBinding, showsLabels: true)
+                     .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
+                 HStack {
+-                    Text("Shared by browser windows and Settings.")
++                    Text("Follows this Space across its windows and panels.")
+                         .settingsFont(\.caption).foregroundStyle(.secondary)
+                     Spacer(minLength: 0)
+-                    Button("Reset") { store.actionInvoked(name: "reset_appearance") }
++                    Button("Reset") { store.applyAppearanceMode(.system) }
+                         .buttonStyle(.bordered)
+                         .accessibilityLabel("Reset appearance")
+                         .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
+@@ -593,19 +616,33 @@ private struct AppearanceSettingsPage: V
+             }
+ 
+             HStack {
+-                Text("Window background").settingsFont(\.section)
++                Text("Space colors").settingsFont(\.section)
+                 Spacer(minLength: 12)
+-                Picker("Background controls", selection: $backgroundMode) {
+-                    ForEach(BackgroundMode.allCases, id: \.self) { mode in
+-                        Text(mode.rawValue).tag(mode)
+-                    }
+-                }
+-                .pickerStyle(.segmented)
+-                .tint(theme.selectionStrong)
+-                .labelsHidden()
++                SSegmentedControl("Background controls",
++                    options: BackgroundMode.allCases.map { (value: $0, label: $0.rawValue) },
++                    selection: $backgroundMode)
+                 .frame(width: 210)
+             }
+             backgroundEditor
++            SSectionCard(title: "Color intensity") {
++                SSlider("Controls saturation", value: Binding(
++                    get: { store.currentSpaceChroma.controls },
++                    set: { [spaceID = store.snapshot.appearance.spacePalette.id] in
++                        store.setSpaceChroma(controls: $0, spaceID: spaceID) }
++                ), range: 0...2, step: 0.05, format: Self.percent,
++                    help: SHelp(description: "Changes chroma while keeping the Space's hue and readable lightness."),
++                    commitMode: .debounced(milliseconds: 80))
++                    .accessibilityIdentifier("space-controls-chroma")
++                SSlider("Panels saturation", value: Binding(
++                    get: { store.currentSpaceChroma.panels },
++                    set: { [spaceID = store.snapshot.appearance.spacePalette.id] in
++                        store.setSpaceChroma(panels: $0, spaceID: spaceID) }
++                ), range: 0...2, step: 0.05, format: Self.percent,
++                    help: SHelp(description: "Tints surfaces from the same Space palette. Text contrast is preserved."),
++                    commitMode: .debounced(milliseconds: 80))
++                    .accessibilityIdentifier("space-panels-chroma")
++            }
++            .disabled(!store.snapshot.appearance.spacePalette.available)
+ 
+             SSectionCard(title: "Floating surfaces") {
+                 SPicker("Preset", selection: Binding(
+@@ -657,31 +694,6 @@ private struct AppearanceSettingsPage: V
+                                 commitMode: .debounced(milliseconds: 80))
+                             .accessibilityIdentifier("surface-panel-blur")
+                     }
+-                    if store.snapshot.appearance.effectivePanelMaterial != "frosted" {
+-                        SToggle("Window tint", isOn: Binding(
+-                            get: { store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty },
+-                            set: { useTheme in
+-                                var tuning = store.snapshot.appearance.surfaceTuning
+-                                tuning.panelTintColor = useTheme ? "" : "#1D1E1C"
+-                                store.setSurfaceTuning(tuning)
+-                            }
+-                        ), description: "Use the first window glass color. Change it in the window color editor above, or turn this off to choose a separate tint. With no window colors, use the browser theme.")
+-                            .accessibilityIdentifier("surface-panel-theme-tint")
+-                        if !store.snapshot.appearance.surfaceTuning.panelTintColor.isEmpty {
+-                            SLabeledControl("Tint color") {
+-                                ColorPicker("Tint color", selection: Binding(
+-                                    get: { Self.color(hex: store.snapshot.appearance.surfaceTuning.panelTintColor) },
+-                                    set: { color in
+-                                        var tuning = store.snapshot.appearance.surfaceTuning
+-                                        tuning.panelTintColor = Self.hex(color)
+-                                        store.setSurfaceTuning(tuning)
+-                                    }
+-                                ), supportsOpacity: false)
+-                                .labelsHidden()
+-                            }
+-                            .accessibilityIdentifier("surface-panel-tint-color")
+-                        }
+-                    }
+                     SToggle("Shadow", isOn: surfaceTuningBinding(\.panelShadow),
+                             description: "A soft shadow around the panel.")
+                         .accessibilityIdentifier("surface-panel-shadow")
+@@ -890,18 +902,16 @@ private struct AppearanceSettingsPage: V
+                 )
+             }
+         }
++        .id(store.snapshot.appearance.spacePalette.id)
+     }
+ 
+     @ViewBuilder
+     private var backgroundEditor: some View {
+         if let chrome = store.currentChromeAppearance, store.snapshot.appearance.chrome.isAvailable {
+-            paletteEditabilityNote
+             if backgroundMode == .everyday {
+                 SBackdropEditor(
+                     configuration: chromeBinding,
+-                    controlAccent: controlAccentBinding,
+-                    controlAccentEditable: store.snapshot.appearance.palette.canEdit,
+-                    editable: store.snapshot.appearance.chrome.canEdit,
++                    editable: store.snapshot.appearance.chrome.canEdit && store.snapshot.appearance.spacePalette.available,
+                     colorsOnly: true,
+                     showsIntensity: false,
+                     glowRadiusRange: 0.1...1.5,
+@@ -927,15 +937,13 @@ private struct AppearanceSettingsPage: V
+                             next.material = .liquidGlass
+                             store.setChromeAppearance(next)
+                         }
+-                        .buttonStyle(.borderedProminent)
++                        .buttonStyle(ArciumAccentButtonStyle())
+                     }
+                 }
+             } else {
+                 SBackdropEditor(
+                     configuration: chromeBinding,
+-                    controlAccent: controlAccentBinding,
+-                    controlAccentEditable: store.snapshot.appearance.palette.canEdit,
+-                    editable: store.snapshot.appearance.chrome.canEdit,
++                    editable: store.snapshot.appearance.chrome.canEdit && store.snapshot.appearance.spacePalette.available,
+                     glowRadiusRange: 0.1...1.5,
+                     canReset: store.snapshot.appearance.chrome.canReset,
+                     activeMaterial: activeMaterial,
+@@ -954,15 +962,6 @@ private struct AppearanceSettingsPage: V
+         }
+     }
+ 
+-    @ViewBuilder
+-    private var paletteEditabilityNote: some View {
+-        if let message = store.snapshot.appearance.palette.editabilityMessage {
+-            Text(message)
+-                .settingsFont(\.caption)
+-                .foregroundStyle(.secondary)
+-                .accessibilityIdentifier("shared-palette-editability-note")
+-        }
+-    }
+ 
+     private func editable(_ key: String) -> Bool {
+         store.snapshot.appearance.hasValue(key) && !store.snapshot.appearance.isManaged(key)
+@@ -972,13 +971,11 @@ private struct AppearanceSettingsPage: V
+         Binding(get: { store.appearanceBoolean(key) }, set: { store.setAppearanceBoolean(key, value: $0) })
+     }
+ 
+-    private var controlAccentBinding: Binding<SettingsControlAccent> {
+-        Binding(get: { store.controlAccent }, set: { store.applyControlAccent($0) })
+-    }
+ 
+     private var chromeBinding: Binding<SettingsBackdropConfiguration> {
+-        Binding(get: { store.currentChromeAppearance ?? SettingsBackdropConfiguration(radiusReference: .shortestEdge) },
+-                set: { store.setChromeAppearance($0) })
++        let spaceID = store.snapshot.appearance.spacePalette.id
++        return Binding(get: { store.currentChromeAppearance ?? SettingsBackdropConfiguration(radiusReference: .shortestEdge) },
++                set: { store.setChromeAppearance($0, spaceID: spaceID) })
+     }
+ 
+     private var activeMaterial: SettingsBackdropMaterial? {
+@@ -1043,8 +1040,7 @@ private struct ShortcutPageHeader: View
+                     store.actionInvoked(name: "apply_arc_defaults")
+                 }
+                 .help("Apply Arc shortcuts and make the sidebar fully hide when collapsed. You can change the collapse style in Appearance.")
+-                .buttonStyle(.borderedProminent)
+-                .tint(theme.accent)
++                .buttonStyle(ArciumAccentButtonStyle())
+                 .disabled(!store.snapshot.shortcuts.canModify || store.isRecordingShortcut)
+ 
+                 Menu("More") {
+@@ -1279,8 +1275,7 @@ private struct ShortcutEditor: View {
+                         Button("Add shortcut") {
+                             store.emitShortcutAction("add_shortcut", command: command)
+                         }
+-                        .buttonStyle(.borderedProminent)
+-                        .tint(theme.accent)
++                        .buttonStyle(ArciumAccentButtonStyle())
+                         .disabled(!store.snapshot.shortcuts.canModify || store.isRecordingShortcut)
+ 
+                         Button("Reset command") {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumColorHarmonyTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumColorHarmonyTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumColorHarmonyTests.swift
+@@ -3,6 +3,22 @@ import SettingsUI
+ 
+ final class ArciumColorHarmonyTests: XCTestCase {
+     @MainActor
++    func testColorPointLabelsMeetContrastAcrossSRGB() throws {
++        let amber = try XCTUnwrap(SettingsRGB(hex: "#FF7800"))
++        XCTAssertEqual(amber.contrastingText.hex, "#000000")
++        for r in stride(from: 0, through: 255, by: 17) {
++            for g in stride(from: 0, through: 255, by: 17) {
++                for b in stride(from: 0, through: 255, by: 17) {
++                    let fill = SettingsRGB(red: Double(r) / 255,
++                                           green: Double(g) / 255,
++                                           blue: Double(b) / 255)
++                    XCTAssertGreaterThanOrEqual(fill.contrast(against: fill.contrastingText), 4.5)
++                }
++            }
++        }
++    }
++
++    @MainActor
+     func testSharedHarmonyOffsetsAndColorGeneration() {
+         XCTAssertEqual(SettingsColorHarmony.complementary.offsets(for: 2), [0, 0.5])
+         XCTAssertEqual(SettingsColorHarmony.splitComplementary.offsets(for: 3), [0, 5.0 / 12.0, 7.0 / 12.0])
+@@ -17,4 +33,33 @@ final class ArciumColorHarmonyTests: XCT
+         XCTAssertEqual(result.count, 2)
+         XCTAssertTrue(result.allSatisfy { SettingsRGB(hex: $0) != nil })
+     }
++    @MainActor
++    func testHarmonyUsesPerceptualHueAndPreservesLightness() throws {
++        let picked = SettingsOKLCH(lightness: 0.7, chroma: 0.08, hue: 28).rgb.hex
++        let result = SColorHarmonyPicker.applyingHarmony(
++            to: ["#808080", picked, "#C0C0C0"], selectedIndex: 1, mode: .triadic)
++        let values = try result.map { try XCTUnwrap(SettingsRGB(hex: $0)).oklch }
++        for value in values {
++            XCTAssertEqual(value.lightness, values[1].lightness, accuracy: 0.006)
++            XCTAssertLessThanOrEqual(value.chroma, values[1].chroma + 0.004)
++        }
++        func distance(_ a: Double, _ b: Double) -> Double {
++            abs((a - b + 540).truncatingRemainder(dividingBy: 360) - 180)
++        }
++        XCTAssertEqual(distance(values[0].hue, values[1].hue), 120, accuracy: 3)
++        XCTAssertEqual(distance(values[1].hue, values[2].hue), 120, accuracy: 3)
++        XCTAssertEqual(result[1], picked)
++    }
++
++    @MainActor
++    func testCustomAndAchromaticHarmonyRemainStable() throws {
++        let colors = ["#808080", "#C0C0C0"]
++        XCTAssertEqual(SColorHarmonyPicker.applyingHarmony(
++            to: colors, selectedIndex: 0, mode: .custom), colors)
++        let neutral = SColorHarmonyPicker.applyingHarmony(
++            to: colors, selectedIndex: 0, mode: .complementary)
++        for color in neutral {
++            XCTAssertLessThan(try XCTUnwrap(SettingsRGB(hex: color)).oklch.chroma, 0.001)
++        }
++    }
+ }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -132,8 +132,8 @@ final class ArciumSettingsUIContractTest
+         )
+         editable.setChromeAppearance(configuration)
+         editable.resetChromeAppearance()
+-        XCTAssertEqual(delegate.settings.map(\.key), ["chrome_appearance"])
+-        XCTAssertEqual(delegate.actions.map(\.name), ["reset_chrome_appearance"])
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_colors"])
++        XCTAssertEqual(delegate.actions.map(\.name), ["reset_space_colors"])
+         XCTAssertNil(editable.pendingChromeAppearance)
+ 
+         let managed = ArciumSettingsStore(
+@@ -149,11 +149,13 @@ final class ArciumSettingsUIContractTest
+         )
+         unavailable.setChromeAppearance(configuration)
+         unavailable.resetChromeAppearance()
+-        XCTAssertEqual(delegate.settings.map(\.key), ["chrome_appearance"])
+-        XCTAssertEqual(delegate.actions.map(\.name), ["reset_chrome_appearance"])
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_colors"])
++        XCTAssertEqual(delegate.actions.map(\.name), ["reset_space_colors"])
+ 
+         let payload = try XCTUnwrap(delegate.settings.first?.value as? [String: Any])
+-        XCTAssertEqual(payload["material"] as? String, "liquidGlass")
++        XCTAssertEqual(payload["spaceID"] as? String, "space-a")
++        let configurationPayload = try XCTUnwrap(payload["configuration"] as? [String: Any])
++        XCTAssertEqual(configurationPayload["material"] as? String, "liquidGlass")
+     }
+ 
+     @MainActor
+@@ -174,8 +176,10 @@ final class ArciumSettingsUIContractTest
+         XCTAssertEqual(pending.grain, 0.3, accuracy: 0.0001)
+         XCTAssertEqual(pending.glows[0].radius, 0.1, accuracy: 0.0001)
+         let payload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        XCTAssertEqual(try XCTUnwrap(payload["grain"] as? Double), 0.3, accuracy: 0.0001)
+-        let points = try XCTUnwrap(payload["points"] as? [[String: Any]])
++        XCTAssertEqual(payload["spaceID"] as? String, "space-a")
++        let configurationPayload = try XCTUnwrap(payload["configuration"] as? [String: Any])
++        XCTAssertEqual(try XCTUnwrap(configurationPayload["grain"] as? Double), 0.3, accuracy: 0.0001)
++        let points = try XCTUnwrap(configurationPayload["points"] as? [[String: Any]])
+         XCTAssertEqual(try XCTUnwrap(points.first?["radius"] as? Double), 0.1, accuracy: 0.0001)
+     }
+ 
+@@ -211,44 +215,6 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
+-    func testPendingChromeDraftSurvivesControlAccentChangeBeforeAcknowledgement() throws {
+-        let delegate = TestDelegate()
+-        let original = makeConfiguration()
+-        let store = ArciumSettingsStore(
+-            snapshot: snapshot(chrome: original, managed: false, available: true, paletteAvailable: true),
+-            delegate: delegate
+-        )
+-        var edited = original
+-        edited.glows[0].x = 0.74
+-        edited.glows[0].y = 0.61
+-        edited.glows[0].radius = 1.2
+-        edited.materialOpacity = 0.53
+-        edited.grain = 0.23
+-        store.setChromeAppearance(edited)
+-
+-        var palette = SettingsPaletteConfiguration()
+-        palette.controlColorID = "blue"
+-        store.applyControlAccent(palette.controlAccent)
+-
+-        let pending = try XCTUnwrap(store.pendingChromeAppearance)
+-        XCTAssertEqual(pending.glows[0].x, 0.74)
+-        XCTAssertEqual(pending.glows[0].y, 0.61)
+-        XCTAssertEqual(pending.glows[0].radius, 1.2)
+-        XCTAssertEqual(pending.materialOpacity, 0.53)
+-        XCTAssertEqual(pending.grain, 0.23)
+-        XCTAssertEqual(pending.colorHarmony, edited.colorHarmony)
+-        XCTAssertEqual(pending.glows[0].color, edited.glows[0].color)
+-
+-        XCTAssertEqual(delegate.settings.map(\.key), [
+-            "chrome_appearance", "shared_palette"
+-        ])
+-        let payload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        let paletteConfiguration = try XCTUnwrap(payload["configuration"] as? [String: Any])
+-        XCTAssertEqual(paletteConfiguration["controlColorID"] as? String, "blue")
+-        XCTAssertEqual(store.pendingChromeAppearance, edited.normalized())
+-    }
+-
+-    @MainActor
+     func testRejectedAuthoritativeChromeSnapshotClearsPendingDraft() throws {
+         let delegate = TestDelegate()
+         let original = makeConfiguration()
+@@ -298,409 +264,6 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
+-    func testControlAccentChangeLeavesChromeConfigurationUnchanged() throws {
+-        let delegate = TestDelegate()
+-        let configuration = makeConfiguration()
+-        let store = ArciumSettingsStore(
+-            snapshot: snapshot(chrome: configuration, managed: false, available: true, paletteAvailable: true),
+-            delegate: delegate
+-        )
+-        var palette = SettingsPaletteConfiguration()
+-        palette.controlColorID = "yellow"
+-        store.applyControlAccent(palette.controlAccent)
+-
+-        XCTAssertEqual(delegate.settings.map(\.key), ["shared_palette"])
+-        XCTAssertEqual(store.currentChromeAppearance, configuration.normalized())
+-        let payload = try XCTUnwrap(delegate.settings[0].value as? [String: Any])
+-        let paletteConfiguration = try XCTUnwrap(payload["configuration"] as? [String: Any])
+-        XCTAssertEqual(paletteConfiguration["controlColorID"] as? String, "yellow")
+-    }
+-
+-    @MainActor
+-    func testLinkedControlAccentTracksGlowColorAndFallsBackWhenGlowRemoved() throws {
+-        let delegate = TestDelegate()
+-        let original = makeConfiguration()
+-        let store = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: original,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true
+-            ),
+-            delegate: delegate
+-        )
+-
+-        var linkedPalette = SettingsPaletteConfiguration()
+-        linkedPalette.controlColorID = "yellow"
+-        store.applyControlAccent(linkedPalette.controlAccent)
+-        delegate.settings.removeAll()
+-
+-        var recolored = original
+-        recolored.glows[0].color = SettingsRGB(hex: "#FF00AA")!
+-        store.setChromeAppearance(recolored)
+-
+-        XCTAssertEqual(delegate.settings.map(\.key), ["chrome_appearance", "shared_palette"])
+-        let linkedPayload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        let linkedConfiguration = try XCTUnwrap(linkedPayload["configuration"] as? [String: Any])
+-        XCTAssertEqual(linkedConfiguration["controlColorID"] as? String, "yellow")
+-        let linkedData = try JSONSerialization.data(withJSONObject: linkedConfiguration)
+-        let resolvedLinked = try JSONDecoder().decode(
+-            SettingsPaletteConfiguration.self,
+-            from: linkedData
+-        )
+-        XCTAssertEqual(resolvedLinked.customAccent, recolored.glows[0].color.oklch)
+-
+-        var removed = recolored
+-        removed.glows.removeFirst()
+-        store.setChromeAppearance(removed)
+-
+-        let fallbackPayload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        let fallbackConfiguration = try XCTUnwrap(fallbackPayload["configuration"] as? [String: Any])
+-        XCTAssertEqual(fallbackConfiguration["controlColorID"] as? String, "blue")
+-    }
+-
+-    @MainActor
+-    func testCustomControlAccentRemainsIndependentFromGlowColorChanges() throws {
+-        let delegate = TestDelegate()
+-        let original = makeConfiguration()
+-        let store = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: original,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true
+-            ),
+-            delegate: delegate
+-        )
+-
+-        let selectedCustomAccent = SettingsOKLCH(lightness: 0.62, chroma: 0.18, hue: 197)
+-        let expectedCustomAccent = selectedCustomAccent.rgb.oklch
+-        store.applyControlAccent(
+-            SettingsControlAccent(colorID: nil, customColor: selectedCustomAccent.rgb)
+-        )
+-        delegate.settings.removeAll()
+-
+-        var recolored = original
+-        recolored.glows[0].color = SettingsRGB(hex: "#FF00AA")!
+-        store.setChromeAppearance(recolored)
+-
+-        let payload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        let configuration = try XCTUnwrap(payload["configuration"] as? [String: Any])
+-        XCTAssertNil(configuration["controlColorID"])
+-        let customAccent = try XCTUnwrap(configuration["customAccent"] as? [String: Any])
+-        XCTAssertEqual(
+-            try XCTUnwrap(customAccent["lightness"] as? Double),
+-            expectedCustomAccent.lightness,
+-            accuracy: 0.0001
+-        )
+-        XCTAssertEqual(
+-            try XCTUnwrap(customAccent["chroma"] as? Double),
+-            expectedCustomAccent.chroma,
+-            accuracy: 0.0001
+-        )
+-        XCTAssertEqual(
+-            try XCTUnwrap(customAccent["hue"] as? Double),
+-            expectedCustomAccent.hue,
+-            accuracy: 0.0001
+-        )
+-    }
+-
+-    @MainActor
+-    func testControlAccentPayloadPreservesOptionalControlColorID() throws {
+-        let delegate = TestDelegate()
+-        let configuration = makeConfiguration()
+-        let store = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: configuration,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true
+-            ),
+-            delegate: delegate
+-        )
+-
+-        var absent = store.sharedPalette()
+-        absent.controlColorID = nil
+-        store.applyControlAccent(absent.controlAccent)
+-        let absentPayload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        let absentConfiguration = try XCTUnwrap(absentPayload["configuration"] as? [String: Any])
+-        XCTAssertNil(absentConfiguration["controlColorID"])
+-
+-        var linked = store.sharedPalette()
+-        linked.controlColorID = "blue"
+-        store.applyControlAccent(linked.controlAccent)
+-        let linkedPayload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
+-        let linkedConfiguration = try XCTUnwrap(linkedPayload["configuration"] as? [String: Any])
+-        XCTAssertEqual(linkedConfiguration["controlColorID"] as? String, "blue")
+-
+-        let encoded = try JSONSerialization.data(withJSONObject: linkedConfiguration)
+-        let decoded = try XCTUnwrap(
+-            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+-        )
+-        XCTAssertEqual(decoded["controlColorID"] as? String, "blue")
+-        let decodedPalette = try JSONDecoder().decode(
+-            SettingsPaletteConfiguration.self,
+-            from: encoded
+-        )
+-        XCTAssertEqual(decodedPalette.controlColorID, "blue")
+-    }
+-
+-    @MainActor
+-    func testControlAccentWritesPreserveLegacyPaletteSourcesAndChromeColors() throws {
+-        let chrome = makeConfiguration()
+-        let original = makeLegacyPaletteConfiguration()
+-        let expectedLightChrome = original.colors(dark: false)[.windowCanvas]!.hex
+-        let expectedDarkChrome = original.colors(dark: true)[.windowCanvas]!.hex
+-
+-        let linkedDelegate = TestDelegate()
+-        let linkedStore = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: chrome,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true,
+-                paletteConfiguration: original
+-            ),
+-            delegate: linkedDelegate,
+-            presetBundleURL: Bundle.module.bundleURL
+-        )
+-        linkedStore.applyControlAccent(
+-            SettingsControlAccent(
+-                colorID: "yellow",
+-                customColor: SettingsRGB(hex: "#B154D5")!
+-            )
+-        )
+-
+-        let linkedPayload = try XCTUnwrap(linkedDelegate.settings.last?.value as? [String: Any])
+-        XCTAssertEqual(linkedPayload["lightChromeColor"] as? String, expectedLightChrome)
+-        XCTAssertEqual(linkedPayload["darkChromeColor"] as? String, expectedDarkChrome)
+-        let linkedConfiguration = try XCTUnwrap(linkedPayload["configuration"] as? [String: Any])
+-        let linkedData = try JSONSerialization.data(withJSONObject: linkedConfiguration)
+-        let linkedPalette = try JSONDecoder().decode(
+-            SettingsPaletteConfiguration.self,
+-            from: linkedData
+-        )
+-        assertLegacyPaletteSourcesPreserved(linkedPalette, comparedWith: original)
+-        XCTAssertEqual(linkedPalette.controlColorID, "yellow")
+-        XCTAssertEqual(linkedPalette.customAccent, chrome.glows[0].color.oklch)
+-
+-        let customDelegate = TestDelegate()
+-        let customStore = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: chrome,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true,
+-                paletteConfiguration: original
+-            ),
+-            delegate: customDelegate,
+-            presetBundleURL: Bundle.module.bundleURL
+-        )
+-        let customColor = SettingsRGB(hex: "#32D1A0")!
+-        customStore.applyControlAccent(
+-            SettingsControlAccent(colorID: nil, customColor: customColor)
+-        )
+-
+-        let customPayload = try XCTUnwrap(customDelegate.settings.last?.value as? [String: Any])
+-        XCTAssertEqual(customPayload["lightChromeColor"] as? String, expectedLightChrome)
+-        XCTAssertEqual(customPayload["darkChromeColor"] as? String, expectedDarkChrome)
+-        let customConfiguration = try XCTUnwrap(customPayload["configuration"] as? [String: Any])
+-        let customData = try JSONSerialization.data(withJSONObject: customConfiguration)
+-        let customPalette = try JSONDecoder().decode(
+-            SettingsPaletteConfiguration.self,
+-            from: customData
+-        )
+-        assertLegacyPaletteSourcesPreserved(customPalette, comparedWith: original)
+-        XCTAssertNil(customPalette.controlColorID)
+-        XCTAssertEqual(customPalette.customAccent, customColor.oklch)
+-    }
+-
+-    @MainActor
+-    func testResetRefreshesLinkedControlAccentOnceButLeavesCustomAccentAlone() throws {
+-        let original = makeConfiguration()
+-        var linked = SettingsPaletteConfiguration()
+-        linked.controlColorID = "yellow"
+-
+-        let linkedDelegate = TestDelegate()
+-        let linkedStore = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: original,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true,
+-                paletteConfiguration: linked
+-            ),
+-            delegate: linkedDelegate,
+-            presetBundleURL: Bundle.module.bundleURL
+-        )
+-        XCTAssertTrue(linkedStore.snapshot.appearance.chrome.canReset)
+-        XCTAssertTrue(linkedStore.snapshot.appearance.palette.canEdit)
+-        XCTAssertNotNil(linkedStore.snapshot.appearance.palette.configuration)
+-        XCTAssertEqual(linkedStore.snapshot.appearance.palette.configuration?.controlColorID, "yellow")
+-        XCTAssertEqual(linkedStore.sharedPalette().controlColorID, "yellow")
+-        linkedStore.resetChromeAppearance()
+-        var resetChrome = original
+-        resetChrome.glows[0].color = SettingsRGB(hex: "#FF00AA")!
+-        linkedStore.updateSnapshot(snapshot(
+-            chrome: resetChrome,
+-            managed: false,
+-            available: true,
+-            paletteAvailable: true,
+-            paletteConfiguration: linked
+-        ))
+-
+-        XCTAssertEqual(linkedDelegate.actions.map(\.name), ["reset_chrome_appearance"])
+-        XCTAssertEqual(linkedDelegate.settings.map(\.key), ["shared_palette"])
+-        let refreshPayload = try XCTUnwrap(linkedDelegate.settings.last?.value as? [String: Any])
+-        let refreshConfiguration = try XCTUnwrap(refreshPayload["configuration"] as? [String: Any])
+-        XCTAssertEqual(refreshConfiguration["controlColorID"] as? String, "yellow")
+-        let refreshData = try JSONSerialization.data(withJSONObject: refreshConfiguration)
+-        let refreshedPalette = try JSONDecoder().decode(
+-            SettingsPaletteConfiguration.self,
+-            from: refreshData
+-        )
+-        XCTAssertEqual(refreshedPalette.customAccent, resetChrome.glows[0].color.oklch)
+-        XCTAssertEqual(refreshedPalette.brand, linked.brand)
+-        XCTAssertEqual(refreshedPalette.companion, linked.companion)
+-        XCTAssertEqual(refreshedPalette.harmony, linked.harmony)
+-
+-        linkedDelegate.settings.removeAll()
+-        linkedStore.updateSnapshot(snapshot(
+-            chrome: resetChrome,
+-            managed: false,
+-            available: true,
+-            paletteAvailable: true,
+-            paletteConfiguration: linked
+-        ))
+-        XCTAssertTrue(linkedDelegate.settings.isEmpty)
+-
+-        var custom = linked
+-        custom.controlColorID = nil
+-        let customDelegate = TestDelegate()
+-        let customStore = ArciumSettingsStore(
+-            snapshot: snapshot(
+-                chrome: original,
+-                managed: false,
+-                available: true,
+-                paletteAvailable: true,
+-                paletteConfiguration: custom
+-            ),
+-            delegate: customDelegate,
+-            presetBundleURL: Bundle.module.bundleURL
+-        )
+-        customStore.resetChromeAppearance()
+-        customStore.updateSnapshot(snapshot(
+-            chrome: resetChrome,
+-            managed: false,
+-            available: true,
+-            paletteAvailable: true,
+-            paletteConfiguration: custom
+-        ))
+-        XCTAssertTrue(customDelegate.settings.isEmpty)
+-    }
+-
+-
+-    @MainActor
+-    func testSharedPaletteAndSidebarUseHostCallbacksAndManagedGates() throws {
+-        let delegate = TestDelegate()
+-        let chrome = makeConfiguration()
+-        let store = ArciumSettingsStore(snapshot: [
+-            "available": true,
+-            "appearance": [
+-                "palette": ["available": true, "managed": false, "editable": true],
+-                "chrome": [
+-                    "available": true,
+-                    "managed": false,
+-                    "configuration": ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: chrome)
+-                ],
+-                "sidebarWidthAvailable": true,
+-                "sidebarWidthManaged": false
+-            ]
+-        ], delegate: delegate)
+-        var palette = SettingsPaletteConfiguration()
+-        palette.controlColorID = "yellow"
+-        store.applyControlAccent(palette.controlAccent)
+-        store.setSidebarWidth(320)
+-        XCTAssertEqual(delegate.settings.map(\.key), ["shared_palette", "sidebar_width"])
+-        let payload = try XCTUnwrap(delegate.settings.first?.value as? [String: Any])
+-        XCTAssertEqual(payload["accent"] as? String, chrome.glows[0].color.hex)
+-        let configuration = try XCTUnwrap(payload["configuration"] as? [String: Any])
+-        XCTAssertEqual(configuration["controlColorID"] as? String, "yellow")
+-
+-        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
+-            "palette": ["available": true, "managed": true],
+-            "sidebarWidthAvailable": true, "sidebarWidthManaged": true
+-        ]], delegate: delegate)
+-        let countBeforeManaged = delegate.settings.count
+-        managed.applyControlAccent(palette.controlAccent)
+-        managed.setSidebarWidth(250)
+-        XCTAssertEqual(delegate.settings.count, countBeforeManaged)
+-
+-        let unavailable = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
+-            "palette": ["available": false, "managed": false],
+-            "sidebarWidthAvailable": true, "sidebarWidthManaged": false
+-        ]], delegate: delegate)
+-        let countBeforeUnavailable = delegate.settings.count
+-        unavailable.applyControlAccent(palette.controlAccent)
+-        unavailable.setSidebarWidth(250)
+-        XCTAssertEqual(delegate.settings.count, countBeforeUnavailable + 1)
+-    }
+-
+-    @MainActor
+-    func testExtensionThemeKeepsItsAccentVisibleAndBlocksPaletteWrites() throws {
+-        let delegate = TestDelegate()
+-        let chrome = makeConfiguration()
+-        let extensionAccent = "#CFDDC0"
+-        let store = ArciumSettingsStore(snapshot: [
+-            "available": true,
+-            "appearance": [
+-                "palette": [
+-                    "available": true,
+-                    "managed": false,
+-                    "editable": false,
+-                    "editabilityReason": "extension_theme",
+-                    "overrideActive": false,
+-                    "accent": extensionAccent
+-                ],
+-                "chrome": [
+-                    "available": true,
+-                    "managed": false,
+-                    "configuration": ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: chrome)
+-                ]
+-            ]
+-        ], delegate: delegate, presetBundleURL: Bundle.module.bundleURL)
+-
+-        let paletteSnapshot = store.snapshot.appearance.palette
+-        XCTAssertTrue(paletteSnapshot.available)
+-        XCTAssertFalse(paletteSnapshot.managed)
+-        XCTAssertFalse(paletteSnapshot.canEdit)
+-        XCTAssertEqual(paletteSnapshot.accent, extensionAccent)
+-        XCTAssertNil(paletteSnapshot.configuration)
+-        XCTAssertEqual(
+-            paletteSnapshot.editabilityMessage,
+-            "The active extension theme sets the controls accent. Change or remove that theme to edit the accent."
+-        )
+-
+-        let preset = try XCTUnwrap(store.preset)
+-        let expectedDisplayedAccent = SettingsRGB(hex: extensionAccent)!.oklch.rgb.hex
+-        XCTAssertEqual(
+-            store.sharedBrand(from: preset).palette.brand.rgb.hex,
+-            expectedDisplayedAccent
+-        )
+-        XCTAssertEqual(store.sharedPalette().controlAccent.customColor.hex, expectedDisplayedAccent)
+-
+-        var attemptedPalette = SettingsPaletteConfiguration()
+-        attemptedPalette.controlColorID = "yellow"
+-        store.applyControlAccent(attemptedPalette.controlAccent)
+-        XCTAssertTrue(delegate.settings.isEmpty)
+-
+-        var updatedChrome = chrome
+-        updatedChrome.glows[0].color = SettingsRGB(hex: "#AA6633")!
+-        store.setChromeAppearance(updatedChrome)
+-        XCTAssertEqual(delegate.settings.map(\.key), ["chrome_appearance"])
+-    }
+-
+-    @MainActor
+     func testSharedPaletteEditabilityRequiresExplicitBoolean() {
+         let missing = ArciumSharedPaletteSnapshot([
+             "available": true,
+@@ -826,7 +389,8 @@ final class ArciumSettingsUIContractTest
+             let store = ArciumSettingsStore(
+                 snapshot: NSDictionary(dictionary: [
+                     "available": true,
+-                    "appearance": ["availableSection": true, "mode": "system", "modeAvailable": true],
++                    "appearance": ["availableSection": true, "mode": "system", "modeAvailable": true,
++                                   "spacePalette": Self.spacePaletteFixture()],
+                     "shortcuts": [
+                         "available": true,
+                         "canModify": true,
+@@ -841,8 +405,10 @@ final class ArciumSettingsUIContractTest
+             )
+ 
+             store.applyAppearanceMode(.dark)
+-            XCTAssertEqual(delegate.settings.map(\.key), ["settings_appearance"])
+-            XCTAssertEqual(delegate.settings.first?.value as? String, "dark")
++            XCTAssertEqual(delegate.settings.map(\.key), ["space_mode"])
++            let modePayload = delegate.settings.first?.value as? [String: Any]
++            XCTAssertEqual(modePayload?["mode"] as? String, "dark")
++            XCTAssertEqual(modePayload?["spaceID"] as? String, "space-a")
+             if let command = store.selectedShortcut {
+                 store.emitShortcutAction("change_shortcut", command: command, binding: command.bindings[0])
+             }
+@@ -1014,59 +580,6 @@ final class ArciumSettingsUIContractTest
+ 
+ 
+     @MainActor
+-    func testControlAccentPendingDraftClearsOnEveryFreshSnapshot() throws {
+-        let delegate = TestDelegate()
+-        let chrome = makeConfiguration()
+-        let store = ArciumSettingsStore(snapshot: [
+-            "available": true,
+-            "appearance": [
+-                "palette": ["available": true, "managed": false, "editable": true],
+-                "chrome": [
+-                    "available": true,
+-                    "managed": false,
+-                    "configuration": ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: chrome)
+-                ]
+-            ]
+-        ], delegate: delegate, presetBundleURL: Bundle.module.bundleURL)
+-        let originalSnapshot = store.snapshot
+-
+-        var first = store.sharedPalette()
+-        first.controlColorID = "yellow"
+-        store.applyControlAccent(first.controlAccent)
+-
+-        var latest = store.sharedPalette()
+-        XCTAssertEqual(latest.controlColorID, "yellow")
+-        latest.controlColorID = "blue"
+-        let expectedLatest = latest.resolvingControlAccent(from: chrome.glows)
+-        store.applyControlAccent(latest.controlAccent)
+-
+-        XCTAssertEqual(store.pendingSharedPalette, expectedLatest)
+-        XCTAssertEqual(store.sharedPalette(), expectedLatest)
+-        XCTAssertEqual(store.snapshot, originalSnapshot)
+-
+-        store.updateSnapshot(try Self.snapshotWithPalette(first))
+-        XCTAssertNil(store.pendingSharedPalette)
+-        XCTAssertEqual(store.sharedPalette(), first)
+-
+-        store.applyControlAccent(expectedLatest.controlAccent)
+-        XCTAssertNotNil(store.pendingSharedPalette)
+-        store.updateSnapshot(NSDictionary(dictionary: [
+-            "available": true,
+-            "appearance": [
+-                "palette": [
+-                    "available": true,
+-                    "managed": false,
+-                    "editable": true,
+-                    "overrideActive": true,
+-                    "configuration": ["controlColorID": String(repeating: "x", count: 129)]
+-                ]
+-            ]
+-        ]))
+-        XCTAssertNil(store.pendingSharedPalette)
+-        XCTAssertNil(store.snapshot.appearance.palette.configuration)
+-    }
+-
+-    @MainActor
+     func testSidebarWidthUsesScaledDisplayButPersistsBaseWidth() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
+@@ -1370,38 +883,6 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
+-    func testSharedPaletteManagedSnapshotAndResetClearPendingDraft() throws {
+-        let delegate = TestDelegate()
+-        let store = ArciumSettingsStore(snapshot: [
+-            "available": true,
+-            "appearance": [
+-                "palette": ["available": true, "managed": false, "editable": true]
+-            ]
+-        ], delegate: delegate, presetBundleURL: Bundle.module.bundleURL)
+-
+-        store.applyControlAccent(store.controlAccent)
+-        XCTAssertNotNil(store.pendingSharedPalette)
+-        store.actionInvoked(name: "reset_shared_palette")
+-        XCTAssertNil(store.pendingSharedPalette)
+-
+-        var palette = store.sharedPalette()
+-        palette.controlColorID = "yellow"
+-        store.applyControlAccent(palette.controlAccent)
+-        XCTAssertNotNil(store.pendingSharedPalette)
+-
+-        store.updateSnapshot(NSDictionary(dictionary: [
+-            "available": true,
+-            "appearance": [
+-                "palette": ["available": true, "managed": true, "overrideActive": false]
+-            ]
+-        ]))
+-
+-        XCTAssertNil(store.pendingSharedPalette)
+-        let preset = try XCTUnwrap(store.preset)
+-        XCTAssertEqual(store.sharedPalette(), preset.brand.palette)
+-    }
+-
+-    @MainActor
+     func testChromeUIScaleSnapshotUsesEffectiveScaleAndDefaultState() {
+         let snapshot = ArciumSettingsSnapshot(dictionary: NSDictionary(dictionary: [
+             "available": true,
+@@ -1935,6 +1416,123 @@ final class ArciumSettingsUIContractTest
+         }
+     }
+ 
++    @MainActor
++    func testSpaceChromaPreservesRecipeAndUsesOneTargetedWrite() throws {
++        let delegate = TestDelegate()
++        let original = makeConfiguration()
++        let store = ArciumSettingsStore(snapshot: snapshot(chrome: original,
++            managed: false, available: true), delegate: delegate)
++        store.setSpaceChroma(controls: 1.75)
++        XCTAssertEqual(store.currentChromeAppearance, original)
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_chroma"])
++        let payload = try XCTUnwrap(delegate.settings.first?.value as? [String: Any])
++        XCTAssertEqual(payload["spaceID"] as? String, "space-a")
++        XCTAssertEqual(payload["controlsChroma"] as? Double, 1.75)
++        XCTAssertEqual(payload["panelsChroma"] as? Double, 0.35)
++        XCTAssertEqual(payload.count, 3)
++    }
++
++    @MainActor
++    func testSpaceRetargetingKeepsQueuedEditsLabeledWithTheirOriginalTarget() throws {
++        let delegate = TestDelegate()
++        let original = makeConfiguration()
++        let store = ArciumSettingsStore(snapshot: snapshot(chrome: original,
++            managed: false, available: true), delegate: delegate)
++        var changed = original
++        changed.glows[0].color = SettingsRGB(hex: "#B261E1")!
++        store.setChromeAppearance(changed)
++        store.setSpaceChroma(panels: 1.25)
++        XCTAssertEqual(store.currentChromeAppearance, changed)
++        store.updateSnapshot(snapshot(chrome: original, managed: false,
++            available: true, spaceID: "space-b"))
++        XCTAssertNil(store.pendingChromeAppearance)
++        store.setChromeAppearance(original)
++        let payloads = delegate.settings.compactMap { $0.value as? [String: Any] }
++        XCTAssertEqual(payloads.compactMap { $0["spaceID"] as? String },
++                       ["space-a", "space-a", "space-b"])
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_colors", "space_chroma", "space_colors"])
++    }
++
++    @MainActor
++    func testDeletedOrUnavailableSpaceAndInvalidDialsEmitNothing() {
++        let delegate = TestDelegate()
++        let configuration = makeConfiguration()
++        let store = ArciumSettingsStore(snapshot: snapshot(chrome: configuration,
++            managed: false, available: true, spaceAvailable: false), delegate: delegate)
++        store.setChromeAppearance(configuration)
++        store.setSpaceChroma(controls: 1)
++        store.applyAppearanceMode(.dark)
++        store.resetChromeAppearance()
++        XCTAssertTrue(delegate.settings.isEmpty)
++        XCTAssertTrue(delegate.actions.isEmpty)
++        store.updateSnapshot(snapshot(chrome: configuration, managed: false, available: true))
++        store.setSpaceChroma(controls: .nan)
++        store.setSpaceChroma(panels: 2.01)
++        store.setSpaceChroma(controls: -0.01)
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    @MainActor
++    func testSpaceResetNeverCreatesAnotherColorWriteOnAcknowledgment() {
++        let delegate = TestDelegate()
++        let configuration = makeConfiguration()
++        let initial = snapshot(chrome: configuration, managed: false, available: true)
++        let store = ArciumSettingsStore(snapshot: initial, delegate: delegate)
++        store.resetChromeAppearance()
++        store.updateSnapshot(initial)
++        XCTAssertTrue(delegate.settings.isEmpty)
++        XCTAssertEqual(delegate.actions.map(\.name), ["reset_space_colors"])
++        XCTAssertEqual(delegate.actions.first?.payload["spaceID"] as? String, "space-a")
++    }
++
++    @MainActor
++    func testPendingChromaEditsMergeAndOldSpaceCallbacksAreRejected() throws {
++        let delegate = TestDelegate()
++        let configuration = makeConfiguration()
++        let store = ArciumSettingsStore(snapshot: snapshot(chrome: configuration,
++            managed: false, available: true), delegate: delegate)
++        store.setSpaceChroma(controls: 0.5)
++        store.setSpaceChroma(panels: 1.2)
++        let payload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
++        XCTAssertEqual(payload["controlsChroma"] as? Double, 0.5)
++        XCTAssertEqual(payload["panelsChroma"] as? Double, 1.2)
++        store.updateSnapshot(snapshot(chrome: configuration, managed: false,
++            available: true, spaceID: "space-b"))
++        let count = delegate.settings.count
++        store.setSpaceChroma(controls: 1, spaceID: "space-a")
++        store.setChromeAppearance(configuration, spaceID: "space-a")
++        store.applyAppearanceMode(.dark, spaceID: "space-a")
++        XCTAssertEqual(delegate.settings.count, count)
++    }
++
++    @MainActor
++    func testSidebarWidthStillUsesHostCallbackAndManagedGates() {
++        let delegate = TestDelegate()
++        func make(_ available: Bool, _ managed: Bool) -> ArciumSettingsStore {
++            ArciumSettingsStore(snapshot: NSDictionary(dictionary: [
++                "available": true, "appearance": ["availableSection": true,
++                    "sidebarWidthAvailable": available, "sidebarWidthManaged": managed]
++            ]), delegate: delegate)
++        }
++        make(true, false).setSidebarWidth(250)
++        make(true, true).setSidebarWidth(300)
++        make(false, false).setSidebarWidth(350)
++        XCTAssertEqual(delegate.settings.map(\.key), ["sidebar_width"])
++        XCTAssertEqual(delegate.settings.first?.value as? Int, 250)
++    }
++
++    private static func spacePaletteFixture(id: String = "space-a", available: Bool = true) -> [String: Any] {
++        let light = ["chrome": "#F8F3FB", "field": "#EDE6F1", "hover": "#E5DEEB",
++                     "panel": "#FBF8FD", "text": "#17111C", "mutedText": "#514659",
++                     "outline": "#6C6074", "accent": "#704A92", "onAccent": "#FFFFFF"]
++        let dark = ["chrome": "#110E13", "field": "#241D2A", "hover": "#2B2332",
++                    "panel": "#211B26", "text": "#F5ECFC", "mutedText": "#C2AFCF",
++                    "outline": "#A18BAC", "accent": "#C99CE5", "onAccent": "#17111C"]
++        return ["id": id, "name": "Work", "available": available,
++                "controlsChroma": 1.0, "panelsChroma": 0.35,
++                "light": light, "dark": dark]
++    }
++
+     private func makeConfiguration() -> SettingsBackdropConfiguration {
+         SettingsBackdropConfiguration(
+             enabled: true,
+@@ -2008,7 +1606,9 @@ final class ArciumSettingsUIContractTest
+         managed: Bool,
+         available: Bool,
+         paletteAvailable: Bool = false,
+-        paletteConfiguration: SettingsPaletteConfiguration? = nil
++        paletteConfiguration: SettingsPaletteConfiguration? = nil,
++        spaceID: String = "space-a",
++        spaceAvailable: Bool = true
+     ) -> NSDictionary {
+         var palette: [String: Any] = [
+             "available": paletteAvailable,
+@@ -2032,7 +1632,9 @@ final class ArciumSettingsUIContractTest
+                     "activeMaterial": "liquidGlass",
+                     "effectsAvailable": true
+                 ],
+-                "palette": palette
++                "palette": palette,
++                "spacePalette": Self.spacePaletteFixture(
++                    id: spaceID, available: spaceAvailable && available && !managed)
+             ]
+         ]
+     }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SColorHarmonyPicker.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SColorHarmonyPicker.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SColorHarmonyPicker.swift
+@@ -149,18 +149,20 @@ public struct SColorHarmonyPicker: View
+         fallbackHue: Double = 0
+     ) -> [String] {
+         guard let index = activeIndex(selectedIndex, count: colors.count),
+-              let selected = SettingsHarmonyColorHSV(hex: colors[index], fallbackHue: fallbackHue),
++              let rgb = SettingsRGB(hex: colors[index]),
+               mode != .custom else { return colors }
+-
++        let selected = rgb.oklch
+         let offsets = mode.offsets(for: colors.count)
+-        let baseHue = SettingsHarmonyColorHSV.wrapped(selected.hue - offsets[index])
+-        return colors.indices.map { index in
+-            SettingsHarmonyColorHSV(
+-                hue: baseHue + offsets[index],
+-                saturation: selected.saturation,
+-                brightness: selected.brightness
+-            ).hex
++        let selectedHue = selected.chroma < 0.00001 ? fallbackHue * 360 : selected.hue
++        let baseHue = selectedHue - offsets[index] * 360
++        return colors.indices.map { i in
++            if i == index { return rgb.hex }
++            return SettingsOKLCH(
++                lightness: selected.lightness, chroma: selected.chroma,
++                hue: baseHue + offsets[i] * 360
++            ).rgb.hex
+         }
++
+     }
+ 
+     /// Returns a point in the hue/saturation wheel. Hue zero is at the top
+@@ -265,20 +267,13 @@ public struct SColorHarmonyPicker: View
+                 guard nextMode != mode else { return }
+                 mode = nextMode
+                 guard nextMode != .custom,
+-                      let selectedHSV,
+                       let activePointIndex else {
+                     updateDraft(draftColors, commit: true, force: true)
+                     return
+                 }
+-                let offsets = nextMode.offsets(for: draftColors.count)
+-                let baseHue = SettingsHarmonyColorHSV.wrapped(selectedHSV.hue - offsets[activePointIndex])
+-                let nextColors = draftColors.indices.map { index in
+-                    SettingsHarmonyColorHSV(
+-                        hue: baseHue + offsets[index],
+-                        saturation: selectedHSV.saturation,
+-                        brightness: selectedHSV.brightness
+-                    ).hex
+-                }
++                let nextColors = Self.applyingHarmony(to: draftColors,
++                    selectedIndex: activePointIndex, mode: nextMode,
++                    fallbackHue: hueFallback)
+                 updateDraft(nextColors, commit: true, force: true)
+             }
+         )
+@@ -411,15 +406,12 @@ public struct SColorHarmonyPicker: View
+ 
+     private func harmonyMarker(_ marker: HarmonyMarker) -> some View {
+         let size: CGFloat = marker.isSelected ? 26 : 20
+-        let lightMarker = (SettingsRGB(hex: marker.color.hex)?.luminance ?? 0) > 0.42
+-        let textColor: Color = lightMarker ? .black : .white
+-        let shadowColor: Color = lightMarker ? .white.opacity(0.35) : .black.opacity(0.7)
++        let textColor = SettingsRGB(hex: marker.color.hex)?.contrastingText.color ?? .white
+         return ZStack {
+-            Circle().fill(marker.color.color.opacity(marker.isSelected ? 0.95 : 0.48))
++            Circle().fill(marker.color.color)
+             Text("\(marker.index + 1)")
+                 .font(.system(size: marker.isSelected ? 11 : 10, weight: .bold, design: .rounded))
+                 .foregroundStyle(textColor)
+-                .shadow(color: shadowColor, radius: 1)
+         }
+         .frame(width: size, height: size)
+         .overlay { Circle().stroke(.white.opacity(0.96), lineWidth: marker.isSelected ? 2.5 : 2) }
+@@ -464,15 +456,10 @@ public struct SColorHarmonyPicker: View
+             updateDraft(next, commit: commit)
+             return
+         }
+-        let offsets = mode.offsets(for: draftColors.count)
+-        let baseHue = SettingsHarmonyColorHSV.wrapped(selected.hue - offsets[activePointIndex])
+-        let next = draftColors.indices.map { index in
+-            SettingsHarmonyColorHSV(
+-                hue: baseHue + offsets[index],
+-                saturation: selected.saturation,
+-                brightness: selected.brightness
+-            ).hex
+-        }
++        var selectedColors = draftColors
++        selectedColors[activePointIndex] = selected.hex
++        let next = Self.applyingHarmony(to: selectedColors,
++            selectedIndex: activePointIndex, mode: mode, fallbackHue: hueFallback)
+         updateDraft(next, commit: commit)
+     }
+ 
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
+@@ -6,6 +6,7 @@
+ #define CHROME_BROWSER_UI_COCOA_ARCIUM_SETTINGS_WINDOW_CONTROLLER_H_
+ 
+ class Profile;
++class BrowserWindowInterface;
+ 
+ namespace arcium_settings {
+ 
+@@ -13,6 +14,7 @@ namespace arcium_settings {
+ // profile. Returns false only when the profile cannot be used by a native
+ // window, allowing the caller to retain Chromium's normal Settings route.
+ bool ShowForProfile(Profile* profile);
++bool ShowForBrowser(BrowserWindowInterface* browser);
+ 
+ // Reuses a key native Settings window when Cmd+, is pressed while that window
+ // is active, so profile selection does not jump to the last browser profile.
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -39,10 +39,13 @@
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/helium/arcium_settings_model.h"
++#include "chrome/browser/ui/helium/space_palette.h"
++#include "chrome/browser/ui/color/arcium_space_color_mixer.h"
+ #include "chrome/browser/ui/helium/arcium_settings_prefs.h"
+ #include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/helium/helium_space_service_factory.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+@@ -430,7 +433,7 @@ bool IsSidebarNavigationConfiguredForPro
+ }
+ 
+ std::optional<SettingsChromeVisualState> GetBrowserChromeVisualState(
+-    Profile* profile) {
++    Profile* profile, const helium::HeliumSpace* target) {
+   if (!profile) {
+     return std::nullopt;
+   }
+@@ -439,10 +442,15 @@ std::optional<SettingsChromeVisualState>
+   if (collection) {
+     std::optional<SettingsChromeVisualState> result;
+     collection->ForEach(
+-        [&result, profile](BrowserWindowInterface* browser) {
++        [&result, profile, target](BrowserWindowInterface* browser) {
+           if (!IsMatchingNormalBrowser(browser, profile)) {
+             return true;
+           }
++          auto* spaces = helium::HeliumSpaceServiceFactory::GetForProfileIfExists(profile);
++          if (target && (!spaces || spaces->GetExplicitSpaceIdForBrowser(
++                  browser->GetBrowserForMigrationOnly()) != target->id())) {
++            return true;
++          }
+ 
+           BrowserView* browser_view =
+               BrowserView::GetBrowserViewForBrowser(browser);
+@@ -457,11 +465,6 @@ std::optional<SettingsChromeVisualState>
+           SettingsChromeVisualState state;
+           state.color_mode = widget->GetColorMode();
+           state.theme_color = color_provider->GetColor(kColorToolbar);
+-          if (auto palette_color = arcium_settings::GetSharedPaletteChromeColor(
+-                  profile, state.color_mode ==
+-                              ui::ColorProviderKey::ColorMode::kDark)) {
+-            state.theme_color = *palette_color;
+-          }
+           result = state;
+           return false;
+         },
+@@ -471,26 +474,18 @@ std::optional<SettingsChromeVisualState>
+     }
+   }
+ 
+-  // Without a browser window, use the public theme-service fallback. Normal
+-  // browser windows above remain the authority for their resolved toolbar color.
+-  ThemeService* theme_service = ThemeServiceFactory::GetForProfile(profile);
+-  if (!theme_service) {
+-    return std::nullopt;
+-  }
+-
+-  const bool is_dark = theme_service->BrowserUsesDarkColors();
+-  const ui::ColorProvider* color_provider = theme_service->GetColorProvider();
+-
++  const bool system_dark = [[NSApp.effectiveAppearance
++      bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]]
++      isEqualToString:NSAppearanceNameDarkAqua];
++  const auto mode = target ? target->theme().mode : helium::SpaceTheme::Mode::kAuto;
++  const bool dark = mode == helium::SpaceTheme::Mode::kDark ||
++      (mode == helium::SpaceTheme::Mode::kAuto && system_dark);
++  const auto key = helium::SpacePaletteKey(target ? &target->theme() : nullptr,
++      helium::ReadGlassSurfaceConfiguration(profile->GetPrefs()));
+   SettingsChromeVisualState state;
+-  state.color_mode = is_dark ? ui::ColorProviderKey::ColorMode::kDark
+-                             : ui::ColorProviderKey::ColorMode::kLight;
+-  if (color_provider) {
+-    state.theme_color = color_provider->GetColor(kColorToolbar);
+-  }
+-  if (auto palette_color = arcium_settings::GetSharedPaletteChromeColor(
+-          profile, is_dark)) {
+-    state.theme_color = *palette_color;
+-  }
++  state.color_mode = dark ? ui::ColorProviderKey::ColorMode::kDark
++                          : ui::ColorProviderKey::ColorMode::kLight;
++  state.theme_color = arcium::GenerateSpacePalette(key, dark).chrome;
+   return state;
+ }
+ 
+@@ -605,6 +600,7 @@ void SetSettingsWindowGlassState(NSWindo
+     : NSWindowController <NSWindowDelegate,
+                           ArciumShortcutRecorderDelegate,
+                           ArciumSettingsUIDelegate>
++
+ - (instancetype)initWithProfile:(Profile*)profile;
+ - (BOOL)buildWindow;
+ - (NSDictionary*)settingsSnapshot;
+@@ -635,6 +631,7 @@ void SetSettingsWindowGlassState(NSWindo
+                        display:(NSString*)display
+                      commandID:(int)commandID
+               previousShortcut:(NSString*)previousShortcut;
++- (BOOL)selectAppearanceSpace:(NSString*)spaceID;
+ - (void)applyArcDefaults;
+ - (void)restorePreviousShortcuts;
+ - (void)resetAllShortcuts;
+@@ -685,6 +682,16 @@ void SettingsModelProfileWillBeDestroyed
+   id accessibility_notification_token_;
+ }
+ 
++- (BOOL)selectAppearanceSpace:(NSString*)spaceID {
++  if (!model_ || !spaceID.length ||
++      !model_->SetAppearanceSpace(base::SysNSStringToUTF8(spaceID))) {
++    return NO;
++  }
++  [self updateNativeGlassBackground];
++  [self publishSnapshot];
++  return YES;
++}
++
+ - (instancetype)initWithProfile:(Profile*)profile {
+   if (!profile) {
+     return nil;
+@@ -899,8 +906,18 @@ void SettingsModelProfileWillBeDestroyed
+ 
+   const bool has_chrome_appearance_preference =
+       model_->HasPreference(helium::kArciumChromeAppearancePref);
+-  const helium::GlassSurfaceConfiguration configuration =
+-      helium::ParseGlassSurfaceConfiguration(model_->GetChromeAppearance());
++  auto configuration = helium::ParseGlassSurfaceConfiguration(model_->GetChromeAppearance());
++  const auto visual_state = GetBrowserChromeVisualState(profile_, model_->GetAppearanceSpace());
++  const auto* target = model_->GetAppearanceSpace();
++  if (model_->IsSpacePaletteRenderingActive()) {
++    helium::ApplySpacePaletteForRendering(configuration,
++        target ? &target->theme() : nullptr,
++        visual_state && visual_state->color_mode == ui::ColorProviderKey::ColorMode::kDark);
++  } else {
++    configuration.chrome_contrast_floor = visual_state
++        ? SkColorSetA(visual_state->theme_color, SK_AlphaOPAQUE) : SK_ColorWHITE;
++    configuration.point_count = 0;
++  }
+   const helium::GlassBackendAvailability availability =
+       helium::GetNativeFrameGlassAvailability();
+   const helium::GlassSurfaceResolution resolution =
+@@ -922,8 +939,6 @@ void SettingsModelProfileWillBeDestroyed
+       custom_surface ? resolution.paints_chrome_transparent
+                       : legacy_native_surface;
+ 
+-  std::optional<SettingsChromeVisualState> visual_state =
+-      GetBrowserChromeVisualState(profile_);
+   if (visual_state.has_value()) {
+     // Window appearance is also needed when native effects are unavailable so
+     // the hosted SwiftUI view follows explicit Light/Dark settings.
+@@ -953,7 +968,8 @@ void SettingsModelProfileWillBeDestroyed
+     return;
+   }
+ 
+-  if (custom_surface && native_background_view_ &&
++  const bool wrapped_surface = custom_surface || configuration.chrome_contrast_floor.has_value();
++  if (wrapped_surface && native_background_view_ &&
+       native_background_is_profile_surface_) {
+     // Color points, opacity, grain, and material-specific controls update the
+     // existing native subtree. The helper recreates only its base when the
+@@ -962,7 +978,7 @@ void SettingsModelProfileWillBeDestroyed
+     helium::ApplyNativeGlassBackgroundView(
+         native_background_view_, content_view.bounds, visual_state->color_mode,
+         visual_state->theme_color, configuration, resolution);
+-  } else if (!custom_surface && native_background_view_ &&
++  } else if (!wrapped_surface && native_background_view_ &&
+              !native_background_is_profile_surface_ &&
+              last_color_mode_ == visual_state->color_mode &&
+              last_theme_color_ == visual_state->theme_color) {
+@@ -973,7 +989,7 @@ void SettingsModelProfileWillBeDestroyed
+     }
+ 
+     native_background_view_ =
+-        custom_surface
++        wrapped_surface
+             ? helium::CreateNativeGlassBackgroundView(
+                   content_view.bounds, visual_state->color_mode,
+                   visual_state->theme_color, configuration, resolution)
+@@ -981,7 +997,7 @@ void SettingsModelProfileWillBeDestroyed
+                   content_view.bounds, visual_state->color_mode,
+                   visual_state->theme_color);
+     if (native_background_view_) {
+-      native_background_is_profile_surface_ = custom_surface;
++      native_background_is_profile_surface_ = wrapped_surface;
+       [content_controller_ setBackgroundView:native_background_view_];
+       SetSettingsWindowGlassState(self.window, should_use_translucent_window);
+     }
+@@ -1383,6 +1399,8 @@ void SettingsModelProfileWillBeDestroyed
+     @"modeManaged" : @(appearance_managed),
+     @"modeAvailable" : @(appearance_available),
+     @"palette" : shared_palette,
++    @"spacePalette" : NSDictionaryFromBaseDict(
++        model ? model->GetSpacePalette() : base::DictValue()) ?: @{},
+     @"chrome" : chrome_appearance,
+     @"chromeUIScale" : @(chrome_ui_scale),
+     @"chromeUIScaleIsDefault" : @(chrome_ui_scale_is_default),
+@@ -1806,14 +1824,39 @@ void SettingsModelProfileWillBeDestroyed
+   if (profile_destroying_ || !model_ || !key.length) {
+     return;
+   }
+-  if ([key isEqualToString:kKeySharedPalette]) {
+-    std::optional<base::DictValue> payload;
+-    if ([value isKindOfClass:[NSDictionary class]]) {
+-      payload = BaseDictFromNSObject((NSDictionary*)value);
++  if ([key isEqualToString:@"space_colors"] ||
++      [key isEqualToString:@"space_chroma"] ||
++      [key isEqualToString:@"space_mode"]) {
++    if (![value isKindOfClass:[NSDictionary class]]) {
++      [self modelDidChange];
++      return;
+     }
+-    if (!payload || !model_->SetSharedPalette(*payload)) {
++    NSDictionary* payload = (NSDictionary*)value;
++    const auto* space = model_->GetAppearanceSpace();
++    if (!space || ![payload[@"spaceID"] isKindOfClass:[NSString class]] ||
++        ![payload[@"spaceID"] isEqualToString:base::SysUTF8ToNSString(space->id())]) {
+       [self modelDidChange];
++      return;
+     }
++    if ([key isEqualToString:@"space_colors"]) {
++      auto colors = [payload[@"configuration"] isKindOfClass:[NSDictionary class]]
++          ? BaseDictFromNSObject(payload[@"configuration"]) : std::nullopt;
++      if (colors) {
++        model_->SetChromeAppearance(*colors);
++      }
++    } else if ([key isEqualToString:@"space_chroma"]) {
++      auto tuning = BaseDictFromNSObject(@{
++        @"controlsChroma": payload[@"controlsChroma"] ?: [NSNull null],
++        @"panelsChroma": payload[@"panelsChroma"] ?: [NSNull null]});
++      if (tuning) {
++        model_->SetSpacePaletteChroma(*tuning);
++      }
++    } else if ([payload[@"mode"] isKindOfClass:[NSString class]]) {
++      if (auto mode = AppearanceModeValue(payload[@"mode"])) {
++        model_->SetAppearanceMode(*mode);
++      }
++    }
++    [self modelDidChange];
+     return;
+   }
+   // The Swift facade is a projection of this model. Re-publish even when the
+@@ -2227,23 +2270,6 @@ void SettingsModelProfileWillBeDestroyed
+     }
+     return;
+   }
+-  if ([key isEqualToString:kKeyAppearance] &&
+-      [value isKindOfClass:[NSString class]]) {
+-    std::optional<int> mode = AppearanceModeValue((NSString*)value);
+-    if (mode && model_->SetAppearanceMode(*mode)) {
+-      [self modelDidChange];
+-    }
+-    return;
+-  }
+-  if ([key isEqualToString:kKeyChromeAppearance] &&
+-      [value isKindOfClass:[NSDictionary class]]) {
+-    std::optional<base::DictValue> configuration =
+-        BaseDictFromNSObject((NSDictionary*)value);
+-    if (configuration) {
+-      model_->SetChromeAppearance(*configuration);
+-    }
+-    return;
+-  }
+   if ([key isEqualToString:kKeyActiveSpace] &&
+       [value isKindOfClass:[NSString class]]) {
+     NSString* requested_id = (NSString*)value;
+@@ -2291,13 +2317,10 @@ void SettingsModelProfileWillBeDestroyed
+     if (profile) {
+       chrome::ShowSettingsSubPageForProfile(profile, "");
+     }
+-  } else if ([name isEqualToString:@"reset_appearance"]) {
+-    if (model_->SetAppearanceMode(0)) {
+-      [self modelDidChange];
+-    }
+-  } else if ([name isEqualToString:@"reset_chrome_appearance"]) {
+-    if (model_->HasPreference(helium::kArciumChromeAppearancePref) &&
+-        !model_->IsManaged(helium::kArciumChromeAppearancePref)) {
++  } else if ([name isEqualToString:@"reset_space_colors"]) {
++    const auto* space = model_->GetAppearanceSpace();
++    if (space && [payload[@"spaceID"] isKindOfClass:[NSString class]] &&
++        [payload[@"spaceID"] isEqualToString:base::SysUTF8ToNSString(space->id())]) {
+       model_->ResetChromeAppearance();
+     }
+   } else if ([name isEqualToString:@"cancel_recording"]) {
+@@ -2626,7 +2649,7 @@ void SettingsModelProfileWillBeDestroyed
+ 
+ namespace arcium_settings {
+ 
+-bool ShowForProfile(Profile* profile) {
++bool ShowForSpace(Profile* profile, std::string_view space_id) {
+   if (!profile) {
+     return false;
+   }
+@@ -2645,10 +2668,29 @@ bool ShowForProfile(Profile* profile) {
+     }
+     Controllers()[key] = controller;
+   }
++  if (!space_id.empty() && ![controller selectAppearanceSpace:
++          base::SysUTF8ToNSString(space_id)]) {
++    return false;
++  }
+   [controller showWindow:nil];
+   return true;
+ }
+ 
++bool ShowForProfile(Profile* profile) {
++  return ShowForSpace(profile, {});
++}
++
++bool ShowForBrowser(BrowserWindowInterface* browser) {
++  if (!browser) {
++    return false;
++  }
++  Profile* profile = browser->GetProfile()->GetOriginalProfile();
++  auto* spaces = helium::HeliumSpaceServiceFactory::GetForProfile(profile);
++  const auto id = spaces ? spaces->GetSpaceIdForBrowser(
++      browser->GetBrowserForMigrationOnly()) : std::string_view();
++  return ShowForSpace(profile, id);
++}
++
+ bool ShowExistingWindow() {
+   for (ArciumSettingsWindowController* controller in Controllers().allValues) {
+     if (controller.window.isKeyWindow || controller.window.isMainWindow) {
+Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
++++ src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+@@ -853,13 +853,7 @@ void BrowserNativeWidgetMac::UpdateBackg
+ 
+   auto color_mode = widget->GetColorMode();
+   auto theme_color = widget->GetColorProvider()->GetColor(kColorToolbar);
+-  if (Profile* profile = browser_view_->GetProfile()) {
+-    if (auto palette_color = arcium_settings::GetSharedPaletteChromeColor(
+-            profile->GetOriginalProfile(),
+-            color_mode == ui::ColorProviderKey::ColorMode::kDark)) {
+-      theme_color = *palette_color;
+-    }
+-  }
++
+ 
+   if (!ns_window) {
+     return;
+@@ -870,7 +864,9 @@ void BrowserNativeWidgetMac::UpdateBackg
+     return;
+   }
+ 
+-  if (configuration.enabled && background_view_ &&
++  const bool profile_surface = configuration.enabled ||
++      configuration.chrome_contrast_floor.has_value();
++  if (profile_surface && background_view_ &&
+       background_view_is_profile_surface_) {
+     // Slider edits update the existing AppKit subtree. The base material is
+     // replaced only when its active backend, color mode, or theme changes.
+@@ -882,7 +878,7 @@ void BrowserNativeWidgetMac::UpdateBackg
+     return;
+   }
+ 
+-  if (!configuration.enabled && background_view_ &&
++  if (!profile_surface && background_view_ &&
+       !background_view_is_profile_surface_ && last_color_mode_ == color_mode &&
+       last_theme_color_ == theme_color) {
+     return;
+@@ -900,7 +896,7 @@ void BrowserNativeWidgetMac::UpdateBackg
+     [content_view addSubview:background_view_
+                   positioned:NSWindowBelow
+                   relativeTo:nil];
+-    background_view_is_profile_surface_ = configuration.enabled;
++    background_view_is_profile_surface_ = profile_surface;
+     last_color_mode_ = color_mode;
+     last_theme_color_ = theme_color;
+   } else {
+Index: src/chrome/browser/ui/views/helium/glass_surface_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/helium/glass_surface_mac.mm
++++ src/chrome/browser/ui/views/helium/glass_surface_mac.mm
+@@ -261,6 +261,8 @@ CGImageRef CreateGrainTile() {
+   helium::GlassSurfaceMaterial active_material_;
+   ui::ColorProviderKey::ColorMode color_mode_;
+   BOOL has_base_;
++  BOOL legacy_base_;
++  SkColor base_theme_color_;
+ }
+ - (void)applyConfiguration:
+             (const helium::GlassSurfaceConfiguration&)configuration
+@@ -299,7 +301,8 @@ CGImageRef CreateGrainTile() {
+                          colorMode:(ui::ColorProviderKey::ColorMode)colorMode
+                         themeColor:(SkColor)themeColor {
+   if (has_base_ && active_material_ == resolution.active &&
+-      color_mode_ == colorMode) {
++      legacy_base_ == !configuration.enabled && color_mode_ == colorMode &&
++      (!legacy_base_ || base_theme_color_ == themeColor)) {
+     return NO;
+   }
+ 
+@@ -307,36 +310,44 @@ CGImageRef CreateGrainTile() {
+   base_view_ = nil;
+   has_base_ = NO;
+ 
+-  switch (resolution.active) {
+-    case helium::GlassSurfaceMaterial::kLiquidGlass:
+-      if (@available(macOS 26.0, *)) {
+-        NSGlassEffectView* glass_view =
+-            [[ArciumLiquidGlassBackgroundView alloc] initWithFrame:self.bounds];
+-        glass_view.style = NSGlassEffectViewStyleRegular;
+-        glass_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+-        base_view_ = glass_view;
++  legacy_base_ = !configuration.enabled;
++  base_theme_color_ = themeColor;
++  if (legacy_base_) {
++    base_view_ = helium::CreateNativeGlassBackgroundView(
++        self.bounds, colorMode, themeColor);
++  } else {
++    switch (resolution.active) {
++      case helium::GlassSurfaceMaterial::kLiquidGlass:
++        if (@available(macOS 26.0, *)) {
++          NSGlassEffectView* glass_view =
++              [[ArciumLiquidGlassBackgroundView alloc] initWithFrame:self.bounds];
++          glass_view.style = NSGlassEffectViewStyleRegular;
++          glass_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++          base_view_ = glass_view;
++        }
++        break;
++      case helium::GlassSurfaceMaterial::kFrosted:
++        base_view_ = helium::CreateNativeFrameMaterialBackgroundView(
++            self.bounds, colorMode, themeColor, configuration.frosted_style,
++            configuration.frosted_tint_strength);
++        if ([base_view_ isKindOfClass:[NSVisualEffectView class]]) {
++          // Match SettingsUI's glowsBehindGlass composition so the rear layer is
++          // sampled inside the window instead of behind the window.
++          NSVisualEffectView* visual_view = (NSVisualEffectView*)base_view_;
++          visual_view.blendingMode = NSVisualEffectBlendingModeWithinWindow;
++        }
++        break;
++      case helium::GlassSurfaceMaterial::kSolid: {
++        NSView* solid_view = [[NSView alloc] initWithFrame:self.bounds];
++        solid_view.wantsLayer = YES;
++        solid_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++        base_view_ = solid_view;
++        break;
+       }
+-      break;
+-    case helium::GlassSurfaceMaterial::kFrosted:
+-      base_view_ = helium::CreateNativeFrameMaterialBackgroundView(
+-          self.bounds, colorMode, themeColor, configuration.frosted_style,
+-          configuration.frosted_tint_strength);
+-      if ([base_view_ isKindOfClass:[NSVisualEffectView class]]) {
+-        // Match SettingsUI's glowsBehindGlass composition so the rear layer is
+-        // sampled inside the window instead of behind the window.
+-        NSVisualEffectView* visual_view = (NSVisualEffectView*)base_view_;
+-        visual_view.blendingMode = NSVisualEffectBlendingModeWithinWindow;
+-      }
+-      break;
+-    case helium::GlassSurfaceMaterial::kSolid: {
+-      NSView* solid_view = [[NSView alloc] initWithFrame:self.bounds];
+-      solid_view.wantsLayer = YES;
+-      solid_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+-      base_view_ = solid_view;
+-      break;
++      case helium::GlassSurfaceMaterial::kAuto:
++        break;
+     }
+-    case helium::GlassSurfaceMaterial::kAuto:
+-      break;
++
+   }
+ 
+   if (base_view_) {
+@@ -389,8 +400,8 @@ CGImageRef CreateGrainTile() {
+       resolution.active == helium::GlassSurfaceMaterial::kSolid;
+ 
+   if (needs_reorder) {
+-    // The rear glow stays below native material; front glow and grain stay
+-    // above material. Reordering happens only after a structural change.
++    // Grain stays below the contrast floor. Normalized front glows remain
++    // above it. Reorder only after a structural change.
+     if (base_view_) {
+       [self addSubview:rear_decoration_view_
+             positioned:NSWindowBelow
+@@ -413,28 +424,31 @@ CGImageRef CreateGrainTile() {
+ 
+   [rear_decoration_view_ applyConfiguration:configuration
+                                 opacityScale:0.5
+-                                  drawsGrain:NO];
++                                  drawsGrain:YES];
+   [decoration_view_ applyConfiguration:configuration
+                            opacityScale:1.0
+-                             drawsGrain:YES];
++                             drawsGrain:NO];
+ 
+   if (base_view_) {
+-    base_view_.alphaValue = std::clamp<CGFloat>(
+-        static_cast<CGFloat>(configuration.material_opacity), 0.0, 1.0);
++    base_view_.alphaValue = configuration.enabled ? std::clamp<CGFloat>(
++        static_cast<CGFloat>(configuration.material_opacity), 0.0, 1.0) : 1.0;
+   }
+ 
+   // Keep tint independent of the native glass's inactive-window rendering and
+   // material opacity, as in SettingsUI's window chrome color overlay.
+-  const bool shows_tint =
+-      configuration.enabled && resolution.paints_chrome_transparent &&
+-      resolution.active == helium::GlassSurfaceMaterial::kLiquidGlass &&
+-      base_view_;
+-  [tint_overlay_view_
+-      applyTintColor:ColorFromSkColor(
+-                         themeColor,
+-                         std::clamp<CGFloat>(configuration.glass_tint_opacity,
+-                                             0.0, 1.0))
+-             visible:shows_tint];
++  const auto floor = configuration.chrome_contrast_floor;
++  const bool shows_tint = floor.has_value() ||
++      (configuration.enabled && resolution.paints_chrome_transparent &&
++       resolution.active == helium::GlassSurfaceMaterial::kLiquidGlass && base_view_);
++  const CGFloat floor_alpha = floor ? SkColorGetA(*floor) / 255.0 : 0.0;
++  const CGFloat alpha = std::max<CGFloat>(floor_alpha,
++      configuration.enabled
++          ? std::clamp<CGFloat>(configuration.glass_tint_opacity, 0.0, 1.0) : 0.0);
++  [tint_overlay_view_ applyTintColor:ColorFromSkColor(
++      floor.value_or(themeColor), alpha) visible:shows_tint];
++  if (!configuration.enabled) {
++    return;
++  }
+ 
+   if (resolution.active == helium::GlassSurfaceMaterial::kLiquidGlass) {
+     if (@available(macOS 26.0, *)) {
+@@ -505,7 +519,8 @@ NSView* CreateNativeGlassBackgroundView(
+     SkColor theme_color,
+     const GlassSurfaceConfiguration& configuration,
+     const GlassSurfaceResolution& resolution) {
+-  if (!configuration.enabled || !resolution.paints_chrome_transparent) {
++  if (!configuration.chrome_contrast_floor &&
++      (!configuration.enabled || !resolution.paints_chrome_transparent)) {
+     return CreateNativeGlassBackgroundView(frame, color_mode, theme_color);
+   }
+ 
+@@ -528,8 +543,8 @@ void ApplyNativeGlassBackgroundView(
+       [view isKindOfClass:[ArciumProfileGlassBackgroundView class]]
+           ? (ArciumProfileGlassBackgroundView*)view
+           : nil;
+-  if (!profile_view || !configuration.enabled ||
+-      !resolution.paints_chrome_transparent) {
++  if (!profile_view || (!configuration.chrome_contrast_floor &&
++      (!configuration.enabled || !resolution.paints_chrome_transparent))) {
+     return;
+   }
+   [profile_view setFrame:frame];
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumBackdropColorEditingTests.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumBackdropColorEditingTests.swift
+@@ -0,0 +1,44 @@
++import XCTest
++@testable import SettingsUI
++
++final class ArciumBackdropColorEditingTests: XCTestCase {
++    @MainActor
++    func testPaletteEditingDoesNotDependOnDecoration() {
++        for enabled in [false, true] {
++            for effects in [false, true] {
++                XCTAssertTrue(SBackdropEditor.allowsColorEditing(
++                    editable: true, colorsOnly: true,
++                    enabled: enabled, effectsAvailable: effects))
++                XCTAssertFalse(SBackdropEditor.allowsColorEditing(
++                    editable: false, colorsOnly: true,
++                    enabled: enabled, effectsAvailable: effects))
++                XCTAssertEqual(SBackdropEditor.allowsColorEditing(
++                    editable: true, colorsOnly: false,
++                    enabled: enabled, effectsAvailable: effects), enabled && effects)
++            }
++        }
++    }
++
++    @MainActor
++    func testDeferredColorPlacementKeepsEffectsDisabled() {
++        let saved = SettingsBackdropConfiguration(enabled: false)
++        let start = saved.glows[0]
++        var moved = saved
++        moved.glows[0].x = 0.72
++        let result = SBackdropEditor.resolveDrag(
++            glowID: start.id, startGlow: start,
++            localConfiguration: moved, deferredConfiguration: saved,
++            allowsDisabledColors: true)
++        XCTAssertTrue(result.shouldCommit)
++        XCTAssertFalse(result.configuration.enabled)
++        XCTAssertEqual(result.configuration.glows[0].x, 0.72)
++        XCTAssertEqual(result.configuration.glows[0].colorHex, start.colorHex)
++        XCTAssertEqual(result.configuration.grain, saved.grain)
++
++        let backdrop = SBackdropEditor.resolveDrag(
++            glowID: start.id, startGlow: start,
++            localConfiguration: moved, deferredConfiguration: saved)
++        XCTAssertFalse(backdrop.shouldCommit)
++        XCTAssertFalse(backdrop.configuration.enabled)
++    }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SBackdropEditor.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SBackdropEditor.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/BackdropEditor/SBackdropEditor.swift
+@@ -27,7 +27,9 @@ public struct SBackdropEditor: View {
+     @State private var sliderPreviewActive = false
+     @State private var deferredSliderConfiguration: SettingsBackdropConfiguration?
+     @State private var colorEditorWidth: CGFloat = 0
++    private enum ColorPickerAnchor: Equatable { case preview, swatches }
+     @State private var colorPickerPresented = false
++    @State private var colorPickerAnchor = ColorPickerAnchor.swatches
+     @State private var maxObservedGlowRadius: Double = 1.5
+     @State private var maxObservedGrain: Double = 0.3
+ 
+@@ -266,7 +268,7 @@ public struct SBackdropEditor: View {
+             }
+         }
+         .onChange(of: effectsAvailable) { _, next in
+-            if !next {
++            if !next && !colorsOnly {
+                 cancelMovingGlow()
+                 cancelSliderPreview()
+                 colorPickerPresented = false
+@@ -293,10 +295,11 @@ public struct SBackdropEditor: View {
+         if !editable { return "Backdrop settings are unavailable for editing." }
+         if !draft.enabled {
+             return colorsOnly
+-                ? "In Advanced, turn on Customize backdrop to edit window colors and effects."
++                ? "Colors still theme this Space. Decorative effects are off."
+                 : "Turn on Customize backdrop to edit window colors and effects."
+         }
+         if !effectsAvailable {
++            if colorsOnly { return "Space colors remain editable while decorative effects are unavailable." }
+             return userFacingFallbackReason ?? "Color effects are unavailable while this window material is active."
+         }
+         return isForcedFallback ? fallbackStatus : nil
+@@ -312,10 +315,13 @@ public struct SBackdropEditor: View {
+                 guard isDecorativeEditingEnabled else { return }
+                 selectedGlowID = id
+             },
+-            editGlow: openColorPicker,
++            editGlow: { openColorPicker($0, anchor: .preview) },
+             moveGlow: moveGlow,
+             moveGlowByAccessibility: moveGlowByAccessibility
+         )
++        .popover(isPresented: colorPickerPresentation(for: .preview), arrowEdge: .bottom) {
++            colorPickerContent
++        }
+         Text(isDecorativeEditingEnabled
+             ? "Drag to place a color. Double-click a point to choose its color."
+             : "Saved color locations are shown. Placement is unavailable.")
+@@ -404,8 +410,7 @@ public struct SBackdropEditor: View {
+                         .overlay {
+                             Text("\(index + 1)")
+                                 .font(.caption.weight(.semibold))
+-                                .foregroundStyle(.white)
+-                                .shadow(color: .black, radius: 2)
++                                .foregroundStyle(SettingsRGB(hex: glow.colorHex)?.contrastingText.color ?? .white)
+                         }
+                         .padding(3)
+                         .overlay {
+@@ -436,21 +441,8 @@ public struct SBackdropEditor: View {
+                 }
+                 .buttonStyle(.bordered)
+                 .help("Choose the selected color and its harmony")
+-                .popover(isPresented: $colorPickerPresented, arrowEdge: .bottom) {
+-                    if let index = draft.glows.firstIndex(where: { $0.id == selectedGlowID }) {
+-                        SColorHarmonyPicker(
+-                            colors: Binding(
+-                                get: { draft.glows.map(\.colorHex) },
+-                                set: { values in applyHarmonyColors(values) }
+-                            ),
+-                            selectedIndex: index,
+-                            mode: harmonyBinding,
+-                            onAddColor: addGlow,
+-                            onRemoveColor: { if draft.glows.count > 1 { removeSelectedGlow() } }
+-                        )
+-                        .id(draft.glows.map(\.id))
+-                        .disabled(!isDecorativeEditingEnabled)
+-                    }
++                .popover(isPresented: colorPickerPresentation(for: .swatches), arrowEdge: .bottom) {
++                    colorPickerContent
+                 }
+             }
+         }
+@@ -460,9 +452,37 @@ public struct SBackdropEditor: View {
+         .accessibilityElement(children: .contain)
+     }
+ 
+-    private func openColorPicker(_ id: String) {
++    @ViewBuilder private var colorPickerContent: some View {
++        if let index = draft.glows.firstIndex(where: { $0.id == selectedGlowID }) {
++            SColorHarmonyPicker(
++                colors: Binding(
++                    get: { draft.glows.map(\.colorHex) },
++                    set: { values in applyHarmonyColors(values) }
++                ),
++                selectedIndex: index,
++                mode: harmonyBinding,
++                onAddColor: addGlow,
++                onRemoveColor: { if draft.glows.count > 1 { removeSelectedGlow() } }
++            )
++            .id(draft.glows.map(\.id))
++            .disabled(!isDecorativeEditingEnabled)
++        }
++    }
++
++    private func colorPickerPresentation(for anchor: ColorPickerAnchor) -> Binding<Bool> {
++        Binding(
++            get: { colorPickerPresented && colorPickerAnchor == anchor },
++            set: { presented in
++                guard colorPickerAnchor == anchor else { return }
++                colorPickerPresented = presented
++            }
++        )
++    }
++
++    private func openColorPicker(_ id: String, anchor: ColorPickerAnchor = .swatches) {
+         guard isDecorativeEditingEnabled, draft.glows.contains(where: { $0.id == id }) else { return }
+         selectedGlowID = id
++        colorPickerAnchor = anchor
+         colorPickerPresented = true
+     }
+ 
+@@ -475,7 +495,16 @@ public struct SBackdropEditor: View {
+     }
+ 
+     private var isCustomEditingEnabled: Bool { editable && (colorsOnly || draft.enabled) }
+-    private var isDecorativeEditingEnabled: Bool { isCustomEditingEnabled && effectsAvailable }
++    private var isDecorativeEditingEnabled: Bool {
++        Self.allowsColorEditing(editable: editable, colorsOnly: colorsOnly,
++                                enabled: draft.enabled, effectsAvailable: effectsAvailable)
++    }
++
++    internal static func allowsColorEditing(
++        editable: Bool, colorsOnly: Bool, enabled: Bool, effectsAvailable: Bool
++    ) -> Bool {
++        editable && (colorsOnly || (enabled && effectsAvailable))
++    }
+     private var isSurfaceEditingEnabled: Bool { isCustomEditingEnabled && effectsAvailable }
+     private var resolvedActiveMaterial: SettingsBackdropMaterial {
+         let material = activeMaterial ?? draft.material
+@@ -679,7 +708,7 @@ public struct SBackdropEditor: View {
+     }
+ 
+     private func commitSlider(_ mutation: (inout SettingsBackdropConfiguration) -> Void) {
+-        guard deferredSliderConfiguration?.enabled ?? draft.enabled else { cancelSliderPreview(); return }
++        guard colorsOnly || (deferredSliderConfiguration?.enabled ?? draft.enabled) else { cancelSliderPreview(); return }
+         var next = deferredSliderConfiguration ?? draft
+         mutation(&next)
+         sliderPreviewActive = false
+@@ -856,7 +885,8 @@ public struct SBackdropEditor: View {
+             glowID: id,
+             startGlow: dragStartGlow,
+             localConfiguration: draft,
+-            deferredConfiguration: deferredConfiguration
++            deferredConfiguration: deferredConfiguration,
++            allowsDisabledColors: colorsOnly
+         )
+         draggingGlowID = nil
+         dragStartGlow = nil
+@@ -873,7 +903,8 @@ public struct SBackdropEditor: View {
+         glowID: String,
+         startGlow: SettingsStyleGlow?,
+         localConfiguration: SettingsBackdropConfiguration,
+-        deferredConfiguration: SettingsBackdropConfiguration?
++        deferredConfiguration: SettingsBackdropConfiguration?,
++        allowsDisabledColors: Bool = false
+     ) -> (configuration: SettingsBackdropConfiguration, shouldCommit: Bool) {
+         let final = localConfiguration.normalized()
+         let localGlow = final.glows.first { $0.id == glowID }
+@@ -882,7 +913,9 @@ public struct SBackdropEditor: View {
+         } else { false }
+ 
+         if let deferredConfiguration {
+-            guard deferredConfiguration.enabled else { return (deferredConfiguration.normalized(), false) }
++            guard allowsDisabledColors || deferredConfiguration.enabled else {
++                return (deferredConfiguration.normalized(), false)
++            }
+             guard let localGlow,
+                   let index = deferredConfiguration.glows.firstIndex(where: { $0.id == glowID }) else {
+                 return (deferredConfiguration.normalized(), false)
+@@ -1034,13 +1067,13 @@ private struct SettingsBackdropEditorGlo
+     }
+ 
+     private var marker: some View {
+-        ZStack {
++        let foreground = SettingsRGB(hex: glow.colorHex)?.contrastingText.color ?? .white
++        return ZStack {
+             Circle().fill(glow.color.color)
+-            Circle().strokeBorder(isSelected ? theme.selectionText : .white.opacity(0.85), lineWidth: isSelected ? 3 : 1)
++            Circle().strokeBorder(foreground.opacity(isSelected ? 1 : 0.85), lineWidth: isSelected ? 3 : 1)
+             Text("\(index + 1)")
+                 .font(.system(size: 11, weight: .bold, design: .rounded))
+-                .foregroundStyle(.white)
+-                .shadow(color: .black.opacity(0.6), radius: 2)
++                .foregroundStyle(foreground)
+         }
+         .frame(width: 30, height: 30)
+         .contentShape(Circle())
+Index: src/chrome/browser/app_controller_mac.mm
+===================================================================
+--- src.orig/chrome/browser/app_controller_mac.mm
++++ src/chrome/browser/app_controller_mac.mm
+@@ -2130,6 +2130,19 @@ class AppControllerProfileObserver : pub
+ // Show the preferences window, or bring it to the front if it's already
+ // visible.
+ - (IBAction)showPreferences:(id)sender {
++  // Capture the initiating browser before Settings becomes key. Reopening
++  // Settings from another Space must deliberately retarget its color editor.
++  NSWindow* initiating_window = NSApp.keyWindow;
++  while (initiating_window.parentWindow) {
++    initiating_window = initiating_window.parentWindow;
++  }
++  BrowserWindowInterface* initiating_browser =
++      GlobalBrowserCollection::GetInstance()->FindBrowserWithWindow(
++          gfx::NativeWindow(initiating_window));
++  if (initiating_browser &&
++      arcium_settings::ShowForBrowser(initiating_browser)) {
++    return;
++  }
+   if (arcium_settings::ShowExistingWindow()) {
+     return;
+   }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Palette/SettingsRGB.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Palette/SettingsRGB.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Palette/SettingsRGB.swift
+@@ -52,6 +52,13 @@ public struct SettingsRGB: Sendable, Equ
+         (max(luminance, other.luminance) + 0.05) / (min(luminance, other.luminance) + 0.05)
+     }
+ 
++    /// An opaque label color with the greater WCAG contrast against this fill.
++    public var contrastingText: Self {
++        let black = Self(red: 0, green: 0, blue: 0)
++        let white = Self(red: 1, green: 1, blue: 1)
++        return contrast(against: black) >= contrast(against: white) ? black : white
++    }
++
+     /// Source-over alpha compositing against an opaque backdrop.
+     public func composited(over backdrop: Self, opacity: Double) -> Self {
+         let alpha = opacity.isFinite ? min(max(opacity, 0), 1) : 0
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/SSettings.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/SSettings.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/SSettings.swift
+@@ -101,6 +101,9 @@ public struct SSegmentedControl<OptionVa
+     public let options: [(value: OptionValue, label: String)]
+     @Binding private var selection: OptionValue
+     @Environment(\.settingsTheme) private var theme
++    @Environment(\.isEnabled) private var isEnabled
++    @Environment(\.layoutDirection) private var layoutDirection
++    @FocusState private var focusedOption: OptionValue?
+ 
+     public init(_ title: String, options: [(value: OptionValue, label: String)], selection: Binding<OptionValue>) {
+         self.title = title
+@@ -109,13 +112,34 @@ public struct SSegmentedControl<OptionVa
+     }
+ 
+     public var body: some View {
+-        Picker(title, selection: $selection) {
+-            ForEach(options, id: \.value) { Text($0.label).tag($0.value) }
++        HStack(spacing: 0) {
++            ForEach(options, id: \.value) { option in
++                let selected = selection == option.value
++                Button { selection = option.value } label: {
++                    Text(option.label)
++                        .settingsFont(\.caption)
++                        .foregroundStyle(selected ? theme.selectionText : theme.textPrimary)
++                        .padding(.horizontal, SettingsSpacing.sm)
++                        .padding(.vertical, SettingsSpacing.xs)
++                        .background {
++                            if selected {
++                                RoundedRectangle(cornerRadius: max(2, SettingsRadius.control - 2))
++                                    .fill(theme.selectionStrong)
++                            }
++                        }
++                        .contentShape(Rectangle())
++                }
++                .buttonStyle(.plain)
++                .focused($focusedOption, equals: option.value)
++                .accessibilityLabel(option.label)
++                .accessibilityAddTraits(selected ? .isSelected : [])
++            }
+         }
+-        .labelsHidden()
+-        .pickerStyle(.segmented)
+-        .controlSize(.small)
+-        .tint(theme.selectionStrong)
++        .padding(2)
++        .opacity(isEnabled ? 1 : 0.5)
++        .onMoveCommand(perform: moveSelection)
++        .accessibilityElement(children: .contain)
++        .accessibilityLabel(title)
+         .settingsMaterialSurface(
+             material: .ultraThinMaterial,
+             tint: theme.control,
+@@ -125,6 +149,21 @@ public struct SSegmentedControl<OptionVa
+         )
+         .fixedSize(horizontal: true, vertical: false)
+     }
++
++    private func moveSelection(_ direction: MoveCommandDirection) {
++        guard isEnabled, let index = options.firstIndex(where: {
++            $0.value == (focusedOption ?? selection)
++        }) else { return }
++        let delta: Int
++        switch direction {
++        case .left: delta = layoutDirection == .rightToLeft ? 1 : -1
++        case .right: delta = layoutDirection == .rightToLeft ? -1 : 1
++        default: return
++        }
++        let next = min(max(index + delta, 0), options.count - 1)
++        selection = options[next].value
++        focusedOption = selection
++    }
+ }
+ 
+ public struct SInventoryRow<Label: View>: View {
