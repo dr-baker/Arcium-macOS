@@ -50,6 +50,7 @@
     "Palette changes propagate live to the initiating Space's windows and panels",
     "Chroma dials preserve chosen colors and lightness while changing derived saturation",
     "Large New Tab and Settings content surfaces remain mostly neutral, using dedicated OKLCH roles capped at chroma 0.012; this does not neutralize window chrome, floating panels, accents, or authored glows",
+    "An existing New Tab follows Space color and Light/Dark changes live without a reload, including after attaching to a Space window",
     "The palette derives from the authored glow colors; the renderer never replaces those colors with generated tones or scales them with Panels saturation",
     "Each glow keeps its own position, size, and intensity; moving a secondary point updates its native glow without moving the main point",
     "Paired field and panel surfaces keep text and selection readable over black and white content, including minimum material opacity",
