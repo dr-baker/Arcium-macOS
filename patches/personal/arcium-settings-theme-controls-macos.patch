@@ -1,0 +1,123 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -698,34 +698,21 @@ private struct AppearanceSettingsPage: V
+                 .help("Window frame, sidebar and toolbar. Auto follows macOS.")
+                 .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
+                 .accessibilityIdentifier("space-chrome-mode")
+-                SPicker("Websites and content", selection: webAppearanceBinding, options: [
+-                    (value: SettingsAppearance.system, label: "Follow window chrome"),
+-                    (value: .light, label: "Light"),
+-                    (value: .dark, label: "Dark")
+-                ])
+-                .help("Preferred website color scheme. Also used by New Tab and Settings.")
++                SLabeledControl("Websites and content") {
++                    SSegmentedControl("Websites and content appearance", options: [
++                        (value: SettingsAppearance.system, label: "Auto"),
++                        (value: .light, label: "Light"),
++                        (value: .dark, label: "Dark")
++                    ], selection: webAppearanceBinding)
++                    .frame(maxWidth: .infinity, alignment: .trailing)
++                }
++                .help("Preferred website color scheme. Also used by New Tab and Settings. Auto follows window chrome.")
+                 .disabled(!store.snapshot.appearance.webModeAvailable || store.snapshot.appearance.webModeManaged)
+                 .accessibilityIdentifier("space-web-mode")
+             }
+ 
+-            Section("Space colors") {
+-                SLabeledControl("Palette") {
+-                    HStack(spacing: 8) {
+-                        ForEach(Array((store.currentChromeAppearance?.glows ?? []).prefix(4))) { glow in
+-                            Circle().fill(glow.color.color)
+-                                .frame(width: 18, height: 18)
+-                                .overlay(Circle().strokeBorder(theme.borderControl, lineWidth: 0.5))
+-                                .accessibilityLabel("Space color")
+-                                .accessibilityValue(glow.colorHex)
+-                        }
+-                        Button("Customize…") { showCustomization(.colors) }
+-                            .buttonStyle(.bordered)
+-                            .accessibilityIdentifier("space-colors-customize")
+-                    }
+-                }
+-            }
+-            Section("Accent and intensity") {
+-                SLabeledControl("Accent") {
++            Section("Space theme") {
++                SLabeledControl("Accent", alignment: .trailing) {
+                     HStack(spacing: SettingsSpacing.sm) {
+                         ForEach(Array((store.currentChromeAppearance?.glows ?? []).enumerated()), id: \.element.id) { index, glow in
+                             Button { [spaceID = store.snapshot.appearance.spacePalette.id] in
+@@ -747,6 +734,11 @@ private struct AppearanceSettingsPage: V
+                             .accessibilityValue(store.currentSpaceAccentID == glow.id ? "Selected" : "")
+                             .help("Use color \(index + 1) for this Space's accent")
+                         }
++                        Button("Customize…") { showCustomization(.colors) }
++                            .buttonStyle(.bordered)
++                            .accessibilityLabel("Customize Space palette")
++                            .accessibilityIdentifier("space-colors-customize")
++                            .help("Edit this Space's colors and pairing.")
+                     }
+                     .frame(maxWidth: .infinity, alignment: .trailing)
+                 }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
+@@ -41,12 +41,25 @@ public struct SGroupedSections<Content:
+             ForEach(sections: content) { section in
+                 let boxed = showsSurfaces && section.containerValues.settingsGroupedSectionSurface
+                 VStack(alignment: .leading, spacing: layout.rowSpacing) {
+-                    section.header
+-                        .settingsFont(\.section)
+-                        .fontWeight(.semibold)
+-                        .foregroundStyle(theme.textPrimary)
+-                        .accessibilityAddTraits(.isHeader)
++                    if !section.header.isEmpty {
++                        VStack(alignment: .leading, spacing: SettingsSpacing.xs) {
++                            section.header
++                                .settingsFont(\.section)
++                                .fontWeight(.semibold)
++                                .foregroundStyle(contrast == .increased ? theme.textPrimary
++                                    : theme.textPrimary.mix(with: theme.accent, by: 0.12))
++                                .accessibilityAddTraits(.isHeader)
++                            Rectangle()
++                                .fill(LinearGradient(
++                                    colors: contrast == .increased
++                                        ? [theme.textSecondary.opacity(0.6), theme.textSecondary.opacity(0.35)]
++                                        : [theme.accent.opacity(0.4), theme.accent.opacity(0.12), .clear],
++                                    startPoint: .leading, endPoint: .trailing))
++                                .frame(height: contrast == .increased ? 1.5 : 1)
++                                .accessibilityHidden(true)
++                        }
+                         .padding(.horizontal, boxed ? layout.cardPadding : 0)
++                    }
+                     rows(section.content)
+                         .padding(boxed ? layout.cardPadding : 0)
+                         .background {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Theme/SettingsDesignTokens.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Theme/SettingsDesignTokens.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Theme/SettingsDesignTokens.swift
+@@ -34,7 +34,7 @@ public struct SettingsTypography {
+     public var display: Font { resolved(24, weight: .semibold) }
+     public var title: Font { resolved(22, weight: .semibold) }
+     public var subtitle: Font { resolved(13) }
+-    public var section: Font { resolved(16, weight: .semibold) }
++    public var section: Font { resolved(18, weight: .semibold) }
+     public var cardTitle: Font { resolved(16, weight: .semibold) }
+     public var label: Font { resolved(13, weight: .medium) }
+     public var body: Font { resolved(13) }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
+@@ -28,3 +28,8 @@ Arcium form hierarchy keeps flat setting
+ Grouped section headings use the section type style and header accessibility
+ traits; glow-editor subheadings use a smaller secondary style distinct from card
+ titles. The host retains the package's existing aligned row controls.
++
++Space theme controls share one accent-and-palette row. Chrome and website modes
++use matching segmented controls. Section headings use 18pt type, a restrained
++resolved-accent tint and a fading rule, with stronger neutral styling for
++Increased Contrast. Empty headings do not gain decorative rules.

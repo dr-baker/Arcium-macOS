@@ -29,6 +29,8 @@ implementation history (on the `archive/dated-docs-2026-10-11` branch).
 | Show Extensions button | `arcium.appearance.sidebar_extensions_drawer` / `kSidebarExtensionsDrawerEnabledPref`; profile boolean, default `false` | The sidebar navigation feature patch connects the optional header button to the existing Extensions menu. It is independent of `prefs::kShowExtensionsButton`. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
+| Window chrome color scheme | Captured Space `theme.mode`: Auto, Light, Dark | `ArciumSettingsModel::SetAppearanceMode` updates the target Space's native frame, sidebar and toolbar mode. Auto follows macOS. |
+| Websites and content color scheme | Captured Space `theme.web_mode`: Auto (`auto`, follows window chrome), Light, Dark | `ArciumSettingsModel::SetWebAppearanceMode` sets the preferred color scheme sent to websites and used by New Tab and Settings. The NTP-specific provider helper selects the same Space palette in the requested mode; native Settings applies that role pair to its detail canvas and sheets. Its frame, sidebar and header retain chrome mode. Spaces policy controls editability independently of browser-theme policy. |
 | Floating surface preset and values | `arcium.appearance.surface_set` / `helium::kArciumSurfaceSetPref`; original profile string, default `glass` (`refractive`, `quiet`, `solid`, `custom`); `arcium.appearance.surface_tuning` / `helium::kArciumSurfaceTuningPref`, the Custom values | Resolved by `helium::ResolveSurfaceStyle` for panels, controls, and scrims. See [Floating surfaces](#floating-surfaces). |
 | Text surface override | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `2` for Automatic, `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice, the surface style, and the browser glass dictionary for the command bar, its results, and floating controls. Containers resolve their own group independently. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
@@ -56,8 +58,8 @@ from Objective-C numeric zero and one.
 
 ## Space appearance
 
-Each Space owns its color recipe, harmony, light/dark mode, and controls and
-panels chroma multipliers. The existing Colors picker is the color-selection
+Each Space owns its color recipe, harmony, chrome mode, website mode, and
+controls and panels chroma multipliers. The existing Colors picker is the color-selection
 entry point. The first point supplies the primary seed; additional points keep
 their stable identities and decorative placement. Legacy Space colors and then
 legacy profile glow colors supply migration inputs until the Space is edited.
@@ -90,7 +92,7 @@ Settings receives the same generated light/dark roles and opacity floors in
 owning browser and its panels without replacing their input or selection.
 
 Settings captures the initiating browser's Space. `space_colors`,
-`space_chroma`, `space_mode`, and `reset_space_colors` carry that Space ID, and
+`space_chroma`, `space_mode`, `space_web_mode`, and `reset_space_colors` carry that Space ID, and
 the native bridge rejects stale targets and deleted Spaces. Opening Settings
 from another Space deliberately retargets it. Pending interactions retain their
 original target. A fresh native snapshot clears pending edits. The obsolete
@@ -102,6 +104,16 @@ placement, size, intensity, and `matchColorAdjustments`. **Match all colors**
 links size and intensity while colors and positions remain independent.
 With effects enabled, releasing a dragged point updates that point's native
 glow. With effects off, placement remains saved for the next enabled render.
+
+## Settings layout
+
+The existing General, Tabs & Spaces, Appearance and Keyboard Shortcuts navigation
+stays in place. Common settings use unboxed sections and aligned adaptive rows.
+Appearance keeps mode, palette summary, accent/intensity, presets, layout, Zen
+and toolbar controls visible. Space colors/backdrop and command-bar styling open
+focused live-edit sheets. Everyday and Advanced color views are inside the color
+sheet. The native backdrop and shortcut recorder remain app-owned. A Space
+change closes customization; profile guards and captured Space IDs remain in force.
 
 ## Floating surfaces
 
@@ -124,9 +136,11 @@ saves the complete tuning in `arcium.appearance.surface_tuning` and selects Cust
 in `arcium.appearance.surface_set`.
 Saved Refractive and Solid recipes appear as Custom while retaining their values.
 
-**Customize…** reveals Text surfaces, Containers, Peek backdrop, Shadows and
-Preview controls. **Done** hides them. Opening or hiding customization does not
-change the preset or saved tuning. Hiding it also ends an active switcher preview.
+**Customize…** opens a sheet for Text surfaces, Containers, Peek backdrop,
+Shadows and Preview. Changes apply live through the same profile owner. **Done**
+or Escape closes the sheet and ends an active switcher preview. Opening or
+closing it does not itself change the preset or tuning. Keyboard adjustments
+commit immediately; drag updates are bounded and finish with the exact value.
 
 | Preset | Text surfaces | Containers | Peek backdrop |
 | --- | --- | --- | --- |
@@ -446,3 +460,23 @@ check and three human-waived live checks that remain unverified. Its separate
 October 4 follow-up (on the `archive/dated-docs-2026-10-11` branch) records the
 top-pin, decorative-availability, and Size-reopen checks. Glow edge
 discoloration remains unresolved.
+
+## Space creation palette sheet
+
+The compact Space editor retains its inline controls and adds **Full editor…**
+to the Theme header. Its attached native sheet shares the Settings palette
+controls: glow selection and placement, color picker, pairings, size and
+intensity, plus Space color strength and grain. Material, reflection, opacity
+and grain size remain profile-owned Settings controls.
+
+The sheet owns a local draft and returns validated changes through a dedicated
+configuration-only delegate. It never routes through profile-setting actions.
+The compact editor synchronizes its own theme copy and previews the draft in
+the originating window. Done closes the sheet; Create or Save persists the
+Space, and Cancel discards the draft. Closing the form or changing its profile
+also closes the sheet and invalidates callbacks.
+
+Draft and persisted editors share the packaged preset, native resolved palette
+roles, strict configuration codec and palette view. Website/content mode
+chooses the sheet scheme, with Auto following chrome; contrast and policy
+rendering bypasses retain native colors.

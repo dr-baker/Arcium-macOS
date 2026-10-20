@@ -1,0 +1,105 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -256,7 +256,7 @@ private struct SettingsPageScroll<Conten
+     var body: some View {
+         SettingsPageScrollView {
+             ArciumPageHeader(title: title, description: description)
+-            SGroupedSections(showsSurfaces: false) { content }
++            SGroupedSections(showsSurfaces: false, showsDividers: false) { content }
+         }
+     }
+ }
+@@ -940,7 +940,7 @@ private struct AppearanceSettingsPage: V
+     }
+ 
+     private var surfaceCustomization: some View {
+-        SGroupedSections(showsSurfaces: false) {
++        SGroupedSections(showsSurfaces: false, showsDividers: false) {
+             Section("General") {
+                 SToggle("Shadows", isOn: surfaceTuningBinding(\.panelShadow),
+                         description: "Soft shadows around floating surfaces.")
+@@ -1020,7 +1020,7 @@ private struct AppearanceSettingsPage: V
+     }
+ 
+     private var commandBarCustomization: some View {
+-        SGroupedSections(showsSurfaces: false) {
++        SGroupedSections(showsSurfaces: false, showsDividers: false) {
+             Section("Style") {
+                 Group {
+                     SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
+@@ -1073,7 +1073,7 @@ private struct AppearanceSettingsPage: V
+                 if !backgroundEffectsAvailable,
+                    store.snapshot.appearance.chrome.canEdit,
+                    store.snapshot.appearance.chrome.effectsAvailable {
+-                    SGroupedSections(showsSurfaces: false) {
++                    SGroupedSections(showsSurfaces: false, showsDividers: false) {
+                         Section("Background Effects unavailable") {
+                             Text("Use Liquid Glass to adjust reflection and opacity.")
+                                 .settingsFont(\.caption).foregroundStyle(.secondary)
+@@ -1100,7 +1100,7 @@ private struct AppearanceSettingsPage: V
+                 )
+             }
+         } else if store.snapshot.appearance.chrome.isAvailable {
+-            SGroupedSections(showsSurfaces: false) {
++            SGroupedSections(showsSurfaces: false, showsDividers: false) {
+                 Section("Window background") {
+                     Text("Custom window chrome could not be loaded.").settingsFont(\.body)
+                     Button("Restore default appearance", action: store.resetChromeAppearance)
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
+@@ -42,9 +42,10 @@ public struct SGroupedSections<Content:
+                 let boxed = showsSurfaces && section.containerValues.settingsGroupedSectionSurface
+                 VStack(alignment: .leading, spacing: layout.rowSpacing) {
+                     section.header
+-                        .settingsFont(\.label)
++                        .settingsFont(\.section)
+                         .fontWeight(.semibold)
+                         .foregroundStyle(theme.textPrimary)
++                        .accessibilityAddTraits(.isHeader)
+                         .padding(.horizontal, boxed ? layout.cardPadding : 0)
+                     rows(section.content)
+                         .padding(boxed ? layout.cardPadding : 0)
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIAuthoring/SBackdropEditor.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIAuthoring/SBackdropEditor.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIAuthoring/SBackdropEditor.swift
+@@ -346,8 +346,12 @@ public struct SBackdropEditor: View {
+             let selectedTitle = draft.matchColorAdjustments ? "All glows" : "Glow \(selectedIndex)"
+             HStack(alignment: .center, spacing: SettingsSpacing.xs) {
+                 Text(selectedTitle)
+-                    .settingsFont(\.section)
+-                    .foregroundStyle(theme.textPrimary)
++                    .settingsFont(\.caption)
++                    .fontWeight(.semibold)
++                    .textCase(.uppercase)
++                    .tracking(0.6)
++                    .foregroundStyle(theme.textSecondary)
++                    .accessibilityAddTraits(.isHeader)
+                 Spacer(minLength: 0)
+                 Button { matchColorAdjustmentsBinding.wrappedValue.toggle() } label: {
+                     Image(systemName: draft.matchColorAdjustments ? "lock.fill" : "lock.open")
+@@ -360,6 +364,7 @@ public struct SBackdropEditor: View {
+                 .help(glowAdjustmentLockHelp)
+                 .disabled(!isDecorativeEditingEnabled)
+             }
++            .padding(.top, SettingsSpacing.sm)
+ 
+             colorControlLayout {
+                 SSlider(
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
+@@ -23,3 +23,8 @@ The host owns preference validation and
+ shortcut recording, calibrated glass opacity and the dynamic library boundary.
+ The layout refresh adds grouped rows and live-edit customization sheets without
+ another store. Trailing whitespace is normalized for Quilt.
++
++Arcium form hierarchy keeps flat settings groups free of automatic row dividers.
++Grouped section headings use the section type style and header accessibility
++traits; glow-editor subheadings use a smaller secondary style distinct from card
++titles. The host retains the package's existing aligned row controls.
