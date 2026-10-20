@@ -61,6 +61,8 @@ beside its single 32-point header. The host removes the native toolbar and
 title-bar separator. The navigation and four categories remain app-owned. Pages use SettingsUI's
 shared page scrolling, aligned rows and unboxed grouped sections. Cards are
 reserved for substantial editors rather than every small settings group.
+Flat groups use section headings and spacing without automatic row dividers.
+Subheadings inside editors use a smaller secondary style, distinct from card titles.
 Space colors/backdrop, floating-surface details and command-bar styling open
 focused sheets. Their controls apply live through the existing profile store;
 Done and Escape close the sheet without implying rollback. Closing a surface

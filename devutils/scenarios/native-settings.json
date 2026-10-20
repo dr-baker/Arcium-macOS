@@ -73,7 +73,8 @@
     "With Peek open, switch Containers through Clear, Chromium and Solid, adjust Chromium blur and shared Shadows, and edit Text material. Exercise Close, Open in Tab and Open in Sidebar while checking page input, focus and source identity.",
     "Quit and relaunch the isolated profile normally; verify both group materials, Tint Intensity and Opacity persist. Restore Glass defaults for handoff.",
     "Inspect all four settings categories at narrow and wide window sizes. Common rows should align, stack without clipping when needed, and retain focus and values while resizing. Cards should be reserved for substantial editors rather than each small group.",
-    "Open color/backdrop, floating-surface and command-bar customization sheets. Confirm every prior control is reachable, edits apply live, Done and Escape close without a rollback promise, and changing the target Space dismisses customization without writing to another Space. Make one final keyboard slider adjustment and immediately press Done or Escape; confirm that value is saved."
+    "Open color/backdrop, floating-surface and command-bar customization sheets. Confirm every prior control is reachable, edits apply live, Done and Escape close without a rollback promise, and changing the target Space dismisses customization without writing to another Space. Make one final keyboard slider adjustment and immediately press Done or Escape; confirm that value is saved.",
+    "Inspect flat settings groups and editor cards at narrow and wide sizes. Flat groups use headings and spacing without automatic row dividers; editor subheadings are visibly distinct from card titles and row labels."
   ],
   "observables": [
     "Settings opens a native AppKit window without creating a settings tab.",
