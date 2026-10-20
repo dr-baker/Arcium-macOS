@@ -209,7 +209,7 @@ geometry. Results clipping excludes the search-bar cutout to avoid double blur.
 
 **Browser layout** uses the existing `helium.browser.layout` preference.
 **Browser UI scale** accepts 80–125% in five-point steps through the original
-profile's `arcium.appearance.chrome_ui_scale` preference. The default is 100%;
+profile's `arcium.appearance.chrome_ui_scale` preference. The default is 110%;
 **Use default browser UI scale** clears the user override. Native browser views
 scale text, tab rows, icons, Favorites, toolbar controls, and their layout
 metrics. Theme propagation refreshes cached sizes when the value changes and
@@ -461,6 +461,14 @@ October 4 follow-up (on the `archive/dated-docs-2026-10-11` branch) records the
 top-pin, decorative-availability, and Size-reopen checks. Glow edge
 discoloration remains unresolved.
 
+## Browser appearance defaults
+
+New default values use preference registration, with no migration or startup
+writes. Existing user and managed values remain authoritative. The browser UI
+defaults to 110%, Fully hidden collapsed sidebar, centered and minimal address
+bar, and hidden Profile and Extensions toolbar buttons. The frame-border
+default is five stored base points, rendered and displayed as six points at
+110%. Webpage zoom is independent.
 ## Space creation palette sheet
 
 The compact Space editor retains its inline controls and adds **Full editor…**
