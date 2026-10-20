@@ -343,7 +343,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "ui/views/widget/widget.h"
  
  NSString* const kArciumSettingsUIControllerClassName =
-@@ -2660,8 +2661,170 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2660,8 +2661,172 @@ void SettingsModelProfileWillBeDestroyed
  
  @end
  
@@ -507,7 +507,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +      initWithParent:parent widget:widget profile:profile theme:theme
 +             changed:std::move(changed)];
 +  if (!controller) return {};
-+  return base::ScopedClosureRunner(base::BindOnce([controller] { [controller closeDraft]; }));
++  return base::ScopedClosureRunner(base::BindOnce(
++      [](ArciumSpaceThemeDraftController* controller) { [controller closeDraft]; },
++      controller));
 +}
 +
 +
