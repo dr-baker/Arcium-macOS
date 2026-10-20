@@ -74,7 +74,8 @@
     "Quit and relaunch the isolated profile normally; verify both group materials, Tint Intensity and Opacity persist. Restore Glass defaults for handoff.",
     "Inspect all four settings categories at narrow and wide window sizes. Common rows should align, stack without clipping when needed, and retain focus and values while resizing. Cards should be reserved for substantial editors rather than each small group.",
     "Open color/backdrop, floating-surface and command-bar customization sheets. Confirm every prior control is reachable, edits apply live, Done and Escape close without a rollback promise, and changing the target Space dismisses customization without writing to another Space. Make one final keyboard slider adjustment and immediately press Done or Escape; confirm that value is saved.",
-    "Inspect flat settings groups and editor cards at narrow and wide sizes. Flat groups use headings and spacing without automatic row dividers; editor subheadings are visibly distinct from card titles and row labels."
+    "Inspect flat settings groups and editor cards at narrow and wide sizes. Flat groups use headings and spacing without automatic row dividers; editor subheadings are visibly distinct from card titles and row labels.",
+    "Record chrome mode, content mode and the complete Space recipe. Set Window chrome Dark and New Tab and Settings Light, then reverse them. Verify native frame/sidebar retain chrome mode while Settings canvas, controls, sheets and the same open New Tab follow content mode without reload. Verify Follow window chrome inherits explicit chrome mode, ordinary website preference remains unchanged, and both modes persist through a normal restart. Restore the original values."
   ],
   "observables": [
     "Settings opens a native AppKit window without creating a settings tab.",
@@ -101,7 +102,8 @@
     "Opacity uses neutral light/dark backing independent of theme tint; Solid remains opaque. Old frosted values resolve to Clear and old fast values display Flat.",
     "The live Peek page remains crisp with native Clear and Liquid, including after resizing; only the source backdrop is blurred and the container material is limited to its frame.",
     "Only Glass, Quiet and Custom presets are offered. Surface details appear only in the Customize sheet and dismiss with Done or Escape; presentation does not change saved tuning. Quiet uses Solid text and Flat containers. Legacy Refractive and Solid presets display Custom while preserving their recipes.",
-    "Existing navigation, native shortcut recording and preference authority are preserved. Common settings use aligned grouped rows; advanced live-edit sheets close safely, retain the last keyboard adjustment, and end temporary preview."
+    "Existing navigation, native shortcut recording and preference authority are preserved. Common settings use aligned grouped rows; advanced live-edit sheets close safely, retain the last keyboard adjustment, and end temporary preview.",
+    "New Tab and Settings mode changes preserve chrome mode, authored colors and geometry, and existing website preference. Content mode defaults to following resolved window chrome, respects managed Spaces preferences, and rejects stale captured targets."
   ],
   "verify_persistence": true,
   "verify_teardown": true

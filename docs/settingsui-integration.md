@@ -63,6 +63,9 @@ shared page scrolling, aligned rows and unboxed grouped sections. Cards are
 reserved for substantial editors rather than every small settings group.
 Flat groups use section headings and spacing without automatic row dividers.
 Subheadings inside editors use a smaller secondary style, distinct from card titles.
+The detail canvas and customization sheets receive the content scheme and its
+resolved palette roles. Sidebar and native window appearance retain the chrome
+scheme; content does not override the NSWindow appearance.
 Space colors/backdrop, floating-surface details and command-bar styling open
 focused sheets. Their controls apply live through the existing profile store;
 Done and Escape close the sheet without implying rollback. Closing a surface
@@ -81,9 +84,12 @@ SettingsUI's export. Its SHA-256 is
 The settings owner decodes it once. A missing or invalid preset produces an
 explicit load error rather than silently selecting another design.
 
-Users can select Auto, Light, or Dark for both browser windows and Settings.
-Auto follows the effective system appearance. Chromium's theme service owns
-this choice. The shared palette edits the accent, color pairing, and chrome tint.
+Window chrome offers Auto, Light, and Dark for the captured Space's frame,
+sidebar, toolbar and native background. Auto follows macOS. New Tab and Settings
+separately offers Follow window chrome, Light, and Dark. Its default inherits the
+resolved chrome mode, including an explicit Light or Dark choice. Both settings
+persist in the Space theme. Regular website preferences remain separate.
+The shared palette edits the accent, color pairing, and chrome tint.
 Settings uses the same native chrome renderer as browser windows, including
 material, tint, opacity, color points, and grain. The bundled preset remains
 the product default for motion, typography, layout, and controls. It does not
