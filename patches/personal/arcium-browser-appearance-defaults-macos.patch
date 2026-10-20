@@ -1,0 +1,70 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -615,14 +615,14 @@ struct ArciumAppearanceSnapshot: Equatab
+     var canEditSurfaceTuning: Bool {
+         surfaceTuningAvailable && canEditSurfaceSet
+     }
+-    var collapsedSidebarStyle = 0
++    var collapsedSidebarStyle = 1
+     var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
+     var collapsedSidebarStyleAvailable = false
+     var collapsedSidebarStyleManaged = false
+-    var chromeFrameBorderWidth = 3
++    var chromeFrameBorderWidth = 5
+     var chromeFrameBorderWidthAvailable = false
+     var chromeFrameBorderWidthManaged = false
+-    var chromeUIScale = 100
++    var chromeUIScale = 110
+     var chromeUIScaleIsDefault = true
+     var chromeUIScaleAvailable = false
+     var chromeUIScaleManaged = false
+@@ -655,7 +655,7 @@ struct ArciumAppearanceSnapshot: Equatab
+         surfaceTuningAvailable = strictBoolean(dictionary["surfaceTuningAvailable"]) ?? false
+         commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
+         commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
+-        collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 0, 0), 1)
++        collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 1, 0), 1)
+         let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
+             .filter { (0...1).contains($0.value) }
+         if !parsedCollapsedSidebarStyleOptions.isEmpty {
+@@ -663,10 +663,10 @@ struct ArciumAppearanceSnapshot: Equatab
+         }
+         collapsedSidebarStyleAvailable = strictBoolean(dictionary["collapsedSidebarStyleAvailable"]) ?? false
+         collapsedSidebarStyleManaged = strictBoolean(dictionary["collapsedSidebarStyleManaged"]) ?? false
+-        chromeFrameBorderWidth = min(max(integerOptional(dictionary["chromeFrameBorderWidth"]) ?? 3, 0), 24)
++        chromeFrameBorderWidth = min(max(integerOptional(dictionary["chromeFrameBorderWidth"]) ?? 5, 0), 24)
+         chromeFrameBorderWidthAvailable = strictBoolean(dictionary["chromeFrameBorderWidthAvailable"]) ?? false
+         chromeFrameBorderWidthManaged = strictBoolean(dictionary["chromeFrameBorderWidthManaged"]) ?? false
+-        chromeUIScale = min(max(finiteIntegerOptional(dictionary["chromeUIScale"]) ?? 100, 80), 125)
++        chromeUIScale = min(max(finiteIntegerOptional(dictionary["chromeUIScale"]) ?? 110, 80), 125)
+         chromeUIScaleIsDefault = strictBoolean(dictionary["chromeUIScaleIsDefault"]) ?? true
+         chromeUIScaleAvailable = strictBoolean(dictionary["chromeUIScaleAvailable"]) ?? false
+         chromeUIScaleManaged = strictBoolean(dictionary["chromeUIScaleManaged"]) ?? false
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -1070,7 +1070,7 @@ final class ArciumSettingsUIContractTest
+                 "chromeUIScaleManaged": false
+             ]
+         ]))
+-        XCTAssertEqual(nonfinite.appearance.chromeUIScale, 100)
++        XCTAssertEqual(nonfinite.appearance.chromeUIScale, 110)
+     }
+ 
+     func testMissingSectionsAndValuesFailClosed() async {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -1300,7 +1300,7 @@ void SettingsModelProfileWillBeDestroyed
+                 model->GetInteger(arcium::kCollapsedSidebarStylePref),
+                 arcium::kCollapsedSidebarStyleMin,
+                 arcium::kCollapsedSidebarStyleMax)
+-          : arcium::kCollapsedSidebarStyleIconRail;
++          : arcium::kCollapsedSidebarStyleFullyHidden;
+   const bool chrome_frame_border_width_available =
+       model && model->HasPreference(
+                    arcium::kChromeFrameBorderWidthPref);
