@@ -86,11 +86,15 @@ explicit load error rather than silently selecting another design.
 
 Window chrome offers Auto, Light, and Dark for the captured Space's frame,
 sidebar, toolbar and native background. Auto follows macOS. Websites and content
-offers Follow window chrome, Light, and Dark. It controls the preferred color
-scheme sent to websites, New Tab, and the Settings detail canvas and sheets.
-Its default inherits the resolved chrome mode, including an explicit Light or
-Dark choice. Settings frame, sidebar and header retain chrome mode. Both
+uses the same Auto, Light, and Dark segmented control. Its Auto choice follows
+the resolved chrome mode, including an explicit Light or Dark choice. It
+controls the preferred color scheme sent to websites, New Tab, and the Settings
+detail canvas and sheets. Settings frame, sidebar and header retain chrome mode. Both
 settings persist in the Space theme using the existing `mode` and `web_mode` fields.
+Space theme places the accent dots and palette Customize button in one row,
+with controls and panels saturation below. Section headings use 18pt type, a
+restrained resolved-accent tint and a fading rule. Increased Contrast keeps
+stronger neutral headings and rules.
 The shared palette edits the accent, color pairing, and chrome tint.
 Settings uses the same native chrome renderer as browser windows, including
 material, tint, opacity, color points, and grain. The bundled preset remains
