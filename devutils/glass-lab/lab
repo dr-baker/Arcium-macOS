@@ -1,0 +1,78 @@
+#!/bin/zsh
+set -euo pipefail
+cd "${0:A:h}"
+export CLANG_MODULE_CACHE_PATH="$PWD/.build/module-cache"
+export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/module-cache"
+spm_flags=(--disable-sandbox --cache-path "$PWD/.build/cache" --config-path "$PWD/.build/config" --security-path "$PWD/.build/security")
+action="${1:-run}"
+if [[ "$action" == "help" || "$action" == "--help" ]]; then
+  print './lab [run|build|test|clean]'
+  print 'Standalone native app. Requires Xcode with the macOS 26 SDK and Metal tools.'
+  exit 0
+fi
+if [[ "$action" == "clean" ]]; then
+  swift package "${spm_flags[@]}" clean
+  exit 0
+fi
+python3 prepare.py
+if [[ "$action" == "test" ]]; then
+  swift test "${spm_flags[@]}"
+  exit 0
+fi
+if [[ "$action" != "run" && "$action" != "build" ]]; then
+  print -u2 "Unknown action: $action"
+  exit 2
+fi
+swift build "${spm_flags[@]}"
+build_bin="$(swift build "${spm_flags[@]}" --show-bin-path)"
+lab_app="$PWD/.build/Arcium Glass Lab.app"
+if [[ "$action" == "run" ]]; then
+  swift -e 'import AppKit
+let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "org.arcium.GlassLab")
+for app in apps { _ = app.terminate() }
+for _ in 0..<30 {
+    if apps.allSatisfy({ $0.isTerminated }) { break }
+    RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+}
+if !apps.allSatisfy({ $0.isTerminated }) {
+    fputs("Quit Arcium Glass Lab, then run again.\n", stderr); exit(1)
+}'
+fi
+python3 - "$lab_app/ArciumGlassLab_ArciumGlassLab.bundle" <<'PY'
+import shutil, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if path.is_dir():
+    shutil.rmtree(path)
+PY
+mkdir -p "$lab_app/Contents/MacOS" "$lab_app/Contents/Resources"
+metal_source=Sources/ArciumGlassLab/Resources/Glass.metal
+if [[ ! -f .build/Glass.metallib || "$metal_source" -nt .build/Glass.metallib ]]; then
+  xcrun metal -fmodules-cache-path="$PWD/.build/metal-cache" -fcikernel -c "$metal_source" -o .build/Glass.air
+  xcrun metallib -cikernel .build/Glass.air -o .build/Glass.metallib
+fi
+cp "$build_bin/ArciumGlassLab" "$lab_app/Contents/MacOS/ArciumGlassLab"
+cp .build/Glass.metallib "$lab_app/Contents/Resources/Glass.metallib"
+cat > "$lab_app/Contents/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>ArciumGlassLab</string>
+<key>CFBundleIdentifier</key><string>org.arcium.GlassLab</string>
+<key>CFBundleName</key><string>Arcium Glass Lab</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSMinimumSystemVersion</key><string>26.0</string>
+<key>NSHighResolutionCapable</key><true/>
+<key>CFBundleDocumentTypes</key><array><dict>
+<key>CFBundleTypeName</key><string>Background image</string>
+<key>CFBundleTypeRole</key><string>Viewer</string>
+<key>LSItemContentTypes</key><array><string>public.image</string></array>
+</dict></array>
+</dict></plist>
+PLIST
+codesign --force --sign - "$lab_app" >/dev/null
+print "$lab_app"
+if [[ "$action" == "run" ]]; then
+  open "$lab_app"
+fi

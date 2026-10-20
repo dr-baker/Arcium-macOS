@@ -43,7 +43,7 @@
     "Explicitly select Pin current tab, Add current tab to Favorites, Move Pin to Space, Close live instance, and Return Pin home on acceptance-owned items",
     "Inspect action icons, target context, and activation cues; use arrow keys to move between navigation and action rows without moving focus from the input",
     "Move the pointer across the floating results and its rounded edges; dismiss and reopen the bar repeatedly, including during a pending navigation",
-    "Choose Solid and Glass appearance while the bar is open; inspect both the search surface and result popup over page content, and leave a recorded preference selected for restart",
+    "In Appearance Text surfaces, choose Liquid and Solid, and change Tint Intensity and Opacity while the bar is open. Inspect both search and results, retaining query, selection, focus and dimensions; Container edits should not change the bar.",
     "Verify Escape restores page focus, outside click dismisses the bar, and resize or active-tab changes leave no detached input",
     "Quit normally, restart the same profile, inspect saved-item identity, usage, and the recorded appearance preference, then restore the original appearance and remove only acceptance-owned items"
   ],
@@ -56,7 +56,7 @@
     "All five explicit command rows mutate the intended source identity; stale rows do nothing",
     "Commands have distinct semantic icons and clear targets; typing a query does not make a destructive command the default Return action",
     "Mouse entry into a standalone results popup and navigation completion after bar dismissal produce no crash",
-    "Solid and Glass update both floating surfaces consistently without losing the query, selection, or keyboard focus; Glass follows the existing browser glass policy",
+    "Text surfaces material, tint and neutral opacity update search and results consistently without losing query, selection, keyboard focus or dimensions. Containers remain independent.",
     "Cancellation creates no tab or navigation and restores usable focus",
     "Normal restart preserves durable items, usage, and command-bar appearance; close and quit produce no new crash"
   ],

@@ -110,7 +110,10 @@ The source checkout was not modified by that import.
 Core owns the shared glass and appearance types. The macOS appearance patch
 owns native rendering; native settings consumes those types and the existing
 Spaces, Little Arc, and shortcut authorities. The production SettingsUI patch
-refines the native-settings baseline.
+refines the native-settings baseline. `arcium-surface-groups.patch` owns the
+Text/Container schema, defaults, resolution, and Views consumers;
+`arcium-surface-groups-macos.patch` owns their native material hosts and Settings
+cards. Both use the existing profile preference bridge.
 
 The merged catalog in the build dir is generated; the core and macOS personal
 patches remain the source owners. Include-only relocation of Spaces and Little
@@ -135,14 +138,19 @@ its radius limits into the editor so saving does not move the Size slider.
 Chromium's PrefService validates, saves, and observes the profile values.
 The SwiftUI editor does not add another preferences store.
 
-The browser and Settings window both use `ApplyNativeGlassBackgroundView`.
+Browser and Settings window chrome use `ApplyNativeGlassBackgroundView`.
 The shared SwiftUI glass renderer remains available to other SettingsUI hosts.
-Arcium does not stack a second SwiftUI glass background above its native one.
+Window chrome has one native glass background. Floating surfaces selected as
+Liquid use a separate noninteractive SwiftUI host with public `Glass.tint`
+and `.glassEffect`.
 
 The normal browser widget supplies Settings with its resolved toolbar color.
 When no browser window exists, Settings uses the public theme-service fallback.
 The shared renderer places a noninteractive Liquid Glass tint layer above the
 glass and below decoration, keeping its opacity independent of window focus.
+Floating-surface Tint Intensity controls the group material's theme tint.
+Its separate Opacity control adds neutral backing for the owning Space's
+Light/Dark mode without increasing that tint.
 
 See [native settings bindings](native-settings-bindings.md#shared-appearance)
 for saved values, editor mappings, and runtime consumers.
