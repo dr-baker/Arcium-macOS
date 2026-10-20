@@ -1,0 +1,234 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -951,6 +951,18 @@ private struct AppearanceSettingsPage: V
+                 .disabled(!store.snapshot.appearance.chromeFrameBorderWidthAvailable
+                     || store.snapshot.appearance.chromeFrameBorderWidthManaged
+                     || !store.snapshot.appearance.roundedFrame)
++            }
++
++            Section("Address bar") {
++                BooleanSetting(
++                    title: "Show top bar",
++                    description: "Show the address bar and navigation above the page.",
++                    enabled: editable("show_toolbar")
++                        && !store.snapshot.appearance.sidebarNavigationConfigured,
++                    value: booleanBinding("show_toolbar"),
++                    unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
++                        ? "The address bar is in the sidebar." : nil
++                )
+                 BooleanSetting(
+                     title: "Centered address bar",
+                     description: nil,
+@@ -960,7 +972,19 @@ private struct AppearanceSettingsPage: V
+                     unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
+                         ? "Sidebar navigation uses a fixed address bar position." : nil
+                 )
+-                BooleanSetting(title: "Minimal address bar", description: nil, enabled: editable("minimal_location_bar"), value: booleanBinding("minimal_location_bar"))
++                BooleanSetting(title: "Minimal address bar", description: "Show a short address while you are not editing it.", enabled: editable("minimal_location_bar"), value: booleanBinding("minimal_location_bar"))
++                BooleanSetting(
++                    title: "Keep visible when sidebar is hidden",
++                    description: "Also keep the top bar visible in Zen mode.",
++                    enabled: editable("zen_mode_top_chrome_pinned")
++                        && store.snapshot.appearance.hasValue("show_toolbar")
++                        && store.snapshot.appearance.showToolbar
++                        && !store.snapshot.appearance.sidebarNavigationConfigured,
++                    value: booleanBinding("zen_mode_top_chrome_pinned"),
++                    unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
++                        ? "The address bar is in the sidebar."
++                        : (!store.snapshot.appearance.showToolbar ? "Show the top bar to keep it visible." : nil)
++                )
+             }
+ 
+             Section("Zen mode") {
+@@ -971,16 +995,6 @@ private struct AppearanceSettingsPage: V
+                     value: booleanBinding("zen_mode")
+                 )
+                 BooleanSetting(
+-                    title: "Keep top bar visible in Zen mode",
+-                    description: "Also keeps the top bar visible when the sidebar is fully hidden.",
+-                    enabled: editable("zen_mode_top_chrome_pinned")
+-                        && !store.snapshot.appearance.sidebarNavigationConfigured,
+-                    value: booleanBinding("zen_mode_top_chrome_pinned"),
+-                    unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
+-                        ? "Navigation is in the sidebar. Keep the sidebar visible in Zen mode to keep navigation visible."
+-                        : nil
+-                )
+-                BooleanSetting(
+                     title: "Keep sidebar visible in Zen mode",
+                     description: "Keep Space and tab navigation visible while Zen mode is active.",
+                     enabled: editable("zen_mode_sidebar_pinned"),
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
+@@ -33,3 +33,7 @@ Space theme controls share one accent-an
+ use matching segmented controls. Section headings use 18pt type, a restrained
+ resolved-accent tint and a fading rule, with stronger neutral styling for
+ Increased Contrast. Empty headings do not gain decorative rules.
++
++The Address bar group exposes centering, minimal display and the existing top-bar
++pin together. The pin applies to Fully hidden sidebars and Zen mode; it retains
++the existing host preference, saved values and managed-availability checks.
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -559,6 +559,7 @@ struct ArciumAppearanceSnapshot: Equatab
+     var roundedFrame = false
+     var centeredLocationBar = false
+     var minimalLocationBar = false
++    var showToolbar = false
+     var showHomeButton = false
+     var showBackButton = false
+     var showForwardButton = false
+@@ -679,6 +680,7 @@ struct ArciumAppearanceSnapshot: Equatab
+         roundedFrame = boolean(dictionary["roundedFrame"])
+         centeredLocationBar = boolean(dictionary["centeredLocationBar"])
+         minimalLocationBar = boolean(dictionary["minimalLocationBar"])
++        showToolbar = strictBoolean(dictionary["showToolbar"]) ?? false
+         showHomeButton = boolean(dictionary["showHomeButton"])
+         showBackButton = boolean(dictionary["showBackButton"])
+         showForwardButton = boolean(dictionary["showForwardButton"])
+@@ -1234,6 +1236,7 @@ final class ArciumSettingsStore: Observa
+         case "rounded_frame": snapshot.appearance.roundedFrame
+         case "centered_location_bar": snapshot.appearance.centeredLocationBar
+         case "minimal_location_bar": snapshot.appearance.minimalLocationBar
++        case "show_toolbar": snapshot.appearance.showToolbar
+         case "show_home_button": snapshot.appearance.showHomeButton
+         case "show_back_button": snapshot.appearance.showBackButton
+         case "show_forward_button": snapshot.appearance.showForwardButton
+@@ -1255,8 +1258,13 @@ final class ArciumSettingsStore: Observa
+     }
+ 
+     func setAppearanceBoolean(_ key: String, value: Bool) {
++        if key == "show_toolbar" {
++            guard snapshot.appearance.hasValue(key),
++                  !snapshot.appearance.isManaged(key),
++                  !snapshot.appearance.sidebarNavigationConfigured else { return }
++        }
+         guard [
+-            "rounded_frame", "centered_location_bar", "minimal_location_bar",
++            "rounded_frame", "centered_location_bar", "minimal_location_bar", "show_toolbar",
+             "show_home_button", "show_back_button", "show_forward_button",
+             "show_reload_button", "show_avatar_button", "show_extensions_button",
+             "show_menu_button", "show_media_button",
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -120,6 +120,7 @@ NSString* const kKeySharedPalette = @"sh
+ NSString* const kKeyRoundedFrame = @"rounded_frame";
+ NSString* const kKeyCenteredLocationBar = @"centered_location_bar";
+ NSString* const kKeyMinimalLocationBar = @"minimal_location_bar";
++NSString* const kKeyShowToolbar = @"show_toolbar";
+ NSString* const kKeyZenMode = @"zen_mode";
+ NSString* const kKeySidebarNavigationEnabled = @"sidebar_navigation_enabled";
+ NSString* const kKeySidebarExtensionsDrawerEnabled =
+@@ -1316,6 +1317,8 @@ void SettingsModelProfileWillBeDestroyed
+                 arcium::kChromeFrameBorderWidthMin,
+                 arcium::kChromeFrameBorderWidthMax)
+           : arcium::kChromeFrameBorderWidthDefault;
++  const bool toolbar_available =
++      model && model->HasPreference(arcium::kShowToolbarPref);
+   const bool home_available =
+       model && model->HasPreference(prefs::kShowHomeButton);
+   const bool back_available =
+@@ -1466,6 +1469,8 @@ void SettingsModelProfileWillBeDestroyed
+           model->GetBoolean(arcium::kSidebarExtensionsDrawerEnabledPref)),
+     @"zenMode" :
+         @(model && zen_available && model->GetBoolean(prefs::kHeliumZenMode)),
++    @"showToolbar" :
++        @(model && toolbar_available && model->GetBoolean(arcium::kShowToolbarPref)),
+     @"showHomeButton" :
+         @(model && home_available && model->GetBoolean(prefs::kShowHomeButton)),
+     @"showBackButton" :
+@@ -1522,6 +1527,8 @@ void SettingsModelProfileWillBeDestroyed
+             model->IsManaged(arcium::kSidebarExtensionsDrawerEnabledPref)),
+       kKeyZenMode :
+           @(model && zen_available && model->IsManaged(prefs::kHeliumZenMode)),
++      kKeyShowToolbar : @(model && toolbar_available &&
++                            model->IsManaged(arcium::kShowToolbarPref)),
+       kKeyShowHomeButton : @(model && home_available &&
+                              model->IsManaged(prefs::kShowHomeButton)),
+       kKeyShowBackButton : @(model && back_available &&
+@@ -1570,6 +1577,7 @@ void SettingsModelProfileWillBeDestroyed
+       kKeySidebarExtensionsDrawerEnabled :
+           @(sidebar_extensions_drawer_pref_available),
+       kKeyZenMode : @(zen_available),
++      kKeyShowToolbar : @(toolbar_available),
+       kKeyShowHomeButton : @(home_available),
+       kKeyShowBackButton : @(back_available),
+       kKeyShowForwardButton : @(forward_available),
+@@ -2015,6 +2023,16 @@ void SettingsModelProfileWillBeDestroyed
+       [self modelDidChange];
+     }
+     return;
++  }
++  if ([key isEqualToString:kKeyShowToolbar] &&
++      GetStrictBooleanObject(value, &boolean_value)) {
++    if (model_->HasPreference(arcium::kShowToolbarPref) &&
++        !model_->IsManaged(arcium::kShowToolbarPref) &&
++        !IsSidebarNavigationConfiguredForProfile(model_->profile())) {
++      model_->SetBoolean(arcium::kShowToolbarPref, boolean_value);
++      [self modelDidChange];
++    }
++    return;
+   }
+   if ([key isEqualToString:kKeyZenModeTopChromePinned] &&
+       GetBooleanObject(value, &boolean_value)) {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -459,6 +459,49 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
++    func testToolbarVisibilityUsesHostPreferenceAndExternalSnapshots() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "showToolbar": true,
++            "available": ["show_toolbar": true],
++            "managed": ["show_toolbar": false]
++        ]], delegate: delegate)
++        XCTAssertTrue(store.appearanceBoolean("show_toolbar"))
++        store.setAppearanceBoolean("show_toolbar", value: false)
++        XCTAssertEqual(delegate.settings.map(\.key), ["show_toolbar"])
++        XCTAssertEqual(delegate.settings.first?.value as? Bool, false)
++        store.updateSnapshot(["available": true, "appearance": [
++            "showToolbar": false, "available": ["show_toolbar": true]
++        ]])
++        XCTAssertFalse(store.appearanceBoolean("show_toolbar"))
++        store.updateSnapshot(["available": true, "appearance": [
++            "showToolbar": true, "available": ["show_toolbar": true]
++        ]])
++        XCTAssertTrue(store.appearanceBoolean("show_toolbar"))
++    }
++
++    @MainActor
++    func testToolbarVisibilityRejectsUnavailableManagedAndSidebarWrites() {
++        let delegate = TestDelegate()
++        let snapshots: [[String: Any]] = [
++            ["showToolbar": true],
++            ["showToolbar": true, "available": ["show_toolbar": false]],
++            ["showToolbar": true, "available": ["show_toolbar": true],
++             "managed": ["show_toolbar": true]],
++            ["showToolbar": true, "available": ["show_toolbar": true],
++             "sidebarNavigationConfigured": true]
++        ]
++        for appearance in snapshots {
++            let store = ArciumSettingsStore(snapshot: ["available": true,
++                "appearance": appearance], delegate: delegate)
++            store.setAppearanceBoolean("show_toolbar", value: false)
++            XCTAssertTrue(store.appearanceBoolean("show_toolbar"))
++        }
++        XCTAssertTrue(delegate.settings.isEmpty)
++        XCTAssertFalse(ArciumAppearanceSnapshot(["showToolbar": 1]).showToolbar)
++    }
++
++    @MainActor
+     func testNativeFeatureSettingsReadWriteAndRefreshUseStableKeys() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(

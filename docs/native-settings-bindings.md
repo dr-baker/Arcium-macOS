@@ -227,20 +227,29 @@ and window traffic lights retain their system sizing.
 
 ## Collapsed sidebar and frame border
 
-**Collapsed sidebar** preserves the existing **Icon rail** default. **Fully
-hidden (Arc)** removes the collapsed vertical sidebar in normal windows. With
-Top bar navigation and **Keep top bar visible in Zen mode** off, it also hides
-the top browser chrome. The top edge and Command-L reveal the toolbar; the
-sidebar button or configured shortcut expands the sidebar again. Its saved
-expanded width is preserved. Fullscreen uses its existing layout, and selecting
-a collapse style does not rewrite Zen mode preferences.
+**Collapsed sidebar** defaults to **Fully hidden (Arc)** and retains **Icon
+rail** as an option. Fully hidden removes the collapsed vertical sidebar in
+normal windows. With Top bar navigation and **Keep visible when sidebar is
+hidden** off, it also hides the top browser chrome. Hovering the top edge temporarily reveals
+the toolbar. Command-L opens the command panel, with inline toolbar focus as
+its fallback. The sidebar button or configured shortcut expands the sidebar
+again. Its saved expanded width is preserved. Fullscreen uses its existing
+layout, and selecting a collapse style does not rewrite Zen mode preferences.
 
-Appearance's Zen card groups **Zen mode**, **Keep top bar visible in Zen mode**,
-and **Keep sidebar visible in Zen mode**. The pins keep the existing
-`helium.browser.zen_mode_top_chrome_pinned` and
-`helium.browser.zen_mode_sidebar_pinned` preferences. The top pin also applies
-to Fully hidden. Active Sidebar navigation disables the top-pin row with a
-reason and preserves its saved value.
+Appearance's **Address bar** group contains **Show top bar**, **Centered address
+bar**, **Minimal address bar**, and **Keep visible when sidebar is hidden**.
+Showing the bar, centered layout and minimal display default on; keeping it
+visible with a hidden sidebar defaults off. **Show top bar** uses the existing
+`arcium.appearance.show_toolbar` profile preference and command. Command-Shift-D
+toggles it by default on macOS; custom shortcuts and AppKit menu overrides remain
+in effect. Bookmark All Tabs remains assignable without a default binding. The
+open Settings window observes shortcut and menu changes to the same preference.
+
+The hidden-sidebar override retains `helium.browser.zen_mode_top_chrome_pinned`
+and applies to both Fully hidden sidebars and Zen mode. It is unavailable while
+the top bar is off. Active Sidebar navigation disables both visibility rows with
+a reason and preserves their saved values. **Keep sidebar visible in Zen mode**
+remains in the Zen group and retains `helium.browser.zen_mode_sidebar_pinned`.
 
 The macOS collapse and expand sequences use a 320 ms sampled approximation of
 a critically damped response on the existing animation clock. A reversal
