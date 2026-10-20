@@ -30,7 +30,7 @@ implementation history (on the `archive/dated-docs-2026-10-11` branch).
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
 | Window chrome color scheme | Captured Space `theme.mode`: Auto, Light, Dark | `ArciumSettingsModel::SetAppearanceMode` updates the target Space's native frame, sidebar and toolbar mode. Auto follows macOS. |
-| New Tab and Settings color scheme | Captured Space `theme.content_mode`: Follow window chrome (`auto`), Light, Dark | `ArciumSettingsModel::SetContentAppearanceMode` changes only browser-page appearance. The NTP-specific provider helper selects the same Space palette in the requested mode; native Settings applies that role pair only to its detail canvas and sheets. Spaces policy controls editability independently of browser-theme policy. Existing website `web_mode` is preserved. |
+| Websites and content color scheme | Captured Space `theme.web_mode`: Follow window chrome (`auto`), Light, Dark | `ArciumSettingsModel::SetWebAppearanceMode` sets the preferred color scheme sent to websites and used by New Tab and Settings. The NTP-specific provider helper selects the same Space palette in the requested mode; native Settings applies that role pair to its detail canvas and sheets. Its frame, sidebar and header retain chrome mode. Spaces policy controls editability independently of browser-theme policy. |
 | Floating surface preset and values | `arcium.appearance.surface_set` / `helium::kArciumSurfaceSetPref`; original profile string, default `glass` (`refractive`, `quiet`, `solid`, `custom`); `arcium.appearance.surface_tuning` / `helium::kArciumSurfaceTuningPref`, the Custom values | Resolved by `helium::ResolveSurfaceStyle` for panels, controls, and scrims. See [Floating surfaces](#floating-surfaces). |
 | Text surface override | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `2` for Automatic, `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice, the surface style, and the browser glass dictionary for the command bar, its results, and floating controls. Containers resolve their own group independently. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
@@ -58,7 +58,7 @@ from Objective-C numeric zero and one.
 
 ## Space appearance
 
-Each Space owns its color recipe, harmony, chrome mode, browser-page mode, and
+Each Space owns its color recipe, harmony, chrome mode, website mode, and
 controls and panels chroma multipliers. The existing Colors picker is the color-selection
 entry point. The first point supplies the primary seed; additional points keep
 their stable identities and decorative placement. Legacy Space colors and then
@@ -92,7 +92,7 @@ Settings receives the same generated light/dark roles and opacity floors in
 owning browser and its panels without replacing their input or selection.
 
 Settings captures the initiating browser's Space. `space_colors`,
-`space_chroma`, `space_mode`, `space_content_mode`, and `reset_space_colors` carry that Space ID, and
+`space_chroma`, `space_mode`, `space_web_mode`, and `reset_space_colors` carry that Space ID, and
 the native bridge rejects stale targets and deleted Spaces. Opening Settings
 from another Space deliberately retargets it. Pending interactions retain their
 original target. A fresh native snapshot clears pending edits. The obsolete

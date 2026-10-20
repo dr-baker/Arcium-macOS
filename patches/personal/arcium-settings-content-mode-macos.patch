@@ -23,9 +23,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var mode = "system"
      var modeManaged = false
      var modeAvailable = true
-+    var contentMode = "system"
-+    var contentModeAvailable = false
-+    var contentModeManaged = true
++    var webMode = "system"
++    var webModeAvailable = false
++    var webModeManaged = true
      var roundedFrame = false
      var centeredLocationBar = false
      var minimalLocationBar = false
@@ -33,9 +33,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          mode = string(dictionary["mode"]) ?? "system"
          modeManaged = boolean(dictionary["modeManaged"])
          modeAvailable = boolean(dictionary["modeAvailable"], defaultValue: false)
-+        contentMode = string(dictionary["contentMode"]) ?? "system"
-+        contentModeAvailable = strictBoolean(dictionary["contentModeAvailable"]) ?? false
-+        contentModeManaged = strictBoolean(dictionary["contentModeManaged"]) ?? true
++        webMode = string(dictionary["webMode"]) ?? "system"
++        webModeAvailable = strictBoolean(dictionary["webModeAvailable"]) ?? false
++        webModeManaged = strictBoolean(dictionary["webModeManaged"]) ?? true
          roundedFrame = boolean(dictionary["roundedFrame"])
          centeredLocationBar = boolean(dictionary["centeredLocationBar"])
          minimalLocationBar = boolean(dictionary["minimalLocationBar"])
@@ -43,18 +43,18 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          }
      }
  
-+    func contentAppearanceMode() -> SettingsAppearance {
-+        switch snapshot.appearance.contentMode.lowercased() {
++    func webAppearanceMode() -> SettingsAppearance {
++        switch snapshot.appearance.webMode.lowercased() {
 +        case "light": .light
 +        case "dark": .dark
 +        default: .system
 +        }
 +    }
 +
-+    func applyContentAppearanceMode(_ mode: SettingsAppearance, spaceID: String? = nil) {
++    func applyWebAppearanceMode(_ mode: SettingsAppearance, spaceID: String? = nil) {
 +        let target = snapshot.appearance.spacePalette
-+        guard snapshot.appearance.contentModeAvailable,
-+              !snapshot.appearance.contentModeManaged,
++        guard snapshot.appearance.webModeAvailable,
++              !snapshot.appearance.webModeManaged,
 +              !target.id.isEmpty, (spaceID ?? target.id) == target.id else { return }
 +        let value: String
 +        switch mode {
@@ -62,11 +62,11 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        case .light: value = "light"
 +        case .dark: value = "dark"
 +        }
-+        settingChanged(key: "space_content_mode", value: ["spaceID": target.id, "mode": value])
++        settingChanged(key: "space_web_mode", value: ["spaceID": target.id, "mode": value])
 +    }
 +
-+    func contentColorScheme(systemColorScheme: ColorScheme) -> ColorScheme {
-+        contentAppearanceMode().colorScheme ?? appearanceMode().colorScheme ?? systemColorScheme
++    func webColorScheme(systemColorScheme: ColorScheme) -> ColorScheme {
++        webAppearanceMode().colorScheme ?? appearanceMode().colorScheme ?? systemColorScheme
 +    }
 +
      func styleAppearance(systemColorScheme: ColorScheme) -> SettingsStyleAppearance? {
@@ -81,7 +81,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
             let style = store.styleAppearance(systemColorScheme: systemColorScheme) {
              let theme = store.snapshot.appearance.spacePalette.theme(fallback: style.theme(brand: preset.brand))
 -            ArciumSettingsShell(store: store)
-+            let contentScheme = store.contentColorScheme(systemColorScheme: systemColorScheme)
++            let contentScheme = store.webColorScheme(systemColorScheme: systemColorScheme)
 +            let contentStyle = contentScheme == .dark ? preset.dark : preset.light
 +            let contentTheme = store.snapshot.appearance.spacePalette.theme(
 +                fallback: contentStyle.theme(brand: preset.brand), colorScheme: contentScheme)
@@ -162,14 +162,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      @State private var backgroundMode: BackgroundMode = .everyday
      @State private var surfacePreview = false
      @State private var customization: Customization?
-@@ -657,20 +678,33 @@ private struct AppearanceSettingsPage: V
+@@ -657,20 +678,34 @@ private struct AppearanceSettingsPage: V
                         set: { store.applyAppearanceMode($0, spaceID: spaceID) })
      }
  
-+    private var contentAppearanceBinding: Binding<SettingsAppearance> {
++    private var webAppearanceBinding: Binding<SettingsAppearance> {
 +        let spaceID = store.snapshot.appearance.spacePalette.id
-+        return Binding(get: { store.contentAppearanceMode() },
-+                       set: { store.applyContentAppearanceMode($0, spaceID: spaceID) })
++        return Binding(get: { store.webAppearanceMode() },
++                       set: { store.applyWebAppearanceMode($0, spaceID: spaceID) })
 +    }
 +
      var body: some View {
@@ -196,17 +196,18 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                .help("Window frame, sidebar and toolbar. Auto follows macOS.")
 +                .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
 +                .accessibilityIdentifier("space-chrome-mode")
-+                SPicker("New Tab and Settings", selection: contentAppearanceBinding, options: [
++                SPicker("Websites and content", selection: webAppearanceBinding, options: [
 +                    (value: SettingsAppearance.system, label: "Follow window chrome"),
 +                    (value: .light, label: "Light"),
 +                    (value: .dark, label: "Dark")
 +                ])
-+                .disabled(!store.snapshot.appearance.contentModeAvailable || store.snapshot.appearance.contentModeManaged)
-+                .accessibilityIdentifier("space-content-mode")
++                .help("Preferred website color scheme. Also used by New Tab and Settings.")
++                .disabled(!store.snapshot.appearance.webModeAvailable || store.snapshot.appearance.webModeManaged)
++                .accessibilityIdentifier("space-web-mode")
              }
  
              Section("Space colors") {
-@@ -932,6 +966,8 @@ private struct AppearanceSettingsPage: V
+@@ -932,6 +967,8 @@ private struct AppearanceSettingsPage: V
                      commandBarCustomization
                  }
              }
@@ -229,43 +230,43 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
          try Self.snapshotWithPalette(palette)
      }
  
-+    private func snapshot(spaceID: String = "space-a", contentMode: String = "system",
++    private func snapshot(spaceID: String = "space-a", webMode: String = "system",
 +                          interfaceMode: String = "dark",
 +                          available: Bool = true, managed: Bool = false) -> NSDictionary {
 +        NSDictionary(dictionary: ["available": true, "appearance": [
 +            "availableSection": true, "mode": interfaceMode, "modeAvailable": true,
-+            "modeManaged": false, "contentMode": contentMode,
-+            "contentModeAvailable": available, "contentModeManaged": managed,
++            "modeManaged": false, "webMode": webMode,
++            "webModeAvailable": available, "webModeManaged": managed,
 +            "spacePalette": ["id": spaceID, "name": "Space", "available": true]
 +        ]])
 +    }
 +
 +    @MainActor
-+    func testContentModeUsesCapturedSpaceAndSeparateInterfaceAction() throws {
++    func testWebModeUsesCapturedSpaceAndSeparateInterfaceAction() throws {
 +        let delegate = TestDelegate()
 +        let store = ArciumSettingsStore(snapshot: snapshot(), delegate: delegate)
 +        XCTAssertEqual(store.appearanceMode(), .dark)
-+        XCTAssertEqual(store.contentAppearanceMode(), .system)
-+        store.applyContentAppearanceMode(.light, spaceID: "space-a")
-+        XCTAssertEqual(delegate.settings.map(\.key), ["space_content_mode"])
++        XCTAssertEqual(store.webAppearanceMode(), .system)
++        store.applyWebAppearanceMode(.light, spaceID: "space-a")
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_web_mode"])
 +        let page = try XCTUnwrap(delegate.settings.first?.value as? [String: Any])
 +        XCTAssertEqual(page["spaceID"] as? String, "space-a")
 +        XCTAssertEqual(page["mode"] as? String, "light")
-+        store.updateSnapshot(snapshot(contentMode: "light"))
++        store.updateSnapshot(snapshot(webMode: "light"))
 +        XCTAssertEqual(store.appearanceMode(), .dark)
-+        XCTAssertEqual(store.contentAppearanceMode(), .light)
-+        store.updateSnapshot(snapshot(spaceID: "space-b", contentMode: "dark"))
-+        store.applyContentAppearanceMode(.system, spaceID: "space-a")
++        XCTAssertEqual(store.webAppearanceMode(), .light)
++        store.updateSnapshot(snapshot(spaceID: "space-b", webMode: "dark"))
++        store.applyWebAppearanceMode(.system, spaceID: "space-a")
 +        XCTAssertEqual(delegate.settings.count, 1)
 +        store.applyAppearanceMode(.light, spaceID: "space-b")
-+        XCTAssertEqual(delegate.settings.map(\.key), ["space_content_mode", "space_mode"])
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_web_mode", "space_mode"])
 +        let interface = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
 +        XCTAssertEqual(interface["spaceID"] as? String, "space-b")
 +        XCTAssertEqual(interface["mode"] as? String, "light")
 +    }
 +
 +    @MainActor
-+    func testContentModeRemainsEditableWhenChromePolicyDisablesPalette() {
++    func testWebModeRemainsEditableWhenChromePolicyDisablesPalette() {
 +        let delegate = TestDelegate()
 +        let value = snapshot() as! [String: Any]
 +        var appearance = value["appearance"] as! [String: Any]
@@ -274,40 +275,40 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        let store = ArciumSettingsStore(snapshot: NSDictionary(dictionary: [
 +            "available": true, "appearance": appearance
 +        ]), delegate: delegate)
-+        store.applyContentAppearanceMode(.light, spaceID: "space-a")
-+        XCTAssertEqual(delegate.settings.map(\.key), ["space_content_mode"])
++        store.applyWebAppearanceMode(.light, spaceID: "space-a")
++        XCTAssertEqual(delegate.settings.map(\.key), ["space_web_mode"])
 +    }
 +
 +    @MainActor
-+    func testContentModeUnavailableManagedOrMissingMetadataEmitsNothing() {
++    func testWebModeUnavailableManagedOrMissingMetadataEmitsNothing() {
 +        let delegate = TestDelegate()
 +        for (available, managed) in [(false, false), (true, true)] {
 +            let store = ArciumSettingsStore(snapshot: snapshot(available: available, managed: managed),
 +                                            delegate: delegate)
-+            store.applyContentAppearanceMode(.dark)
++            store.applyWebAppearanceMode(.dark)
 +        }
 +        let missing = ArciumSettingsStore(snapshot: NSDictionary(dictionary: [
 +            "available": true, "appearance": ["availableSection": true,
 +                "spacePalette": ["id": "space-a", "available": true]]
 +        ]), delegate: delegate)
-+        missing.applyContentAppearanceMode(.dark)
++        missing.applyWebAppearanceMode(.dark)
 +        XCTAssertTrue(delegate.settings.isEmpty)
 +    }
 +
 +    @MainActor
-+    func testContentModeFollowsResolvedChromeRatherThanSystem() {
++    func testWebModeFollowsResolvedChromeRatherThanSystem() {
 +        let delegate = TestDelegate()
 +        let store = ArciumSettingsStore(snapshot: snapshot(), delegate: delegate)
-+        XCTAssertEqual(store.contentColorScheme(systemColorScheme: .light), .dark)
-+        store.updateSnapshot(snapshot(contentMode: "light"))
-+        XCTAssertEqual(store.contentColorScheme(systemColorScheme: .dark), .light)
-+        store.updateSnapshot(snapshot(contentMode: "dark", interfaceMode: "light"))
-+        XCTAssertEqual(store.contentColorScheme(systemColorScheme: .light), .dark)
++        XCTAssertEqual(store.webColorScheme(systemColorScheme: .light), .dark)
++        store.updateSnapshot(snapshot(webMode: "light"))
++        XCTAssertEqual(store.webColorScheme(systemColorScheme: .dark), .light)
++        store.updateSnapshot(snapshot(webMode: "dark", interfaceMode: "light"))
++        XCTAssertEqual(store.webColorScheme(systemColorScheme: .light), .dark)
 +        store.updateSnapshot(snapshot(interfaceMode: "light"))
-+        XCTAssertEqual(store.contentColorScheme(systemColorScheme: .dark), .light)
++        XCTAssertEqual(store.webColorScheme(systemColorScheme: .dark), .light)
 +        store.updateSnapshot(snapshot(interfaceMode: "system"))
-+        XCTAssertEqual(store.contentColorScheme(systemColorScheme: .light), .light)
-+        XCTAssertEqual(store.contentColorScheme(systemColorScheme: .dark), .dark)
++        XCTAssertEqual(store.webColorScheme(systemColorScheme: .light), .light)
++        XCTAssertEqual(store.webColorScheme(systemColorScheme: .dark), .dark)
 +    }
 +
      @MainActor
@@ -321,9 +322,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      @"mode" : AppearanceModeString(appearance_value),
      @"modeManaged" : @(appearance_managed),
      @"modeAvailable" : @(appearance_available),
-+    @"contentMode" : AppearanceModeString(model ? model->GetContentAppearanceMode() : 0),
-+    @"contentModeAvailable" : @(model && model->IsContentAppearanceAvailable()),
-+    @"contentModeManaged" : @(!model || model->IsContentAppearanceManaged()),
++    @"webMode" : AppearanceModeString(model ? model->GetWebAppearanceMode() : 0),
++    @"webModeAvailable" : @(model && model->IsWebAppearanceAvailable()),
++    @"webModeManaged" : @(!model || model->IsWebAppearanceManaged()),
      @"palette" : shared_palette,
      @"spacePalette" : NSDictionaryFromBaseDict(
          model ? model->GetSpacePalette() : base::DictValue()) ?: @{},
@@ -333,7 +334,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
        [key isEqualToString:@"space_accent"] ||
 -      [key isEqualToString:@"space_mode"]) {
 +      [key isEqualToString:@"space_mode"] ||
-+      [key isEqualToString:@"space_content_mode"]) {
++      [key isEqualToString:@"space_web_mode"]) {
      if (![value isKindOfClass:[NSDictionary class]]) {
        [self modelDidChange];
        return;
@@ -342,8 +343,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      } else if ([payload[@"mode"] isKindOfClass:[NSString class]]) {
        if (auto mode = AppearanceModeValue(payload[@"mode"])) {
 -        model_->SetAppearanceMode(*mode);
-+        if ([key isEqualToString:@"space_content_mode"]) {
-+          model_->SetContentAppearanceMode(*mode);
++        if ([key isEqualToString:@"space_web_mode"]) {
++          model_->SetWebAppearanceMode(*mode);
 +        } else {
 +          model_->SetAppearanceMode(*mode);
 +        }
