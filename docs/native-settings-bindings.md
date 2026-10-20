@@ -460,3 +460,23 @@ check and three human-waived live checks that remain unverified. Its separate
 October 4 follow-up (on the `archive/dated-docs-2026-10-11` branch) records the
 top-pin, decorative-availability, and Size-reopen checks. Glow edge
 discoloration remains unresolved.
+
+## Space creation palette sheet
+
+The compact Space editor retains its inline controls and adds **Full editor…**
+to the Theme header. Its attached native sheet shares the Settings palette
+controls: glow selection and placement, color picker, pairings, size and
+intensity, plus Space color strength and grain. Material, reflection, opacity
+and grain size remain profile-owned Settings controls.
+
+The sheet owns a local draft and returns validated changes through a dedicated
+configuration-only delegate. It never routes through profile-setting actions.
+The compact editor synchronizes its own theme copy and previews the draft in
+the originating window. Done closes the sheet; Create or Save persists the
+Space, and Cancel discards the draft. Closing the form or changing its profile
+also closes the sheet and invalidates callbacks.
+
+Draft and persisted editors share the packaged preset, native resolved palette
+roles, strict configuration codec and palette view. Website/content mode
+chooses the sheet scheme, with Auto following chrome; contrast and policy
+rendering bypasses retain native colors.

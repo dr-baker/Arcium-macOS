@@ -1,0 +1,559 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -884,16 +884,7 @@ final class ArciumSettingsStore: Observa
+         self.pendingChromeAppearance = nil
+ 
+         do {
+-            guard let presetBundleURL,
+-                  let bundle = Bundle(url: presetBundleURL),
+-                  let url = bundle.url(
+-                forResource: "yellow-blue grain",
+-                withExtension: "json"
+-            ) else {
+-                throw CocoaError(.fileNoSuchFile)
+-            }
+-            let data = try Data(contentsOf: url)
+-            preset = try SettingsStylePreset.decodeJSON(data)
++            preset = try loadArciumSettingsStylePreset(from: presetBundleURL)
+             presetError = nil
+         } catch {
+             preset = nil
+@@ -1423,3 +1414,14 @@ private func isValidSharedPalette(_ pale
+         && contains(palette.textContrast, 4.5...7) && contains(palette.lightCanvas, 0...1)
+         && contains(palette.darkCanvas, 0...1)
+ }
++
++
++// Both the profile window and creation sheet use the packaged app preset.
++func loadArciumSettingsStylePreset(from bundleURL: URL?) throws -> SettingsStylePreset {
++    guard let bundleURL, let bundle = Bundle(url: bundleURL),
++          let url = bundle.url(forResource: "yellow-blue grain", withExtension: "json") else {
++        throw CocoaError(.fileNoSuchFile)
++    }
++    return try SettingsStylePreset.decodeJSON(Data(contentsOf: url))
++}
++
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -1,6 +1,8 @@
+ import AppKit
++import Combine
+ import Foundation
+ import SettingsUI
++import SettingsUIStyle
+ import SwiftUI
+ 
+ @objc public protocol ArciumSettingsUIDelegate: AnyObject {
+@@ -35,3 +37,67 @@ public final class ArciumSettingsUIContr
+         store.updateSnapshot(snapshot)
+     }
+ }
++
++@objc public protocol ArciumSpaceThemeEditorDelegate: AnyObject {
++    @objc(spaceThemeEditorDidChangeConfiguration:)
++    func configurationChanged(_ configuration: NSDictionary)
++
++    @objc(spaceThemeEditorDidFinish)
++    func finished()
++}
++
++/// Presentation state for an unsaved draft. Its delegate has no profile writes.
++@MainActor
++final class ArciumSpaceThemeDraft: ObservableObject {
++    @Published private(set) var configuration: SettingsBackdropConfiguration?
++    @Published private(set) var palette = ArciumSpacePaletteSnapshot()
++    @Published private(set) var mode = "system"
++    @Published private(set) var webMode = "system"
++    weak var delegate: ArciumSpaceThemeEditorDelegate?
++    let preset: SettingsStylePreset?
++
++    init(snapshot: NSDictionary, delegate: ArciumSpaceThemeEditorDelegate) {
++        self.delegate = delegate
++        preset = try? loadArciumSettingsStylePreset(from:
++            Bundle.main.resourceURL?.appendingPathComponent("ArciumSettingsUI_ArciumSettingsUI.bundle"))
++        updateSnapshot(snapshot)
++    }
++
++    func updateSnapshot(_ snapshot: NSDictionary) {
++        let fields = snapshot["configuration"] as? [String: Any] ?? [:]
++        configuration = ArciumChromeAppearanceSnapshot.Configuration(fields).backdropConfiguration
++        palette = ArciumSpacePaletteSnapshot(snapshot["spacePalette"] as? [String: Any] ?? [:])
++        mode = snapshot["mode"] as? String ?? "system"
++        webMode = snapshot["webMode"] as? String ?? "system"
++    }
++
++    func setConfiguration(_ next: SettingsBackdropConfiguration) {
++        guard configuration != nil else { return }
++        configuration = next
++        delegate?.configurationChanged(
++            ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: next) as NSDictionary)
++    }
++
++    func finish() { delegate?.finished() }
++}
++
++@MainActor
++@objc(ArciumSpaceThemeEditorController)
++public final class ArciumSpaceThemeEditorController: NSHostingController<AnyView> {
++    private let draft: ArciumSpaceThemeDraft
++
++    @objc(initWithSnapshot:delegate:)
++    public init(snapshot: NSDictionary, delegate: ArciumSpaceThemeEditorDelegate) {
++        let draft = ArciumSpaceThemeDraft(snapshot: snapshot, delegate: delegate)
++        self.draft = draft
++        super.init(rootView: AnyView(ArciumSpaceThemeDraftView(draft: draft)))
++    }
++
++    @available(*, unavailable)
++    required init?(coder: NSCoder) {
++        fatalError("Arcium Space themes do not support storyboards")
++    }
++
++    @objc(updateSnapshot:)
++    public func updateSnapshot(_ snapshot: NSDictionary) { draft.updateSnapshot(snapshot) }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -281,10 +281,85 @@ private struct SettingsPageScroll<Conten
+     }
+ }
+ 
++
++/// The saved Settings sheet and unsaved Space sheet share the palette controls.
++private struct ArciumSpacePaletteEditor: View {
++    @Binding var configuration: SettingsBackdropConfiguration
++    var editable = true
++    var showsIntensity = true
++    var activeMaterial: SettingsBackdropMaterial? = nil
++    var fallbackReason: String? = nil
++    var effectsAvailable = true
++
++    var body: some View {
++        SBackdropEditor(configuration: $configuration, editable: editable,
++                        colorsOnly: true, showsIntensity: showsIntensity,
++                        glowRadiusRange: 0.1...1.5, activeMaterial: activeMaterial,
++                        fallbackReason: fallbackReason, effectsAvailable: effectsAvailable)
++    }
++}
++
++struct ArciumSpaceThemeDraftView: View {
++    @ObservedObject var draft: ArciumSpaceThemeDraft
++    @Environment(\.colorScheme) private var systemScheme
++
++    private func scheme(_ mode: String) -> ColorScheme? {
++        switch mode { case "light": .light; case "dark": .dark; default: nil }
++    }
++
++    var body: some View {
++        if let preset = draft.preset, draft.configuration != nil {
++            let colorScheme = scheme(draft.webMode) ?? scheme(draft.mode) ?? systemScheme
++            let style = colorScheme == .dark ? preset.dark : preset.light
++            let theme = draft.palette.theme(fallback: style.theme(brand: preset.brand), colorScheme: colorScheme)
++            ArciumLiveSettingsSheet(title: "Space theme", onClose: { draft.finish() }) {
++                ArciumSpacePaletteEditor(configuration: configuration)
++                SGroupedSections(showsSurfaces: false, showsDividers: false) {
++                    Section("Background") {
++                        SSlider("Color strength", value: value(\.tintStrength), range: 0...1,
++                                step: 0.01, format: percent,
++                                commitMode: .throttled(milliseconds: 80))
++                        SSlider("Grain", value: value(\.grain), range: 0...0.3,
++                                step: 0.01, format: percent,
++                                commitMode: .throttled(milliseconds: 80))
++                    }
++                }
++            }
++            .settingsTheme(theme)
++            .settingsFont(preset.font)
++            .settingsFontScale(CGFloat(style.surface.fontScale))
++            .settingsLayout(SettingsLayoutConfiguration(pageGutter: 24, compactPageGutter: 16,
++                maximumPageWidth: 960, cardPadding: 14, sectionSpacing: 20, rowSpacing: 7, inputWidth: 260))
++            .preferredColorScheme(colorScheme)
++        } else {
++            VStack(spacing: 20) {
++                Text("The Space palette editor could not be loaded.")
++                Button("Done") { draft.finish() }.keyboardShortcut(.defaultAction)
++            }.padding(32).onExitCommand { draft.finish() }
++        }
++    }
++
++    private var configuration: Binding<SettingsBackdropConfiguration> {
++        Binding(get: { draft.configuration ?? SettingsBackdropConfiguration(radiusReference: .shortestEdge) },
++                set: { draft.setConfiguration($0) })
++    }
++
++    private func value(_ keyPath: WritableKeyPath<SettingsBackdropConfiguration, Double>) -> Binding<Double> {
++        Binding(get: { configuration.wrappedValue[keyPath: keyPath] }, set: { value in
++            var next = configuration.wrappedValue
++            next[keyPath: keyPath] = value
++            draft.setConfiguration(next)
++        })
++    }
++
++    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
++}
++
+ /// These controls apply live through the existing profile-bound settings store.
+ /// Dismissal closes the editor; it does not promise to roll back saved changes.
+ private struct ArciumLiveSettingsSheet<Content: View>: View {
+     let title: String
++    var onClose: (() -> Void)? = nil
+     @ViewBuilder let content: Content
+     @Environment(\.dismiss) private var dismiss
+     @Environment(\.settingsTheme) private var theme
+@@ -305,7 +380,7 @@ private struct ArciumLiveSettingsSheet<C
+             }
+             HStack {
+                 Spacer()
+-                Button("Done") { dismiss() }
++                Button("Done") { close() }
+                     .buttonStyle(ArciumAccentButtonStyle())
+                     .keyboardShortcut(.defaultAction)
+             }
+@@ -313,7 +388,10 @@ private struct ArciumLiveSettingsSheet<C
+         }
+         .settingsSheetSurface()
+         .frame(minWidth: 520, idealWidth: 680, minHeight: 400, idealHeight: 620)
+-        .onExitCommand { dismiss() }
++        .onExitCommand { close() }
++    }
++    private func close() {
++        if let onClose { onClose() } else { dismiss() }
+     }
+ }
+ 
+@@ -1083,12 +1161,10 @@ private struct AppearanceSettingsPage: V
+     private var backgroundEditor: some View {
+         if let chrome = store.currentChromeAppearance, store.snapshot.appearance.chrome.isAvailable {
+             if backgroundMode == .everyday {
+-                SBackdropEditor(
++                ArciumSpacePaletteEditor(
+                     configuration: chromeBinding,
+                     editable: store.snapshot.appearance.chrome.canEdit && store.snapshot.appearance.spacePalette.available,
+-                    colorsOnly: true,
+                     showsIntensity: false,
+-                    glowRadiusRange: 0.1...1.5,
+                     activeMaterial: activeMaterial,
+                     fallbackReason: store.snapshot.appearance.chrome.fallbackDescription,
+                     effectsAvailable: store.snapshot.appearance.chrome.effectsAvailable
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -8,6 +8,43 @@ import SettingsUI
+ 
+ @MainActor
+ final class ArciumSettingsUIContractTests: XCTestCase {
++    func testSpaceDraftSnapshotRefreshDoesNotRepublishEdits() throws {
++        let delegate = DraftDelegate()
++        let initial = makeConfiguration()
++        func envelope(_ configuration: SettingsBackdropConfiguration) -> NSDictionary {
++            ["configuration": ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: configuration),
++             "spacePalette": Self.spacePaletteFixture(id: "space-draft"),
++             "mode": "dark", "webMode": "light"] as NSDictionary
++        }
++        let draft = ArciumSpaceThemeDraft(snapshot: envelope(initial), delegate: delegate)
++        XCTAssertTrue(delegate.configurations.isEmpty)
++        var changed = initial
++        changed.glows[0].x = 0.81
++        changed.colorHarmony = .analogous
++        draft.setConfiguration(changed)
++        XCTAssertEqual(delegate.configurations.count, 1)
++        let sent = try XCTUnwrap(delegate.configurations.first as? [String: Any])
++        let canonical = try XCTUnwrap(ArciumChromeAppearanceSnapshot.Configuration(sent).backdropConfiguration)
++        draft.updateSnapshot(envelope(canonical))
++        XCTAssertEqual(delegate.configurations.count, 1)
++        XCTAssertEqual(draft.configuration, canonical)
++        XCTAssertEqual(draft.mode, "dark")
++        XCTAssertEqual(draft.webMode, "light")
++        draft.finish()
++        XCTAssertEqual(delegate.finishes, 1)
++        XCTAssertEqual(delegate.configurations.count, 1)
++    }
++
++    func testInvalidSpaceDraftCannotSendAnEdit() {
++        let delegate = DraftDelegate()
++        let draft = ArciumSpaceThemeDraft(snapshot: ["configuration": [:]], delegate: delegate)
++        XCTAssertNil(draft.configuration)
++        draft.setConfiguration(makeConfiguration())
++        XCTAssertTrue(delegate.configurations.isEmpty)
++        draft.finish()
++        XCTAssertEqual(delegate.finishes, 1)
++    }
++
+     @MainActor
+     func testSharedEditorAdapterRoundTripsNativeDictionary() throws {
+         let original = makeConfiguration()
+@@ -1882,3 +1919,11 @@ final class ArciumSettingsUIContractTest
+         }
+     }
+ }
++
++@MainActor
++private final class DraftDelegate: NSObject, ArciumSpaceThemeEditorDelegate {
++    var configurations: [NSDictionary] = []
++    var finishes = 0
++    func configurationChanged(_ configuration: NSDictionary) { configurations.append(configuration) }
++    func finished() { finishes += 1 }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
+@@ -5,6 +5,11 @@
+ #ifndef CHROME_BROWSER_UI_COCOA_ARCIUM_SETTINGS_WINDOW_CONTROLLER_H_
+ #define CHROME_BROWSER_UI_COCOA_ARCIUM_SETTINGS_WINDOW_CONTROLLER_H_
+ 
++#include "base/functional/callback.h"
++#include "base/functional/callback_helpers.h"
++
++namespace helium { struct SpaceTheme; }
++
+ class Profile;
+ class BrowserWindowInterface;
+ 
+@@ -16,6 +21,13 @@ namespace arcium_settings {
+ bool ShowForProfile(Profile* profile);
+ bool ShowForBrowser(BrowserWindowInterface* browser);
+ 
++// Edits a local Space draft; it never writes profile or Space preferences.
++// The caller keeps the returned closer until the compact editor closes.
++base::ScopedClosureRunner ShowSpaceThemeDraft(
++    BrowserWindowInterface* browser, Profile* profile,
++    const helium::SpaceTheme& theme,
++    base::RepeatingCallback<void(const helium::SpaceTheme&)> changed);
++
+ // Reuses a key native Settings window when Cmd+, is pressed while that window
+ // is active, so profile selection does not jump to the last browser profile.
+ bool ShowExistingWindow();
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -58,6 +58,7 @@
+ #include "components/prefs/pref_service.h"
+ #include "third_party/blink/public/common/features.h"
+ #include "ui/color/color_provider.h"
++#include "ui/native_theme/native_theme.h"
+ #include "ui/views/widget/widget.h"
+ 
+ NSString* const kArciumSettingsUIControllerClassName =
+@@ -2660,8 +2661,170 @@ void SettingsModelProfileWillBeDestroyed
+ 
+ @end
+ 
++
++// This controller owns only the creation/editing draft. Profile configuration is
++// read once for inherited context; all writes return to the compact editor.
++@interface ArciumSpaceThemeDraftController
++    : NSWindowController <NSWindowDelegate, ArciumSpaceThemeEditorDelegate>
++- (instancetype)initWithParent:(NSWindow*)parent
++                       widget:(views::Widget*)widget
++                      profile:(Profile*)profile
++                        theme:(const helium::SpaceTheme&)theme
++                      changed:(base::RepeatingCallback<void(const helium::SpaceTheme&)>)changed;
++- (void)closeDraft;
++@end
++
++@implementation ArciumSpaceThemeDraftController {
++  helium::SpaceTheme theme_;
++  helium::GlassSurfaceConfiguration base_configuration_;
++  base::RepeatingCallback<void(const helium::SpaceTheme&)> changed_;
++  std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
++  NSViewController* facade_;
++  base::DictValue fallback_roles_;
++  BOOL uses_fallback_roles_;
++  BOOL closed_;
++}
++
++- (NSDictionary*)draftSnapshot {
++  const auto input = helium::SpacePaletteKey(&theme_, base_configuration_);
++  auto light = arcium::GenerateSpacePalette(input, false);
++  auto dark = arcium::GenerateSpacePalette(input, true);
++  return @{
++    @"configuration": NSDictionaryFromBaseDict(
++        helium::SerializeGlassSurfaceConfiguration(
++            helium::SpacePaletteAppearance(&theme_, base_configuration_))),
++    @"mode": AppearanceModeString(static_cast<int>(theme_.mode)),
++    @"webMode": AppearanceModeString(static_cast<int>(theme_.web_mode)),
++    @"spacePalette": @{
++      @"id": @"space-draft", @"available": @YES,
++      @"light": (uses_fallback_roles_ ? NSDictionaryFromBaseDict(fallback_roles_)
++          : NSDictionaryFromBaseDict(helium::SpacePaletteRoles(light))),
++      @"dark": (uses_fallback_roles_ ? NSDictionaryFromBaseDict(fallback_roles_)
++          : NSDictionaryFromBaseDict(helium::SpacePaletteRoles(dark)))
++    }
++  };
++}
++
++- (instancetype)initWithParent:(NSWindow*)parent
++                       widget:(views::Widget*)widget
++                      profile:(Profile*)profile
++                        theme:(const helium::SpaceTheme&)theme
++                      changed:(base::RepeatingCallback<void(const helium::SpaceTheme&)>)changed {
++  NSWindow* window = [[NSWindow alloc]
++      initWithContentRect:NSMakeRect(0, 0, 680, 620)
++                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
++                          NSWindowStyleMaskResizable
++                  backing:NSBackingStoreBuffered defer:NO];
++  self = [super initWithWindow:window];
++  if (!self) return nil;
++  window.releasedWhenClosed = NO;
++  window.title = @"Space theme";
++  window.delegate = self;
++  window.minSize = NSMakeSize(540, 440);
++  theme_ = theme;
++  changed_ = std::move(changed);
++  base_configuration_ = profile
++      ? helium::ReadGlassSurfaceConfiguration(profile->GetPrefs())
++      : helium::DefaultGlassSurfaceConfiguration();
++  if (profile) {
++    profile_keep_alive_ = std::make_unique<ScopedProfileKeepAlive>(
++        profile, ProfileKeepAliveOrigin::kArciumSettingsWindow);
++  }
++  auto* theme_service = profile ? ThemeServiceFactory::GetForProfile(profile) : nullptr;
++  const auto* native_theme = widget->GetNativeTheme();
++  uses_fallback_roles_ =
++      (theme_service && theme_service->UsingPolicyTheme()) ||
++      native_theme->preferred_contrast() == ui::NativeTheme::PreferredContrast::kMore ||
++      widget->GetForcedColors() != ui::ColorProviderKey::ForcedColors::kNone;
++  if (uses_fallback_roles_) {
++    const auto* provider = widget->GetColorProvider();
++    arcium::SpacePaletteColors colors = {
++        .chrome = provider->GetColor(kColorToolbar),
++        .chrome_background = provider->GetColor(kColorToolbar),
++        .field = provider->GetColor(kColorLocationBarBackground),
++        .field_hovered = provider->GetColor(kColorLocationBarBackgroundHovered),
++        .panel = provider->GetColor(kColorOmniboxResultsBackground),
++        .panel_background = provider->GetColor(kColorOmniboxResultsBackground),
++        .text = provider->GetColor(kColorOmniboxText),
++        .muted_text = provider->GetColor(kColorOmniboxTextDimmed),
++        .outline = provider->GetColor(ui::kColorSysOutline),
++        .accent = provider->GetColor(ui::kColorSysPrimary),
++        .on_accent = provider->GetColor(ui::kColorSysOnPrimary),
++        .content_canvas = provider->GetColor(kColorToolbar),
++        .content_panel = provider->GetColor(kColorOmniboxResultsBackground),
++        .content_field = provider->GetColor(kColorLocationBarBackground),
++        .content_hovered = provider->GetColor(kColorLocationBarBackgroundHovered)};
++    fallback_roles_ = helium::SpacePaletteRoles(colors);
++  }
++  Class facade_class = LoadSettingsUIModule()
++      ? NSClassFromString(@"ArciumSpaceThemeEditorController") : Nil;
++  SEL initializer = NSSelectorFromString(kArciumSettingsUIInitializerSelector);
++  if (!facade_class || ![facade_class instancesRespondToSelector:initializer]) {
++    return nil;
++  }
++  using Initializer = id (*)(id, SEL, NSDictionary*, id);
++  id facade = reinterpret_cast<Initializer>(objc_msgSend)(
++      [facade_class alloc], initializer, [self draftSnapshot], self);
++  if (![facade isKindOfClass:[NSViewController class]]) return nil;
++  facade_ = facade;
++  window.contentViewController = facade_;
++  [parent beginSheet:window completionHandler:nil];
++  [window makeKeyWindow];
++  return self;
++}
++
++- (void)spaceThemeEditorDidChangeConfiguration:(NSDictionary*)configuration {
++  if (closed_ || !changed_) return;
++  auto dictionary = BaseDictFromNSObject(configuration);
++  auto parsed = dictionary
++      ? helium::ParseGlassSurfaceConfigurationStrict(*dictionary) : std::nullopt;
++  if (!parsed) return;
++  theme_ = helium::WithSpacePaletteAppearance(theme_, *parsed);
++  // Copy the callback: preview propagation may close the compact editor.
++  auto changed = changed_;
++  changed.Run(theme_);
++  if (!closed_) {
++    using Update = void (*)(id, SEL, NSDictionary*);
++    reinterpret_cast<Update>(objc_msgSend)(facade_,
++        NSSelectorFromString(kArciumSettingsUIUpdateSnapshotSelector),
++        [self draftSnapshot]);
++  }
++}
++
++- (void)spaceThemeEditorDidFinish { [self closeDraft]; }
++- (BOOL)windowShouldClose:(NSWindow*)sender {
++  [self closeDraft];
++  return NO;
++}
++- (void)closeDraft {
++  if (closed_) return;
++  closed_ = YES;
++  changed_.Reset();
++  [self.window.sheetParent endSheet:self.window];
++  [self.window orderOut:nil];
++  profile_keep_alive_.reset();
++}
++@end
++
+ namespace arcium_settings {
+ 
++base::ScopedClosureRunner ShowSpaceThemeDraft(
++    BrowserWindowInterface* browser, Profile* profile,
++    const helium::SpaceTheme& theme,
++    base::RepeatingCallback<void(const helium::SpaceTheme&)> changed) {
++  auto* view = browser ? BrowserView::GetBrowserViewForBrowser(
++      browser->GetBrowserForMigrationOnly()) : nullptr;
++  auto* widget = view ? view->GetWidget() : nullptr;
++  NSWindow* parent = widget ? widget->GetNativeWindow().GetNativeNSWindow() : nil;
++  if (!parent || parent.attachedSheet) return {};
++  auto* controller = [[ArciumSpaceThemeDraftController alloc]
++      initWithParent:parent widget:widget profile:profile theme:theme
++             changed:std::move(changed)];
++  if (!controller) return {};
++  return base::ScopedClosureRunner(base::BindOnce([controller] { [controller closeDraft]; }));
++}
++
++
+ bool ShowForSpace(Profile* profile, std::string_view space_id) {
+   if (!profile) {
+     return false;
+Index: src/chrome/browser/ui/cocoa/arcium_settingsui_bridge.h
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settingsui_bridge.h
++++ src/chrome/browser/ui/cocoa/arcium_settingsui_bridge.h
+@@ -24,4 +24,10 @@ FOUNDATION_EXPORT NSString* const kArciu
+ - (void)actionInvokedWithName:(NSString*)name payload:(NSDictionary*)payload;
+ @end
+ 
++// A separate draft-only bridge has no profile-setting or action routing.
++@protocol ArciumSpaceThemeEditorDelegate <NSObject>
++- (void)spaceThemeEditorDidChangeConfiguration:(NSDictionary*)configuration;
++- (void)spaceThemeEditorDidFinish;
++@end
++
+ #endif  // CHROME_BROWSER_UI_COCOA_ARCIUM_SETTINGSUI_BRIDGE_H_
+Index: src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+===================================================================
+--- src.orig/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
++++ src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
+@@ -44,6 +44,9 @@
+ #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+ #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
+ #include "chrome/browser/ui/views/helium/arcium_space_editor_view.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/cocoa/arcium_settings_window_controller.h"
++#endif
+ #include "chrome/browser/ui/views/helium/frame_corner_radius.h"
+ #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
+ #include "chrome/browser/ui/views/tabs/common/root_tab_collection_node.h"
+@@ -491,7 +494,12 @@ void VerticalTabStripRegionView::ShowSpa
+       base::BindRepeating(&VerticalTabStripBottomContainer::SetThemePreview,
+                           base::Unretained(bottom_button_container_.get())),
+       base::BindRepeating(&VerticalTabStripRegionView::CloseSpaceEditor,
+-                          base::Unretained(this)));
++                          base::Unretained(this))
++#if BUILDFLAG(IS_MAC)
++      , base::BindRepeating(&arcium_settings::ShowSpaceThemeDraft,
++                            browser_view_->browser())
++#endif
++      );
+   editor->SetProperty(
+       views::kFlexBehaviorKey,
+       views::FlexSpecification(views::LayoutOrientation::kVertical,

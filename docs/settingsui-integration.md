@@ -218,3 +218,8 @@ swift test --package-path /tmp/arcium-settings-test --filter ArciumSettingsUICon
 
 Inside the source tree, SwiftPM spends minutes scanning the surrounding
 checkout and writes a `.build` directory into the generated source.
+
+The compact Space editor can present the same colors-only palette editor in
+an attached draft sheet. Its dedicated native delegate updates only the local
+Space recipe and preview; the compact form remains the persistence boundary.
+Profile glass/effects controls are not exposed in this draft host.
