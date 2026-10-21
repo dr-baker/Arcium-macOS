@@ -16,7 +16,9 @@
         "RenderViewContextMenuPrefsTest.PeekCanBeDisabled",
         "PrefsUtilTest.ArciumFeatureSettingsAreAllowlistedAndWritable",
         "PrefsUtilTest.ArciumAutoPictureInPicturePrefIsAllowlisted",
-        "ChromeContentBrowserClientTestWithWebContents.IsBrowserInitiatedAutomaticPictureInPictureEnabled_UsesProfilePref"
+        "ChromeContentBrowserClientTestWithWebContents.IsBrowserInitiatedAutomaticPictureInPictureEnabled_UsesProfilePref",
+        "ArciumBrowserChromeTest.Footer*",
+        "ArciumSpaceIconTest.*"
       ]
     },
     {
@@ -80,7 +82,11 @@
     "In Appearance, find the Address bar group with Show top bar, Centered address bar, Minimal address bar and Keep visible when sidebar is hidden. With Show top bar on, Fully hidden sidebar style and Keep visible when sidebar is hidden off, collapse the sidebar and move the pointer away from the top edge; verify no top bar remains. Turn Keep visible when sidebar is hidden on, collapse again and verify the centered minimal bar stays visible. Use Command-Shift-D twice and verify the top bar and the already-open Show top bar switch change together without altering sidebar collapse state. Verify the saved visibility values survive normal quit/relaunch, then restore their original values and sidebar state. Sidebar navigation must disable both visibility rows without losing their saved values.",
     "Open New Space, keep the compact editor, then open Full editor. Change a non-first glow position, pairing, color and size; Done must return to the same draft. Make an inline adjustment and verify sheet changes remain. Cancel must leave the saved Space list, active Space recipe and profile appearance unchanged. Repeat with Create, verify the authored recipe persists through normal quit/relaunch, and remove only the created test Space. Exercise sheet/form close and profile changes without stale writes.",
     "With left Vertical tabs, confirm Sidebar placement defaults on when unset and places the short address above Favorites and tabs. Preserve an explicit Top bar choice. Hide the Top bar with Command-Shift-D and compare configured top, right and bottom page-frame insets in single and split views. Select Sidebar while Show top bar is saved off: the sidebar address must remain visible, the Top bar command must be disabled, and returning to Top bar must retain the saved off value. Collapse and reveal the sidebar without changing those preferences. Repeat border checks with bookmarks or horizontal tabs visible so attached top chrome does not gain a duplicate inset.",
-    "Start a fresh Sidebar window and switch from both visible and hidden Top bar placement. At 100% and 110% UI scale, confirm native traffic lights align with the first navigation row and do not overlap the address field or leave the window. Collapse a Sidebar containing a named Space and nested folder, then hover-reveal and wait for settling. Confirm the Space palette backs the overlay, Space and folder labels and indentation match expanded presentation, and hover exit retains the saved collapsed state and width."
+    "Start a fresh Sidebar window and switch from both visible and hidden Top bar placement. At 100% and 110% UI scale, confirm native traffic lights align with the first navigation row and do not overlap the address field or leave the window. Collapse a Sidebar containing a named Space and nested folder, then hover-reveal and wait for settling. Confirm the Space palette backs the overlay, Space and folder labels and indentation match expanded presentation, and hover exit retains the saved collapsed state and width.",
+    "With one, several and overflowing Spaces, confirm the expanded footer centers its Space group in the whole sidebar, fixes + at the right, and reserves an equal left button slot. Resize the sidebar and repeat at 100% and 110% scale. Scroll overflow, switch Space, collapse to the icon rail, and hover-reveal without losing the active Space or the saved collapsed state.",
+    "On a fresh profile, verify Extensions is the default left footer button. Right-click it to choose Home, Downloads, History, Bookmarks or None; verify native Appearance → Left footer button follows immediately. Change the native picker and verify the footer follows. None must retain centered Spaces and a right-aligned +. Exercise each available action and preserve managed or unavailable settings.",
+    "Open Extensions from the footer in both Sidebar and Top bar placement. Its menu must anchor to the footer button, stay open while the pointer enters it from a hovered sidebar, and close safely without leaving a reveal lock or exposing a duplicate sidebar Extensions control.",
+    "Right-click a Space and select Change icon. Compare its Emoji and Icons tabs, search, categories, typed/pasted emoji and Reset with the picker in both New Space and Edit Space. They must expose one shared catalogue. Escape and outside click cancel without saving; choosing in the direct popover changes only that Space icon, including a Space owned by another profile. Editor choices remain drafts until Create or Save; cancelling the form preserves the saved icon, name and theme. Reset saves the neutral dot. Test normal quit/relaunch, anchor deletion, profile/Space changes and closing while the picker is open without a crash or stale write."
   ],
   "observables": [
     "Settings opens a native AppKit window without creating a settings tab.",
@@ -108,7 +114,11 @@
     "The live Peek page remains crisp with native Clear and Liquid, including after resizing; only the source backdrop is blurred and the container material is limited to its frame.",
     "Only Glass, Quiet and Custom presets are offered. Surface details appear only in the Customize sheet and dismiss with Done or Escape; presentation does not change saved tuning. Quiet uses Solid text and Flat containers. Legacy Refractive and Solid presets display Custom while preserving their recipes.",
     "Existing navigation, native shortcut recording and preference authority are preserved. Common settings use aligned grouped rows; advanced live-edit sheets close safely, retain the last keyboard adjustment, and end temporary preview.",
-    "Website mode controls websites, New Tab and Settings while preserving chrome mode, authored colors and geometry. It defaults to following resolved window chrome, respects managed Spaces preferences, and rejects stale captured targets."
+    "Website mode controls websites, New Tab and Settings while preserving chrome mode, authored colors and geometry. It defaults to following resolved window chrome, respects managed Spaces preferences, and rejects stale captured targets.",
+    "Footer Space icons stay centered between symmetric end slots; horizontal overflow, selected reveal and the compact rail remain usable.",
+    "Footer button preference, native picker and right-click choices agree and persist per profile; Extensions uses one menu owner and the footer anchor.",
+    "New Space, Edit Space and Change icon share emoji/icon options, search, category browsing and Reset while preserving their save/cancel semantics.",
+    "Direct icon edits preserve every unrelated Space field; closing the bubble precedes footer anchor replacement, and deleted targets are never recreated."
   ],
   "verify_persistence": true,
   "verify_teardown": true

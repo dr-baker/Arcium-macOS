@@ -1,0 +1,244 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -545,6 +545,14 @@ struct ArciumSpacePaletteSnapshot: Equat
+ 
+ struct ArciumAppearanceSnapshot: Equatable {
+     static let surfaceSetValues = ["glass", "refractive", "quiet", "solid", "custom"]
++    static let defaultSidebarFooterActionOptions = [
++        ArciumChoice(value: 0, label: "None"),
++        ArciumChoice(value: 1, label: "Extensions"),
++        ArciumChoice(value: 2, label: "Home"),
++        ArciumChoice(value: 3, label: "Downloads"),
++        ArciumChoice(value: 4, label: "History"),
++        ArciumChoice(value: 5, label: "Bookmarks")
++    ]
+     static let defaultCollapsedSidebarStyleOptions = [
+         ArciumChoice(value: 0, label: "Icon rail"),
+         ArciumChoice(value: 1, label: "Fully hidden (Arc)")
+@@ -616,6 +624,10 @@ struct ArciumAppearanceSnapshot: Equatab
+     var canEditSurfaceTuning: Bool {
+         surfaceTuningAvailable && canEditSurfaceSet
+     }
++    var sidebarFooterAction = 1
++    var sidebarFooterActionOptions = defaultSidebarFooterActionOptions
++    var sidebarFooterActionAvailable = false
++    var sidebarFooterActionManaged = false
+     var collapsedSidebarStyle = 1
+     var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
+     var collapsedSidebarStyleAvailable = false
+@@ -656,6 +668,16 @@ struct ArciumAppearanceSnapshot: Equatab
+         surfaceTuningAvailable = strictBoolean(dictionary["surfaceTuningAvailable"]) ?? false
+         commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
+         commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
++        if let value = exactIntegerOptional(dictionary["sidebarFooterAction"]), (0...5).contains(value) {
++            sidebarFooterAction = value
++        }
++        let parsedFooterOptions = choices(dictionary["sidebarFooterActionOptions"])
++            .filter { (0...5).contains($0.value) }
++        if !parsedFooterOptions.isEmpty {
++            sidebarFooterActionOptions = parsedFooterOptions
++        }
++        sidebarFooterActionAvailable = strictBoolean(dictionary["sidebarFooterActionAvailable"]) ?? false
++        sidebarFooterActionManaged = strictBoolean(dictionary["sidebarFooterActionManaged"]) ?? false
+         collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 1, 0), 1)
+         let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
+             .filter { (0...1).contains($0.value) }
+@@ -1080,6 +1102,13 @@ final class ArciumSettingsStore: Observa
+         }
+     }
+ 
++    func setSidebarFooterAction(_ action: Int) {
++        guard snapshot.appearance.sidebarFooterActionAvailable,
++              !snapshot.appearance.sidebarFooterActionManaged,
++              (0...5).contains(action) else { return }
++        settingChanged(key: "sidebar_footer_action", value: action)
++    }
++
+     func setCollapsedSidebarStyle(_ style: Int) {
+         guard snapshot.appearance.collapsedSidebarStyleAvailable,
+               !snapshot.appearance.collapsedSidebarStyleManaged,
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -907,6 +907,14 @@ private struct AppearanceSettingsPage: V
+                     help: SHelp(description: "Resize the expanded sidebar in this profile’s browser windows. Its displayed width follows Browser UI scale; webpage zoom stays unchanged."),
+                     commitMode: .onDragEnd)
+                 .disabled(!store.snapshot.appearance.sidebarWidthAvailable || store.snapshot.appearance.sidebarWidthManaged)
++                SPicker("Left footer button", selection: Binding(
++                    get: { store.snapshot.appearance.sidebarFooterAction },
++                    set: { store.setSidebarFooterAction($0) }
++                ), options: store.snapshot.appearance.sidebarFooterActionOptions.map {
++                    (value: $0.value, label: $0.label)
++                }, description: "Choose the button to the left of your Space icons.")
++                .disabled(!store.snapshot.appearance.sidebarFooterActionAvailable
++                    || store.snapshot.appearance.sidebarFooterActionManaged)
+                 SPicker("Collapsed sidebar", selection: Binding(
+                     get: { store.snapshot.appearance.collapsedSidebarStyle },
+                     set: { store.setCollapsedSidebarStyle($0) }
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -956,6 +956,62 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
++    func testSidebarFooterActionUsesTypedCallbacksAndRejectsUnknownValues() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "sidebarFooterAction": 1,
++            "sidebarFooterActionAvailable": true,
++            "sidebarFooterActionManaged": false
++        ]], delegate: delegate)
++        XCTAssertEqual(store.snapshot.appearance.sidebarFooterActionOptions.count, 6)
++        for value in 0...5 { store.setSidebarFooterAction(value) }
++        store.setSidebarFooterAction(-1)
++        store.setSidebarFooterAction(6)
++        XCTAssertEqual(delegate.settings.map(\.key), Array(repeating: "sidebar_footer_action", count: 6))
++        XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [0, 1, 2, 3, 4, 5])
++    }
++
++    @MainActor
++    func testSidebarFooterActionRespectsManagedAndUnavailableGates() {
++        let delegate = TestDelegate()
++        for appearance in [
++            ["sidebarFooterActionAvailable": true, "sidebarFooterActionManaged": true],
++            ["sidebarFooterActionAvailable": false, "sidebarFooterActionManaged": false]
++        ] {
++            let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": appearance], delegate: delegate)
++            store.setSidebarFooterAction(2)
++        }
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    @MainActor
++    func testSidebarFooterActionSnapshotRejectsMalformedNumbers() {
++        let delegate = TestDelegate()
++        let values: [Any] = [NSNumber(value: true), NSNumber(value: 2.7), NSNumber(value: Double.nan), "2"]
++        for value in values {
++            let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++                "sidebarFooterAction": value
++            ]], delegate: delegate)
++            XCTAssertEqual(store.snapshot.appearance.sidebarFooterAction, 1)
++        }
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    @MainActor
++    func testSidebarFooterActionSnapshotFallsBackWithoutWriting() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "sidebarFooterAction": 999,
++            "sidebarFooterActionOptions": [["value": 999, "label": "Unknown"]]
++        ]], delegate: delegate)
++        XCTAssertEqual(store.snapshot.appearance.sidebarFooterAction, 1)
++        XCTAssertEqual(store.snapshot.appearance.sidebarFooterActionOptions,
++                       ArciumAppearanceSnapshot.defaultSidebarFooterActionOptions)
++        XCTAssertFalse(store.snapshot.appearance.sidebarFooterActionAvailable)
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    @MainActor
+     func testCollapsedSidebarAndFrameBorderUseTypedHostCallbacks() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
+--- a/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ b/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -114,6 +114,7 @@ NSString* const kKeySurfacePreview = @"s
+ NSString* const kKeyCommandPanelLayout = @"command_panel_layout";
+ NSString* const kKeySidebarWidth = @"sidebar_width";
+ NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
++NSString* const kKeySidebarFooterAction = @"sidebar_footer_action";
+ NSString* const kKeyChromeFrameBorderWidth = @"chrome_frame_border_width";
+ NSString* const kKeyChromeUIScale = @"chrome_ui_scale";
+ NSString* const kKeySharedPalette = @"shared_palette";
+@@ -171,6 +172,21 @@ bool GetStrictBooleanObject(id value, bo
+   return true;
+ }
+ 
++bool GetExactIntegerObject(id value, int* result) {
++  if (!result || ![value isKindOfClass:[NSNumber class]] ||
++      CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()) {
++    return false;
++  }
++  const double number = [value doubleValue];
++  if (!std::isfinite(number) || std::trunc(number) != number ||
++      number < std::numeric_limits<int>::min() ||
++      number > std::numeric_limits<int>::max()) {
++    return false;
++  }
++  *result = static_cast<int>(number);
++  return true;
++}
++
+ bool GetIntegerObject(id value, int* result) {
+   if (!result || !IsBooleanObject(value)) {
+     return false;
+@@ -1303,6 +1319,18 @@ void SettingsModelProfileWillBeDestroyed
+                 arcium::kCollapsedSidebarStyleMin,
+                 arcium::kCollapsedSidebarStyleMax)
+           : arcium::kCollapsedSidebarStyleFullyHidden;
++  const bool sidebar_footer_action_available =
++      model && model->HasPreference(arcium::kSidebarFooterActionPref);
++  const bool sidebar_footer_action_managed =
++      sidebar_footer_action_available &&
++      model->IsManaged(arcium::kSidebarFooterActionPref);
++  const int raw_sidebar_footer_action = sidebar_footer_action_available
++      ? model->GetInteger(arcium::kSidebarFooterActionPref)
++      : arcium::kSidebarFooterActionExtensions;
++  const int sidebar_footer_action =
++      raw_sidebar_footer_action >= arcium::kSidebarFooterActionMin &&
++              raw_sidebar_footer_action <= arcium::kSidebarFooterActionMax
++          ? raw_sidebar_footer_action : arcium::kSidebarFooterActionExtensions;
+   const bool chrome_frame_border_width_available =
+       model && model->HasPreference(
+                    arcium::kChromeFrameBorderWidthPref);
+@@ -1448,6 +1476,17 @@ void SettingsModelProfileWillBeDestroyed
+     ],
+     @"collapsedSidebarStyleAvailable" : @(collapsed_sidebar_style_available),
+     @"collapsedSidebarStyleManaged" : @(collapsed_sidebar_style_managed),
++    @"sidebarFooterAction" : @(sidebar_footer_action),
++    @"sidebarFooterActionOptions" : @[
++      @{ @"value" : @0, @"label" : @"None" },
++      @{ @"value" : @1, @"label" : @"Extensions" },
++      @{ @"value" : @2, @"label" : @"Home" },
++      @{ @"value" : @3, @"label" : @"Downloads" },
++      @{ @"value" : @4, @"label" : @"History" },
++      @{ @"value" : @5, @"label" : @"Bookmarks" },
++    ],
++    @"sidebarFooterActionAvailable" : @(sidebar_footer_action_available),
++    @"sidebarFooterActionManaged" : @(sidebar_footer_action_managed),
+     @"chromeFrameBorderWidth" : @(chrome_frame_border_width),
+     @"chromeFrameBorderWidthAvailable" : @(chrome_frame_border_width_available),
+     @"chromeFrameBorderWidthManaged" : @(chrome_frame_border_width_managed),
+@@ -1510,6 +1549,7 @@ void SettingsModelProfileWillBeDestroyed
+       kKeyChromeAppearance : @(chrome_appearance_managed),
+       kKeySidebarWidth : @(sidebar_width_managed),
+       kKeyCollapsedSidebarStyle : @(collapsed_sidebar_style_managed),
++      kKeySidebarFooterAction : @(sidebar_footer_action_managed),
+       kKeyChromeFrameBorderWidth : @(chrome_frame_border_width_managed),
+       kKeyRoundedFrame : @(model && rounded_available &&
+                            model->IsManaged(prefs::kHeliumRoundedFrame)),
+@@ -1569,6 +1609,7 @@ void SettingsModelProfileWillBeDestroyed
+       kKeyChromeAppearance : @(chrome_appearance_available),
+       kKeySidebarWidth : @(sidebar_width_available),
+       kKeyCollapsedSidebarStyle : @(collapsed_sidebar_style_available),
++      kKeySidebarFooterAction : @(sidebar_footer_action_available),
+       kKeyChromeFrameBorderWidth : @(chrome_frame_border_width_available),
+       kKeyRoundedFrame : @(rounded_available),
+       kKeyCenteredLocationBar : @(centered_available),
+@@ -2289,6 +2330,17 @@ void SettingsModelProfileWillBeDestroyed
+       [self modelDidChange];
+     }
+     return;
++  }
++  if ([key isEqualToString:kKeySidebarFooterAction] &&
++      GetExactIntegerObject(value, &integer_value)) {
++    if (integer_value >= arcium::kSidebarFooterActionMin &&
++        integer_value <= arcium::kSidebarFooterActionMax &&
++        model_->HasPreference(arcium::kSidebarFooterActionPref) &&
++        !model_->IsManaged(arcium::kSidebarFooterActionPref)) {
++      model_->SetInteger(arcium::kSidebarFooterActionPref, integer_value);
++      [self modelDidChange];
++    }
++    return;
+   }
+   if ([key isEqualToString:kKeyChromeFrameBorderWidth] &&
+       GetIntegerObject(value, &integer_value)) {
