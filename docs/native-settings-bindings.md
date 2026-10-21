@@ -510,3 +510,33 @@ Draft and persisted editors share the packaged preset, native resolved palette
 roles, strict configuration codec and palette view. Website/content mode
 chooses the sheet scheme, with Auto following chrome; contrast and policy
 rendering bypasses retain native colors.
+
+### Sidebar footer
+
+`arcium.appearance.sidebar_footer_action` is a profile integer: None 0,
+Extensions 1 (default), Home 2, Downloads 3, History 4 and Bookmarks 5.
+Appearance’s **Left footer button** picker and the button’s right-click menu
+write the same preference. Missing or invalid values display Extensions without
+rewriting the saved value. The native bridge accepts only integral numeric enum
+values, honors managed/unavailable gates and observes external changes live.
+
+The expanded footer reserves matching 28-DIP end slots. The left slot holds the
+selected action, + stays at the right, and the Space group is centered between
+them. Overflow retains the existing horizontal scroll and selected-Space reveal.
+The compact rail keeps its vertical arrangement. Hover uses presentation state
+without changing saved collapse or width preferences. Extensions reuses its
+existing menu controller with the footer button as anchor and holds the revealed
+sidebar through menu and popup teardown.
+
+All Space icon editing uses `ArciumSpaceIconPicker`: New Space, Edit Space and
+the Space icon’s **Change icon…** context action. Emoji and Icons tabs share
+search, keyboard navigation, typed/pasted emoji and Reset. Emoji categories and
+English search metadata come from Chromium’s local Skills catalogue and CLDR;
+regenerate the deduplicated native data with core’s
+`devutils/generate_space_emoji_data.py --chromium-src PATH`.
+
+The forms retain icon choices in their draft until Create/Save. The direct
+popover saves only the selected icon after the bubble closes, resolving the
+Space by profile path and Space ID. It retains another profile while editing,
+closes before its anchor is replaced and cancels when the target disappears.
+
