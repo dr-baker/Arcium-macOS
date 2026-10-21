@@ -1,0 +1,62 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -882,28 +882,6 @@ private struct AppearanceSettingsPage: V
+                 ), options: store.snapshot.tabs.layoutOptions.map { (value: $0.value, label: $0.label) },
+                     description: "Choose a compact, classic, or sidebar layout.")
+                 .disabled(!store.snapshot.tabs.hasValue("helium_layout") || store.snapshot.tabs.isManaged("helium_layout"))
+-                SPicker("Navigation placement", selection: Binding(
+-                    get: { store.snapshot.appearance.sidebarNavigationEnabled ? 1 : 0 },
+-                    set: { store.setAppearanceBoolean("sidebar_navigation_enabled", value: $0 == 1) }
+-                ), options: [(value: 0, label: "Top bar"), (value: 1, label: "Sidebar")],
+-                    description: "Put the address bar and navigation in the sidebar so pages can use the full window height.")
+-                .disabled(!editable("sidebar_navigation_enabled")
+-                    || !store.snapshot.appearance.sidebarNavigationAvailable)
+-                if !store.snapshot.appearance.sidebarNavigationAvailable {
+-                    Text("Available in regular windows with Vertical tabs on the left, outside full screen.")
+-                        .settingsFont(\.caption).foregroundStyle(.secondary)
+-                }
+-                if store.snapshot.appearance.sidebarNavigationEnabled {
+-                    BooleanSetting(
+-                        title: "Show Extensions button",
+-                        description: "Open the extensions menu from the sidebar navigation.",
+-                        enabled: editable("sidebar_extensions_drawer_enabled")
+-                            && store.snapshot.appearance.sidebarNavigationConfigured,
+-                        value: booleanBinding("sidebar_extensions_drawer_enabled"),
+-                        unavailableReason: store.snapshot.appearance.sidebarNavigationAvailable
+-                            ? nil : "Available in regular windows with Vertical tabs on the left, outside full screen."
+-                    )
+-                }
+                 SSlider("Browser UI scale", value: Binding(
+                     get: { Double(store.snapshot.appearance.chromeUIScale) },
+                     set: { store.setChromeUIScale($0) }
+@@ -954,6 +932,28 @@ private struct AppearanceSettingsPage: V
+             }
+ 
+             Section("Address bar") {
++                SPicker("Navigation placement", selection: Binding(
++                    get: { store.snapshot.appearance.sidebarNavigationEnabled ? 1 : 0 },
++                    set: { store.setAppearanceBoolean("sidebar_navigation_enabled", value: $0 == 1) }
++                ), options: [(value: 0, label: "Top bar"), (value: 1, label: "Sidebar")],
++                    description: "Place the address bar above your tabs, or above the page.")
++                .disabled(!editable("sidebar_navigation_enabled")
++                    || !store.snapshot.appearance.sidebarNavigationAvailable)
++                if !store.snapshot.appearance.sidebarNavigationAvailable {
++                    Text("Available in regular windows with Vertical tabs on the left, outside full screen.")
++                        .settingsFont(\.caption).foregroundStyle(.secondary)
++                }
++                if store.snapshot.appearance.sidebarNavigationEnabled {
++                    BooleanSetting(
++                        title: "Show Extensions button",
++                        description: "Open the extensions menu from the sidebar navigation.",
++                        enabled: editable("sidebar_extensions_drawer_enabled")
++                            && store.snapshot.appearance.sidebarNavigationConfigured,
++                        value: booleanBinding("sidebar_extensions_drawer_enabled"),
++                        unavailableReason: store.snapshot.appearance.sidebarNavigationAvailable
++                            ? nil : "Available in regular windows with Vertical tabs on the left, outside full screen."
++                    )
++                }
+                 BooleanSetting(
+                     title: "Show top bar",
+                     description: "Show the address bar and navigation above the page.",

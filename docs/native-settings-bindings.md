@@ -25,7 +25,7 @@ implementation history (on the `archive/dated-docs-2026-10-11` branch).
 | Place the sidebar on the right | `prefs::kHeliumVerticalRightAligned`; profile | Vertical tab controller reads/writes the pref and observes mode changes (`chrome/browser/ui/tabs/vertical_tab_strip_state_controller.cc:61-70,182-189`). |
 | Keep sidebar visible in Zen mode | `prefs::kHeliumZenModeSidebarPinned`; profile | Moved from Tabs & Spaces into Appearance's Zen card beside Zen mode and the top-bar pin. `BrowserView::IsZenModeSideChromePinned` applies the saved value in Zen mode, including the Sidebar navigation header. |
 | Keep top bar visible in Zen mode | `prefs::kHeliumZenModeTopChromePinned`; profile | The same saved preference also applies to Fully hidden sidebar style, as the Zen card's help explains. `BrowserView::IsZenModeTopChromePinned` and `GetTopChromeRevealRatio` consume it. Sidebar navigation makes the control unavailable with a reason and retains its value. |
-| Navigation placement | `arcium.appearance.sidebar_navigation` / `kArcSidebarNavigationEnabledPref`; profile boolean, default `false` for Top bar | `BrowserView::IsSidebarNavigationAvailable` checks the window contract. `IsSidebarNavigationActive` combines availability with the saved Sidebar choice, independently of ordinary toolbar visibility. The feature patch relocates the real `ToolbarView` and omnibox into the sidebar header. |
+| Navigation placement | `arcium.appearance.sidebar_navigation` / `kArcSidebarNavigationEnabledPref`; profile boolean, default `true` for Sidebar | `BrowserView::IsSidebarNavigationAvailable` checks the window contract. `IsSidebarNavigationActive` combines availability with the saved Sidebar choice, independently of ordinary toolbar visibility. The feature patch relocates the real `ToolbarView` and omnibox into the sidebar header. Explicit saved Top bar choices remain authoritative. |
 | Show Extensions button | `arcium.appearance.sidebar_extensions_drawer` / `kSidebarExtensionsDrawerEnabledPref`; profile boolean, default `false` | The sidebar navigation feature patch connects the optional header button to the existing Extensions menu. It is independent of `prefs::kShowExtensionsButton`. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
@@ -274,8 +274,9 @@ while dragging, displays scaled points, and is disabled when Rounded frame is
 off. The stored width remains available when Rounded frame is enabled again.
 The border controls page-content insets independently of webpage zoom.
 
-Navigation placement defaults to Top bar. Sidebar is available in regular
-browser windows with left Vertical tabs outside fullscreen. The
+Navigation placement defaults to Sidebar when available. Existing browser
+layouts and explicit Top bar preferences are retained. Sidebar is available in
+regular browser windows with left Vertical tabs outside fullscreen. The
 real `ToolbarView` and omnibox occupy two compact rows above the sidebar tabs,
 and page content uses the full height. Private, guest, and other ineligible
 windows use the standard top bar and retain the saved placement and drawer
@@ -286,6 +287,18 @@ keeps the header visible. Command-L temporarily reveals a hidden sidebar while
 the address bar has focus or a navigation popup, menu, or bubble remains open,
 then restores the saved collapse state. Mode activation does not depend on
 whether the standard toolbar is shown.
+
+Native caption controls align with the navigation row rather than the full
+two-row header. Placement changes defer native frame sizing until layout has
+finished. Hover reveal uses expanded Space and folder labels with the current
+Space background, while retaining the saved collapsed state and width.
+
+The saved Show top bar preference applies to Top bar placement. Sidebar keeps
+its address field visible while expanded, including when that saved value is
+off. Command-Shift-D is disabled while Sidebar placement is active, matching
+the native Show top bar control; returning to Top bar restores the saved value
+and command availability. A hidden top bar leaves the configured border on
+each unattached page edge, including the top edge in single and split views.
 
 Sidebar mode suppresses pinned extension icons, the bookmark star, profile and
 media buttons, and the horizontal bookmarks bar without rewriting their
