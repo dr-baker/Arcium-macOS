@@ -33,10 +33,10 @@
   ],
   "steps": [
     "Open two different HTTP or HTTPS pages and create a native split; focus the second pane and drag the divider away from center",
-    "Use the split tab context menu to Pin it; inspect the sidebar and interact with both pages",
+    "Use the split tab context menu to choose Pin split view; inspect the sidebar and interact with both pages",
     "Close the Pin from its sidebar row, then reopen it twice",
     "Change the split to stacked, reverse the panes, focus the second pane, quit normally, and relaunch the same isolated profile",
-    "Navigate each pane away from its saved home, then invoke Return Home from the Pin menu",
+    "Navigate each pane away from its saved home, then choose Reset to home from the Pin menu",
     "Close only one pane, then activate its saved Pin; repeat with the other pane",
     "Repeat saving with the same URL open in both panes",
     "Unpin the pair by dragging the durable row into ordinary tabs, then Pin and remove it through its menu",
@@ -45,6 +45,7 @@
   ],
   "observables": [
     "Saving replaces the native split row with exactly one Pin row that names both pages; tab count and each live page state remain unchanged",
+    "Saved splits have a split glyph and an accessible Split view description. Their row menu offers Reset to home when live, disables it when closed, and omits Favorite.",
     "Reopening restores exactly two panes with their saved home URLs, order, layout, ratio, and focus; repeated activation adds no tabs",
     "Normal quit and relaunch preserves both pane identities even when both URLs are identical",
     "Return Home restores both saved URLs in the existing panes",
