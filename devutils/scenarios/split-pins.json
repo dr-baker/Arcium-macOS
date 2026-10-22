@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "id": "split-pins",
+  "description": "Save one native split as one durable Pin and validate both panes, layout, profile ownership, and teardown.",
+  "profile": {
+    "policy": "isolated",
+    "name": "split-pins"
+  },
+  "feature_flags": [
+    "HeliumFavoritesAndPins"
+  ],
+  "tests": [
+    {
+      "target": "//chrome/browser/ui:helium_persistent_item_model_tests",
+      "filters": [
+        "PersistentItemCodecTest.SplitRoundTripPreservesDuplicatePaneHomes",
+        "PersistentItemCodecTest.RejectsMalformedSplitState"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "HeliumSpaceServiceTest.SplitPin*",
+        "HeliumSpaceServiceTest.SplitSessionRolesRestoreInEitherOrder",
+        "HeliumSpaceServiceTest.SplittingExistingPinSavesItsWholePair",
+        "HeliumSpaceServiceTest.RemovingSplitPinKeepsBothLiveContentsTogether",
+        "HeliumSpaceServiceTest.PinningReversedNativeSplitRetainsBothLivePages",
+        "HeliumSpaceServiceTest.FirstPaneSeedCanCloseUnassociatedSplitCompanion",
+        "HeliumSpaceServiceTest.SplitUnpinStopsIfActivationNotificationClosesItsWindow",
+        "HeliumSpaceServiceTest.*SplitReturnHomeLoadsBothSavedPaneControllers"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Launch the exact completed Dev build with the isolated split-pins profile",
+    "Use one active Space and keep an unrelated ordinary tab open"
+  ],
+  "steps": [
+    "Open two different HTTP or HTTPS pages and create a native split; focus the second pane and drag the divider away from center",
+    "Use the split tab context menu to choose Pin split view; inspect the sidebar and interact with both pages",
+    "Close the Pin from its sidebar row, then reopen it twice",
+    "Change the split to stacked, reverse the panes, focus the second pane, quit normally, and relaunch the same isolated profile",
+    "Navigate each pane away from its saved home, then choose Reset to home from the Pin menu",
+    "Close only one pane, then activate its saved Pin; repeat with the other pane",
+    "Repeat saving with the same URL open in both panes",
+    "Unpin the pair by dragging the durable row into ordinary tabs, then Pin and remove it through its menu",
+    "Create a split starting from an existing Pin, then close and reopen the resulting Pin",
+    "Stop the isolated profile after checking persistence"
+  ],
+  "observables": [
+    "Saving replaces the native split row with exactly one Pin row that names both pages; tab count and each live page state remain unchanged",
+    "Saved splits have a split glyph and an accessible Split view description. Their row menu offers Reset to home when live, disables it when closed, and omits Favorite.",
+    "Reopening restores exactly two panes with their saved home URLs, order, layout, ratio, and focus; repeated activation adds no tabs",
+    "Normal quit and relaunch preserves both pane identities even when both URLs are identical",
+    "Return Home restores both saved URLs in the existing panes",
+    "Closing one pane retains the survivor; activating the Pin creates only its missing counterpart",
+    "Unpin and Remove preserve both WebContents as one ordinary native split, clear both persistent associations, and leave no ghost Pin rows",
+    "Splitting an existing Pin saves the complete pair without another Pin row",
+    "The split stays in its owning Space and profile; other Spaces do not acquire its live instance",
+    "Closing and stopping produce no new crash report"
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

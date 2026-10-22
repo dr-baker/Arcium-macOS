@@ -38,6 +38,26 @@ class Fixture(unittest.TestCase):
             (self.paths.catalog / name).write_text(f"patch {name}\n")
 
 
+class ScratchCreateSectionTest(Fixture):
+    def test_existing_owned_creations_are_allowed_but_new_conflicts_are_rejected(self) -> None:
+        parent = self.root / "parent"
+        (parent / "src").mkdir(parents=True)
+        (parent / "src" / "owned.cc").write_text("owned\n")
+        (parent / "src" / "unowned.cc").write_text("unowned\n")
+        self.paths.state.mkdir(exist_ok=True)
+        (self.paths.state / "scratch.json").write_text(json.dumps({"parent": str(parent)}))
+        original = "--- /dev/null\n+++ b/owned.cc\n@@ -0,0 +1 @@\n+owned\n"
+        patch = self.paths.catalog / "p.patch"
+        patch.write_text(original.replace("+owned", "+edited"))
+        self.assertEqual(scratch.created_files_in_parent(self.paths, patch, original.encode()), [])
+        patch.write_text(patch.read_text() +
+                         "--- /dev/null\n+++ b/unowned.cc\n@@ -0,0 +1 @@\n+mistake\n")
+        self.assertEqual(scratch.created_files_in_parent(self.paths, patch, original.encode()),
+                         ["unowned.cc"])
+        self.assertEqual(scratch.created_files_in_parent(self.paths, patch),
+                         ["owned.cc", "unowned.cc"])
+
+
 class QuiltTest(Fixture):
     def test_series_comments_options_and_unsafe_names(self) -> None:
         path = self.root / "series"

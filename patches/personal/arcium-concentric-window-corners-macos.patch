@@ -1,0 +1,250 @@
+Index: src/chrome/browser/ui/views/helium/frame_corner_radius_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/helium/frame_corner_radius_mac.mm
++++ src/chrome/browser/ui/views/helium/frame_corner_radius_mac.mm
+@@ -4,7 +4,91 @@
+ 
+ #include "chrome/browser/ui/views/helium/frame_corner_radius.h"
+ 
++#import <AppKit/AppKit.h>
++#import <objc/runtime.h>
++
++#include <algorithm>
++#include <cmath>
++
++#import "base/apple/foundation_util.h"
++#import "components/remote_cocoa/app_shim/browser_native_widget_window_mac.h"
++#include "ui/views/view.h"
++#include "ui/views/widget/widget.h"
++
++// Public macOS 27 APIs, dispatched through protocols so SDK 26 builds can use
++// them when running on 27. Signatures are from Apple's AppKit documentation:
++// NSViewCornerRadius/containerConcentric(_:), NSViewCornerConfiguration/
++// corners(radius:), and NSView/effectiveCornerRadii. No private selectors are
++// used by the 27 resolver and no new clipping layer is installed.
++@protocol ArciumCornerRadiusFactory
+++ (id)containerConcentricRadiusWithMinimum:(CGFloat)minimumRadius;
++@end
++@protocol ArciumCornerConfigurationFactory
+++ (id)configurationWithRadius:(id)radius;
++@end
++@protocol ArciumEffectiveCornerRadii
++@property(readonly) CGFloat topLeft;
++@property(readonly) CGFloat topRight;
++@property(readonly) CGFloat bottomLeft;
++@property(readonly) CGFloat bottomRight;
++@end
++@protocol ArciumCornerResolution
++- (id<ArciumEffectiveCornerRadii>)effectiveCornerRadii;
++- (void)invalidateCornerConfiguration;
++@end
++
++@class NSViewCornerConfiguration;
++
++@interface ArciumConcentricCornerProbe : NSView
++@end
++
++@implementation ArciumConcentricCornerProbe
++- (NSViewCornerConfiguration*)cornerConfiguration {
++  Class<ArciumCornerRadiusFactory> radiusClass =
++      NSClassFromString(@"NSViewCornerRadius");
++  Class<ArciumCornerConfigurationFactory> configurationClass =
++      NSClassFromString(@"NSViewCornerConfiguration");
++  if (![(id)radiusClass respondsToSelector:@selector
++                    (containerConcentricRadiusWithMinimum:)] ||
++      ![(id)configurationClass
++          respondsToSelector:@selector(configurationWithRadius:)]) {
++    return nil;
++  }
++  return [configurationClass
++      configurationWithRadius:[radiusClass
++                                  containerConcentricRadiusWithMinimum:0]];
++}
++- (NSView*)hitTest:(NSPoint)point {
++  return nil;
++}
++- (BOOL)isAccessibilityElement {
++  return NO;
++}
++@end
++
++namespace {
++
++bool ValidRadius(CGFloat radius) {
++  return std::isfinite(radius) && radius >= 0;
++}
++
++gfx::RoundedCornersF RadiiForWindowRect(NSWindow* window,
++                                        NSRect rect,
++                                        float radius) {
++  const NSSize size = window.frame.size;
++  return InsetFrameRadii(
++      gfx::RoundedCornersF(radius),
++      gfx::InsetsF::TLBR(std::max<CGFloat>(0, size.height - NSMaxY(rect)),
++                         std::max<CGFloat>(0, NSMinX(rect)),
++                         std::max<CGFloat>(0, NSMinY(rect)),
++                         std::max<CGFloat>(0, size.width - NSMaxX(rect))));
++}
++
++}  // namespace
++
+ int GetSystemWindowRadius() {
++  // This legacy helper is used without a window by non-browser surfaces.
++  // Content uses the actual native window below, including custom policy.
+   if (@available(macOS 26, *)) {
+     return 17;
+   }
+@@ -13,5 +97,71 @@ int GetSystemWindowRadius() {
+ 
+ gfx::RoundedCornersF GetFrameRadiiForView(const views::View* view,
+                                           int fallback_inset) {
+-  return gfx::RoundedCornersF(GetFrameRadiusForContentInset(fallback_inset));
++  const auto fallback =
++      gfx::RoundedCornersF(GetFrameRadiusForContentInset(fallback_inset));
++  const auto* widget = view ? view->GetWidget() : nullptr;
++  NSWindow* window =
++      widget ? widget->GetNativeWindow().GetNativeNSWindow() : nil;
++  if (!window || view->GetLocalBounds().IsEmpty()) {
++    return fallback;
++  }
++  const gfx::Rect bounds = view->GetBoundsInScreen();
++  // gfx screen coordinates have their origin at the main screen's top left;
++  // AppKit screen coordinates have their origin at its bottom left.
++  NSScreen* mainScreen = NSScreen.screens.firstObject;
++  const CGFloat screenTop = NSMaxY(mainScreen.frame);
++  const NSRect screenRect = NSMakeRect(bounds.x(), screenTop - bounds.bottom(),
++                                       bounds.width(), bounds.height());
++  const NSRect windowRect = [window convertRectFromScreen:screenRect];
++
++  if (@available(macOS 27, *)) {
++    if ([NSView instancesRespondToSelector:@selector(effectiveCornerRadii)] &&
++        [NSView instancesRespondToSelector:@selector
++                (invalidateCornerConfiguration)]) {
++      static char probeKey;
++      ArciumConcentricCornerProbe* probe =
++          objc_getAssociatedObject(window, &probeKey);
++      if (!probe) {
++        probe = [[ArciumConcentricCornerProbe alloc] initWithFrame:NSZeroRect];
++        objc_setAssociatedObject(window, &probeKey, probe,
++                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
++      }
++      NSView* content = window.contentView;
++      if (probe.superview != content) {
++        [probe removeFromSuperview];
++        [content addSubview:probe];
++      }
++      probe.frame = [content convertRect:windowRect fromView:nil];
++      id<ArciumCornerResolution> resolver = (id<ArciumCornerResolution>)probe;
++      [resolver invalidateCornerConfiguration];
++      id<ArciumEffectiveCornerRadii> radii = [resolver effectiveCornerRadii];
++      if (radii && ValidRadius(radii.topLeft) && ValidRadius(radii.topRight) &&
++          ValidRadius(radii.bottomLeft) && ValidRadius(radii.bottomRight)) {
++        const CGFloat maximum =
++            std::min<CGFloat>(bounds.width(), bounds.height()) / 2;
++        return gfx::RoundedCornersF(std::min(radii.topLeft, maximum),
++                                    std::min(radii.topRight, maximum),
++                                    std::min(radii.bottomRight, maximum),
++                                    std::min(radii.bottomLeft, maximum));
++      }
++    }
++  }
++
++  BrowserNativeWidgetWindow* browserWindow =
++      base::apple::ObjCCast<BrowserNativeWidgetWindow>(window);
++  if (!browserWindow) {
++    return fallback;
++  }
++  const CGFloat radius = [browserWindow arciumWindowCornerRadius];
++  if (!ValidRadius(radius)) {
++    return fallback;
++  }
++  // Clamp a corrupt/custom policy to the window's possible radius. Read it on
++  // every layout, so changing native policy, zoom or fullscreen cannot stale
++  // it.
++  return RadiiForWindowRect(
++      window, windowRect,
++      std::min<CGFloat>(
++          radius,
++          std::min(window.frame.size.width, window.frame.size.height) / 2));
+ }
+Index: src/components/remote_cocoa/app_shim/browser_native_widget_window_mac.h
+===================================================================
+--- src.orig/components/remote_cocoa/app_shim/browser_native_widget_window_mac.h
++++ src/components/remote_cocoa/app_shim/browser_native_widget_window_mac.h
+@@ -9,6 +9,10 @@
+ 
+ REMOTE_COCOA_APP_SHIM_EXPORT
+ @interface BrowserNativeWidgetWindow : NativeWidgetMacNSWindow
++// Native policy used by the browser's existing compositor clip. macOS 27
++// resolves content radii through public NSView concentricity instead.
++- (CGFloat)arciumWindowCornerRadius;
++
+ // When set to `YES`, the traffic lights will always be shown. When set to `NO`,
+ // the traffic lights follow the default AppKit behavior.
+ - (void)setAlwaysShowTrafficLights:(BOOL)alwaysShow;
+Index: src/components/remote_cocoa/app_shim/browser_native_widget_window_mac.mm
+===================================================================
+--- src.orig/components/remote_cocoa/app_shim/browser_native_widget_window_mac.mm
++++ src/components/remote_cocoa/app_shim/browser_native_widget_window_mac.mm
+@@ -27,6 +27,7 @@ const double kThinControllerHeight = 0.5
+ @end
+ 
+ @interface BrowserWindowFrame : NativeWidgetMacNSWindowTitledFrame
++- (CGFloat)arciumWindowCornerRadius;
+ @end
+ 
+ @implementation BrowserWindowFrame {
+@@ -64,23 +65,22 @@ const double kThinControllerHeight = 0.5
+ 
+ - (CGFloat)_minXTitlebarWidgetInset {
+   // Both macOS 15- and macOS 26+ use the same inset here, but
+-  // 1px is invisible on macOS 15- for some reason. Ideally it should be 11px here,
+-  // but since it appears visually to be 11, we just use 10 here for both styles.
++  // 1px is invisible on macOS 15- for some reason. Ideally it should be 11px
++  // here, but since it appears visually to be 11, we just use 10 here for both
++  // styles.
+   return 10.0;
+ }
+ 
+-// Override -_getCachedWindowCornerRadius rather than -_cornerRadius because the
+-// latter does fullscreen checks before calling down to the former, and other
+-// methods (-_topCornerSize, -_bottomCornerSize) also depend on
+-// _getCachedWindowCornerRadius.
+-- (CGFloat)_getCachedWindowCornerRadius {
+-  if (@available(macOS 26, *)) {
+-    return 10.0 /* widget position from top and left */ +
+-           7.0 /* widget radius */;
+-  }
+-  // Don't mess with the window radius before macOS 26, as concentricity was not
+-  // a design element for those releases.
+-  return [super _getCachedWindowCornerRadius];
++// Do not override AppKit's cached radius: its policy can change with the OS
++// and user configuration. Before macOS 27 there is no public radius resolver.
++// Reuse Chromium's existing superclass dependency, guarded for its absence,
++// without installing an override or bypassing AppKit's fullscreen policy.
++- (CGFloat)arciumWindowCornerRadius {
++  if ([NativeWidgetMacNSWindowTitledFrame
++          instancesRespondToSelector:@selector(_getCachedWindowCornerRadius)]) {
++    return [super _getCachedWindowCornerRadius];
++  }
++  return 12;
+ }
+ 
+ - (void)setStyleMask:(NSUInteger)styleMask {
+@@ -193,6 +193,16 @@ const double kThinControllerHeight = 0.5
+     bridge->host()->OnFocusWindowToolbar();
+ }
+ 
++- (CGFloat)arciumWindowCornerRadius {
++  if ((self.styleMask & NSWindowStyleMaskFullScreen) ||
++      !(self.styleMask & NSWindowStyleMaskTitled)) {
++    return 0;
++  }
++  BrowserWindowFrame* frame =
++      base::apple::ObjCCast<BrowserWindowFrame>(self.contentView.superview);
++  return frame ? [frame arciumWindowCornerRadius] : 12;
++}
++
+ - (void)setAlwaysShowTrafficLights:(BOOL)alwaysShow {
+   [base::apple::ObjCCastStrict<BrowserWindowFrame>(self.contentView.superview)
+       setAlwaysShowTrafficLights:alwaysShow];
