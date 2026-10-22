@@ -217,7 +217,7 @@ def save_patch(paths: Paths, style: str | None = None) -> str:
             raise HeError((result.stdout + result.stderr).strip() or f"quilt refresh failed for {top}")
         refreshed = (paths.catalog / top).read_bytes()
         from . import scratch
-        if (created := scratch.created_files_in_parent(paths, paths.catalog / top)):
+        if (created := scratch.created_files_in_parent(paths, paths.catalog / top, authoritative)):
             raise HeError(f"{top} would create files that already exist in the shared tree: {', '.join(created)}; "
                           "run he scratch-pull for them before quilt add, then edit again")
         if authoritative != refreshed:
