@@ -87,6 +87,39 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              if backgroundMode == .everyday {
                  SBackdropEditor(
                      configuration: chromeBinding,
+@@ -1099,7 +1111,8 @@ private struct AppearanceSettingsPage: V
+                     glowRadiusRange: 0.1...1.5,
+                     activeMaterial: activeMaterial,
+                     fallbackReason: store.snapshot.appearance.chrome.fallbackDescription,
+-                    effectsAvailable: store.snapshot.appearance.chrome.effectsAvailable
++                    effectsAvailable: store.snapshot.appearance.chrome.effectsAvailable,
++                    resolvedTintColor: resolvedTintColor
+                 )
+                 SBackgroundEffects(
+                     configuration: chromeBinding,
+@@ -1133,6 +1146,7 @@ private struct AppearanceSettingsPage: V
+                     activeMaterial: activeMaterial,
+                     fallbackReason: store.snapshot.appearance.chrome.fallbackDescription,
+                     effectsAvailable: store.snapshot.appearance.chrome.effectsAvailable,
++                    resolvedTintColor: resolvedTintColor,
+                     onReset: store.resetChromeAppearance
+                 )
+             }
+@@ -1164,6 +1178,14 @@ private struct AppearanceSettingsPage: V
+                 set: { store.setChromeAppearance($0, spaceID: spaceID) })
+     }
+ 
++    private var resolvedTintColor: SettingsRGB? {
++        let dark = store.appearanceMode().colorScheme.map { $0 == .dark }
++            ?? (NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
++        let roles = dark ? store.snapshot.appearance.spacePalette.dark
++                         : store.snapshot.appearance.spacePalette.light
++        return roles["chrome"].flatMap(SettingsRGB.init(hex:))
++    }
++
+     private var activeMaterial: SettingsBackdropMaterial? {
+         store.snapshot.appearance.chrome.activeMaterial.flatMap(SettingsBackdropMaterial.init(rawValue:))
+     }
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUI/Layout/SGroupedSections.swift
@@ -139,7 +172,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
-@@ -28,3 +28,14 @@ Arcium form hierarchy keeps flat setting
+@@ -28,3 +28,16 @@ Arcium form hierarchy keeps flat setting
  Grouped section headings use the section type style and header accessibility
  traits; glow-editor subheadings use a smaller secondary style distinct from card
  titles. The host retains the package's existing aligned row controls.
@@ -154,51 +187,80 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 +The Address bar group exposes centering, minimal display and the existing top-bar
 +pin together. The pin applies to Fully hidden sidebars and Zen mode; it retains
 +the existing host preference, saved values and managed-availability checks.
++
++Tint has a direct color well independent of saved glow points. Its optional Space-owned seed uses the native shared palette for contrast and the flat preview.
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift
-@@ -42,6 +42,7 @@ enum ArciumChromeAppearanceAdapter {
+@@ -42,6 +42,8 @@ enum ArciumChromeAppearanceAdapter {
  
          return SettingsBackdropConfiguration(
              enabled: snapshot.enabled,
 +            colorEffect: snapshot.colorEffect,
++            tintColor: snapshot.tintColor,
              material: material,
              materialOpacity: snapshot.materialOpacity,
              glassTintOpacity: snapshot.glassTintOpacity,
-@@ -67,6 +68,7 @@ enum ArciumChromeAppearanceAdapter {
+@@ -65,8 +67,9 @@ enum ArciumChromeAppearanceAdapter {
+         for configuration: SettingsBackdropConfiguration
+     ) -> [String: Any] {
          let configuration = configuration.normalized()
-         return [
+-        return [
++        var result: [String: Any] = [
              "enabled": configuration.enabled,
 +            "colorEffect": configuration.colorEffect.rawValue,
              "material": configuration.material.rawValue,
              "materialOpacity": bounded(configuration.materialOpacity, to: 0...1),
              "glassTintOpacity": bounded(configuration.glassTintOpacity, to: 0...1),
+@@ -80,6 +83,8 @@ enum ArciumChromeAppearanceAdapter {
+             "colorHarmony": configuration.colorHarmony.rawValue,
+             "points": nativePoints(configuration.glows)
+         ]
++        if let color = configuration.tintColor { result["tintColor"] = color.hex }
++        return result
+     }
+ 
+     private static func nativePoints(_ glows: [SettingsStyleGlow]) -> [[String: Any]] {
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -189,6 +189,7 @@ struct ArciumChromeAppearanceSnapshot: E
+@@ -189,6 +189,8 @@ struct ArciumChromeAppearanceSnapshot: E
  
      struct Configuration: Equatable {
          var enabled = false
++        var tintColor: SettingsRGB?
 +        var colorEffect = SettingsBackdropColorEffect.glows
          var material = "auto"
          var materialOpacity = 0.0
          var glassTintOpacity = 0.0
-@@ -210,7 +211,10 @@ struct ArciumChromeAppearanceSnapshot: E
+@@ -210,7 +212,10 @@ struct ArciumChromeAppearanceSnapshot: E
                  "tintStrength", "grain", "grainScale", "matchColorAdjustments", "points"
              ]
              let keys = Set(dictionary.keys)
 -            guard keys == requiredKeys || keys == requiredKeys.union(["colorHarmony"]),
 +            guard requiredKeys.isSubset(of: keys),
-+                  keys.isSubset(of: requiredKeys.union(["colorHarmony", "colorEffect"])),
++                  keys.isSubset(of: requiredKeys.union(["colorHarmony", "colorEffect", "tintColor"])),
 +                  let colorEffect = SettingsBackdropColorEffect(rawValue:
 +                    dictionary["colorEffect"] == nil ? "glows" : string(dictionary["colorEffect"]) ?? ""),
                    let colorHarmony = SettingsColorHarmony(rawValue:
                      dictionary["colorHarmony"] == nil ? "custom" : string(dictionary["colorHarmony"]) ?? ""),
                    let enabled = strictBoolean(dictionary["enabled"]),
-@@ -249,6 +253,7 @@ struct ArciumChromeAppearanceSnapshot: E
+@@ -238,6 +243,12 @@ struct ArciumChromeAppearanceSnapshot: E
+                 return
+             }
+ 
++            if let value = dictionary["tintColor"] {
++                guard let hex = string(value), hex.utf8.count == 7,
++                      hex.first == "#", let color = SettingsRGB(hex: hex) else { return }
++                self.tintColor = color
++            }
++
+             var seen = Set<String>()
+             var parsedPoints: [Point] = []
+             for rawPoint in rawPoints {
+@@ -249,6 +260,7 @@ struct ArciumChromeAppearanceSnapshot: E
              }
  
              self.enabled = enabled
@@ -210,10 +272,72 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -8,6 +8,41 @@ import SettingsUI
+@@ -8,6 +8,103 @@ import SettingsUI
  
  @MainActor
  final class ArciumSettingsUIContractTests: XCTestCase {
++    func testTintColorEditingDoesNotRequireOrCreateGlowPoints() throws {
++        var empty = makeConfiguration()
++        empty.colorEffect = .tint
++        empty.glows = []
++        let color = try XCTUnwrap(SettingsRGB(hex: "#2A9ED0"))
++        let edited = empty.applyingTintColor(color)
++        let dictionary = ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: edited)
++        let restored = try XCTUnwrap(ArciumChromeAppearanceSnapshot.Configuration(dictionary).backdropConfiguration)
++        XCTAssertEqual(restored.tintColor, color)
++        XCTAssertTrue(restored.glows.isEmpty)
++        XCTAssertEqual(restored.grain, empty.grain)
++        XCTAssertEqual(restored.colorEffect, .tint)
++        XCTAssertEqual(dictionary["tintColor"] as? String, "#2A9ED0")
++        let legacy = ArciumChromeAppearanceSnapshot.Configuration(
++            ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: empty))
++        XCTAssertTrue(legacy.isValid)
++        XCTAssertNil(legacy.tintColor)
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(
++            snapshot: snapshot(chrome: empty, managed: false, available: true),
++            delegate: delegate)
++        store.setChromeAppearance(edited)
++        let payload = try XCTUnwrap(delegate.settings.last?.value as? [String: Any])
++        XCTAssertEqual(payload["spaceID"] as? String, "space-a")
++        let sent = try XCTUnwrap(payload["configuration"] as? [String: Any])
++        XCTAssertEqual(sent["tintColor"] as? String, "#2A9ED0")
++        XCTAssertEqual((sent["points"] as? [[String: Any]])?.count, 0)
++        XCTAssertEqual(store.pendingChromeAppearance?.tintColor, color)
++    }
++
++    func testTintOverrideAndGlowRecipeSurviveModeChanges() throws {
++        let original = makeConfiguration()
++        let color = try XCTUnwrap(SettingsRGB(hex: "#D05080"))
++        for mode in SettingsBackdropColorEffect.allCases {
++            var edited = original.applyingTintColor(color)
++            edited.colorEffect = mode
++            let restored = try XCTUnwrap(ArciumChromeAppearanceSnapshot.Configuration(
++                ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: edited)).backdropConfiguration)
++            XCTAssertEqual(restored.tintColor, color)
++            XCTAssertEqual(restored.glows, original.glows)
++            XCTAssertEqual(restored.grain, original.grain)
++            let typed = try JSONDecoder().decode(SettingsBackdropConfiguration.self,
++                from: JSONEncoder().encode(edited))
++            XCTAssertEqual(typed, edited.normalized())
++            let style = try edited.updating(SettingsStyleBackdrop(),
++                viewportSize: CGSize(width: 100, height: 100))
++            let persisted = try JSONDecoder().decode(SettingsStyleBackdrop.self,
++                from: JSONEncoder().encode(style))
++            let restoredStyle = SettingsBackdropConfiguration(styleBackdrop: persisted)
++            XCTAssertEqual(restoredStyle.tintColor, color)
++            XCTAssertEqual(restoredStyle.glows, original.glows)
++        }
++    }
++
++    func testOptionalTintColorRejectsMalformedNativeValues() {
++        var native = ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: makeConfiguration())
++        for invalid: Any in ["red", "#12345", "#001122FF", "#GG0011", false, NSNull()] {
++            native["tintColor"] = invalid
++            XCTAssertFalse(ArciumChromeAppearanceSnapshot.Configuration(native).isValid)
++        }
++    }
++
 +    func testWindowColorModesRoundTripWithoutChangingSavedRecipe() throws {
 +        let original = makeConfiguration()
 +        for effect in SettingsBackdropColorEffect.allCases {
@@ -252,7 +376,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      @MainActor
      func testSharedEditorAdapterRoundTripsNativeDictionary() throws {
          let original = makeConfiguration()
-@@ -20,7 +55,7 @@ final class ArciumSettingsUIContractTest
+@@ -20,7 +117,7 @@ final class ArciumSettingsUIContractTest
          XCTAssertEqual(Set(dictionary.keys), Set([
              "enabled", "material", "materialOpacity", "glassTintOpacity",
              "glassStyle", "frostedStyle", "frostedTintStrength", "tintStrength",
@@ -265,7 +389,55 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIAuthoring/SBackdropEditor.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIAuthoring/SBackdropEditor.swift
-@@ -138,11 +138,11 @@ public struct SBackdropEditor: View {
+@@ -1,3 +1,4 @@
++import AppKit
+ import SettingsUI
+ import SettingsUIStyle
+ import SwiftUI
+@@ -11,6 +12,7 @@ public struct SBackdropEditor: View {
+     public let activeMaterial: SettingsBackdropMaterial?
+     public let fallbackReason: String?
+     public let effectsAvailable: Bool
++    public let resolvedTintColor: SettingsRGB?
+     public let colorsOnly: Bool
+     public let showsIntensity: Bool
+     public let showsColors: Bool
+@@ -51,6 +53,7 @@ public struct SBackdropEditor: View {
+         activeMaterial: SettingsBackdropMaterial? = nil,
+         fallbackReason: String? = nil,
+         effectsAvailable: Bool = true,
++        resolvedTintColor: SettingsRGB? = nil,
+         onReset: (() -> Void)? = nil
+     ) {
+         _configuration = configuration
+@@ -59,6 +62,7 @@ public struct SBackdropEditor: View {
+         self.activeMaterial = activeMaterial
+         self.fallbackReason = fallbackReason
+         self.effectsAvailable = effectsAvailable
++        self.resolvedTintColor = resolvedTintColor
+         self.colorsOnly = colorsOnly
+         self.showsIntensity = showsIntensity
+         self.showsColors = showsColors
+@@ -83,7 +87,17 @@ public struct SBackdropEditor: View {
+                 .disabled(!editable)
+             }
+ 
+-            if showsColors {
++            if showsColors && draft.colorEffect == .tint {
++                SSectionCard(title: "Tint") {
++                    ColorPicker("Tint color", selection: tintColorBinding, supportsOpacity: false)
++                        .accessibilityIdentifier("backdrop-tint-color")
++                        .disabled(!isCustomEditingEnabled)
++                    (resolvedTintColor?.color ?? tintColorBinding.wrappedValue)
++                        .frame(height: 72)
++                        .clipShape(RoundedRectangle(cornerRadius: 8))
++                        .accessibilityHidden(true)
++                }
++            } else if showsColors {
+                 SSectionCard(title: "Colors") {
+                     colorsSectionContent
+                 }
+@@ -138,11 +152,11 @@ public struct SBackdropEditor: View {
                              help: SHelp(description: "Blend all colors into the window material together."),
                              style: .compact,
                              onPreviewChange: { value in
@@ -279,7 +451,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
                      }
  
                      Group {
-@@ -159,11 +159,11 @@ public struct SBackdropEditor: View {
+@@ -159,11 +173,11 @@ public struct SBackdropEditor: View {
                                      commitMode: .onDragEnd,
                                      style: .compact,
                                      onPreviewChange: { value in
@@ -293,7 +465,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
  
                                  SPicker(
                                      "Glass style",
-@@ -197,11 +197,11 @@ public struct SBackdropEditor: View {
+@@ -197,11 +211,11 @@ public struct SBackdropEditor: View {
                                      commitMode: .onDragEnd,
                                      style: .compact,
                                      onPreviewChange: { value in
@@ -307,7 +479,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
                              }
                          }
                      }
-@@ -216,7 +216,7 @@ public struct SBackdropEditor: View {
+@@ -216,7 +230,7 @@ public struct SBackdropEditor: View {
                              help: SHelp(description: "Add static texture to the window chrome."),
                              style: .compact,
                              onPreviewChange: { value in
@@ -316,7 +488,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
                              },
                              onEditingChanged: handleSliderEditing
                          )
-@@ -228,12 +228,12 @@ public struct SBackdropEditor: View {
+@@ -228,12 +242,12 @@ public struct SBackdropEditor: View {
                              format: scaleFormat,
                              style: .compact,
                              onPreviewChange: { value in
@@ -331,7 +503,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
  
                      if editable && effectsAvailable && !isForcedFallback, let fallbackStatus {
                          HStack(alignment: .firstTextBaseline, spacing: SettingsSpacing.xs) {
-@@ -449,7 +449,7 @@ public struct SBackdropEditor: View {
+@@ -449,7 +463,7 @@ public struct SBackdropEditor: View {
                  .disabled(draft.glows.count >= 4)
              Button("Remove color", systemImage: "minus", action: removeSelectedGlow)
                  .labelStyle(.iconOnly)
@@ -340,7 +512,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
              Spacer(minLength: 0)
              if selectedGlow != nil {
                  Button("Color picker…", systemImage: "paintpalette") {
-@@ -481,7 +481,7 @@ public struct SBackdropEditor: View {
+@@ -481,7 +495,7 @@ public struct SBackdropEditor: View {
                  ),
                  mode: harmonyBinding,
                  onAddColor: addGlow,
@@ -349,7 +521,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
              )
              .id(draft.glows.map(\.id))
              .disabled(!isDecorativeEditingEnabled)
-@@ -524,6 +524,9 @@ public struct SBackdropEditor: View {
+@@ -524,6 +538,9 @@ public struct SBackdropEditor: View {
      ) -> Bool {
          editable && (colorsOnly || (enabled && effectsAvailable))
      }
@@ -359,7 +531,27 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
      private var isSurfaceEditingEnabled: Bool { isCustomEditingEnabled && effectsAvailable }
      private var resolvedActiveMaterial: SettingsBackdropMaterial {
          let material = activeMaterial ?? draft.material
-@@ -616,14 +619,14 @@ public struct SBackdropEditor: View {
+@@ -607,6 +624,19 @@ public struct SBackdropEditor: View {
+         })
+     }
+ 
++    private var tintColorBinding: Binding<Color> {
++        Binding(get: {
++            (draft.tintColor ?? resolvedTintColor ?? draft.glows.first?.color
++                ?? SettingsRGB(red: 0.5, green: 0.5, blue: 0.5)).color
++        }, set: { value in
++            guard isCustomEditingEnabled else { return }
++            guard let color = NSColor(value).usingColorSpace(.sRGB) else { return }
++            commit(draft.applyingTintColor(SettingsRGB(
++                red: Double(color.redComponent), green: Double(color.greenComponent),
++                blue: Double(color.blueComponent))))
++        })
++    }
++
+     private var materialOpacityBinding: Binding<Double> {
+         Binding(get: { draft.materialOpacity }, set: { value in
+             guard isSurfaceEditingEnabled else { cancelSliderPreview(); return }
+@@ -616,14 +646,14 @@ public struct SBackdropEditor: View {
  
      private var tintBinding: Binding<Double> {
          Binding(get: { draft.tintStrength }, set: { value in
@@ -376,7 +568,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
              commitSlider { $0.glassTintOpacity = value }
          })
      }
-@@ -644,21 +647,21 @@ public struct SBackdropEditor: View {
+@@ -644,21 +674,21 @@ public struct SBackdropEditor: View {
  
      private var frostedTintStrengthBinding: Binding<Double> {
          Binding(get: { draft.frostedTintStrength }, set: { value in
@@ -401,7 +593,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
              commitSlider { $0.grainScale = value }
          })
      }
-@@ -833,10 +836,10 @@ public struct SBackdropEditor: View {
+@@ -833,10 +863,10 @@ public struct SBackdropEditor: View {
      }
  
      private func removeSelectedGlow() {
@@ -414,7 +606,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
              next.colorHarmony = .automatic(for: next.glows.count)
              next = next.applyingColorPalette(
                  SColorHarmonyPicker.applyingHarmony(to: next.glows.map(\.colorHex), selectedIndex: 0, mode: next.colorHarmony),
-@@ -1025,7 +1028,7 @@ private struct SettingsBackdropEditorPre
+@@ -1025,7 +1055,7 @@ private struct SettingsBackdropEditorPre
                  ForEach(configuration.glows, id: \.id) { glow in
                      RadialGradient(
                          colors: [
@@ -423,7 +615,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
                              .clear
                          ],
                          center: UnitPoint(x: glow.x, y: glow.y),
-@@ -1039,7 +1042,7 @@ private struct SettingsBackdropEditorPre
+@@ -1039,7 +1069,7 @@ private struct SettingsBackdropEditorPre
                          finish: SettingsBackdropFinish(
                              opacity: 1,
                              saturation: 1,
@@ -490,72 +682,90 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
  /// The native Liquid Glass style exposed by the editor.
  public enum SettingsBackdropGlassStyle: String, CaseIterable, Codable, Hashable, Identifiable, Sendable {
      case regular
-@@ -114,6 +137,7 @@ public enum SettingsBackdropConfiguratio
+@@ -114,6 +137,8 @@ public enum SettingsBackdropConfiguratio
  /// binding boundary, while glow count and radius are intentionally preserved.
  public struct SettingsBackdropConfiguration: Codable, Equatable, Sendable {
      public var enabled: Bool
++    public var tintColor: SettingsRGB?
 +    public var colorEffect: SettingsBackdropColorEffect
      public var material: SettingsBackdropMaterial
      public var materialOpacity: Double
      public var glassTintOpacity: Double
-@@ -149,6 +173,7 @@ public struct SettingsBackdropConfigurat
+@@ -149,6 +174,8 @@ public struct SettingsBackdropConfigurat
  
      public init(
          enabled: Bool = true,
 +        colorEffect: SettingsBackdropColorEffect = .glows,
++        tintColor: SettingsRGB? = nil,
          material: SettingsBackdropMaterial = .liquidGlass,
          materialOpacity: Double = 0.95,
          glassTintOpacity: Double = 0.70,
-@@ -164,6 +189,7 @@ public struct SettingsBackdropConfigurat
+@@ -164,6 +191,8 @@ public struct SettingsBackdropConfigurat
          radiusReference: SettingsGlowRadiusReference = .shortestEdge
      ) {
          self.enabled = enabled
++        self.tintColor = tintColor.map { SettingsRGB(red: $0.red, green: $0.green, blue: $0.blue) }
 +        self.colorEffect = colorEffect
          self.material = material
          self.materialOpacity = Self.bounded(materialOpacity, to: 0...1)
          self.glassTintOpacity = Self.bounded(glassTintOpacity, to: 0...1)
-@@ -184,6 +210,7 @@ public struct SettingsBackdropConfigurat
+@@ -184,6 +213,8 @@ public struct SettingsBackdropConfigurat
      public init(
          styleBackdrop: SettingsStyleBackdrop,
          enabled: Bool? = nil,
 +        colorEffect: SettingsBackdropColorEffect? = nil,
++        tintColor: SettingsRGB? = nil,
          material: SettingsBackdropMaterial? = nil,
          materialOpacity: Double? = nil,
          glassTintOpacity: Double? = nil,
-@@ -198,6 +225,7 @@ public struct SettingsBackdropConfigurat
+@@ -198,6 +229,8 @@ public struct SettingsBackdropConfigurat
          let storedEffects = styleBackdrop.effects?.normalized()
          self.init(
              enabled: enabled ?? storedEffects?.enabled ?? true,
 +            colorEffect: colorEffect ?? storedEffects?.colorEffect ?? .glows,
++            tintColor: tintColor ?? storedEffects?.tintColor,
              material: material ?? storedEffects?.material ?? .liquidGlass,
              materialOpacity: materialOpacity ?? storedEffects?.materialOpacity ?? 0.95,
              glassTintOpacity: glassTintOpacity ?? storedEffects?.glassTintOpacity ?? 0.70,
-@@ -245,6 +273,7 @@ public struct SettingsBackdropConfigurat
+@@ -245,6 +278,8 @@ public struct SettingsBackdropConfigurat
          result.finish.grain = grain
          result.effects = SettingsStyleBackdropEffects(
              enabled: enabled,
 +            colorEffect: colorEffect,
++            tintColor: tintColor,
              material: material,
              materialOpacity: materialOpacity,
              glassTintOpacity: glassTintOpacity,
-@@ -287,6 +316,7 @@ public struct SettingsBackdropConfigurat
+@@ -284,9 +319,18 @@ public struct SettingsBackdropConfigurat
+         return next.normalized()
+     }
+ 
++    /// A flat tint never creates or edits the saved radial color recipe.
++    public func applyingTintColor(_ color: SettingsRGB) -> Self {
++        var next = self
++        next.tintColor = color
++        return next.normalized()
++    }
++
      public func normalized() -> Self {
          Self(
              enabled: enabled,
 +            colorEffect: colorEffect,
++            tintColor: tintColor,
              material: material,
              materialOpacity: materialOpacity,
              glassTintOpacity: glassTintOpacity,
-@@ -303,6 +333,29 @@ public struct SettingsBackdropConfigurat
+@@ -303,6 +347,30 @@ public struct SettingsBackdropConfigurat
          )
      }
  
 +    private enum CodingKeys: String, CodingKey {
-+        case colorEffect, enabled, material, materialOpacity, glassTintOpacity, glassStyle, frostedStyle, frostedTintStrength, tintStrength, grain, grainScale, matchColorAdjustments, colorHarmony, glows, radiusReference
++        case tintColor, colorEffect, enabled, material, materialOpacity, glassTintOpacity, glassStyle, frostedStyle, frostedTintStrength, tintStrength, grain, grainScale, matchColorAdjustments, colorHarmony, glows, radiusReference
 +    }
 +
 +    public init(from decoder: Decoder) throws {
 +        let values = try decoder.container(keyedBy: CodingKeys.self)
++        self.tintColor = try values.decodeIfPresent(SettingsRGB.self, forKey: .tintColor)
 +        self.colorEffect = try values.decodeIfPresent(SettingsBackdropColorEffect.self, forKey: .colorEffect) ?? .glows
 +        self.enabled = try values.decode(Bool.self, forKey: .enabled)
 +        self.material = try values.decode(SettingsBackdropMaterial.self, forKey: .material)
@@ -580,50 +790,56 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIStyle/StylePreset/SettingsStyleBackdropEffects.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIStyle/StylePreset/SettingsStyleBackdropEffects.swift
-@@ -8,6 +8,7 @@ import SettingsUI
+@@ -8,6 +8,8 @@ import SettingsUI
  /// copy of those visual values. This payload only records the controls that
  /// have no representation in the original style-preset schema.
  public struct SettingsStyleBackdropEffects: Codable, Equatable, Sendable {
++    public var tintColor: SettingsRGB?
 +    public var colorEffect: SettingsBackdropColorEffect
      public var enabled: Bool
      public var material: SettingsBackdropMaterial
      public var materialOpacity: Double
-@@ -22,6 +23,7 @@ public struct SettingsStyleBackdropEffec
+@@ -22,6 +24,8 @@ public struct SettingsStyleBackdropEffec
  
      public init(
          enabled: Bool = true,
 +        colorEffect: SettingsBackdropColorEffect = .glows,
++        tintColor: SettingsRGB? = nil,
          material: SettingsBackdropMaterial = .liquidGlass,
          materialOpacity: Double = 0.95,
          glassTintOpacity: Double = 0.70,
-@@ -33,6 +35,7 @@ public struct SettingsStyleBackdropEffec
+@@ -33,6 +37,8 @@ public struct SettingsStyleBackdropEffec
          matchColorAdjustments: Bool = true,
          colorHarmony: SettingsColorHarmony = .custom
      ) {
++        self.tintColor = tintColor.map { SettingsRGB(red: $0.red, green: $0.green, blue: $0.blue) }
 +        self.colorEffect = colorEffect
          self.enabled = enabled
          self.material = material
          self.materialOpacity = Self.bounded(materialOpacity, in: 0...1)
-@@ -49,6 +52,7 @@ public struct SettingsStyleBackdropEffec
+@@ -49,6 +55,8 @@ public struct SettingsStyleBackdropEffec
      public func normalized() -> Self {
          Self(
              enabled: enabled,
 +            colorEffect: colorEffect,
++            tintColor: tintColor,
              material: material,
              materialOpacity: materialOpacity,
              glassTintOpacity: glassTintOpacity,
-@@ -63,6 +67,7 @@ public struct SettingsStyleBackdropEffec
+@@ -63,6 +71,8 @@ public struct SettingsStyleBackdropEffec
      }
  
      private enum CodingKeys: String, CodingKey {
++        case tintColor
 +        case colorEffect
          case enabled
          case material
          case materialOpacity
-@@ -82,6 +87,7 @@ public struct SettingsStyleBackdropEffec
+@@ -82,6 +92,8 @@ public struct SettingsStyleBackdropEffec
          // typed initializer normalizes host-created values, while preset JSON
          // must report malformed stored values instead of hiding them by
          // clamping during decoding.
++        self.tintColor = try container.decodeIfPresent(SettingsRGB.self, forKey: .tintColor)
 +        self.colorEffect = try container.decodeIfPresent(SettingsBackdropColorEffect.self, forKey: .colorEffect) ?? .glows
          self.enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
          self.material = try container.decodeIfPresent(SettingsBackdropMaterial.self, forKey: .material) ?? .liquidGlass
