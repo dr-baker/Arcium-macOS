@@ -50,9 +50,9 @@ Index: src/chrome/browser/ui/views/helium/frame_corner_radius_mac.mm
 +      NSClassFromString(@"NSViewCornerRadius");
 +  Class<ArciumCornerConfigurationFactory> configurationClass =
 +      NSClassFromString(@"NSViewCornerConfiguration");
-+  if (![radiusClass respondsToSelector:@selector
++  if (![(id)radiusClass respondsToSelector:@selector
 +                    (containerConcentricRadiusWithMinimum:)] ||
-+      ![configurationClass
++      ![(id)configurationClass
 +          respondsToSelector:@selector(configurationWithRadius:)]) {
 +    return nil;
 +  }
