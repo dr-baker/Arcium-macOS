@@ -149,7 +149,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 +resolved-accent tint and a fading rule, with stronger neutral styling for
 +Increased Contrast. Empty headings do not gain decorative rules.
 +
-+Local appearance extension: reversible Pure glass / Tint / Glows policy preserves saved color recipes, supports empty glow palettes, and disables inactive decorative controls.
++Local appearance extension: reversible None / Tint / Glows policy preserves saved color recipes, supports empty glow palettes, and disables inactive decorative controls.
 +
 +The Address bar group exposes centering, minimal display and the existing top-bar
 +pin together. The pin applies to Fully hidden sidebars and Zen mode; it retains
@@ -473,14 +473,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
 +    public var id: String { rawValue }
 +    public var title: String {
 +        switch self {
-+        case .none: "Pure glass"
++        case .none: "None"
 +        case .tint: "Tint"
 +        case .glows: "Glows"
 +        }
 +    }
 +    public var help: String {
 +        switch self {
-+        case .none: "Native material without color effects."
++        case .none: "Keep the selected material without tints, glows, or grain."
 +        case .tint: "A flat Space tint, without glows or grain."
 +        case .glows: "Your saved color glows and grain."
 +        }
