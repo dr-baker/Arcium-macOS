@@ -4,7 +4,7 @@
   "description": "Compare native window and content corners across page borders, split layouts, sidebar states and fullscreen.",
   "profile": {"policy": "isolated", "name": "concentric-window-corners"},
   "feature_flags": [],
-  "tests": [{"target": "//chrome/test:browser_tests", "filters": ["MultiContentsViewBrowserTest.RoundedFrameBorderWidthLayout"]}],
+  "tests": [{"target": "//chrome/test:arcium_feature_settings_browser_tests", "filters": ["MultiContentsViewBrowserTest.RoundedFrameBorderWidthLayout"]}],
   "preconditions": [
     "Launch the exact newly built Dev bundle on the isolated profile and record the macOS version.",
     "Use a plain page with a bright solid background so its clip is visible against the window frame."

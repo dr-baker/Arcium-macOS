@@ -23,7 +23,10 @@
         "HeliumSpaceServiceTest.SplitPin*",
         "HeliumSpaceServiceTest.SplitSessionRolesRestoreInEitherOrder",
         "HeliumSpaceServiceTest.SplittingExistingPinSavesItsWholePair",
-        "HeliumSpaceServiceTest.RemovingSplitPinKeepsBothLiveContentsTogether"
+        "HeliumSpaceServiceTest.RemovingSplitPinKeepsBothLiveContentsTogether",
+        "HeliumSpaceServiceTest.PinningReversedNativeSplitRetainsBothLivePages",
+        "HeliumSpaceServiceTest.FirstPaneSeedCanCloseUnassociatedSplitCompanion",
+        "HeliumSpaceServiceTest.SplitUnpinStopsIfActivationNotificationClosesItsWindow"
       ]
     }
   ],
