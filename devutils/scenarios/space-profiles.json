@@ -29,7 +29,8 @@
     "Create a Space named Scratch with one Pin, right-click it, choose Delete Space…, click Keep Space, then choose Delete Space… again and confirm",
     "Open Edit Space for the current window's Space in a profile with other Spaces, click Delete Space… and confirm",
     "Create a Space in a new profile, then delete it and confirm the profile deletion",
-    "Quit Helium Dev normally, relaunch the same isolated profile, and inspect the bottom bar, Space themes, and the Pins header",
+    "Quit Helium Dev normally with both Personal and Work profiles present, relaunch the same isolated profile without a profile-directory flag, and inspect the bottom bar, Space themes, and the Pins header",
+    "Close every browser window without quitting, click the isolated Dev app in the Dock, and switch from Personal to Work using the Space bar",
     "Stop the isolated profile after the restored state has been checked"
   ],
   "observables": [
@@ -43,6 +44,7 @@
     "Clicking the Space name hides the Pins and shows a right-pointing chevron; clicking again shows the Pins",
     "The compact sidebar hides the Space header and shows only the current Space's icon in the bottom bar",
     "After normal quit and relaunch, every Space keeps its icon, theme, profile, and folded Pins state, and the bottom bar lists Spaces from both profiles",
+    "Normal startup and Dock reopen go directly to a browser window without a profile selector, even when Chromium's legacy ask-on-startup preference is enabled; switching Spaces still selects the correct profile",
     "Stopping the profile leaves no matching Helium Dev process and no newly timestamped crash report",
     "The Theme card's preview shows the window background's glows; clicking adds a glow, dragging or arrow keys move it, Delete removes it, and the header + adds one by keyboard up to four",
     "Glow color, intensity, and grain preview live on the window background, using the same effect as Settings > Appearance, so Personal and Work look clearly different",
