@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -889,16 +889,7 @@ final class ArciumSettingsStore: Observa
+@@ -896,16 +896,7 @@ final class ArciumSettingsStore: Observa
          self.pendingChromeAppearance = nil
  
          do {
@@ -20,7 +20,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              presetError = nil
          } catch {
              preset = nil
-@@ -1428,3 +1419,14 @@ private func isValidSharedPalette(_ pale
+@@ -1435,3 +1426,14 @@ private func isValidSharedPalette(_ pale
          && contains(palette.textContrast, 4.5...7) && contains(palette.lightCanvas, 0...1)
          && contains(palette.darkCanvas, 0...1)
  }
@@ -120,7 +120,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -281,10 +281,85 @@ private struct SettingsPageScroll<Conten
+@@ -281,10 +281,95 @@ private struct SettingsPageScroll<Conten
      }
  }
  
@@ -133,12 +133,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +    var activeMaterial: SettingsBackdropMaterial? = nil
 +    var fallbackReason: String? = nil
 +    var effectsAvailable = true
++    var resolvedTintColor: SettingsRGB? = nil
 +
 +    var body: some View {
 +        SBackdropEditor(configuration: $configuration, editable: editable,
 +                        colorsOnly: true, showsIntensity: showsIntensity,
 +                        glowRadiusRange: 0.1...1.5, activeMaterial: activeMaterial,
-+                        fallbackReason: fallbackReason, effectsAvailable: effectsAvailable)
++                        fallbackReason: fallbackReason, effectsAvailable: effectsAvailable,
++                        resolvedTintColor: resolvedTintColor)
 +    }
 +}
 +
@@ -156,7 +158,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            let style = colorScheme == .dark ? preset.dark : preset.light
 +            let theme = draft.palette.theme(fallback: style.theme(brand: preset.brand), colorScheme: colorScheme)
 +            ArciumLiveSettingsSheet(title: "Space theme", onClose: { draft.finish() }) {
-+                ArciumSpacePaletteEditor(configuration: configuration)
++                ArciumSpacePaletteEditor(configuration: configuration,
++                    resolvedTintColor: resolvedTintColor)
 +                SGroupedSections(showsSurfaces: false, showsDividers: false) {
 +                    Section("Background") {
 +                        SSlider("Color strength", value: value(\.tintStrength), range: 0...1,
@@ -180,6 +183,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                Button("Done") { draft.finish() }.keyboardShortcut(.defaultAction)
 +            }.padding(32).onExitCommand { draft.finish() }
 +        }
++    }
++
++    private var resolvedTintColor: SettingsRGB? {
++        let dark = scheme(draft.mode).map { $0 == .dark }
++            ?? (NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
++        return (dark ? draft.palette.dark : draft.palette.light)["chrome"]
++            .flatMap(SettingsRGB.init(hex:))
 +    }
 +
 +    private var configuration: Binding<SettingsBackdropConfiguration> {
@@ -206,7 +216,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      @ViewBuilder let content: Content
      @Environment(\.dismiss) private var dismiss
      @Environment(\.settingsTheme) private var theme
-@@ -305,7 +380,7 @@ private struct ArciumLiveSettingsSheet<C
+@@ -305,7 +390,7 @@ private struct ArciumLiveSettingsSheet<C
              }
              HStack {
                  Spacer()
@@ -215,7 +225,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      .buttonStyle(ArciumAccentButtonStyle())
                      .keyboardShortcut(.defaultAction)
              }
-@@ -313,7 +388,10 @@ private struct ArciumLiveSettingsSheet<C
+@@ -313,7 +398,10 @@ private struct ArciumLiveSettingsSheet<C
          }
          .settingsSheetSurface()
          .frame(minWidth: 520, idealWidth: 680, minHeight: 400, idealHeight: 620)
@@ -227,7 +237,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      }
  }
  
-@@ -1103,12 +1181,10 @@ private struct AppearanceSettingsPage: V
+@@ -1103,12 +1191,10 @@ private struct AppearanceSettingsPage: V
                      .settingsFont(\.caption).foregroundStyle(.secondary)
              }
              if backgroundMode == .everyday {
@@ -240,7 +250,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                    glowRadiusRange: 0.1...1.5,
                      activeMaterial: activeMaterial,
                      fallbackReason: store.snapshot.appearance.chrome.fallbackDescription,
-                     effectsAvailable: store.snapshot.appearance.chrome.effectsAvailable
+                     effectsAvailable: store.snapshot.appearance.chrome.effectsAvailable,
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
@@ -286,10 +296,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        XCTAssertEqual(delegate.finishes, 1)
 +    }
 +
-     func testWindowColorModesRoundTripWithoutChangingSavedRecipe() throws {
-         let original = makeConfiguration()
-         for effect in SettingsBackdropColorEffect.allCases {
-@@ -1917,3 +1954,11 @@ final class ArciumSettingsUIContractTest
+     func testTintColorEditingDoesNotRequireOrCreateGlowPoints() throws {
+         var empty = makeConfiguration()
+         empty.colorEffect = .tint
+@@ -1958,3 +1995,11 @@ final class ArciumSettingsUIContractTest
          }
      }
  }
