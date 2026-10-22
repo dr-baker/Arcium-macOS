@@ -26,7 +26,8 @@
         "HeliumSpaceServiceTest.RemovingSplitPinKeepsBothLiveContentsTogether",
         "HeliumSpaceServiceTest.PinningReversedNativeSplitRetainsBothLivePages",
         "HeliumSpaceServiceTest.FirstPaneSeedCanCloseUnassociatedSplitCompanion",
-        "HeliumSpaceServiceTest.SplitUnpinStopsIfActivationNotificationClosesItsWindow"
+        "HeliumSpaceServiceTest.SplitUnpinStopsIfActivationNotificationClosesItsWindow",
+        "HeliumSpaceServiceTest.*SplitReturnHomeLoadsBothSavedPaneControllers"
       ]
     }
   ],
