@@ -4,7 +4,7 @@ Daniel's requested Arcium work. Deferred entries do not authorize implementation
 
 ## Current work list
 
-The original four suggestions are in implementation and validation:
+The original four suggestions were implemented and validated on macOS 26.6.2 in an isolated Dev app and test profile. Astra reviewed the source and representative screenshots. macOS 27 corner behavior and stacked or fully hidden sidebar geometry still need visual checks on those configurations.
 
 1. Remove the profile selector on launch. Spaces determine the profile.
 2. Allow all glows to be removed, with pure glass and a flat tint option.
