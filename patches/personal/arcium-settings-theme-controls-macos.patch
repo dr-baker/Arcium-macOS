@@ -172,7 +172,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
-@@ -28,3 +28,16 @@ Arcium form hierarchy keeps flat setting
+@@ -28,3 +28,18 @@ Arcium form hierarchy keeps flat setting
  Grouped section headings use the section type style and header accessibility
  traits; glow-editor subheadings use a smaller secondary style distinct from card
  titles. The host retains the package's existing aligned row controls.
@@ -189,6 +189,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
 +the existing host preference, saved values and managed-availability checks.
 +
 +Tint has a direct color well independent of saved glow points. Its optional Space-owned seed uses the native shared palette for contrast and the flat preview.
++
++Full preset validation accepts empty glow recipes and rejects non-finite or out-of-range tint RGB components before export or import.
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift
@@ -272,7 +274,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -8,6 +8,103 @@ import SettingsUI
+@@ -8,6 +8,161 @@ import SettingsUI
  
  @MainActor
  final class ArciumSettingsUIContractTests: XCTestCase {
@@ -330,6 +332,64 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        }
 +    }
 +
++    func testEmptyGlowFullPresetRoundTripsEveryColorMode() throws {
++        let tint = try XCTUnwrap(SettingsRGB(hex: "#2A9ED0"))
++        for mode in SettingsBackdropColorEffect.allCases {
++            var preset = SettingsStylePreset.standard
++            preset.light.backdrop.glows = []
++            preset.dark.backdrop.glows = []
++            preset.light.backdrop.effects = SettingsStyleBackdropEffects(
++                colorEffect: mode, tintColor: tint)
++            preset.dark.backdrop.effects = SettingsStyleBackdropEffects(
++                colorEffect: mode, tintColor: tint)
++            let restored = try SettingsStylePreset.decodeJSON(preset.jsonData())
++            XCTAssertTrue(restored.light.backdrop.glows.isEmpty)
++            XCTAssertTrue(restored.dark.backdrop.glows.isEmpty)
++            XCTAssertEqual(restored.light.backdrop.effects?.colorEffect, mode)
++            XCTAssertEqual(restored.dark.backdrop.effects?.colorEffect, mode)
++            XCTAssertEqual(restored.light.backdrop.effects?.tintColor, tint)
++            XCTAssertEqual(restored.dark.backdrop.effects?.tintColor, tint)
++        }
++    }
++
++    func testFullPresetRejectsInvalidTintRGBComponents() throws {
++        var preset = SettingsStylePreset.standard
++        preset.light.backdrop.effects = SettingsStyleBackdropEffects(
++            colorEffect: .tint, tintColor: SettingsRGB(red: 0.2, green: 0.4, blue: 0.6))
++        let valid = try preset.jsonData()
++        func malformed(_ channel: String, _ value: Any) throws -> Data {
++            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
++            var light = try XCTUnwrap(object["light"] as? [String: Any])
++            var backdrop = try XCTUnwrap(light["backdrop"] as? [String: Any])
++            var effects = try XCTUnwrap(backdrop["effects"] as? [String: Any])
++            var color: [String: Any] = ["red": 0.2, "green": 0.4, "blue": 0.6]
++            color[channel] = value
++            effects["tintColor"] = color
++            backdrop["effects"] = effects
++            light["backdrop"] = backdrop
++            object["light"] = light
++            return try JSONSerialization.data(withJSONObject: object)
++        }
++        for channel in ["red", "green", "blue"] {
++            for value in [-0.1, 1.1] {
++                let data = try malformed(channel, value)
++                XCTAssertThrowsError(try SettingsStylePreset.decodeJSON(data))
++                let decoded = try JSONDecoder().decode(SettingsStylePreset.self, from: data)
++                XCTAssertThrowsError(try decoded.jsonData())
++            }
++        }
++        let decoder = JSONDecoder()
++        decoder.nonConformingFloatDecodingStrategy = .convertFromString(
++            positiveInfinity: "Infinity", negativeInfinity: "-Infinity", nan: "NaN")
++        for value in ["NaN", "Infinity", "-Infinity"] {
++            let data = try malformed("red", value)
++            XCTAssertThrowsError(try SettingsStylePreset.decodeJSON(data))
++            let decoded = try decoder.decode(SettingsStylePreset.self, from: data)
++            XCTAssertThrowsError(try decoded.validate())
++            XCTAssertThrowsError(try decoded.jsonData())
++        }
++    }
++
 +    func testOptionalTintColorRejectsMalformedNativeValues() {
 +        var native = ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: makeConfiguration())
 +        for invalid: Any in ["red", "#12345", "#001122FF", "#GG0011", false, NSNull()] {
@@ -376,7 +436,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      @MainActor
      func testSharedEditorAdapterRoundTripsNativeDictionary() throws {
          let original = makeConfiguration()
-@@ -20,7 +117,7 @@ final class ArciumSettingsUIContractTest
+@@ -20,7 +175,7 @@ final class ArciumSettingsUIContractTest
          XCTAssertEqual(Set(dictionary.keys), Set([
              "enabled", "material", "materialOpacity", "glassTintOpacity",
              "glassStyle", "frostedStyle", "frostedTintStrength", "tintStrength",
@@ -844,3 +904,27 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sourc
          self.enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
          self.material = try container.decodeIfPresent(SettingsBackdropMaterial.self, forKey: .material) ?? .liquidGlass
          self.materialOpacity = try container.decodeIfPresent(Double.self, forKey: .materialOpacity) ?? 0.95
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIStyle/StylePreset/SettingsStylePreset.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIStyle/StylePreset/SettingsStylePreset.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Vendor/SettingsUI/Sources/SettingsUIStyle/StylePreset/SettingsStylePreset.swift
+@@ -187,7 +187,6 @@ public struct SettingsStylePreset: Codab
+         try require((0...24).contains(appearance.edgeShadow.softness), "\(name) shadow softness must be between 0 and 24.")
+ 
+         let backdrop = appearance.backdrop
+-        try require(!backdrop.glows.isEmpty, "\(name) backdrop must contain at least one glow.")
+         try require(backdrop.glows.allSatisfy { !$0.id.isEmpty }, "\(name) glow names must not be empty.")
+         try require(Set(backdrop.glows.map(\.id)).count == backdrop.glows.count, "\(name) glow names must be unique.")
+         for glow in backdrop.glows {
+@@ -203,6 +202,11 @@ public struct SettingsStylePreset: Codab
+         try require((0...1).contains(finish.vignette), "\(name) backdrop vignette must be between 0 and 1.")
+ 
+         if let effects = backdrop.effects {
++            if let color = effects.tintColor {
++                try require([color.red, color.green, color.blue].allSatisfy {
++                    $0.isFinite && (0...1).contains($0)
++                }, "\(name) tint color components must be finite and between 0 and 1.")
++            }
+             try require((0...1).contains(effects.materialOpacity), "\(name) background material opacity must be between 0 and 1.")
+             try require((0...1).contains(effects.glassTintOpacity), "\(name) background glass tint opacity must be between 0 and 1.")
+             try require((0...2).contains(effects.frostedTintStrength), "\(name) background frosted tint strength must be between 0 and 2.")
