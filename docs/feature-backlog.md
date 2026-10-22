@@ -1,6 +1,17 @@
 # Arcium feature backlog
 
-Deferred product ideas. Entries here do not authorize implementation.
+Daniel's requested Arcium work. Deferred entries do not authorize implementation.
+
+## Current work list
+
+The original four suggestions are in implementation and validation:
+
+1. Remove the profile selector on launch. Spaces determine the profile.
+2. Allow all glows to be removed, with pure glass and a flat tint option.
+3. Save split screens as durable Pins and verify their page ownership and lifecycle.
+4. Keep corner rounding concentric throughout the app, especially between the native window and browser content. Honor macOS window policy and account for Golden Gate's corner APIs.
+
+The Peek sign-in concept below is the fifth suggestion and remains deferred.
 
 ## Open sign-in redirects in Peek while preserving the original page
 
