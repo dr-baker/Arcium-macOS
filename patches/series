@@ -52,3 +52,4 @@ personal/arcium-space-editor-sheet-macos.patch
 personal/arcium-titlebar-visibility-macos.patch
 personal/arcium-sidebar-address-macos.patch
 personal/arcium-sidebar-footer-macos.patch
+personal/arcium-concentric-window-corners-macos.patch

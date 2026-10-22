@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "id": "concentric-window-corners",
+  "description": "Compare native window and content corners across page borders, split layouts, sidebar states and fullscreen.",
+  "profile": {"policy": "isolated", "name": "concentric-window-corners"},
+  "feature_flags": [],
+  "tests": [{"target": "//chrome/test:browser_tests", "filters": ["MultiContentsViewBrowserTest.RoundedFrameBorderWidthLayout"]}],
+  "preconditions": [
+    "Launch the exact newly built Dev bundle on the isolated profile and record the macOS version.",
+    "Use a plain page with a bright solid background so its clip is visible against the window frame."
+  ],
+  "steps": [
+    "At browser UI scales 100%, 110% and 125%, compare frame borders 0, 6 and 24 points with the sidebar expanded, collapsed and fully hidden.",
+    "Hide and reveal the top bar, then inspect all four page corners while resizing and zooming the window.",
+    "Create a side-by-side split, then a stacked split. Change the frame border and inspect both outer corners and the divider corners.",
+    "Enter fullscreen with a single page and each split orientation, then exit fullscreen. Repeat with the sidebar hidden.",
+    "Move the window between displays with different backing scales when available.",
+    "On macOS 27, repeat with the user's existing customized window policy when present; do not change global defaults for the test.",
+    "Quit normally and relaunch the same profile, then close its windows and stop the isolated app."
+  ],
+  "observables": [
+    "Window-facing content corners follow the actual native window curve after accounting for their adjacent frame insets. A border wider than that curve produces a square corner without a negative radius.",
+    "Single pages and split outer corners use the same configured frame width. Internal split corners retain the generic rounded style.",
+    "A stacked split gives both top window corners to the top pane and both bottom window corners to the bottom pane.",
+    "Sidebar and top-bar changes retain generic interior corners next to attached chrome. No extra native mask clips page content twice.",
+    "Fullscreen has no inherited window-corner cutout, and exiting fullscreen restores the current native policy without restarting.",
+    "Resizing, zooming, browser scale and display changes leave no stale corner geometry or clipped input targets.",
+    "Saved frame settings survive normal relaunch; closing and quitting produce no new crash report."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}
