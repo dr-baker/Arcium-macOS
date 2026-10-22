@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -884,16 +884,7 @@ final class ArciumSettingsStore: Observa
+@@ -889,16 +889,7 @@ final class ArciumSettingsStore: Observa
          self.pendingChromeAppearance = nil
  
          do {
@@ -20,7 +20,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              presetError = nil
          } catch {
              preset = nil
-@@ -1423,3 +1414,14 @@ private func isValidSharedPalette(_ pale
+@@ -1428,3 +1419,14 @@ private func isValidSharedPalette(_ pale
          && contains(palette.textContrast, 4.5...7) && contains(palette.lightCanvas, 0...1)
          && contains(palette.darkCanvas, 0...1)
  }
@@ -227,9 +227,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      }
  }
  
-@@ -1083,12 +1161,10 @@ private struct AppearanceSettingsPage: V
-     private var backgroundEditor: some View {
-         if let chrome = store.currentChromeAppearance, store.snapshot.appearance.chrome.isAvailable {
+@@ -1103,12 +1181,10 @@ private struct AppearanceSettingsPage: V
+                     .settingsFont(\.caption).foregroundStyle(.secondary)
+             }
              if backgroundMode == .everyday {
 -                SBackdropEditor(
 +                ArciumSpacePaletteEditor(
@@ -286,10 +286,10 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +        XCTAssertEqual(delegate.finishes, 1)
 +    }
 +
-     @MainActor
-     func testSharedEditorAdapterRoundTripsNativeDictionary() throws {
+     func testWindowColorModesRoundTripWithoutChangingSavedRecipe() throws {
          let original = makeConfiguration()
-@@ -1882,3 +1919,11 @@ final class ArciumSettingsUIContractTest
+         for effect in SettingsBackdropColorEffect.allCases {
+@@ -1917,3 +1954,11 @@ final class ArciumSettingsUIContractTest
          }
      }
  }
@@ -545,7 +545,7 @@ Index: src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
  #include "chrome/browser/ui/views/helium/frame_corner_radius.h"
  #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
  #include "chrome/browser/ui/views/tabs/common/root_tab_collection_node.h"
-@@ -491,7 +494,12 @@ void VerticalTabStripRegionView::ShowSpa
+@@ -498,7 +501,12 @@ void VerticalTabStripRegionView::ShowSpa
        base::BindRepeating(&VerticalTabStripBottomContainer::SetThemePreview,
                            base::Unretained(bottom_button_container_.get())),
        base::BindRepeating(&VerticalTabStripRegionView::CloseSpaceEditor,

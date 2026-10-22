@@ -59,23 +59,11 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      title: "Keep sidebar visible in Zen mode",
                      description: "Keep Space and tab navigation visible while Zen mode is active.",
                      enabled: editable("zen_mode_sidebar_pinned"),
-Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
-===================================================================
---- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
-+++ src/chrome/browser/ui/cocoa/arcium_settings_swift/VENDOR_PROVENANCE.md
-@@ -33,3 +33,7 @@ Space theme controls share one accent-an
- use matching segmented controls. Section headings use 18pt type, a restrained
- resolved-accent tint and a fading rule, with stronger neutral styling for
- Increased Contrast. Empty headings do not gain decorative rules.
-+
-+The Address bar group exposes centering, minimal display and the existing top-bar
-+pin together. The pin applies to Fully hidden sidebars and Zen mode; it retains
-+the existing host preference, saved values and managed-availability checks.
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -559,6 +559,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -564,6 +564,7 @@ struct ArciumAppearanceSnapshot: Equatab
      var roundedFrame = false
      var centeredLocationBar = false
      var minimalLocationBar = false
@@ -83,7 +71,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var showHomeButton = false
      var showBackButton = false
      var showForwardButton = false
-@@ -679,6 +680,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -684,6 +685,7 @@ struct ArciumAppearanceSnapshot: Equatab
          roundedFrame = boolean(dictionary["roundedFrame"])
          centeredLocationBar = boolean(dictionary["centeredLocationBar"])
          minimalLocationBar = boolean(dictionary["minimalLocationBar"])
@@ -91,7 +79,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          showHomeButton = boolean(dictionary["showHomeButton"])
          showBackButton = boolean(dictionary["showBackButton"])
          showForwardButton = boolean(dictionary["showForwardButton"])
-@@ -1234,6 +1236,7 @@ final class ArciumSettingsStore: Observa
+@@ -1239,6 +1241,7 @@ final class ArciumSettingsStore: Observa
          case "rounded_frame": snapshot.appearance.roundedFrame
          case "centered_location_bar": snapshot.appearance.centeredLocationBar
          case "minimal_location_bar": snapshot.appearance.minimalLocationBar
@@ -99,7 +87,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          case "show_home_button": snapshot.appearance.showHomeButton
          case "show_back_button": snapshot.appearance.showBackButton
          case "show_forward_button": snapshot.appearance.showForwardButton
-@@ -1255,8 +1258,13 @@ final class ArciumSettingsStore: Observa
+@@ -1260,8 +1263,13 @@ final class ArciumSettingsStore: Observa
      }
  
      func setAppearanceBoolean(_ key: String, value: Bool) {
@@ -182,7 +170,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -459,6 +459,49 @@ final class ArciumSettingsUIContractTest
+@@ -494,6 +494,49 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor
