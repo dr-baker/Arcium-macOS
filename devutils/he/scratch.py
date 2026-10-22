@@ -113,12 +113,18 @@ def pull(paths: Paths, relatives: list[str]) -> list[str]:
     return pulled
 
 
-def created_files_in_parent(paths: Paths, patch: Path) -> list[str]:
-    """Files a scratch patch would create that the shared tree already has."""
+def created_files_in_parent(paths: Paths, patch: Path, previous_patch: bytes = b"") -> list[str]:
+    """New create sections that conflict with existing shared source files."""
     if not is_scratch(paths.build_dir):
         return []
     source_root = parent_src(paths.build_dir)
-    lines = patch.read_text(errors="replace").splitlines()
+    previous = set(_created_files(previous_patch.decode(errors="replace")))
+    return [name for name in _created_files(patch.read_text(errors="replace"))
+            if name not in previous and (source_root / name).exists()]
+
+
+def _created_files(patch: str) -> list[str]:
+    lines = patch.splitlines()
     created = []
     for previous, line in zip(lines, lines[1:]):
         if previous.startswith("--- /dev/null") and line.startswith("+++ "):
@@ -127,8 +133,7 @@ def created_files_in_parent(paths: Paths, patch: Path) -> list[str]:
                 if name.startswith(prefix):
                     name = name[len(prefix):]
                     break
-            if (source_root / name).exists():
-                created.append(name)
+            created.append(name)
     return created
 
 
