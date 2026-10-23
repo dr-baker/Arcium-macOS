@@ -34,7 +34,7 @@ it with the corresponding feature flag. Never force-enable it from Settings.
 | Choose startup and download behavior | `prefs::kRestoreOnStartup`, `prefs::kPromptForDownload` | Already in General; backed by Chromium startup/session and download-target consumers. |
 | Confirm before quitting | `prefs::kConfirmToQuitEnabled` in app local state | Already in General; app-wide, not per profile. |
 | Spaces and default Space | `helium.spaces`, `helium.active_space_id` | The existing Default Space picker chooses the Space for new windows and persistent items; already-open windows keep their assigned Space. No master Spaces switch is exposed. |
-| Favorites and Pins | `kHeliumFavoritesAndPins` feature flag plus `helium.favorites`, `helium.spaces` (including each Space’s `pins` tree), tab/session anchor metadata; legacy `prefs::kHeliumPins` remains registered by `PinTabCodec` | Sidebar actions and the one-time Arc import cover creation/migration. No master disable control is exposed: this feature spans saved data, active tab ownership, session restore, and anchored-navigation behavior. A future off switch needs a defined hide/restore and migration contract that preserves access to every saved record. |
+| Favorites and Pins | `kHeliumFavoritesAndPins` feature flag plus `helium.favorites`, `helium.spaces` (including each Space’s `pins` tree), tab/session anchor metadata; legacy `prefs::kHeliumPins` remains registered by `PinTabCodec` | Sidebar actions and Arc import cover creation and migration. No master disable control is exposed: this feature spans saved data, active tab ownership, session restore, and anchored-navigation behavior. A future off switch needs a defined hide/restore and migration contract that preserves access to every saved record. |
 | Pinned/Favorite link navigation | `HeliumAnchoredNavigationThrottle` and `GetAnchoredPinnedTabHome` | This is a core tab-identity/navigation invariant. Eligible ordinary link clicks can open in Peek while the pinned home stays anchored. The Peek preference controls that diversion; there is no separate “disable linked tabs” switch. |
 | Tab layout and collapsed sidebar | `helium.browser.layout`, `arcium.appearance.collapsed_sidebar_style` | Already in Appearance. The layout picker offers Classic, Compact, Vertical, and Dynamic; the collapse-style picker defaults to Fully hidden (Arc) and retains Icon rail as an option. Applying Arc shortcut defaults selects Fully hidden. Later edits take effect, but Restore previous restores the pre-preset collapse style as well as shortcuts. No new default-collapse preference is needed. |
 | Tab ordering and context menu | `helium.browser.new_tab_next_to_active`, `helium.browser.mru_tab_cycling`, `helium.browser.shift_right_click_context_menu` | Already in Tabs & Spaces. Sequential MRU cycling is separate from explicit Recent Tab shortcuts, which retain their existing preview behavior. |
@@ -48,8 +48,9 @@ it with the corresponding feature flag. Never force-enable it from Settings.
 | Window material, glass, colors, and frame | `helium::kArciumChromeAppearancePref` for profile material and effect enablement; captured Space recipe, chroma dials, and appearance mode; `arcium.appearance.chrome_ui_scale`, sidebar width, rounded frame, frame border | Already in the native Appearance editor. The existing color picker supplies one Space palette throughout chrome, controls, panels, and Settings. The material editor enables/disables decorative effects while retaining the Space recipe. |
 | Split tabs and browser shortcuts | Existing split-tab commands and `BrowserShortcutService` bindings | Keyboard Shortcuts already exposes bindings for split/focus actions. There is no separate Arcium master preference to expose. |
 | Helium Noise fingerprinting protection | `prefs::kHeliumNoiseEnabled` (`helium.noise.enabled`; profile) and per-origin `ContentSettingsType::HELIUM_NOISE` exceptions | Already available in Chromium WebUI at Privacy → Helium Noise (`settings/privacy_page/noise_page.html`). The global default is `true`; turning it off disables the protection globally but leaves site exceptions saved. Page Info can override eligible HTTP(S) sites independently. The Blink `kHeliumNoise` feature flag controls whether the feature is available at all. |
-| Import from Arc | Native General action `open_arc_import`, shared with Welcome; core `ArcImportCoordinator` | One-time operation into the window's current profile. Saved Spaces, Pins, folders, and Favorites default on; History defaults off and requires a new choice after retry or source change. No extensions or credentials. Results require the sidebar receive/save gate; refresh replaces source-owned trees. |
-| Advanced Arc sidebar import mode | Per-import `importArcAsPins_` option in `settings/people_page/import_data_dialog.ts` | The older browser import dialog retains its default `false` mode and resets when the source changes. Off imports tab groups; on imports dormant Pins and Favorites. Native Import from Arc always uses Pins. Neither entry adds a persistent mode preference. |
+| First-run Arc import | `chrome://setup`; `Welcome.svelte`, `ArcSpacesImport` and `ArcImportCoordinator`; completion pref `helium.completed_onboarding` | An explicit Import from Arc click imports all eligible saved Spaces with History off. Start browsing opens an imported Space and completes setup without enabling optional services or granting consent. Configure opens the remaining setup choices. Discovery alone imports nothing. Choose what to import opens the custom picker. |
+| Import from Arc | General action `open_arc_import` opens `chrome://setup/?import=arc`; core `ArcSpacesImport` and `ArcImportCoordinator` | Select one, several, or all Spaces. Attached Arc identities get separate physical browser profiles automatically. Pins, folders, and Favorites are included; History defaults off and resets for every request. Refresh preserves unselected Spaces and independently maintained local records but replaces edits inside selected imported trees. No credentials or extensions. Partial writes and unavailable-inventory warnings remain visible independently of batch success. The Settings route leaves setup completion and service consent unchanged. |
+| Advanced Arc sidebar import mode | Per-import `importArcAsPins_` option in `settings/people_page/import_data_dialog.ts` | The older browser import dialog retains its default `false` mode and resets when the source changes. Off imports tab groups; on imports dormant Pins and Favorites. The Space picker always uses Pins. Neither entry adds a persistent mode preference. |
 
 The current native binding inventory is in
 [`native-settings-bindings.md`](native-settings-bindings.md); it records the
@@ -77,6 +78,20 @@ approximation. Folder presentation stays expanded during the slide, and
 connector painters suppress collapse and expand motion. Runtime acceptance
 currently covers endpoints, without frame, reversal, duration, Reduce Motion,
 or folder-connector proof.
+
+## Arc import acceptance status
+
+The new browser-content Welcome and Space picker still need native acceptance
+against the selected candidate. Earlier native import-dialog results do not
+verify the new flow. Keep compilation, executed automated tests, and visible
+browser behavior separate.
+
+Check one-click import with History off, partial inventory followed by a
+successful batch, retry and Stop, custom selection across attached profiles,
+Settings entry without preference changes, and normal quit/restart persistence.
+After Start browsing, verify onboarding completion without service consent.
+After a failed Open, verify retry and Continue without opening. Source-cached
+icons and imported records must persist in each destination profile.
 
 ## State and ownership rules
 

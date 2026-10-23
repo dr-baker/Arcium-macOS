@@ -115,18 +115,41 @@ focused live-edit sheets. Everyday and Advanced color views are inside the color
 sheet. The native backdrop and shortcut recorder remain app-owned. A Space
 change closes customization; profile guards and captured Space IDs remain in force.
 
-General's **Import from Arc** action opens the same native sheet used by Welcome.
-This is an operation, not a persistent preference. The C++ import coordinator owns
-source discovery, destination identity, progress, cancellation, and results. Swift
-sends an opaque source token and category choices. The saved sidebar always uses
-Pins; History starts off and resets off on retry or source changes. A central
-importer-host guard also prevents an older browser import dialog from writing into
-the destination while a job is running. Closing an unrelated Settings window does
-not close a sheet attached to Welcome.
+General's **Import from Arc** action opens `chrome://setup/?import=arc` in a
+new tab. This standalone route shows only the Space picker. Opening, importing,
+and finishing there do not change setup completion or existing service consent.
+Users select one, several, or all Spaces. The importer creates separate physical
+browser profiles for their attached Arc identities and reuses those destinations
+on later imports. Space names are display labels; opaque identities control
+selection and results.
 
-The [Arc welcome scenario](../devutils/scenarios/arc-welcome.json) covers first run,
-failures, refresh, source-cached icons, and persistence. Its checks must be executed
-against the selected bundle before claiming runtime verification.
+First-run `chrome://setup` starts with **Coming from Arc?**. **Import from Arc**
+imports all eligible Spaces from an explicit click, with History off. Discovery
+alone never starts an import. Successful **Start browsing** opens an imported
+Space and writes only `helium.completed_onboarding`. It does not grant
+`helium.services.user_consented` or accept the service schema. **Configure**
+continues to the services and search choices. **Choose what to import** opens the
+custom picker. Other-browser import and starting fresh retain the regular setup.
+
+Pins, folders, and profile Favorites come with the selected Spaces. History is
+optional in the picker and resets off after selection changes, rereads, and each
+request. Password-manager setup is skipped without service consent or when
+services or extension access are off. Newly created import destinations set
+services and consent off and mark setup complete; reused destinations retain
+those preferences.
+
+Refreshing a selected Space replaces its source-owned saved tree while preserving
+unselected imported Spaces and independently maintained local records. Cancelling
+may leave partial data, which the page reports. An inventory warning stays visible
+through imports and unsuccessful rereads; only a completed clean inventory clears
+it. Foreign-machine identity rejection remains in the parser. Credentials and
+extensions are not imported by this flow. The importer-host guard prevents
+another import from writing into a destination while its current job is running.
+
+These are source contracts. The [Arc welcome scenario](../devutils/scenarios/arc-welcome.json)
+covers first run, failures, refresh, source-cached icons, and persistence. Native
+acceptance of the new browser-content flow is pending. Earlier native-dialog
+results do not verify this flow; execute its checks against the selected bundle.
 
 ## Floating surfaces
 

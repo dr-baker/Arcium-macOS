@@ -1,5 +1,7 @@
 # Arc daily-driver migration
 
+The new browser-content import below is in source and the unreleased preview.2 candidate. Published `0.2.0-preview.1` uses the older dialog described in [Import from Arc](import-from-arc.md#advanced-import). Native acceptance of the new setup flow is still pending.
+
 Use the installed `/Applications/Arcium.app` with the persistent
 `~/Library/Application Support/Arcium` user-data directory and the real macOS
 Keychain. An isolated development profile does not verify this migration.
@@ -9,11 +11,36 @@ Keychain. An isolated development profile does not verify this migration.
 Quit Arc normally first so its sidebar and databases are saved. Snapshot its
 application-support directory and back up Arcium before importing.
 
-In Arcium, open Settings > Import data, choose the Arc source profile, and enable
-Import sidebar as Pins. Repeat for the Arc profiles to refresh. The native
-importer reconciles stable Arc IDs and retains native Pins and Favorites instead
-of turning the sidebar into bookmarks. Verify folder order and saved records
-against the captured `StorableSidebar.json` after a normal quit.
+For a first run, **Import from Arc** brings over all eligible saved Spaces with
+Pins, folders, and Favorites. History stays off. After success, **Start browsing**
+finishes setup without enabling optional services. Use **Configure** if you want
+to review the remaining setup choices.
+
+For a subset, choose **Choose what to import**, or open **Settings > General >
+Import from Arc** later. Select individual Spaces or **Select all**. History is
+optional in this picker and resets off for every request. Opening the picker
+from Settings does not change existing service consent or setup completion.
+
+Arcium creates separate browser profiles for the attached Arc identities and
+reuses those destinations on later imports. A Favorites-only source has its own
+entry. Empty sources have nothing to import. Foreign-machine records do not get
+attached to a local profile with the same directory name.
+
+Use **Check again** in the picker before intentionally refreshing an earlier
+import. Refreshing selected Spaces preserves unselected Spaces and independently
+maintained local records. It replaces the selected saved trees, including edits
+made inside them. Repeating History import can duplicate visits, so leave it off
+for sidebar refreshes.
+
+Check every available Space against the saved sidebar. A successful batch covers
+the selected available data. If the page says some data is unavailable, that
+warning remains after import until a clean reread. A failed or stopped import can
+leave partial data; stopping does not roll it back. Verify folder order and saved
+records after a normal quit and restart.
+
+The older Settings > Import data dialog remains an advanced full-profile path.
+Its Import sidebar as Pins option imports into the current browser profile;
+it does not provide the new picker's automatic destination isolation.
 
 The older `import_arc_spaces.py` creates bookmark trees in separate Chromium
 profiles. It does not populate the native Arcium sidebar. Do not use its default
@@ -33,8 +60,10 @@ printed or passed as command-line arguments.
 
 Supply explicit source-to-target profile mappings. Directory names such as
 `Profile 1` are local identifiers, not evidence that two profiles belong to the
-same account. Check Arc profile metadata and any existing Arc Space Import.json
-mapping first. One Arc profile can map to several established Arcium profiles;
+same account. Check Arc profile metadata and the actual destination created by
+the sidebar importer. Older migration tools may have an `Arc Space Import.json`
+mapping; verify it rather than treating it as the new picker's destination map.
+One Arc profile can map to several established Arcium profiles;
 two Arc identities must not map to one destination.
 
 Preview the import first:
@@ -75,6 +104,10 @@ does not switch accounts. Cookie migration also cannot guarantee every service
 will accept an existing session; some services require a fresh sign-in.
 
 ## Verification
+
+Verify the selected build before replacing a daily browser. The new browser-content
+flow still needs native first-run, import, and restart acceptance; automated tests
+do not establish that those checks passed.
 
 Check exact bundle and profile identity, native sidebar records, password-store
 visibility, and representative authenticated pages. Quit and relaunch normally,
