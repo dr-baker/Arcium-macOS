@@ -1,0 +1,203 @@
+Index: src/chrome/browser/ui/chrome_pages.cc
+===================================================================
+--- src.orig/chrome/browser/ui/chrome_pages.cc
++++ src/chrome/browser/ui/chrome_pages.cc
+@@ -472,12 +472,22 @@ bool ShowAppearanceSettings(BrowserWindo
+   if (!browser) {
+     return false;
+   }
++#if BUILDFLAG(IS_MAC)
++  return arcium_settings::ShowAppearanceForBrowser(browser);
++#else
+   ShowSettingsSubPage(browser, kAppearanceSubPage);
+   return true;
++#endif
+ }
+ 
+ void ShowSettingsSubPage(BrowserWindowInterface* browser,
+                          std::string_view sub_page) {
++#if BUILDFLAG(IS_MAC)
++  if (sub_page == kAppearanceSubPage &&
++      arcium_settings::ShowAppearanceForBrowser(browser)) {
++    return;
++  }
++#endif
+ #if BUILDFLAG(IS_CHROMEOS)
+   ShowSettingsSubPageForProfile(browser->GetProfile(), sub_page);
+ #else
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -36,6 +36,13 @@ public final class ArciumSettingsUIContr
+     public func updateSnapshot(_ snapshot: NSDictionary) {
+         store.updateSnapshot(snapshot)
+     }
++
++    // An explicit native deep link; ordinary snapshots keep navigation intact.
++    @objc(selectAppearanceCategory)
++    public func selectAppearanceCategory() -> Bool {
++        store.selectCategory(.appearance)
++        return store.selectedCategory == .appearance
++    }
+ }
+ 
+ @objc public protocol ArciumSpaceThemeEditorDelegate: AnyObject {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumAppearanceDeepLinkTests.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumAppearanceDeepLinkTests.swift
+@@ -0,0 +1,63 @@
++// Copyright 2026 The Helium Authors
++// SPDX-License-Identifier: GPL-3.0-only
++import AppKit
++import Foundation
++import XCTest
++@testable import ArciumSettingsUI
++
++@MainActor
++final class ArciumAppearanceDeepLinkTests: XCTestCase {
++    func testFacadeExposesExplicitAppearanceSelectionWithoutPreferenceWrites() {
++        let delegate = Delegate()
++        let controller = ArciumSettingsUIController(snapshot: snapshot(), delegate: delegate)
++        XCTAssertTrue(controller.responds(to: NSSelectorFromString("selectAppearanceCategory")))
++        XCTAssertTrue(controller.selectAppearanceCategory())
++        XCTAssertEqual(delegate.actions, ["cancel_recording"])
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    func testOrdinarySnapshotKeepsExplicitAppearanceSelection() {
++        let delegate = Delegate()
++        let controller = ArciumSettingsUIController(snapshot: snapshot(), delegate: delegate)
++        XCTAssertTrue(controller.selectAppearanceCategory())
++        controller.updateSnapshot(snapshot(spaceID: "space-b"))
++        XCTAssertTrue(controller.selectAppearanceCategory())
++        // A reset to General during update would require another navigation
++        // and send another cancel_recording action here.
++        XCTAssertEqual(delegate.actions, ["cancel_recording"])
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    func testStoreUpdatesPreserveOrdinaryCategoryAndCapturedSpace() {
++        let delegate = Delegate()
++        let store = ArciumSettingsStore(snapshot: snapshot(), delegate: delegate,
++                                        presetBundleURL: nil)
++        store.selectCategory(.shortcuts)
++        store.updateSnapshot(snapshot(spaceID: "space-b"))
++        XCTAssertEqual(store.selectedCategory, .shortcuts)
++        XCTAssertEqual(store.snapshot.appearance.spacePalette.id, "space-b")
++        XCTAssertEqual(delegate.actions, ["cancel_recording"])
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    private func snapshot(spaceID: String = "space-a") -> NSDictionary {
++        ["available": true, "appearance": [
++            "availableSection": true,
++            "spacePalette": ["id": spaceID, "name": "Example", "available": true]
++        ]]
++    }
++
++    @MainActor
++    private final class Delegate: NSObject, ArciumSettingsUIDelegate {
++        var actions: [String] = []
++        var settings: [String] = []
++
++        func settingChanged(key: String, value: Any) {
++            settings.append(key)
++        }
++
++        func actionInvoked(name: String, payload: NSDictionary) {
++            actions.append(name)
++        }
++    }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.h
+@@ -21,6 +21,10 @@ namespace arcium_settings {
+ bool ShowForProfile(Profile* profile);
+ bool ShowForBrowser(BrowserWindowInterface* browser);
+ 
++// Selects this browser's Space and the Appearance category before presenting.
++// Returns false when the exact target or native category cannot be opened.
++bool ShowAppearanceForBrowser(BrowserWindowInterface* browser);
++
+ // Edits a local Space draft; it never writes profile or Space preferences.
+ // The caller keeps the returned closer until the compact editor closes.
+ base::ScopedClosureRunner ShowSpaceThemeDraft(
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -654,6 +654,7 @@ void SetSettingsWindowGlassState(NSWindo
+                      commandID:(int)commandID
+               previousShortcut:(NSString*)previousShortcut;
+ - (BOOL)selectAppearanceSpace:(NSString*)spaceID;
++- (BOOL)selectAppearanceCategory;
+ - (void)applyArcDefaults;
+ - (void)restorePreviousShortcuts;
+ - (void)resetAllShortcuts;
+@@ -714,6 +715,19 @@ void SettingsModelProfileWillBeDestroyed
+   return YES;
+ }
+ 
++- (BOOL)selectAppearanceCategory {
++  if (profile_destroying_ || !settings_ui_controller_) {
++    return NO;
++  }
++  SEL selector = NSSelectorFromString(@"selectAppearanceCategory");
++  if (![settings_ui_controller_ respondsToSelector:selector]) {
++    return NO;
++  }
++  using SelectAppearance = BOOL (*)(id, SEL);
++  return reinterpret_cast<SelectAppearance>(objc_msgSend)(settings_ui_controller_,
++                                                         selector);
++}
++
+ - (instancetype)initWithProfile:(Profile*)profile {
+   if (!profile) {
+     return nil;
+@@ -2969,7 +2983,9 @@ base::ScopedClosureRunner ShowSpaceTheme
+ }
+ 
+ 
+-bool ShowForSpace(Profile* profile, std::string_view space_id) {
++bool ShowForSpace(Profile* profile,
++                  std::string_view space_id,
++                  bool select_appearance = false) {
+   if (!profile) {
+     return false;
+   }
+@@ -2992,6 +3008,9 @@ bool ShowForSpace(Profile* profile, std:
+           base::SysUTF8ToNSString(space_id)]) {
+     return false;
+   }
++  if (select_appearance && ![controller selectAppearanceCategory]) {
++    return false;
++  }
+   [controller showWindow:nil];
+   return true;
+ }
+@@ -3011,6 +3030,21 @@ bool ShowForBrowser(BrowserWindowInterfa
+   return ShowForSpace(profile, id);
+ }
+ 
++bool ShowAppearanceForBrowser(BrowserWindowInterface* browser) {
++  if (!browser) {
++    return false;
++  }
++  Profile* profile = browser->GetProfile()->GetOriginalProfile();
++  auto* spaces = helium::HeliumSpaceServiceFactory::GetForProfile(profile);
++  if (!spaces) {
++    return false;
++  }
++  const auto id =
++      spaces->GetSpaceIdForBrowser(browser->GetBrowserForMigrationOnly());
++  // Never fall back to the model's previous Space for an explicit deep link.
++  return !id.empty() && ShowForSpace(profile, id, true);
++}
++
+ bool ShowExistingWindow() {
+   for (ArciumSettingsWindowController* controller in Controllers().allValues) {
+     if (controller.window.isKeyWindow || controller.window.isMainWindow) {

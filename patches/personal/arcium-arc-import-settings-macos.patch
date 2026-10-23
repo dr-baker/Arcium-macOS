@@ -1,0 +1,50 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -539,6 +539,16 @@ private struct GeneralSettingsPage: View
+                 }
+ 
+ 
++                Section("Import") {
++                    SLabeledControl("Import from Arc", description: "Spaces, Pins, and Favorites",
++                                    alignment: .trailing) {
++                        Button("Import…") {
++                            store.actionInvoked(name: "open_arc_import")
++                        }
++                        .buttonStyle(.settings(.secondary))
++                        .accessibilityLabel("Import from Arc")
++                    }
++                }
+ 
+                 Button("More settings…") {
+                     store.actionInvoked(name: "open_advanced")
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -46,6 +46,8 @@
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
+ #include "chrome/browser/ui/helium/helium_space_service_factory.h"
++#include "chrome/browser/ui/navigator/browser_navigator.h"
++#include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+@@ -2396,6 +2398,15 @@ void SettingsModelProfileWillBeDestroyed
+     [self resetAllShortcuts];
+   } else if ([name isEqualToString:@"show_unavailable_arc_shortcuts"]) {
+     [self showUnavailableArcShortcuts];
++  } else if ([name isEqualToString:@"open_arc_import"]) {
++    Profile* profile = model_->profile();
++    if (profile && profile->IsRegularProfile() && !profile->IsOffTheRecord()) {
++      NavigateParams params(profile, GURL("chrome://setup/?import=arc"),
++                            ui::PAGE_TRANSITION_AUTO_BOOKMARK);
++      params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++      params.window_action = NavigateParams::WindowAction::kShowWindow;
++      Navigate(&params);
++    }
+   } else if ([name isEqualToString:@"open_advanced"]) {
+     Profile* profile = model_ ? model_->profile() : nullptr;
+     if (profile) {

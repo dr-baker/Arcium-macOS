@@ -44,6 +44,20 @@ def tracked_clean(repo: Path) -> bool:
     return result.returncode == 0
 
 
+def verify_credits(out: Path) -> None:
+    """Reject component builds that still ship Chromium's sample credits."""
+    credits = out / 'gen/components/resources/about_credits.html'
+    try:
+        text = credits.read_text(encoding='utf-8')
+    except OSError as error:
+        raise RuntimeError('build full credits before packaging the preview') from error
+    if ('generate_about_credits=true' in text or
+            any(notice not in text for notice in
+                ('Helium', 'Chromium', 'GNU GENERAL PUBLIC LICENSE'))):
+        raise RuntimeError('preview credits are incomplete; set generate_about_credits=true '
+                           'and rebuild chrome before packaging')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, required=True)
@@ -123,6 +137,7 @@ def main() -> int:
     if timestamps.pending(paths) or quilt.applied(paths.src) != quilt.read_list(paths.catalog / 'series.merged'):
         parser.error('complete the guarded patch replay before packaging')
     receipt = builds.require_completed(out, 'daily')
+    verify_credits(out)
     identity = args.identity or signing_identity()
     if not identity.startswith('Developer ID Application:'):
         parser.error('a Developer ID Application identity is required')

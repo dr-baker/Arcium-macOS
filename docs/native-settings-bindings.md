@@ -29,8 +29,8 @@ implementation history (on the `archive/dated-docs-2026-10-11` branch).
 | Show Extensions button | `arcium.appearance.sidebar_extensions_drawer` / `kSidebarExtensionsDrawerEnabledPref`; profile boolean, default `false` | The sidebar navigation feature patch connects the optional header button to the existing Extensions menu. It is independent of `prefs::kShowExtensionsButton`. |
 | Use a rounded browser frame | `prefs::kHeliumRoundedFrame`; profile | `MultiContentsView` reads it, observes changes, and updates the frame/layout (`chrome/browser/ui/views/frame/multi_contents_view.cc:165-181,966-973`). |
 | Center the location bar | `prefs::kHeliumCenteredLocationBar`; profile | `ToolbarView` reads the saved value for standard toolbar layout. Sidebar navigation makes the row unavailable because the address-bar row has a fixed position; it retains the saved value. |
-| Window chrome color scheme | Captured Space `theme.mode`: Auto, Light, Dark | `ArciumSettingsModel::SetAppearanceMode` updates the target Space's native frame, sidebar and toolbar mode. Auto follows macOS. |
-| Websites and content color scheme | Captured Space `theme.web_mode`: Auto (`auto`, follows window chrome), Light, Dark | `ArciumSettingsModel::SetWebAppearanceMode` sets the preferred color scheme sent to websites and used by New Tab and Settings. The NTP-specific provider helper selects the same Space palette in the requested mode; native Settings applies that role pair to its detail canvas and sheets. Its frame, sidebar and header retain chrome mode. Spaces policy controls editability independently of browser-theme policy. |
+| Window chrome color scheme | Captured Space `theme.mode`: System, Light, Dark | `ArciumSettingsModel::SetAppearanceMode` updates the target Space's native frame, sidebar and toolbar mode. System follows macOS. The stored `auto` value remains compatible. |
+| Websites and content color scheme | Captured Space `theme.web_mode`: System (`auto`, follows macOS independently), Light, Dark | `ArciumSettingsModel::SetWebAppearanceMode` sets the preferred color scheme sent to websites and used by New Tab and Settings. System does not inherit the window chrome choice. The shared content provider helper selects the same Space palette in the requested mode; native Settings applies that role pair to its detail canvas and sheets. Its frame, sidebar and header retain chrome mode. Spaces policy controls editability independently of browser-theme policy. |
 | Floating surface preset and values | `arcium.appearance.surface_set` / `helium::kArciumSurfaceSetPref`; original profile string, default `glass` (`refractive`, `quiet`, `solid`, `custom`); `arcium.appearance.surface_tuning` / `helium::kArciumSurfaceTuningPref`, the Custom values | Resolved by `helium::ResolveSurfaceStyle` for panels, controls, and scrims. See [Floating surfaces](#floating-surfaces). |
 | Text surface override | `arcium.appearance.command_bar` / `arcium::kCommandBarAppearancePref`; original profile integer, default `2` for Automatic, `0` for Solid, `1` for Glass | `arcium::CommandBarMaterial` observes this choice, the surface style, and the browser glass dictionary for the command bar, its results, and floating controls. Containers resolve their own group independently. Live changes preserve the input, focus, selection, and geometry; managed or missing preferences disable the native Settings row. |
 | Use a minimal location bar | `prefs::kHeliumMinimalLocationBar`; profile | `ChromeOmniboxClient::ShouldUseMinimalLocationBar` reads it, and `OmniboxViewViews` applies steady-state alignment. Sidebar navigation uses the real location bar, so this setting still applies. |
@@ -114,6 +114,42 @@ and toolbar controls visible. Space colors/backdrop and command-bar styling open
 focused live-edit sheets. Everyday and Advanced color views are inside the color
 sheet. The native backdrop and shortcut recorder remain app-owned. A Space
 change closes customization; profile guards and captured Space IDs remain in force.
+
+General's **Import from Arc** action opens `chrome://setup/?import=arc` in a
+new tab. This standalone route shows only the Space picker. Opening, importing,
+and finishing there do not change setup completion or existing service consent.
+Users select one, several, or all Spaces. The importer creates separate physical
+browser profiles for their attached Arc identities and reuses those destinations
+on later imports. Space names are display labels; opaque identities control
+selection and results.
+
+First-run `chrome://setup` starts with **Coming from Arc?**. **Import from Arc**
+imports all eligible Spaces from an explicit click, with History off. Discovery
+alone never starts an import. Successful **Start browsing** opens an imported
+Space and writes only `helium.completed_onboarding`. It does not grant
+`helium.services.user_consented` or accept the service schema. **Configure**
+continues to the services and search choices. **Choose what to import** opens the
+custom picker. Other-browser import and starting fresh retain the regular setup.
+
+Pins, folders, and profile Favorites come with the selected Spaces. History is
+optional in the picker and resets off after selection changes, rereads, and each
+request. Password-manager setup is skipped without service consent or when
+services or extension access are off. Newly created import destinations set
+services and consent off and mark setup complete; reused destinations retain
+those preferences.
+
+Refreshing a selected Space replaces its source-owned saved tree while preserving
+unselected imported Spaces and independently maintained local records. Cancelling
+may leave partial data, which the page reports. An inventory warning stays visible
+through imports and unsuccessful rereads; only a completed clean inventory clears
+it. Foreign-machine identity rejection remains in the parser. Credentials and
+extensions are not imported by this flow. The importer-host guard prevents
+another import from writing into a destination while its current job is running.
+
+These are source contracts. The [Arc welcome scenario](../devutils/scenarios/arc-welcome.json)
+covers first run, failures, refresh, source-cached icons, and persistence. Native
+acceptance of the new browser-content flow is pending. Earlier native-dialog
+results do not verify this flow; execute its checks against the selected bundle.
 
 ## Floating surfaces
 
@@ -508,7 +544,7 @@ also closes the sheet and invalidates callbacks.
 
 Draft and persisted editors share the packaged preset, native resolved palette
 roles, strict configuration codec and palette view. Website/content mode
-chooses the sheet scheme, with Auto following chrome; contrast and policy
+chooses the sheet scheme, with System following macOS independently of chrome; contrast and policy
 rendering bypasses retain native colors.
 
 ### Sidebar footer
@@ -539,4 +575,3 @@ The forms retain icon choices in their draft until Create/Save. The direct
 popover saves only the selected icon after the bubble closes, resolving the
 Space by profile path and Space ID. It retains another profile while editing,
 closes before its anchor is replaced and cancels when the target disappears.
-
