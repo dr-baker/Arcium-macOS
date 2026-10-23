@@ -979,7 +979,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/helium/arcium_settings_model.cc
 +++ src/chrome/browser/ui/helium/arcium_settings_model.cc
-@@ -965,6 +965,7 @@ void ArciumSettingsModel::OnProfilePrefe
+@@ -1125,6 +1125,7 @@ void ArciumSettingsModel::OnProfilePrefe
    if (surface_preview_ &&
        (name == helium::kArciumSurfaceSetPref ||
         name == helium::kArciumSurfaceTuningPref ||

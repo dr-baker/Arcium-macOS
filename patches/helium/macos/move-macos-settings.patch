@@ -1,6 +1,6 @@
 --- a/chrome/browser/resources/settings/appearance_page/appearance_page.html
 +++ b/chrome/browser/resources/settings/appearance_page/appearance_page.html
-@@ -334,16 +334,6 @@
+@@ -328,16 +328,6 @@
                label="$i18n{showZoomIndicator}">
            </settings-toggle-button>
          </div>

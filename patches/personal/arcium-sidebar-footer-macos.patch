@@ -1,6 +1,6 @@
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -545,6 +545,14 @@ struct ArciumSpacePaletteSnapshot: Equat
+@@ -557,6 +557,14 @@ struct ArciumSpacePaletteSnapshot: Equat
  
  struct ArciumAppearanceSnapshot: Equatable {
      static let surfaceSetValues = ["glass", "refractive", "quiet", "solid", "custom"]
@@ -15,7 +15,7 @@
      static let defaultCollapsedSidebarStyleOptions = [
          ArciumChoice(value: 0, label: "Icon rail"),
          ArciumChoice(value: 1, label: "Fully hidden (Arc)")
-@@ -616,6 +624,10 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -628,6 +636,10 @@ struct ArciumAppearanceSnapshot: Equatab
      var canEditSurfaceTuning: Bool {
          surfaceTuningAvailable && canEditSurfaceSet
      }
@@ -26,7 +26,7 @@
      var collapsedSidebarStyle = 1
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
-@@ -656,6 +668,16 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -668,6 +680,16 @@ struct ArciumAppearanceSnapshot: Equatab
          surfaceTuningAvailable = strictBoolean(dictionary["surfaceTuningAvailable"]) ?? false
          commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
          commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
@@ -43,7 +43,7 @@
          collapsedSidebarStyle = min(max(integerOptional(dictionary["collapsedSidebarStyle"]) ?? 1, 0), 1)
          let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
              .filter { (0...1).contains($0.value) }
-@@ -1080,6 +1102,13 @@ final class ArciumSettingsStore: Observa
+@@ -1092,6 +1114,13 @@ final class ArciumSettingsStore: Observa
          }
      }
  
@@ -59,7 +59,7 @@
                !snapshot.appearance.collapsedSidebarStyleManaged,
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -907,6 +907,14 @@ private struct AppearanceSettingsPage: V
+@@ -917,6 +917,14 @@ private struct AppearanceSettingsPage: V
                      help: SHelp(description: "Resize the expanded sidebar in this profile’s browser windows. Its displayed width follows Browser UI scale; webpage zoom stays unchanged."),
                      commitMode: .onDragEnd)
                  .disabled(!store.snapshot.appearance.sidebarWidthAvailable || store.snapshot.appearance.sidebarWidthManaged)
@@ -76,7 +76,7 @@
                      set: { store.setCollapsedSidebarStyle($0) }
 --- a/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -956,6 +956,62 @@ final class ArciumSettingsUIContractTest
+@@ -1111,6 +1111,62 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor
