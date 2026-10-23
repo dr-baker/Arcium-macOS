@@ -1,0 +1,672 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -571,6 +571,7 @@ struct ArciumAppearanceSnapshot: Equatab
+     ]
+ 
+     var mode = "system"
++    var systemMode = "system"
+     var modeManaged = false
+     var modeAvailable = true
+     var webMode = "system"
+@@ -706,6 +707,7 @@ struct ArciumAppearanceSnapshot: Equatab
+         chromeUIScaleAvailable = strictBoolean(dictionary["chromeUIScaleAvailable"]) ?? false
+         chromeUIScaleManaged = strictBoolean(dictionary["chromeUIScaleManaged"]) ?? false
+         mode = string(dictionary["mode"]) ?? "system"
++        systemMode = string(dictionary["systemMode"]) ?? "system"
+         modeManaged = boolean(dictionary["modeManaged"])
+         modeAvailable = boolean(dictionary["modeAvailable"], defaultValue: false)
+         webMode = string(dictionary["webMode"]) ?? "system"
+@@ -874,6 +876,24 @@ struct ArciumSettingsSnapshot: Equatable
+ }
+ 
+ @MainActor
++// The bridge publishes actual native System mode separately from window chrome.
++// Older snapshots fall back to NSApp, which is not forced by NSWindow.appearance.
++func arciumContentColorScheme(_ mode: String, systemMode: String) -> ColorScheme {
++    switch mode.lowercased() {
++    case "light": return .light
++    case "dark": return .dark
++    default:
++        switch systemMode.lowercased() {
++        case "light": return .light
++        case "dark": return .dark
++        default:
++            return NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
++                ? .dark : .light
++        }
++    }
++}
++
++@MainActor
+ final class ArciumSettingsStore: ObservableObject {
+     @Published private(set) var snapshot: ArciumSettingsSnapshot
+     /// The last typed chrome value sent to the native host. The host applies a
+@@ -1207,8 +1227,9 @@ final class ArciumSettingsStore: Observa
+         settingChanged(key: "space_web_mode", value: ["spaceID": target.id, "mode": value])
+     }
+ 
+-    func webColorScheme(systemColorScheme: ColorScheme) -> ColorScheme {
+-        webAppearanceMode().colorScheme ?? appearanceMode().colorScheme ?? systemColorScheme
++    func webColorScheme() -> ColorScheme {
++        arciumContentColorScheme(snapshot.appearance.webMode,
++                                 systemMode: snapshot.appearance.systemMode)
+     }
+ 
+     func styleAppearance(systemColorScheme: ColorScheme) -> SettingsStyleAppearance? {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -53,6 +53,8 @@ final class ArciumSpaceThemeDraft: Obser
+     @Published private(set) var palette = ArciumSpacePaletteSnapshot()
+     @Published private(set) var mode = "system"
+     @Published private(set) var webMode = "system"
++    @Published private(set) var systemMode = "system"
++    var contentColorScheme: ColorScheme { arciumContentColorScheme(webMode, systemMode: systemMode) }
+     weak var delegate: ArciumSpaceThemeEditorDelegate?
+     let preset: SettingsStylePreset?
+ 
+@@ -69,6 +71,7 @@ final class ArciumSpaceThemeDraft: Obser
+         palette = ArciumSpacePaletteSnapshot(snapshot["spacePalette"] as? [String: Any] ?? [:])
+         mode = snapshot["mode"] as? String ?? "system"
+         webMode = snapshot["webMode"] as? String ?? "system"
++        systemMode = snapshot["systemMode"] as? String ?? "system"
+     }
+ 
+     func setConfiguration(_ next: SettingsBackdropConfiguration) {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -34,7 +34,7 @@ struct ArciumSettingsRootView: View {
+         } else if let preset = store.preset,
+            let style = store.styleAppearance(systemColorScheme: systemColorScheme) {
+             let theme = store.snapshot.appearance.spacePalette.theme(fallback: style.theme(brand: preset.brand))
+-            let contentScheme = store.webColorScheme(systemColorScheme: systemColorScheme)
++            let contentScheme = store.webColorScheme()
+             let contentStyle = contentScheme == .dark ? preset.dark : preset.light
+             let contentTheme = store.snapshot.appearance.spacePalette.theme(
+                 fallback: contentStyle.theme(brand: preset.brand), colorScheme: contentScheme)
+@@ -303,7 +303,6 @@ private struct ArciumSpacePaletteEditor:
+ 
+ struct ArciumSpaceThemeDraftView: View {
+     @ObservedObject var draft: ArciumSpaceThemeDraft
+-    @Environment(\.colorScheme) private var systemScheme
+ 
+     private func scheme(_ mode: String) -> ColorScheme? {
+         switch mode { case "light": .light; case "dark": .dark; default: nil }
+@@ -311,7 +310,7 @@ struct ArciumSpaceThemeDraftView: View {
+ 
+     var body: some View {
+         if let preset = draft.preset, draft.configuration != nil {
+-            let colorScheme = scheme(draft.webMode) ?? scheme(draft.mode) ?? systemScheme
++            let colorScheme = draft.contentColorScheme
+             let style = colorScheme == .dark ? preset.dark : preset.light
+             let theme = draft.palette.theme(fallback: style.theme(brand: preset.brand), colorScheme: colorScheme)
+             ArciumLiveSettingsSheet(title: "Space theme", onClose: { draft.finish() }) {
+@@ -787,24 +786,24 @@ private struct AppearanceSettingsPage: V
+             Section("Color scheme") {
+                 SLabeledControl("Window chrome") {
+                     SSegmentedControl("Window chrome appearance", options: [
+-                        (value: SettingsAppearance.system, label: "Auto"),
++                        (value: SettingsAppearance.system, label: "System"),
+                         (value: .light, label: "Light"),
+                         (value: .dark, label: "Dark")
+                     ], selection: appearanceBinding)
+                     .frame(maxWidth: .infinity, alignment: .trailing)
+                 }
+-                .help("Window frame, sidebar and toolbar. Auto follows macOS.")
++                .help("Window frame, sidebar and toolbar. System follows macOS.")
+                 .disabled(!store.snapshot.appearance.modeAvailable || store.snapshot.appearance.modeManaged)
+                 .accessibilityIdentifier("space-chrome-mode")
+                 SLabeledControl("Websites and content") {
+                     SSegmentedControl("Websites and content appearance", options: [
+-                        (value: SettingsAppearance.system, label: "Auto"),
++                        (value: SettingsAppearance.system, label: "System"),
+                         (value: .light, label: "Light"),
+                         (value: .dark, label: "Dark")
+                     ], selection: webAppearanceBinding)
+                     .frame(maxWidth: .infinity, alignment: .trailing)
+                 }
+-                .help("Preferred website color scheme. Also used by New Tab and Settings. Auto follows window chrome.")
++                .help("Preferred website color scheme. Also used by New Tab and Settings. System follows macOS independently of window chrome.")
+                 .disabled(!store.snapshot.appearance.webModeAvailable || store.snapshot.appearance.webModeManaged)
+                 .accessibilityIdentifier("space-web-mode")
+             }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -2069,11 +2069,11 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     private func snapshot(spaceID: String = "space-a", webMode: String = "system",
+-                          interfaceMode: String = "dark",
++                          interfaceMode: String = "dark", systemMode: String = "light",
+                           available: Bool = true, managed: Bool = false) -> NSDictionary {
+         NSDictionary(dictionary: ["available": true, "appearance": [
+             "availableSection": true, "mode": interfaceMode, "modeAvailable": true,
+-            "modeManaged": false, "webMode": webMode,
++            "modeManaged": false, "webMode": webMode, "systemMode": systemMode,
+             "webModeAvailable": available, "webModeManaged": managed,
+             "spacePalette": ["id": spaceID, "name": "Space", "available": true]
+         ]])
+@@ -2134,19 +2134,43 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
+-    func testWebModeFollowsResolvedChromeRatherThanSystem() {
++    func testWebSystemFollowsNativeSnapshotIndependentlyOfChrome() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: snapshot(), delegate: delegate)
+-        XCTAssertEqual(store.webColorScheme(systemColorScheme: .light), .dark)
+-        store.updateSnapshot(snapshot(webMode: "light"))
+-        XCTAssertEqual(store.webColorScheme(systemColorScheme: .dark), .light)
+-        store.updateSnapshot(snapshot(webMode: "dark", interfaceMode: "light"))
+-        XCTAssertEqual(store.webColorScheme(systemColorScheme: .light), .dark)
+-        store.updateSnapshot(snapshot(interfaceMode: "light"))
+-        XCTAssertEqual(store.webColorScheme(systemColorScheme: .dark), .light)
+-        store.updateSnapshot(snapshot(interfaceMode: "system"))
+-        XCTAssertEqual(store.webColorScheme(systemColorScheme: .light), .light)
+-        XCTAssertEqual(store.webColorScheme(systemColorScheme: .dark), .dark)
++        XCTAssertEqual(store.appearanceMode(), .dark)
++        XCTAssertEqual(store.webColorScheme(), .light)
++        store.updateSnapshot(snapshot(interfaceMode: "light", systemMode: "dark"))
++        XCTAssertEqual(store.appearanceMode(), .light)
++        XCTAssertEqual(store.webColorScheme(), .dark)
++        store.updateSnapshot(snapshot(webMode: "light", interfaceMode: "dark", systemMode: "dark"))
++        XCTAssertEqual(store.webColorScheme(), .light)
++        store.updateSnapshot(snapshot(webMode: "dark", interfaceMode: "light", systemMode: "light"))
++        XCTAssertEqual(store.webColorScheme(), .dark)
++        store.updateSnapshot(snapshot(interfaceMode: "system", systemMode: "dark"))
++        XCTAssertEqual(store.webColorScheme(), .dark)
++        store.updateSnapshot(snapshot(interfaceMode: "system", systemMode: "light"))
++        XCTAssertEqual(store.webColorScheme(), .light)
++        XCTAssertTrue(delegate.settings.isEmpty, "native snapshot changes never write preferences")
++    }
++
++    func testDraftSystemRefreshDoesNotFollowChromeOrRepublishEdits() {
++        let delegate = DraftDelegate()
++        let configuration = makeConfiguration()
++        func envelope(_ systemMode: String, webMode: String = "system") -> NSDictionary {
++            ["configuration": ArciumChromeAppearanceAdapter.dictionaryRepresentation(for: configuration),
++             "spacePalette": Self.spacePaletteFixture(id: "space-draft"),
++             "mode": "dark", "webMode": webMode, "systemMode": systemMode]
++        }
++        let draft = ArciumSpaceThemeDraft(snapshot: envelope("light"), delegate: delegate)
++        XCTAssertEqual(draft.contentColorScheme, .light)
++        draft.updateSnapshot(envelope("dark"))
++        XCTAssertEqual(draft.contentColorScheme, .dark)
++        XCTAssertEqual(draft.mode, "dark")
++        XCTAssertEqual(draft.webMode, "system")
++        draft.updateSnapshot(envelope("dark", webMode: "light"))
++        XCTAssertEqual(draft.contentColorScheme, .light)
++        XCTAssertTrue(delegate.configurations.isEmpty)
++        XCTAssertEqual(delegate.finishes, 0)
+     }
+ 
+     @MainActor
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -21,6 +21,7 @@
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
++#include "base/scoped_observation.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/values.h"
+ #include "chrome/browser/prefs/session_startup_pref.h"
+@@ -36,16 +37,16 @@
+ #include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
+ #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
+ #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
++#include "chrome/browser/ui/color/arcium_space_color_mixer.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/helium/arcium_settings_model.h"
+-#include "chrome/browser/ui/helium/space_palette.h"
+-#include "chrome/browser/ui/color/arcium_space_color_mixer.h"
+ #include "chrome/browser/ui/helium/arcium_settings_prefs.h"
+ #include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
+ #include "chrome/browser/ui/helium/helium_layout_state_controller.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
+ #include "chrome/browser/ui/helium/helium_space_service_factory.h"
++#include "chrome/browser/ui/helium/space_palette.h"
+ #include "chrome/browser/ui/navigator/browser_navigator.h"
+ #include "chrome/browser/ui/navigator/browser_navigator_params.h"
+ #include "chrome/browser/ui/tabs/features.h"
+@@ -61,6 +62,7 @@
+ #include "third_party/blink/public/common/features.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/native_theme/native_theme.h"
++#include "ui/native_theme/native_theme_observer.h"
+ #include "ui/views/widget/widget.h"
+ 
+ NSString* const kArciumSettingsUIControllerClassName =
+@@ -1432,12 +1434,16 @@ void SettingsModelProfileWillBeDestroyed
+     @"mode" : AppearanceModeString(appearance_value),
+     @"modeManaged" : @(appearance_managed),
+     @"modeAvailable" : @(appearance_available),
+-    @"webMode" : AppearanceModeString(model ? model->GetWebAppearanceMode() : 0),
++    @"webMode" :
++        AppearanceModeString(model ? model->GetWebAppearanceMode() : 0),
++    @"systemMode" :
++        AppearanceModeString(model ? model->GetSystemAppearanceMode() : 0),
+     @"webModeAvailable" : @(model && model->IsWebAppearanceAvailable()),
+     @"webModeManaged" : @(!model || model->IsWebAppearanceManaged()),
+     @"palette" : shared_palette,
+-    @"spacePalette" : NSDictionaryFromBaseDict(
+-        model ? model->GetSpacePalette() : base::DictValue()) ?: @{},
++    @"spacePalette" : NSDictionaryFromBaseDict(model ? model->GetSpacePalette()
++                                                     : base::DictValue())
++        ?: @{},
+     @"chrome" : chrome_appearance,
+     @"chromeUIScale" : @(chrome_ui_scale),
+     @"chromeUIScaleIsDefault" : @(chrome_ui_scale_is_default),
+@@ -1457,8 +1463,8 @@ void SettingsModelProfileWillBeDestroyed
+     @"surfaceSetManaged" : @(surface_set_managed),
+     @"surfaceTuning" : NSDictionaryFromBaseDict(
+         model ? model->GetSurfaceTuning()
+-              : helium::SerializeSurfaceTuning(helium::PresetSurfaceTuning(
+-                    helium::SurfaceSet::kGlass))),
++              : helium::SerializeSurfaceTuning(
++                    helium::PresetSurfaceTuning(helium::SurfaceSet::kGlass))),
+     @"surfaceTuningAvailable" :
+         @(model && model->HasPreference(helium::kArciumSurfaceTuningPref) &&
+           !model->IsManaged(helium::kArciumSurfaceTuningPref)),
+@@ -1480,12 +1486,12 @@ void SettingsModelProfileWillBeDestroyed
+     @"collapsedSidebarStyleManaged" : @(collapsed_sidebar_style_managed),
+     @"sidebarFooterAction" : @(sidebar_footer_action),
+     @"sidebarFooterActionOptions" : @[
+-      @{ @"value" : @0, @"label" : @"None" },
+-      @{ @"value" : @1, @"label" : @"Extensions" },
+-      @{ @"value" : @2, @"label" : @"Home" },
+-      @{ @"value" : @3, @"label" : @"Downloads" },
+-      @{ @"value" : @4, @"label" : @"History" },
+-      @{ @"value" : @5, @"label" : @"Bookmarks" },
++      @{@"value" : @0, @"label" : @"None"},
++      @{@"value" : @1, @"label" : @"Extensions"},
++      @{@"value" : @2, @"label" : @"Home"},
++      @{@"value" : @3, @"label" : @"Downloads"},
++      @{@"value" : @4, @"label" : @"History"},
++      @{@"value" : @5, @"label" : @"Bookmarks"},
+     ],
+     @"sidebarFooterActionAvailable" : @(sidebar_footer_action_available),
+     @"sidebarFooterActionManaged" : @(sidebar_footer_action_managed),
+@@ -1510,8 +1516,8 @@ void SettingsModelProfileWillBeDestroyed
+           model->GetBoolean(arcium::kSidebarExtensionsDrawerEnabledPref)),
+     @"zenMode" :
+         @(model && zen_available && model->GetBoolean(prefs::kHeliumZenMode)),
+-    @"showToolbar" :
+-        @(model && toolbar_available && model->GetBoolean(arcium::kShowToolbarPref)),
++    @"showToolbar" : @(model && toolbar_available &&
++                       model->GetBoolean(arcium::kShowToolbarPref)),
+     @"showHomeButton" :
+         @(model && home_available && model->GetBoolean(prefs::kShowHomeButton)),
+     @"showBackButton" :
+@@ -1570,7 +1576,7 @@ void SettingsModelProfileWillBeDestroyed
+       kKeyZenMode :
+           @(model && zen_available && model->IsManaged(prefs::kHeliumZenMode)),
+       kKeyShowToolbar : @(model && toolbar_available &&
+-                            model->IsManaged(arcium::kShowToolbarPref)),
++                          model->IsManaged(arcium::kShowToolbarPref)),
+       kKeyShowHomeButton : @(model && home_available &&
+                              model->IsManaged(prefs::kShowHomeButton)),
+       kKeyShowBackButton : @(model && back_available &&
+@@ -2742,17 +2748,39 @@ void SettingsModelProfileWillBeDestroyed
+ 
+ @end
+ 
++// This controller owns only the creation/editing draft. Profile configuration
++// is read once for inherited context; all writes return to the compact editor.
++namespace {
++class DraftSystemAppearanceObservation final : public ui::NativeThemeObserver {
++ public:
++  explicit DraftSystemAppearanceObservation(base::RepeatingClosure changed)
++      : changed_(std::move(changed)) {
++    observation_.Observe(ui::NativeTheme::GetInstanceForNativeUi());
++  }
++  void OnNativeThemeUpdated(ui::NativeTheme*) override {
++    // Publishing can close the sheet and destroy this observation.
++    auto changed = changed_;
++    changed.Run();
++  }
++
++ private:
++  base::RepeatingClosure changed_;
++  base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
++      observation_{this};
++};
++}  // namespace
+ 
+-// This controller owns only the creation/editing draft. Profile configuration is
+-// read once for inherited context; all writes return to the compact editor.
+ @interface ArciumSpaceThemeDraftController
+     : NSWindowController <NSWindowDelegate, ArciumSpaceThemeEditorDelegate>
+-- (instancetype)initWithParent:(NSWindow*)parent
+-                       widget:(views::Widget*)widget
+-                      profile:(Profile*)profile
+-                        theme:(const helium::SpaceTheme&)theme
+-                      changed:(base::RepeatingCallback<void(const helium::SpaceTheme&)>)changed;
++- (instancetype)
++    initWithParent:(NSWindow*)parent
++            widget:(views::Widget*)widget
++           profile:(Profile*)profile
++             theme:(const helium::SpaceTheme&)theme
++           changed:(base::RepeatingCallback<void(const helium::SpaceTheme&)>)
++                       changed;
+ - (void)closeDraft;
++- (void)systemAppearanceDidChange;
+ @end
+ 
+ @implementation ArciumSpaceThemeDraftController {
+@@ -2761,6 +2789,7 @@ void SettingsModelProfileWillBeDestroyed
+   base::RepeatingCallback<void(const helium::SpaceTheme&)> changed_;
+   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
+   NSViewController* facade_;
++  std::unique_ptr<DraftSystemAppearanceObservation> system_observation_;
+   base::DictValue fallback_roles_;
+   BOOL uses_fallback_roles_;
+   BOOL closed_;
+@@ -2771,17 +2800,27 @@ void SettingsModelProfileWillBeDestroyed
+   auto light = arcium::GenerateSpacePalette(input, false);
+   auto dark = arcium::GenerateSpacePalette(input, true);
+   return @{
+-    @"configuration": NSDictionaryFromBaseDict(
+-        helium::SerializeGlassSurfaceConfiguration(
++    @"configuration" :
++        NSDictionaryFromBaseDict(helium::SerializeGlassSurfaceConfiguration(
+             helium::SpacePaletteAppearance(&theme_, base_configuration_))),
+-    @"mode": AppearanceModeString(static_cast<int>(theme_.mode)),
+-    @"webMode": AppearanceModeString(static_cast<int>(theme_.web_mode)),
+-    @"spacePalette": @{
+-      @"id": @"space-draft", @"available": @YES,
+-      @"light": (uses_fallback_roles_ ? NSDictionaryFromBaseDict(fallback_roles_)
+-          : NSDictionaryFromBaseDict(helium::SpacePaletteRoles(light))),
+-      @"dark": (uses_fallback_roles_ ? NSDictionaryFromBaseDict(fallback_roles_)
+-          : NSDictionaryFromBaseDict(helium::SpacePaletteRoles(dark)))
++    @"mode" : AppearanceModeString(static_cast<int>(theme_.mode)),
++    @"webMode" : AppearanceModeString(static_cast<int>(theme_.web_mode)),
++    @"systemMode" :
++        (ui::NativeTheme::GetInstanceForNativeUi()->preferred_color_scheme() ==
++                 ui::NativeTheme::PreferredColorScheme::kDark
++             ? @"dark"
++             : @"light"),
++    @"spacePalette" : @{
++      @"id" : @"space-draft",
++      @"available" : @YES,
++      @"light" :
++          (uses_fallback_roles_
++               ? NSDictionaryFromBaseDict(fallback_roles_)
++               : NSDictionaryFromBaseDict(helium::SpacePaletteRoles(light))),
++      @"dark" :
++          (uses_fallback_roles_
++               ? NSDictionaryFromBaseDict(fallback_roles_)
++               : NSDictionaryFromBaseDict(helium::SpacePaletteRoles(dark)))
+     }
+   };
+ }
+@@ -2846,16 +2885,36 @@ void SettingsModelProfileWillBeDestroyed
+   using Initializer = id (*)(id, SEL, NSDictionary*, id);
+   id facade = reinterpret_cast<Initializer>(objc_msgSend)(
+       [facade_class alloc], initializer, [self draftSnapshot], self);
+-  if (![facade isKindOfClass:[NSViewController class]]) return nil;
++  if (![facade isKindOfClass:[NSViewController class]])
++    return nil;
+   facade_ = facade;
++  // The controller owns this synchronous observation and detaches it on close.
++  // Bind its non-retaining identity, just like the main Settings model bridge.
++  system_observation_ =
++      std::make_unique<DraftSystemAppearanceObservation>(base::BindRepeating(
++          [](void* controller) {
++            [(__bridge ArciumSpaceThemeDraftController*)
++                    controller systemAppearanceDidChange];
++          },
++          (__bridge void*)self));
+   window.contentViewController = facade_;
+   [parent beginSheet:window completionHandler:nil];
+   [window makeKeyWindow];
+   return self;
+ }
+ 
++- (void)systemAppearanceDidChange {
++  if (closed_ || !facade_)
++    return;
++  using Update = void (*)(id, SEL, NSDictionary*);
++  reinterpret_cast<Update>(objc_msgSend)(
++      facade_, NSSelectorFromString(kArciumSettingsUIUpdateSnapshotSelector),
++      [self draftSnapshot]);
++}
++
+ - (void)spaceThemeEditorDidChangeConfiguration:(NSDictionary*)configuration {
+-  if (closed_ || !changed_) return;
++  if (closed_ || !changed_)
++    return;
+   auto dictionary = BaseDictFromNSObject(configuration);
+   auto parsed = dictionary
+       ? helium::ParseGlassSurfaceConfigurationStrict(*dictionary) : std::nullopt;
+@@ -2878,8 +2937,10 @@ void SettingsModelProfileWillBeDestroyed
+   return NO;
+ }
+ - (void)closeDraft {
+-  if (closed_) return;
++  if (closed_)
++    return;
+   closed_ = YES;
++  system_observation_.reset();
+   changed_.Reset();
+   [self.window.sheetParent endSheet:self.window];
+   [self.window orderOut:nil];
+Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/arcium_settings_model.cc
++++ src/chrome/browser/ui/helium/arcium_settings_model.cc
+@@ -388,6 +388,7 @@ ArciumSettingsModel::ArciumSettingsModel
+   if (theme_service_) {
+     theme_service_observation_.Observe(theme_service_);
+   }
++  system_theme_observation_.Observe(ui::NativeTheme::GetInstanceForNativeUi());
+ 
+   space_service_ = helium::HeliumSpaceServiceFactory::GetForProfile(profile_);
+   if (space_service_ && space_service_->GetActiveSpace()) {
+@@ -822,6 +823,14 @@ bool ArciumSettingsModel::IsAppearanceAv
+          prefs_->FindPreference(prefs::kBrowserColorScheme);
+ }
+ 
++int ArciumSettingsModel::GetSystemAppearanceMode() const {
++  return static_cast<int>(
++      ui::NativeTheme::GetInstanceForNativeUi()->preferred_color_scheme() ==
++              ui::NativeTheme::PreferredColorScheme::kDark
++          ? ThemeService::BrowserColorScheme::kDark
++          : ThemeService::BrowserColorScheme::kLight);
++}
++
+ int ArciumSettingsModel::GetAppearanceMode() const {
+   const auto* space = GetAppearanceSpace();
+   if (!space || space->theme().mode == helium::SpaceTheme::Mode::kAuto) {
+@@ -1080,6 +1089,7 @@ void ArciumSettingsModel::Shutdown() {
+   // runs while keyed services still exist, but the window must never ask them
+   // for state after this point.
+   shortcut_observation_.Reset();
++  system_theme_observation_.Reset();
+   theme_service_observation_.Reset();
+   profile_observation_.Reset();
+   pref_change_registrar_.Reset();
+@@ -1115,6 +1125,10 @@ void ArciumSettingsModel::OnThemeChanged
+   NotifyChanged();
+ }
+ 
++void ArciumSettingsModel::OnNativeThemeUpdated(ui::NativeTheme*) {
++  NotifyChanged();
++}
++
+ void ArciumSettingsModel::NotifyChanged() {
+   if (!shutting_down_ && changed_callback_) {
+     changed_callback_.Run();
+Index: src/chrome/browser/ui/helium/arcium_settings_model.h
+===================================================================
+--- src.orig/chrome/browser/ui/helium/arcium_settings_model.h
++++ src/chrome/browser/ui/helium/arcium_settings_model.h
+@@ -19,6 +19,7 @@
+ #include "chrome/browser/ui/browser_shortcuts/arcium_shortcut_presets.h"
+ #include "chrome/browser/ui/browser_shortcuts/browser_shortcut_service.h"
+ #include "components/prefs/pref_change_registrar.h"
++#include "ui/native_theme/native_theme_observer.h"
+ 
+ class PrefService;
+ class Profile;
+@@ -45,7 +46,8 @@ inline constexpr int kSidebarWidthMax =
+ class ArciumSettingsModel final
+     : public ProfileObserver,
+       public browser_shortcuts::BrowserShortcutService::Observer,
+-      public ThemeServiceObserver {
++      public ThemeServiceObserver,
++      public ui::NativeThemeObserver {
+  public:
+   ArciumSettingsModel(Profile* profile,
+                       base::RepeatingClosure changed_callback,
+@@ -108,9 +110,11 @@ class ArciumSettingsModel final
+ 
+   // Window chrome and website appearance belong to the captured Space.
+   // Values match ThemeService::BrowserColorScheme for the SettingsUI bridge;
+-  // system means follow window chrome for websites, New Tab and Settings.
++  // system follows the native OS independently for websites, New Tab and
++  // Settings.
+   bool IsAppearanceAvailable() const;
+   int GetAppearanceMode() const;
++  int GetSystemAppearanceMode() const;
+   bool IsAppearanceManaged() const;
+   bool SetAppearanceMode(int mode);
+   bool IsWebAppearanceAvailable() const;
+@@ -152,6 +156,9 @@ class ArciumSettingsModel final
+   // ThemeServiceObserver:
+   void OnThemeChanged() override;
+ 
++  // NativeThemeObserver: independent of an explicit window chrome mode.
++  void OnNativeThemeUpdated(ui::NativeTheme* observed_theme) override;
++
+  private:
+   void NotifyChanged();
+   void OnProfilePreferenceChanged(std::string_view name);
+@@ -174,6 +181,8 @@ class ArciumSettingsModel final
+       shortcut_observation_{this};
+   base::ScopedObservation<ThemeService, ThemeServiceObserver>
+       theme_service_observation_{this};
++  base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>
++      system_theme_observation_{this};
+ 
+   base::RepeatingClosure changed_callback_;
+   base::RepeatingClosure profile_destroyed_callback_;
+Index: src/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
+@@ -0,0 +1,92 @@
++// Copyright 2026 The Helium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license found in the LICENSE file.
++
++#include "chrome/browser/ui/helium/arcium_settings_model.h"
++
++#include <memory>
++
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/test/bind.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/helium/helium_space.h"
++#include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/helium/helium_space_service_factory.h"
++#include "chrome/test/base/browser_with_test_window_test.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "ui/native_theme/mock_os_settings_provider.h"
++#include "ui/native_theme/native_theme.h"
++
++namespace arcium_settings {
++namespace {
++class ArciumSystemAppearanceModelTest : public BrowserWithTestWindowTest {
++ protected:
++  void SetUp() override {
++    BrowserWithTestWindowTest::SetUp();
++    service_ =
++        helium::HeliumSpaceServiceFactory::GetInstance()
++            ->SetTestingSubclassFactoryAndUse(
++                profile(), base::BindOnce([](content::BrowserContext* context) {
++                  return std::make_unique<helium::HeliumSpaceService>(
++                      static_cast<Profile*>(context));
++                }));
++    ASSERT_TRUE(service_);
++  }
++  void TearDown() override {
++    service_ = nullptr;
++    BrowserWithTestWindowTest::TearDown();
++  }
++  raw_ptr<helium::HeliumSpaceService> service_ = nullptr;
++};
++
++TEST_F(ArciumSystemAppearanceModelTest,
++       NativeChangesRefreshFixedChromeAndStopAtShutdown) {
++  ui::MockOsSettingsProvider os;
++  os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kLight);
++  int changes = 0;
++  ArciumSettingsModel model(profile(),
++                            base::BindLambdaForTesting([&] { ++changes; }),
++                            base::DoNothing());
++  ASSERT_TRUE(model.SetAppearanceSpace(service_->GetDefaultSpace()->id()));
++  ASSERT_TRUE(model.SetAppearanceMode(
++      static_cast<int>(ThemeService::BrowserColorScheme::kLight)));
++  const int before = changes;
++  os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kDark);
++  EXPECT_GT(changes, before);
++  EXPECT_EQ(static_cast<int>(ThemeService::BrowserColorScheme::kDark),
++            model.GetSystemAppearanceMode());
++  EXPECT_EQ(static_cast<int>(ThemeService::BrowserColorScheme::kLight),
++            model.GetAppearanceMode());
++  ASSERT_TRUE(model.SetAppearanceMode(
++      static_cast<int>(ThemeService::BrowserColorScheme::kDark)));
++  const int dark_before = changes;
++  os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kLight);
++  EXPECT_GT(changes, dark_before);
++  EXPECT_EQ(static_cast<int>(ThemeService::BrowserColorScheme::kLight),
++            model.GetSystemAppearanceMode());
++  EXPECT_EQ(static_cast<int>(ThemeService::BrowserColorScheme::kDark),
++            model.GetAppearanceMode());
++  model.Shutdown();
++  const int stopped = changes;
++  os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kDark);
++  EXPECT_EQ(stopped, changes);
++}
++
++TEST_F(ArciumSystemAppearanceModelTest, DestructionDetachesNativeObservation) {
++  ui::MockOsSettingsProvider os;
++  os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kLight);
++  int changes = 0;
++  {
++    ArciumSettingsModel model(profile(),
++                              base::BindLambdaForTesting([&] { ++changes; }),
++                              base::DoNothing());
++    os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kDark);
++    EXPECT_GT(changes, 0);
++  }
++  const int destroyed = changes;
++  os.SetPreferredColorScheme(ui::NativeTheme::PreferredColorScheme::kLight);
++  EXPECT_EQ(destroyed, changes);
++}
++}  // namespace
++}  // namespace arcium_settings
+Index: src/chrome/test/BUILD.gn
+===================================================================
+--- src.orig/chrome/test/BUILD.gn
++++ src/chrome/test/BUILD.gn
+@@ -11477,6 +11477,7 @@ if (!is_android && toolkit_views) {
+       "../browser/extensions/api/settings_private/prefs_util_unittest.cc",
+       "../browser/renderer_context_menu/render_view_context_menu_unittest.cc",
+       "../browser/ui/helium/helium_space_service_unittest.cc",
++      "../browser/ui/helium/arcium_system_appearance_model_unittest.cc",
+       "../browser/ui/profiles/profile_picker_unittest.cc",
+       "../browser/ui/views/frame/arcium_browser_chrome_unittest.cc",
+     "../browser/ui/helium/arcium_space_icon_unittest.cc",
