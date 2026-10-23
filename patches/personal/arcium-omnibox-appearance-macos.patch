@@ -168,7 +168,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +      // A spring's duration is perceptual; let its short settling tail finish.
 +      // Zero duration also stops an in-flight resize at its current frame.
 +      context.duration = animate ? spring.settlingDuration : 0;
-+      [[window animator] setFrame:frame display:YES animate:NO];
++      [[window animator] setFrame:frame display:YES];
 +    } completionHandler:nil];
 +    window.animations = previous_animations;
 +    return base::ClampRound(NSHeight(window.frame));
