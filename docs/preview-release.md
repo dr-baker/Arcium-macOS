@@ -1,35 +1,42 @@
-# Public preview and current development
+# Arcium preview
 
-The public download is the **October 17, 2026 preview** for Apple Silicon Macs running macOS 26 or later. The README gallery shows the **October 22 development build** with newer glass, Space editing, and sidebar controls. A source change or screenshot does not update the download.
+This preview is for Apple Silicon Macs running macOS 26 or later. It includes the current sidebar, glass controls, top-down command bar glows, pink icon, and Arcium onboarding.
 
-[Download the historical preview and read its release record](https://github.com/dr-baker/Arcium-browser/releases).
+[Download Arcium](https://github.com/dr-baker/Arcium-macOS/releases).
 
-## Install the October 17 preview
+## Install
 
-Open the downloaded DMG, open **Install Arcium**, and click **Install**. The installer copies Arcium to Applications and offers to open it. First launch includes Helium's setup choices, including whether to enable its online services.
+Open the DMG, open **Install Arcium**, and click **Install**. The installer copies Arcium to Applications and offers to open it. First-run setup explains the browser's optional online services.
 
-New profiles get a light pastel sidebar, navigation above the tabs, Peek, recent-tab cycling, and Little Arc for external links. Existing profiles keep their settings. The installer refuses to replace an app already in Applications. Quit and move the older app to the Trash first; your profile remains in `~/Library/Application Support/Arcium`.
+New profiles start with a pastel sidebar, no address bar, Peek, recent-tab cycling, and Little Arc. **Command-L** opens the command bar. Existing profiles keep their settings. The installer refuses to replace an app already in Applications. Quit and move the older app to the Trash first; your profile remains in `~/Library/Application Support/Arcium`.
 
-Back up your profile before migration. [Import from Arc](import-from-arc.md) explains the native sidebar/history importer and the separate password/cookie migration tool.
+Coming from Arc? Follow [Import from Arc](import-from-arc.md) for sidebar and history import. Passwords and optional cookies use a separate tool.
 
-## Known limits
+## What changed
 
-The preview uses Chromium **151.0.7922.71** and is not an up-to-date everyday browser release. Automatic updates are not configured; install later releases manually.
+- Traffic lights use the navigation row's height, including at larger browser UI scales.
+- Scope colors fade down into the command bar. Omni blends violet, blue, and a faint mint.
+- A typed YouTube search or ChatGPT question remains the default action even when an existing tab matches it.
+- Favorites-only Arc profiles get a visible imported Space. Empty imports preserve the starter Space's identity.
+- Visible browser and onboarding copy says Arcium. Upstream licenses and service attribution remain intact.
+- The macOS product repository now contains the installer, source instructions, gallery, and import guide.
 
-Peek opens and closes, but its control strip can paint incorrectly in this build. Its recent-tab preview has a very translucent glass background. It does not include later October 21 sidebar footer and icon-picker work or October 22 changes shown in the gallery.
+## Limits
 
-Spaces in one browser profile share cookies and sign-ins. Repeating a Pins import replaces source-owned Space trees, including local edits inside them. A Little Arc request handles one eligible HTTP or HTTPS URL; a shortcut for an empty Little Arc search window is not implemented.
+This is an early preview built on Chromium **151.0.7922.71**, not a current Chromium security release. Automatic browser updates are not configured. Install later releases manually.
 
-The roadmap describes planned work. Pinned split views, a Shelf-inspired auto-archive alternative, combined Little Arc/Peek, local model cleanup, and optimized browser control for agents are not promises about this download.
+Spaces in one browser profile share cookies and sign-ins. Repeating a Pins import replaces the source-owned Space trees, including local edits inside them. Arc split views import as individual pages, without their split layout. Favorites folders flatten into tiles.
+
+Little Arc handles one eligible HTTP or HTTPS URL per request. A shortcut for an empty Little Arc search window is not implemented. Pinned split views exist in source; broader release validation remains on the roadmap.
+
+The Shelf-inspired archive alternative, combined Little Arc/Peek, local model cleanup, and optimized browser control for agents are planned work.
 
 ## Source and verification
 
-The main macOS product source is [Arcium-macOS](https://github.com/dr-baker/Arcium-macOS), with its pinned [Arcium core](https://github.com/dr-baker/Arcium) checkout. The historical [Arcium-browser preview repository](https://github.com/dr-baker/Arcium-browser) contains its matching source snapshot directly. Its [SOURCE.json](https://github.com/dr-baker/Arcium-browser/blob/main/SOURCE.json) records the original revisions.
+[Arcium-macOS](https://github.com/dr-baker/Arcium-macOS) owns this release and pins [Arcium core](https://github.com/dr-baker/Arcium) in `helium-chromium/`. Clone with `--recurse-submodules`, or use the complete source archive attached to the release. GitHub's automatic source archives omit submodule contents.
 
-The download preserves an optimized October 17 component build. It was re-signed and notarized for distribution; it is not a fresh reproducible build of current main. The historical verification checked 554 Mach-O files, six resource manifests, and bundled non-system library dependencies. The source association comes from the saved build/install record. Original GN arguments and local compiler settings were not preserved.
+The release assets record the exact macOS and core revisions, build arguments, checksums, signing, notarization, and runtime checks. The browser is an optimized component build packaged with its required libraries. Building from the same source does not guarantee byte-for-byte identical artifacts.
 
-The native installer was built from source. Its tests cover fresh-profile defaults, preserving an existing profile, and refusing a symbolic-link profile path. The GitHub release records signing, notarization, the final checksum, and runtime checks for the distributed artifact.
+The installer tests cover fresh defaults, preserving existing profiles, and refusing a symbolic-link profile path. Arc import tests cover parser fixtures, saved sidebar reconciliation, repeated imports, and source ownership. Credential tests use synthetic databases and test keys; they cannot guarantee that a website will accept migrated cookies.
 
-Synthetic migration tests cover fixture databases and supplied test keys. They do not establish compatibility with every Arc version or guarantee that a website will accept migrated cookies. Compile results, executed tests, visible import behavior, and persistence checks belong in separate release gates.
-
-For a new build, follow the [build guide](building.md). Current-source features become part of the public download only when a matching build has passed its release checks and been published.
+The old October 17 package remains in the [historical Arcium-browser release](https://github.com/dr-baker/Arcium-browser/releases/tag/v0.1.0-preview.1). It has older styling and does not contain these fixes.

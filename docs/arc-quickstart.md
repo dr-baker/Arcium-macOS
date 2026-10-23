@@ -1,182 +1,64 @@
 # Coming from Arc
 
-Arcium adds Spaces, Favorites, Pins, Peek, Little Arc, and an Arc-inspired sidebar
-workflow to Helium. It is in development. This guide describes the implementation
-in this branch; publication and live verification results belong in the release
-notes for the build you install.
+Arcium adds an Arc-inspired sidebar workflow to Helium. This guide covers the current preview. See the [release notes](preview-release.md) for its limits.
 
-The current macOS product requires macOS 26 or later.
+To bring over existing data, start with [Import from Arc](import-from-arc.md). Sidebar import and password migration use different tools.
 
 ## Set up your workspace
 
-1. Open Settings with Command-Comma. In Tabs & Spaces, choose Vertical tabs for
-   a sidebar layout and choose its side. In Appearance, adjust Sidebar width.
-2. In Appearance, choose how a collapsed sidebar behaves. Icon rail keeps
-   compact tab access; Fully hidden hides the sidebar. The Zen card groups
-   **Zen mode**, **Keep top bar visible in Zen mode**, and **Keep sidebar visible
-   in Zen mode**. The top-bar pin also applies to Fully hidden, as its help
-   explains.
-3. In Keyboard Shortcuts, review the Arc-inspired preset. It applies supported
-   actions and reports unsupported ones. It saves the prior shortcut state so
-   you can restore it. Applying the preset also selects Fully hidden; you can
-   change that appearance choice afterward. Restore previous restores both the
-   saved shortcuts and the pre-preset collapse style, replacing later edits to
-   those settings.
-4. Use Spaces to organize work within a browser profile. Favorites are shared
-   across that profile; Pins and their folders belong to a Space. Ordinary tabs
-   remain separate from saved sidebar items. Selecting a Space activates its
-   window or creates a window for that Space.
+Open Settings with **Command-Comma**. In Tabs & Spaces, choose Vertical tabs and the side of the window. In Appearance, adjust sidebar width, browser UI scale, colors, and collapse behavior. UI scale changes browser controls independently of webpage zoom.
 
-Spaces in one profile share cookies and sign-ins. Use separate browser profiles
-for separate account identities. Choosing a default Space affects new windows
-and persistent items; it does not move already-open windows.
-The current interface selects default and imported Spaces. It does not expose
-commands to create, rename, or delete a Space.
+Use the **+** in the sidebar's Space bar to create a Space. Choose its name, icon, profile, and theme. Right-click a Space icon to edit or delete it. Deletion asks for confirmation; the last Space cannot be deleted.
 
-## Bring your Arc sidebar
+Spaces hold their own Pins and folders. Local Favorites are shared within the profile. Imported Arc Favorites appear in Spaces belonging to their Arc source profile. Spaces in one profile share cookies and sign-ins, so use separate browser profiles for separate accounts. Choosing a default Space affects new windows and saved items; it does not move existing windows.
 
-Quit Arc normally so its saved sidebar is current, and back up both browsers'
-data before importing. Open native Settings, then General, **More settings…**,
-and Import data in browser Settings. Choose the Arc source profile and enable
-**Import sidebar as Pins**. This option imports the
-sidebar as saved Favorites, Pins, and folders. With the option off, the importer
-uses tabs and tab groups. The option is a choice for that import, not a permanent
-setting.
+## Keep useful pages
 
-Refreshing a Pins-mode import replaces the imported Space trees belonging to
-that Arc source profile. The refresh also removes local Pins and folders added
-inside those trees and replaces edits to their home pages. Back up Arcium before
-refreshing. For the installed app, quit Arcium and copy
-`~/Library/Application Support/Arcium` to a separate backup location. If you use
-a custom profile directory, back up that directory instead.
+A Pin keeps its saved home page while its live tab navigates. Use its return-home control to go back. Closing the live tab leaves the saved Pin dormant; opening it again starts at home. Removing the saved item is a separate action.
 
-Check your Spaces, folder order, and saved items after importing and again after
-a normal quit and relaunch. Import each source profile into the intended browser
-profile. Matching directory names alone do not establish that two profiles
-represent the same account.
+Local Favorites stay available across the profile. Pins and folders belong to their Space. Ordinary tabs remain separate from saved sidebar items.
 
-When refreshing a tabs-mode import, Arcium must be able to replace the previous
-imported tabs without a close confirmation. If an imported page has unload
-handlers or cannot be closed, the refresh stops before changing the import.
-Save any work, close those imported tabs yourself, and retry. Importing the
-sidebar as dormant Pins does not require replacing those live tabs.
+## Find and preview pages
 
-For passwords and optional cookies, follow the explicit mapping and dry-run
-steps in [Arc daily-driver migration](arc-daily-driver-migration.md). That tool
-requires both browsers to be closed before applying changes. Some websites
-require a new sign-in even after cookie migration.
+**Command-T** opens the command bar. Search tabs, Pins, Favorites, or the web. Click its input and scroll upward to reveal the scope tabs; the selected scope expands its label.
 
-## Choose the behavior you want
+Hold **Control** and press **Tab** to preview recently used tabs. Control-Tab follows the binding in Keyboard Shortcuts. An explicit Recent Tab action uses recent order and the held-Control preview even when **Cycle tabs by recent use** is off. That preference controls standard tab cycling.
 
-| Setting | Effect |
-| --- | --- |
-| Enable Peek | Previews eligible links while keeping the saved item's home anchored. Turning it off requests closure of an active Peek and returns eligible link clicks to ordinary navigation. If you cancel the page's unsaved-change prompt, the same document stays open as an ordinary tab and Peek remains off. |
-| Suggest Favorites and Pins in the address bar | Includes saved sidebar items among address-bar results. Turning it off preserves the items and ordinary suggestions. |
-| Open external links in Little Arc | Routes links opened from other apps through Little Arc. Turning it off uses the ordinary browser window or tab path. |
-| Keep top bar visible in Zen mode | Keeps the address bar visible in Zen mode and when the collapsed sidebar is Fully hidden. Appearance's Zen card retains the existing saved value. The row explains why it is unavailable while Sidebar navigation is active. |
-| Navigation placement | Top bar is the default. Sidebar places navigation and the address bar above the tabs in an eligible left sidebar, leaving the page at full height. Other window layouts use the standard top bar and retain the saved choice. |
-| Show Extensions button | Adds an optional button to Sidebar navigation that opens the existing Extensions menu. It defaults to off and is independent of the standard toolbar's Extensions setting. |
-| Show Spaces in Dock menu | Shows Spaces in the app's Dock menu. Turning it off shows profile shortcuts when there are multiple profiles. A single profile keeps the ordinary window commands. New Incognito Window remains available when permitted. This setting applies across profiles. |
-| Show sidebar collapse button | Shows the collapse button in Vertical layout. Other collapse commands still work when it is hidden. |
-| Show New Tab button | Shows the New Tab button in Dynamic layout. Other New Tab commands still work when it is hidden. |
-| Enter Picture-in-Picture automatically | Leaving an eligible playing tab can open Picture-in-Picture automatically. Turning it off prevents new automatic entries and keeps an already-open window. Manual Picture-in-Picture is independent. |
+Enable Peek to preview eligible links over the source page, or choose **Open Link in Peek** from a link's context menu. A preview can become an ordinary tab or saved sidebar item. If an unsaved-change prompt prevents closure, cancelling preserves the document.
 
-Layout-specific controls retain their saved values while another layout is
-selected. A disabled row can also indicate a browser feature or policy that
-prevents editing. Turning off a behavior switch does not delete saved Spaces,
-Favorites, or Pins.
+Enable **Open external links in Little Arc** to open one eligible HTTP or HTTPS link from another app in a compact window. Multiple URLs and other schemes use the ordinary browser path. A shortcut to open an empty Little Arc search window is not implemented.
 
-Automatic Picture-in-Picture is experimental. The browser flag **Browser
-initiated automatic picture in picture** defaults to off, which disables the
-native setting. When the flag is enabled, audible video from an HTTPS or local
-file page can qualify. Site permissions still apply. Switching away from the
-playing tab triggers entry; turning the setting on alone does not open a window.
+## Choose your layout
 
-## Adjust window colors and effects
+Appearance offers **Top bar** and **Sidebar** navigation. Sidebar navigation is available with left Vertical tabs in ordinary windows outside fullscreen. Incognito, Guest, right-side, horizontal, and fullscreen layouts use the standard top bar while keeping the saved choice.
 
-Appearance offers Everyday and Advanced views of the same saved colors and
-effects. Both show why decorative controls are unavailable. To enable those
-controls, switch to Advanced and enable backdrop customization. If a renderer
-override prevents color effects, select the Automatic backend and relaunch
-Arcium normally as the guidance describes.
+For an address-bar-free layout, choose Top bar navigation and turn **Show top bar** off. Command-L still gives you a place to enter an address.
 
-While decorative editing is disabled, the color canvas keeps its saved markers
-but does not select, edit, or move them. Enabling customization restores the
-saved colors. Controls accent remains independent, subject to its own theme
-and policy availability.
+Choose **Icon rail** to keep compact sidebar access when collapsed, or **Fully hidden** to hide it. Zen controls let you pin the top bar or sidebar. **Keep top bar visible in Zen mode** also applies to Fully hidden; it is unavailable while Sidebar navigation is active.
 
-## Use the sidebar each day
+Sidebar navigation hides standard toolbar items and the bookmarks bar without changing their preferences. Enable **Show Extensions button** for access to the existing Extensions menu in the sidebar header. Returning to Top bar restores the standard presentation.
 
-In Appearance, choose **Sidebar** for **Navigation placement** to use a compact,
-two-row header above the tabs. The header uses the browser's existing navigation
-controls and address bar.
+## Colors and glass
 
-The header is available in regular browser windows with left Vertical tabs
-outside fullscreen. Incognito, guest, right-side, horizontal, and
-fullscreen layouts use the standard top bar without changing the saved choice.
-Centered address bar is unavailable in Sidebar placement because the row has a
-fixed position; Minimal address bar still applies.
+Give each Space a palette with movable glows and its own Browser and Pages appearance modes. Native Appearance settings also control grain, rounded frame, and border width.
 
-The header follows sidebar visibility. In Zen mode, **Keep sidebar visible in
-Zen mode** pins both the sidebar and its header. Command-L temporarily reveals
-a hidden sidebar and focuses its address bar. Focus, popups, menus, and bubbles
-keep that reveal open; releasing them restores the saved collapse state.
+Surface customization separates **Text surfaces**, for the command bar and floating controls, from **Containers**, for the recent-tab switcher and Peek. Each group has its own material, tint intensity, and opacity. Tint controls the theme color; opacity controls neutral light or dark backing. Peek also has separate backdrop blur and dimming.
 
-Sidebar placement hides pinned extension icons, the bookmark star, profile and
-media buttons, and the horizontal bookmarks bar without changing their saved
-preferences. Returning to Top bar restores the standard presentation. Enable
-**Show Extensions button** for access to the existing Extensions menu in the
-sidebar header.
+The current menu offers Flat, Clear, Liquid, Chromium glassmorphic, and Solid materials. Availability depends on the renderer, theme, and policy. Read a disabled control's explanation before changing other settings. Turning off decorative customization preserves its saved colors.
 
-Review your effective bindings in Keyboard Shortcuts. Arc defaults supplies
-supported Arc-style bindings; the controls below assume that preset where
-applicable.
+## Shortcuts and optional behavior
 
-| Action | Control |
+Keyboard Shortcuts offers an Arc-inspired preset. It applies supported actions, reports unsupported ones, and saves the previous bindings. Applying it also selects Fully hidden. **Restore previous** restores the saved shortcuts and collapse style, replacing later edits to those settings.
+
+| Action | Control with the relevant default or Arc preset |
 | --- | --- |
 | Pin or unpin the current page | Command-D |
 | Collapse or expand the sidebar | Command-S |
 | Show or hide the toolbar | Command-Shift-D |
-| Preview recent tabs | Control-Tab with the default Recent Tab binding |
+| Preview recent tabs | Control-Tab |
 
-Control-Tab follows the action assigned in Keyboard Shortcuts. Explicit Recent
-Tab actions use recent order and a held-Control preview even when **Cycle tabs
-by recent use** is off. That preference controls standard tab-cycling actions;
-it does not disable an explicit Recent Tab action.
+**Suggest Favorites and Pins in the address bar** controls saved-item suggestions without deleting those items. **Show Spaces in Dock menu** controls Space shortcuts in the Dock. Turning it off uses profile shortcuts when multiple profiles exist, or ordinary window commands for one profile.
 
-A Pin keeps its saved home page while its live tab navigates. Use its return-home
-control to return to that page. Closing the live tab leaves the saved item
-dormant in the sidebar; opening it again starts from its home page. Removing the
-saved item is a separate action.
+Automatic Picture-in-Picture is experimental. Its native setting is unavailable while the **Browser initiated automatic picture in picture** feature is off. With that feature enabled, eligible audible video can enter Picture-in-Picture when you switch away. Site permissions still apply; turning the setting on alone does not open a window.
 
-## Arc-like additions and related controls
-
-This inventory separates the browsing additions from their supporting macOS
-integration. It does not promise complete Arc parity.
-
-| Addition | What is implemented | Limits or controls |
-| --- | --- | --- |
-| Spaces | Named workspaces, window assignment, a default Space, and session restoration. | Spaces share the enclosing profile's cookies. The current UI selects default and imported Spaces. There is no master disable switch. |
-| Favorites | Profile-wide persistent sidebar items. | Saved items remain when suggestions or Peek are disabled. |
-| Pins and folders | Space-specific saved items, folder hierarchy, anchored home navigation, and restoration. | There is no master disable switch; hiding the system needs a complete data and session contract first. |
-| Arc sidebar import | Imports Arc's saved hierarchy into native Spaces and persistent items, or into tabs and groups. | Select Import sidebar as Pins for persistent sidebar items. Refresh replaces the source-owned Space trees, including local edits in those trees. |
-| Address-bar integration | Favorites and Pins can appear as suggestions. | Independently switchable. |
-| Peek | Eligible link previews and an explicit context-menu action. | Independently switchable. Closing the source page waits for both pages' close decisions; Cancel preserves their original documents. |
-| Little Arc | External-link routing through a small browser window. | Handles one eligible HTTP(S) external URL per request. Multiple URLs and other schemes use the ordinary path. A shortcut to open a new Little Arc search window is unsupported. |
-| Recent-tab switching | Recent-use cycling and explicit Recent Tab shortcuts with previews. | The cycling preference does not remove previews from explicit Recent Tab commands. |
-| Sidebar layouts | Vertical tabs, configurable side and width, collapse styles, and Zen controls. | Classic, Compact, and Dynamic layouts are also available. |
-| Arc-inspired shortcuts | A preset for supported actions, saved previous bindings, and restoration. | Unsupported actions are reported; review bindings before applying. |
-| Split-tab access | Existing split and focus actions exposed through shortcut customization. | No separate master feature toggle. |
-| macOS Dock integration | Space shortcuts in the Dock menu. | The app-wide toggle exposes profile shortcuts with multiple profiles, or ordinary window commands with a single profile. |
-| Native Settings | Profile-aware macOS window for General, Tabs & Spaces, Appearance, and Keyboard Shortcuts. | Browser preferences remain owned by Chromium; some settings remain in browser WebUI. |
-| Chrome appearance | Everyday and Advanced backdrop controls, spatial colors and harmony, shared control accent, material/glass effects, rounded frame, and border controls. | Availability depends on the current configuration and theme. |
-| Sizing | Browser UI scale and sidebar width. | These resize browser chrome without changing web page zoom. |
-| Automatic Picture-in-Picture | Preference support and automatic-entry behavior behind the browser feature. | Experimental and disabled by the baseline feature configuration. |
-
-Helium's privacy features remain part of the browser. Helium Noise has a global
-control in browser Privacy settings and per-site exceptions through Page Info.
-It is separate from the Arc-style workflow additions above.
-
-For a control-by-control inventory and acceptance criteria, see the
-[feature settings audit](feature-settings-audit.md). For source ownership and
-development, see the [build guide](building.md#repository-ownership).
+For detailed behavior and preference ownership, see [feature settings contracts](feature-settings-audit.md) and [native settings bindings](native-settings-bindings.md).
