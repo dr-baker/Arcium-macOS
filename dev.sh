@@ -82,10 +82,6 @@ ___helium_quilt() {
 ___helium_locked() {
     local label="$1"
     shift
-    if [ -n "${HELIUM_LOCK_HELD:-}" ]; then
-        "$@"
-        return
-    fi
     mkdir -p "$_build_dir/.arcium"
     HELIUM_BUILD_DIR="$_build_dir" HELIUM_DEV_WORKTREE="$_root_dir" HELIUM_DEV_BUILD_MODE="$_he_build_mode" \
         ___helium_he lock --label "$label" -- \
@@ -736,6 +732,7 @@ __helium_menu() {
 
         validate) ___helium_validate "$2";;
         check) shift; ___helium_check "$@";;
+        lane) shift; ___helium_he lane "$@";;
         locate) shift; ___helium_locate "$@";;
         *)
             echo "usage: he <command>" >&2
@@ -767,6 +764,7 @@ __helium_menu() {
 
             echo "\n" >&2
             echo "\tcheck [--json] - reports drift between patches, records, and the source tree" >&2
+            echo "\tlane ACTION - durable reservations and turn notifications; see docs/build-lane.md" >&2
             echo "\tlocate QUERY - finds which patch owns a file or symbol" >&2
             echo "\tvalidate config - validates the build configuration" >&2
             echo "\tvalidate patches - validates that patches are applied correctly" >&2
