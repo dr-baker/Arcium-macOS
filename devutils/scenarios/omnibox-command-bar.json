@@ -24,6 +24,7 @@
         "ArciumCommandActionRouterTest.*",
         "ArciumCommandSessionTest.*",
         "ArciumCommandIconCacheTest.*",
+        "ArciumCommandContextHistoryTest.*",
         "ArciumCommandLocalPresentationTest.*",
         "ArciumCommandEntryRoutingTest.*",
         "ArciumCommandCorpusTimeTest.*"
