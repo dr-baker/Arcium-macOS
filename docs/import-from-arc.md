@@ -8,6 +8,10 @@ This guide describes the new setup flow in source. The published `0.2.0-preview.
 
 On the first screen, **Import from Arc** imports all eligible saved Spaces with their Pins, folders, and Favorites. Arcium reads the list when the screen opens, but imports only after you click. History stays off.
 
+![Arcium's first setup screen with one-click Arc import and a choice of specific Spaces](assets/arc-welcome.png)
+
+Browser-content setup in the unreleased `0.2.0-preview.2` candidate. Published `0.2.0-preview.1` uses [Advanced import](#advanced-import).
+
 Progress and results stay on that screen. After a successful import, **Start browsing** opens an imported Space and finishes setup. It does not enable optional online services. **Configure** opens the remaining setup choices, including services and search. If opening the imported Space fails, you can retry or continue without opening it.
 
 For a smaller selection, choose **Choose what to import**. Pick one or several Spaces, or use **Select all**. History is optional in this picker and starts off for each request. You can return to the same picker through **Settings > General > Import from Arc** without changing setup completion or existing service settings.
@@ -56,8 +60,8 @@ If an icon is missing, Arc may not have cached it. Open that page when you need 
 
 The older browser dialog remains available for other browsers and for Arc's live-tab import mode. It is the Arc import route in `0.2.0-preview.1`.
 
-1. Open `chrome://settings/importData`.
-2. Choose the Arc source profile and the Arcium profile that should receive it.
+1. Switch to the Arcium browser profile that should receive the import.
+2. In that profile, open `chrome://settings/importData` and choose the Arc source profile.
 3. Enable **Import sidebar as Pins** for saved sidebar items. Leave it off to import live tabs and tab groups.
 4. Choose the other categories you want, then import.
 

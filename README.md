@@ -30,6 +30,14 @@ New profiles start with a pastel sidebar, a hidden address bar, Peek, recent-tab
 
 These are planned directions. Chromium updates and release reliability come first.
 
+## Bring your Arc sidebar
+
+The unreleased `0.2.0-preview.2` candidate imports available Spaces, Pins, folders, and Favorites in one click, or lets you choose specific Spaces. History starts off. See the [import guide](docs/import-from-arc.md) for account separation and refresh limits.
+
+![Arcium's pink browser-content setup with Import from Arc and Choose what to import](docs/assets/arc-welcome.png)
+
+This screenshot shows the unreleased candidate's browser-content setup. Published `0.2.0-preview.1` uses the [older import dialog](docs/import-from-arc.md#advanced-import).
+
 ## Make it yours
 
 Choose a sidebar layout and collapse behavior, move navigation, or hide the top bar. Give Spaces their own colors, then adjust grain, glass, borders, and browser UI scale without changing webpage zoom.
