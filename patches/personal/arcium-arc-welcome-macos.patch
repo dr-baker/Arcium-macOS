@@ -91,9 +91,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_arc_import_sheet_controller.h
 +                        base::DictValue space_palette,
 +                        SheetCallbacks callbacks);
 +
-+// Closes the sheet for `profile`, cancelling a running job. Already imported
-+// data stays in the profile.
-+void CloseForProfile(Profile* profile);
++// Closes only the sheet attached to this window, cancelling its running job.
++// Already imported data stays in the profile.
++void CloseForParent(gfx::NativeWindow parent);
 +
 +// Called before profile and keyed-service shutdown begins.
 +void CloseAllForShutdown();
@@ -105,7 +105,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_arc_import_sheet_controller.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_arc_import_sheet_controller.mm
-@@ -0,0 +1,380 @@
+@@ -0,0 +1,387 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license that can be found in the LICENSE file.
@@ -474,9 +474,16 @@ Index: src/chrome/browser/ui/cocoa/arcium_arc_import_sheet_controller.mm
 +                  callbacks:std::move(callbacks)] != nil;
 +}
 +
-+void CloseForProfile(Profile* profile) {
-+  Profile* original = profile ? profile->GetOriginalProfile() : nullptr;
-+  [Sheets()[KeyForProfile(original)] closeSheet];
++void CloseForParent(gfx::NativeWindow parent) {
++  NSWindow* parent_window = parent.GetNativeNSWindow();
++  if (!parent_window) {
++    return;
++  }
++  for (ArciumArcImportSheetController* sheet in [Sheets().allValues copy]) {
++    if (sheet.window.sheetParent == parent_window) {
++      [sheet closeSheet];
++    }
++  }
 +}
 +
 +void CloseAllForShutdown() {
@@ -2155,7 +2162,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  - (void)windowWillClose:(NSNotification*)notification {
    window_closing_ = YES;
 +  // Closing Settings stops an attached import; delivered data stays.
-+  arcium_import::CloseForProfile(profile_);
++  arcium_import::CloseForParent(gfx::NativeWindow(self.window));
    if (model_) {
      model_->SetSurfacePreview(false);
    }
@@ -2679,7 +2686,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_welcome_window_controller.mm
 +  ArciumWelcomeWindowController* __attribute__((objc_precise_lifetime))
 +  keep_self = self;
 +  // The sheet cancels a running import as it closes. Delivered data stays.
-+  arcium_import::CloseForProfile(profile_);
++  arcium_import::CloseForParent(gfx::NativeWindow(self.window));
 +  detector_.reset();
 +  bridge_.reset();
 +  default_worker_ = nullptr;
