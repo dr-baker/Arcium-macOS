@@ -5,47 +5,47 @@ across source changes, builds, and packaging. The existing OS lock still
 serializes individual commands. A watcher sends the next requester a turn
 offer; the requester must claim it before changing the build directory.
 
-## Activation status
+## Production installation
 
-The code and temporary-lane tests are complete. Daniel approved the watcher's
-T3 Auto access on 2026-10-23. The separate OAuth client connected to
-`http://127.0.0.1:3773/mcp`, and a real queued turn offer woke this coordinator
-from `completed` state. Claim, guarded command, release, and pause all passed.
-The offer was delivered once, on its first attempt. Evidence is in
+Active since 2026-10-23 for
+`/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930`.
+Read `he agent lane status --json` for current ownership, queue, notes, and
+watcher health; this document is not the live ownership record.
+
+- Tooling: `/Users/daniel/Developer/Helium/helium-macos/dev.sh` on canonical
+  `main`. Preserve your own `HELIUM_DEV_WORKTREE` when sourcing it.
+- State: `.arcium/lane.sqlite3` inside the build directory. The existing
+  `.arcium/lane.lock` was preserved.
+- Service: `dev.arcium.lane.475cac468f104e65ae7c7b70d8840955`, installed in
+  `/Users/daniel/Library/LaunchAgents/`. launchd starts it at login and restarts
+  it after an exit. Logs are in `.arcium/lane-watcher.log`.
+- Runtime: `/opt/homebrew/opt/python@3.14/bin/python3.14`, with canonical
+  `devutils` on `PYTHONPATH`; no disposable worktree or build venv dependency.
+- T3 connection: `http://127.0.0.1:3773/mcp`. Daniel approved the separate
+  watcher's Auto ceiling. Its private credential is
+  `/Users/daniel/.config/arcium/build-lane-oauth.json`; never copy it into
+  source control or messages. T3 access expires after 30 days and requires
+  reauthorization; follow the reconciliation procedure below.
+
+Cutover followed auth-in-Peek's explicit release and command-bar's agreement
+to hold shared mutations and adopt claims. The initial handoff is recorded in
+lane state, including 514/514 patches, namesub plus translate applied,
+`nameunsub` before any pop, and preservation of the standalone Peek demo and
+other apps. The archived source is
+`.arcium/standalone/peek-auth/validation/handoff.json`.
+
+Command-bar's `command-bar-reviewed-integration` worktree received the first
+production offer on its first delivery attempt and successfully claimed it.
+Its request is
+`e7feac708bd1435eb48c6c157e99c031`, thread
+`3aa1b6cc-a3dd-41d9-9b40-47ff3ec73cc7`. This preserves the prior manual order;
+use lane status for subsequent ownership changes.
+
+Validation: all 24 lane tests and 35 workflow tests passed on canonical main.
+A separate real OAuth test woke an idle coordinator, then completed claim,
+guarded command, release, and pause. Its evidence is in
 `/private/tmp/arcium-lane-live-smoke/verification.log` and `final-status.json`
-beside it; that temporary lane is paused and its one-shot watcher has exited.
-
-Production activation still requires an idle handoff from the existing owner,
-landing the tooling at a stable path, and installing the supervised watcher.
-No shared lane has been initialized. A request recorded in this document is
-not a reservation.
-
-Current manual owner: auth-in-Peek,
-`3f69554e-6974-44a2-b4c4-14cdf23f1a47`. On 2026-10-23 Daniel authorized
-this thread to check the lane manually and proceed. The owner reported a free
-OS command lock, no compiler/build processes, shared 513/513 at canonical
-outer `de45369` / core `1b2531d5`, and explicit releases from command-bar and
-onboarding. It is integrating and building now. Do not initialize or grant
-the live lane during this session; wait for its explicit release. Test the
-watcher against a temporary lane meanwhile.
-
-Owner's task:
-
-- Task: auth-in-Peek, outer/core `feature/peek-auth`.
-- Worktree: `agent_features/.worktrees/peek-auth`.
-- Original base: outer `a3c606d7`, core `bc5a8d47`; merging latest canonical
-  before integration.
-- Patch: `personal/arcium-peek-auth.patch`.
-- Work: shared integration, `chrome` and
-  `arcium_feature_settings_browser_tests`, isolated Dev packaging and tests.
-- A broad content-browser-client header change may exceed the usual edge
-  budget. Inspect the plan and approve its breadth only within that task's
-  existing authorization.
-- The owner will send an explicit release; no availability pings are needed.
-
-Reconcile remaining waiting requests at cutover. Thread activity or a finished
-build is not proof of release. Read-only work and scratch authoring continue
-normally.
+beside it. That temporary lane is paused and its one-shot watcher exited.
 
 ## Agent use after activation
 
@@ -54,7 +54,8 @@ The source worktree and tooling checkout may be different:
 
 ```sh
 export HELIUM_DEV_WORKTREE=/absolute/path/to/your/worktree
-source /absolute/path/to/updated/tooling/dev.sh
+export HELIUM_BUILD_DIR=/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930
+source /Users/daniel/Developer/Helium/helium-macos/dev.sh
 he agent lane status --json
 he agent lane request --thread THREAD_ID --key TASK_NAME --note 'Scope, revisions, targets, packaging needed'
 ```
