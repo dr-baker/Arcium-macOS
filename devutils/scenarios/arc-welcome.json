@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "id": "arc-welcome",
+  "description": "One-click in-browser Arc migration, custom Space selection, attached profiles, cached icons, and retry.",
+  "profile": {
+    "policy": "isolated",
+    "name": "arc-welcome"
+  },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "ArcImportCoordinatorTest.*",
+        "ArcImportCoordinatorOutcomeTest.*",
+        "ArcImportCoordinatorSourcesTest.*",
+        "ArcSpacesImport*",
+        "OnboardingMessageHandlerTest.*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_browser_tests",
+      "filters": [
+        "ArciumArcImportBrowserTest.*"
+      ]
+    },
+    {
+      "target": "//chrome/utility:arc_sidebar_snapshot_tests",
+      "filters": [
+        "ArcSidebarSnapshotTest.*"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Record source pins, build receipt, exact bundle, launch arguments, and isolated user-data root.",
+    "Seed installer preferences in a fresh isolated home. Launch with onboarding incomplete and without --no-first-run.",
+    "For authorized real Arc checks, expose Arc data and its local machine metadata read-only in the test home. Use public synthetic sources for failure tests. Never print saved titles, URLs, machine IDs, or raw source identities.",
+    "Run the onboarding component tests, Svelte checks, and focused C++ targets. Do not infer native behavior from a successful build."
+  ],
+  "steps": [
+    "Verify chrome://setup appears in browser content and controls respond immediately. Close unfinished setup, relaunch, and verify it returns.",
+    "Verify Coming from Arc is the first question, with Import from Arc primary and Choose what to import secondary. Viewing or leaving the screen must not import. Another browser and Start fresh remain available.",
+    "Press Import from Arc once. Verify every locally eligible Space and its attached profile is imported with Pins, folders, Favorites, and History off. Show unavailable-source warnings throughout. Start browsing leaves the imported Space in front without granting service consent or navigating the original window over it. The original setup becomes noninteractive after completion; Configure is optional before completion.",
+    "In a separate fresh case, choose what to import. Verify Space names, independent checkboxes, Select all, clearing selection, Favorites-only entries when locally valid, and History off. No Chromium folder picker should be required.",
+    "Import selected Spaces across attached Arc identities. Verify distinct physical destination profiles, correct Favorites per identity, measured saved records and ordering, and available cached icons. Do not open private saved pages.",
+    "Refresh one selected Space. Preserve unselected imported Spaces, local records, ordering, and unrelated cached icons. Repeat with History off and verify no duplicate sidebar or history records.",
+    "Visit every imported Space through its controls. Close and reopen the largest Space window. Quit normally and verify all destination profile records and icon coverage; relaunch and verify the active Space before switching.",
+    "Use a synthetic source for Favorites-only import, malformed sidebar, source changes, retry, cancellation, and duplicate Space names. Retry must not repeat successful jobs or retain an earlier History opt-in.",
+    "Exercise delayed Start acknowledgement in controller tests: no automatic retry, no duplicate sends or stale request attribution, and cancellation remains available after the active batch is recovered. State explicitly if the native timing cannot be reproduced.",
+    "Verify littleBrowser containers and foreign-machine Favorites cannot be attached to local saved Spaces. Missing local machine metadata must not cause guessed profile mapping.",
+    "Open Settings > General > Import from Arc. Verify the same content picker opens in a new tab without changing completed setup or service consent. Closing it affects only the import tab.",
+    "Finish first run with optional services off, extensions skipped, and default-browser registration declined. Verify normal close/quit without a crash. Leave a separate fresh walkthrough untouched on the content Welcome page."
+  ],
+  "observables": [
+    "A local sidebar import does not wait for extension preparation or service consent.",
+    "Each selected Space retains its Arc identity and attached profile; display names never identify jobs or restored selection.",
+    "Failures remain visible and retryable. Stopping may retain partial data; no rollback or History deduplication is promised.",
+    "Selected sidebar data and source-cached icons persist after normal restart. Unselected collections remain unchanged.",
+    "Setup sends only its supported preferences and does not serialize saved sidebar trees on every change."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

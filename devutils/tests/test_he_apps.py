@@ -352,6 +352,40 @@ class AppsTest(unittest.TestCase):
         self.m.he("agent", "arcium", "--approved", **self.arcium_env)
         self.assertFalse(apps.alive(first["pid"]))
 
+    def test_seeding_preserves_favicon_database_and_sidecars(self) -> None:
+        seed = self.m.root / "favicon-seed"
+        source = seed / "Default"
+        source.mkdir(parents=True)
+        payloads = {
+            "Favicons": b"native-database-placeholder",
+            "Favicons-wal": b"native-wal-placeholder",
+            "Favicons-shm": b"native-shm-placeholder",
+            "Favicons-journal": b"native-journal-placeholder",
+        }
+        for name, data in payloads.items():
+            (source / name).write_bytes(data)
+        self.m.he("run", "--profile", "favicon-seeded", "--seed-from", str(seed))
+        destination = self.profile("favicon-seeded") / "Default"
+        for name, data in payloads.items():
+            self.assertEqual((destination / name).read_bytes(), data)
+            self.assertEqual((source / name).read_bytes(), data)
+        self.m.he("stop", "--profile", "favicon-seeded")
+        (source / "Favicons").write_bytes(b"source-later-change")
+        self.m.he("run", "--profile", "favicon-seeded", "--labeled")
+        self.assertEqual((destination / "Favicons").read_bytes(), payloads["Favicons"])
+
+    def test_rebuilt_dev_bundle_keeps_existing_favicon_cache(self) -> None:
+        self.m.he("run", "--profile", "favicon-persistent")
+        self.m.he("stop", "--profile", "favicon-persistent")
+        cache = self.profile("favicon-persistent") / "Default" / "Favicons"
+        cache.write_bytes(b"existing-native-cache")
+        resources = self.m.out / "Helium.app" / "Contents" / "Resources"
+        resources.mkdir(exist_ok=True)
+        (resources / "rebuilt-favicon-test").write_text("rebuilt")
+        builds.record_completed(Paths(self.m.worktree, self.m.build_dir), ["chrome"])
+        self.m.he("run", "--profile", "favicon-persistent")
+        self.assertEqual(cache.read_bytes(), b"existing-native-cache")
+
 
 @unittest.skipUnless(shutil.which("bash"), "needs bash")
 class RemoteExecutionTest(unittest.TestCase):

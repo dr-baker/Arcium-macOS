@@ -93,6 +93,15 @@ uses, unless that is already established:
 
 Use the contract in `devutils/scenarios/` for the feature when one exists.
 
+Reuse the same named Dev profile when iterating on a build or taking screenshots.
+Rebuilding and relabeling the app preserve that profile's favicon cache. A new
+profile starts with synthetic saved items and no cached icons for them; creating
+a new name for every build makes those icons disappear again. For an isolated
+visual check with loaded icons, use `--seed-from` with a stopped, public-only demo
+profile's user-data directory. It copies the profile and its native favicon
+database once. Keep genuinely fresh profiles for first-run and import tests.
+Do not visit private saved pages in the background just to fill their icons.
+
 Verify visible changes with a GPT-6.1-Sol computer-use agent: it drives the
 running Dev app, takes screenshots, and reports what looks wrong. Report its
 findings with the behavior gates.
