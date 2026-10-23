@@ -486,7 +486,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
 -                            range: 0...2, step: 0.05,
 -                            format: { "\(Int(($0 * 100).rounded()))%" },
--                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 100% is the default strength."))
+-                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 75% is the default strength."))
 -                        .accessibilityIdentifier("omnibox-scope-glow-strength")
 -                    }
 -                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
@@ -679,7 +679,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
 +                            range: 0...2, step: 0.05,
 +                            format: { "\(Int(($0 * 100).rounded()))%" },
-+                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 100% is the default strength."))
++                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 75% is the default strength."))
 +                        .accessibilityIdentifier("omnibox-scope-glow-strength")
 +                    }
 +                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
