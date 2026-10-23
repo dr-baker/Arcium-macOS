@@ -2,9 +2,11 @@
 
 Daniel's requested Arcium work. Deferred entries do not authorize implementation.
 
+Product changes and published versions live in the [changelog](../CHANGELOG.md). This file holds working notes, acceptance criteria, and future ideas.
+
 ## Current work list
 
-The original four suggestions were implemented and validated on macOS 26.6.2 in an isolated Dev app and test profile. Astra reviewed the source and representative screenshots. macOS 27 corner behavior and stacked or fully hidden sidebar geometry still need visual checks on those configurations.
+The original four suggestions were implemented and validated on macOS 26.6.2 in an isolated Dev app and test profile. Astra reviewed the source and representative screenshots. Follow-up checks covered stacked splits, fully hidden sidebar corners at 125% scale with zero and maximum border width, and both connected and detached Omnibox layouts in None mode. macOS 27 corner APIs, displays with different backing scales, and the exhaustive scale/border matrix remain unverified.
 
 1. Remove the profile selector on launch. Spaces determine the profile.
 2. Allow all glows to be removed, with pure glass and a flat tint option.

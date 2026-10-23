@@ -8,6 +8,7 @@ Coding agents start with [Agent workflow](agent-workflow.md).
 
 - [First day](#first-day)
 - [Official (non-development) build](#official-non-development-build)
+- [Release notes](#release-notes)
 - [Development build and environment](#development-build-and-environment)
   - [Basics](#basics)
   - [Creating a new patch](#creating-a-new-patch)
@@ -150,6 +151,36 @@ the GN configuration.
 
 After a failed official build, remove `build/download_cache` if downloading
 failed, or `build/src` if a later step failed, and run the build again.
+
+## Release notes
+
+Keep user-visible changes in `CHANGELOG.md` under Unreleased. Use Highlights for
+major additions and Polish and fixes for smaller changes. Keep plans, test
+matrices, and implementation notes in `docs/feature-backlog.md`.
+
+When cutting a release, move its Unreleased entries into
+`docs/releases/<product-tag>.md`, add the date and download link, and link that
+page from the changelog. Keep published entries stable except for factual
+corrections. The release page is the curated body for that version; GitHub
+release assets and verification reports carry the technical provenance.
+
+For the Build macOS binaries workflow, set `do-release`, choose the new product
+`release-tag`, and supply its repository-relative `release-notes-file` at
+`docs/releases/<product-tag>.md`. Release generation requires the tag and a
+nonempty notes file, then appends asset hashes, commit history, and the workflow
+link. Artifact filenames keep their underlying build version. Build-only
+dispatches do not need either release input.
+
+For a manually packaged preview, supply the same file to GitHub CLI after
+verifying the release assets and selecting the exact source revision:
+
+```sh
+gh release create "$product_tag" --prerelease --target "$source_revision" \
+  --notes-file "docs/releases/$product_tag.md" "${release_assets[@]}"
+```
+
+Product preview tags and the underlying Helium build version are separate.
+Choose the product tag explicitly; do not infer it from the bundle version.
 
 ## Development build and environment
 
