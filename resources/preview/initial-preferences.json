@@ -68,7 +68,7 @@
             "opacity": 0.5,
             "radius": 0.8,
             "x": 0.18,
-            "y": 0.2
+            "y": 0.8
           },
           {
             "color": "#C2DCB5",
@@ -76,7 +76,7 @@
             "opacity": 0.5,
             "radius": 0.8,
             "x": 0.8,
-            "y": 0.65
+            "y": 0.35
           },
           {
             "color": "#B5DCCF",
@@ -84,7 +84,7 @@
             "opacity": 0.5,
             "radius": 0.8,
             "x": 0.58,
-            "y": 0.54
+            "y": 0.46
           }
         ],
         "tintStrength": 0.4
@@ -98,7 +98,7 @@
   },
   "browser": {
     "theme": {
-      "color_scheme2": 1
+      "color_scheme2": 0
     }
   }
 }
