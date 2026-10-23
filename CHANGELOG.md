@@ -12,6 +12,7 @@ The big additions go under Highlights; smaller improvements go under Polish and 
 ### Polish and fixes
 
 - Keep attached Arc profiles separate, preserve unselected Spaces during refresh, and retain source-cached site icons.
+- New Arc import profiles inherit sidebar and material settings, so imported Pins and Favorites are visible when browsing starts.
 - Setup responds without the old introductory delay. Imports show progress and retryable failures, with optional configuration after migration.
 - Visual polish! Browser content follows the window's curve more closely, including split panes and frames with no border. Checked on macOS 26; macOS 27 still needs a runtime check.
 
