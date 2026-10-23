@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-from . import builds, catalog, quilt, records, scratch, timestamps
+from . import builds, catalog, lane, quilt, records, scratch, timestamps
 from .common import HeError, Paths, make_paths, write_atomic
 from .lock import run_locked
 
@@ -102,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--build-mode", choices=builds.MODES,
                         default=os.environ.get("HELIUM_DEV_BUILD_MODE", "diagnostics"))
     commands = parser.add_subparsers(dest="command", required=True)
+    lane.add_parser(commands)
     lock = commands.add_parser("lock")
     lock.add_argument("--label", required=True)
     lock.add_argument("argv", nargs=argparse.REMAINDER)
@@ -162,7 +163,9 @@ def main(argv: list[str] | None = None) -> int:
         paths = make_paths(args.worktree, args.build_dir, args.build_mode)
         if args.command == "lock":
             command = args.argv[1:] if args.argv[:1] == ["--"] else args.argv
-            return run_locked(paths.state / "lane.lock", command, label=args.label)
+            return run_locked(paths.state / "lane.lock", command, label=args.label, worktree=paths.worktree)
+        if args.command == "lane":
+            return lane.main(paths, args)
         if args.command == "merge":
             records.require_compatible(paths)
             catalog.merge(paths, discard=args.discard)
