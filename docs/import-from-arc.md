@@ -2,15 +2,23 @@
 
 Arcium can bring Arc's saved sidebar into Spaces, Favorites, Pins, and folders. It can also import browsing history. Passwords and optional cookies use a separate migration tool.
 
-This page describes the current implementation. Check the [preview notes](preview-release.md) for the build you downloaded.
+This page describes the native welcome flow in source. The published `0.2.0-preview.1` still uses the older browser import dialog described under Advanced import below. Check the [preview notes](preview-release.md) for the build you downloaded.
+
+## Start here
+
+1. In Arcium's welcome window, choose **Import from Arc**. If you already finished setup, open **Settings > General > Import from Arc**.
+2. Choose your Arc profile. Check the Arcium destination shown beneath it.
+3. Choose **Import**. Spaces, Pins, folders, and Favorites are selected for you. History is optional and starts off.
+
+The result stays open so you can check what came over, open an imported Space, or import another profile. A failed import stays on screen with a retry action. You can skip importing and return from Settings later.
 
 ## What comes over
 
 | Data | How to import it |
 | --- | --- |
-| Spaces, saved Favorites, Pins, nested folders | Browser Import data dialog, with **Import sidebar as Pins** enabled |
-| Sidebar as live tabs and tab groups | Same dialog, with **Import sidebar as Pins** off |
-| Browsing history | Select History in the native import dialog when available |
+| Spaces, saved Favorites, Pins, nested folders | Import from Arc, selected by default |
+| Browsing history | Turn on History when available |
+| Sidebar as live tabs and tab groups | Advanced browser import dialog, with **Import sidebar as Pins** off |
 | Ordinary Arc bookmarks, if present | Native bookmark import; these remain browser bookmarks |
 | Saved passwords | Advanced credential migration tool, with explicit profile mappings |
 | Cookies and existing sessions | Optional credential migration step; some sites will still require sign-in |
@@ -30,7 +38,9 @@ The importer reads Arc's saved sidebar, not an exact copy of every live window o
 3. Quit Arcium and copy `~/Library/Application Support/Arcium` to a separate backup location. Back up your custom user-data directory instead if you use one.
 4. Open Arcium in the browser profile that should receive this Arc profile's data.
 
-## Import the sidebar
+## Advanced import
+
+The browser import dialog remains available for other browsers and for Arc's older live-tab import mode. It is also the import route in `0.2.0-preview.1`.
 
 1. Open Settings with **Command-Comma**.
 2. In General, choose **More settings…**, then open **Import data** in browser Settings. You can also open `chrome://settings/importData`.
@@ -40,15 +50,17 @@ The importer reads Arc's saved sidebar, not an exact copy of every live window o
 6. Open each imported Space. Check names, folder order, Favorites, and saved home pages.
 7. Quit Arcium normally, reopen it, and check the sidebar again.
 
-Import each Arc source profile into its intended Arcium browser profile. The native dialog does not perform an automatic account migration across all profiles.
+Import each Arc source profile into its intended Arcium browser profile. Neither dialog creates separate account profiles automatically.
 
 ## Importing again
 
-Uncheck **History** when refreshing your sidebar. History imports append visits; importing the same history again creates duplicate visits. The sidebar refresh behavior below applies to Pins, not History.
+The native sheet changes its button to **Refresh sidebar** when that source already has imported data. History stays off when you choose another source or retry. History imports append visits; importing the same history again creates duplicate visits. The sidebar refresh behavior below applies to Pins, not History.
 
 **Refreshing a Pins import replaces the source-owned sidebar trees.** It removes or replaces that source profile's imported Spaces, Pins, folders, and Favorites to match the new snapshot. Local Pins and folders added inside those imported Space trees can disappear, and edits to their saved home pages can be replaced. Back up Arcium before refreshing.
 
 Keep items you want to maintain independently in a separate local Space. Check the imported sidebar after every refresh.
+
+**Stop import does not undo writes.** Items added before you stop can remain in Arcium. A failed import can also leave some data behind. Retrying the sidebar reconciles that source's records; leave History off unless you intend to add visits again.
 
 Tabs mode must replace prior imported tabs. If an imported page has an unload handler or cannot close without a confirmation, refresh stops before changing the import. Save your work, close those imported tabs yourself, and retry. Dormant Pins avoid this live-tab replacement step.
 
@@ -74,9 +86,9 @@ Do not use `import_arc_cookies.py` directly; its old command-line migration is d
 ## If something is missing
 
 - **Arc is absent from the source list.** Check that Arc has saved a local profile. Do not move its live data to make detection work.
-- **The Pins option is absent.** Select an Arc profile and enable the sidebar/bookmark category. Ordinary browser sources do not have this option.
+- **The Pins option is absent.** The native Import from Arc sheet always imports the saved sidebar as Pins. The separate browser dialog shows its Pins switch only for Arc sources with the sidebar/bookmark category enabled.
 - **Wrong account or Favorites.** Check the selected source and destination profiles. Switching Spaces does not switch cookie stores.
-- **An icon is missing.** Open that saved page and let its favicon load.
+- **An icon is missing.** The importer copies icons cached by Arc. If Arc has no cached icon for a saved page, open it and let its favicon load. Browser updates preserve the profile's cache.
 - **Tabs-mode refresh stops.** Save and close imported pages that request confirmation, then retry.
 - **A credential migration is rejected.** Read the reported cause and the migration guide. Keep the original databases and backup intact.
 

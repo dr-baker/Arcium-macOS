@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "id": "arc-welcome",
+  "description": "Native first run, Arc import, cached icons, retry, and profile lifetime.",
+  "profile": { "policy": "isolated", "name": "arc-welcome" },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": ["ArcImportCoordinatorTest.*", "ArcImportCoordinatorOutcomeTest.*", "ArcImportCoordinatorSourcesTest.*"]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_browser_tests",
+      "filters": ["ArciumArcImportBrowserTest.*"]
+    }
+  ],
+  "preconditions": [
+    "Record the exact source pins, build receipt, bundle, launch arguments, and isolated profile.",
+    "Launch without --no-first-run and with incomplete onboarding. Use a separate test home for installer preference seeding and Arc discovery.",
+    "Use public synthetic sources for failure tests. Read an authorized real Arc source only for aggregate import and cache checks; never modify it or visit private saved pages just to obtain icons.",
+    "Run ArciumArcImportTests and ArciumWelcomeTests in a copy of the native Swift package. Run node --test tests/import-navigation.test.mjs from the onboarding component separately."
+  ],
+  "steps": [
+    "Verify automatic native Welcome. Close before finishing, relaunch, and confirm setup remains incomplete. Services consent, extensions, and default-browser changes require separate user actions.",
+    "Open Import from Arc. Verify explicit source choice when several profiles exist, visible current destination, saved sidebar enabled, History off, and no extensions or credential import.",
+    "Import a large saved sidebar. Compare measured Spaces, Pins, folders, Favorites, source identities, ordering, and available cached icons. Visit every Space through its control without opening saved pages.",
+    "Close the largest window, reopen the Space, quit normally, and relaunch. Verify the restored active Space before switching. Compare counts, ordering, and icon coverage after restart.",
+    "Refresh the same source with History off. Verify stable imported identities and preservation of unrelated local Spaces. Check the refresh warning before starting.",
+    "In another destination, import a Favorites-only source. Verify a fallback Space, visible Favorites, preserved unrelated local records, and normal restart.",
+    "Use a malformed synthetic sidebar. Failure must remain visible without advancing setup. Retry returns to selection with History off and starts only after confirmation. Repair only the synthetic source and verify success. Refresh an empty source and verify the removal disclosure.",
+    "Exercise Stop import and close/profile destruction. Retained partial data is possible and must be described honestly. A second native or legacy import into the same destination must be rejected until the active host finishes.",
+    "Finish setup with services off and default-browser registration declined. Open the same import sheet from Settings > General. Verify keyboard navigation, small-window scrolling, and light/dark appearance.",
+    "Leave a separate fresh walkthrough profile untouched on Welcome for the user. Keep completed validation profiles separate."
+  ],
+  "observables": [
+    "A local sidebar import completes without extension preparation or network-service consent.",
+    "Failures stay retryable; History category completion is not described as a verified visit count.",
+    "Saved sidebar counts, active Space, and source-cached icons survive a normal restart.",
+    "Refresh changes only the selected source's owned sidebar records. History stays unchanged when off.",
+    "No new crash, stale callback, or cross-profile write occurs during cancellation and teardown."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}
