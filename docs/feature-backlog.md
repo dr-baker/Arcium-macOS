@@ -13,12 +13,18 @@ The original four suggestions were implemented and validated on macOS 26.6.2 in 
 3. Save split screens as durable Pins and verify their page ownership and lifecycle.
 4. Keep corner rounding concentric throughout the app, especially between the native window and browser content. Honor macOS window policy and account for Golden Gate's corner APIs.
 
-The Peek sign-in concept below is the fifth suggestion and remains deferred.
+The Peek sign-in feature below is the fifth suggestion and is in development.
 
 ## Open sign-in redirects in Peek while preserving the original page
 
 ID: ARCIUM-BACKLOG-PEEK-AUTH
-Status: Backlog only. Implementation has not started.
+Status: Implementation authorized on October 23, 2026. Source implementation and review are complete on `feature/peek-auth`. All 510 patches replayed with zero fuzz in the isolated scratch; its state check and both patch-catalog validators passed. Compilation and Arcium browser validation await the new build-lane handoff.
+
+The implementation adds a per-origin page-menu option, **Sign in with Peek on this site**. Recognized GET sign-in detours open in the source profile. Peek shows a still image of the dashboard while its original document is frozen and protected from navigation and discard. Closing Peek resumes that document without a reload. **Continue in tab** promotes the live login page. The initial sessionStorage namespace is cloned for callback state such as PKCE verifiers; callback writes and JavaScript memory do not transfer back to the source.
+
+If a protected destination never committed, closing Peek retries its exact URL once, including query and hash. Automatic renderer retries from the same document are suppressed after dismissal; a new user gesture permits another attempt. POST and form-submission flows retain normal browser behavior. Endpoint recognition is conservative and does not guarantee coverage of every identity provider.
+
+The local two-origin fixture is `devutils/peek_auth_site.py`. All three HTTP tests passed, covering expiration, the wrong return destination, and a one-use PKCE exchange. Standalone browser checks passed for PKCE success and the memory-only-state fallback. The seven new Chromium browser tests have not run. The `peek-auth` scenario covers browser state, cancellation, promotion, profile isolation, persistence, and teardown. This fixture represents shared-cookie SSO and cloned sessionStorage state. It does not represent a production Snowflake or Okta tenant, WebAuthn, MFA, or server-side SSO policy.
 
 An expired session can redirect the current tab through authentication and then land on a dashboard, losing the user's place. Add a simple opt-in option, preferably per site, that routes qualifying sign-in detours into Peek. The user completes login and closes Peek manually to resume the original page. Target authentication detours, not ordinary HTTP redirects. Manual close avoids inferring authentication completion from cookies.
 
