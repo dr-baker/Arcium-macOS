@@ -84,6 +84,7 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
 
 
 def status(paths: Paths, problems: list[str]) -> dict:
+    from .lane import Lane
     series = quilt.read_list(paths.catalog / "series.merged")
     applied = quilt.applied(paths.src)
     scratch_root = paths.state / "scratch"
@@ -98,6 +99,7 @@ def status(paths: Paths, problems: list[str]) -> dict:
         "worktree": str(paths.worktree),
         "build_dir": str(paths.build_dir),
         "build_mode": paths.build_mode,
+        "lane": Lane(paths.state).status(),
         "output_dir": str(paths.out),
         "scratch": (paths.state / "scratch.json").is_file(),
         "patches": {"series": len(series), "applied": len(applied), "top": applied[-1] if applied else None},

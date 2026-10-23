@@ -15,6 +15,7 @@ import sys
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from minichromium import CORE_PATCH, LONG_PATCH, OUTER_PATCH, PRISTINE, TOOLS, MiniChromium, run  # noqa: E402
 
 REQUIRED = all(shutil.which(tool) for tool in ("quilt", "ninja", "clang++", "bash", "git"))
@@ -25,6 +26,29 @@ class WorkflowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.m = MiniChromium()
         self.addCleanup(self.m.cleanup)
+
+    def test_lane_shell_dispatch_reserves_and_guards_shared_mutations(self) -> None:
+        from he.lane import Lane
+        self.m.he("lane", "init", "--coordinator", "coordinator")
+        state = self.m.build_dir / ".arcium"
+        lane = Lane(state)
+        lane.heartbeat(True)
+        self.m.he("lane", "resume", "--note", "fixture delivery verified")
+        request = json.loads(self.m.he("lane", "request", "--thread", "a", "--key", "build",
+                                      "--note", "fixture integration").stdout)
+        lane.offer_next()
+        generation = lane.status()["offer"]["generation"]
+        owner = json.loads(self.m.he("lane", "claim", request["id"], "--thread", "a",
+                                    "--offer", str(generation)).stdout)
+        refused = self.m.he("merge", check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("reservation", refused.stderr)
+        self.m.he("merge", HELIUM_LANE_TOKEN=owner["token"])
+        self.m.he("push", HELIUM_LANE_TOKEN=owner["token"])
+        self.assertEqual(lane.status()["owner"]["request"], request["id"])
+        self.m.he("lane", "release", "--note", "fixture replay complete", HELIUM_LANE_TOKEN=owner["token"])
+        stale = self.m.he("pop", check=False, HELIUM_LANE_TOKEN=owner["token"])
+        self.assertNotEqual(stale.returncode, 0)
 
     # Catalog -----------------------------------------------------------------
 
