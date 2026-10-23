@@ -16,6 +16,7 @@ in `docs/development-changes.md`. Agents prefix every `he` command with
 - `helium-chromium/` - pinned Arcium core and shared patches.
 - `patches/` - macOS-only Quilt patches.
 - `docs/agent-workflow.md` - read before running any `he` command: which command fits each task, the agent guards, runtime modes, proof gates.
+- `docs/build-lane.md` - read before shared build work or watcher setup: queue requests, claims, release, and recovery.
 - `docs/parallel-work.md` - read before dispatching parallel agents or working as one.
 - `docs/building.md` - the human build guide; setup, new patches, Chromium updates.
 - `docs/development-changes.md` - why the tooling differs from upstream Helium's.
