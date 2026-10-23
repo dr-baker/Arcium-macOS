@@ -32,7 +32,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,304 @@
 +// Copyright 2026 The Helium Authors
 +// You can use, redistribute, and/or modify this source code under
 +// the terms of the GPL-3.0 license found in the LICENSE file.
@@ -128,6 +128,50 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
 +    [NSWorkspace.sharedWorkspace.notificationCenter
 +        removeObserver:accessibility_observer_];
 +    [background_view_ removeFromSuperview];
++  }
++
++  std::optional<int> ResizeHeight(std::optional<int> height,
++                                  base::TimeDelta duration) override {
++    NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++    if (!window) {
++      return std::nullopt;
++    }
++    NSRect frame = window.frame;
++    if (height) {
++      // Cocoa coordinates grow upward. Keep the search field's top edge fixed.
++      frame.origin.y = NSMaxY(frame) - *height;
++      frame.size.height = *height;
++    }
++    const bool animate = height && duration.is_positive() &&
++        !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
++    NSDictionary* previous_animations = window.animations;
++    CASpringAnimation* spring = nil;
++    if (animate) {
++      if (@available(macOS 14.0, *)) {
++        spring = [[CASpringAnimation alloc]
++            initWithPerceptualDuration:duration.InSecondsF() bounce:0];
++      } else {
++        // Critically damped equivalent for older AppKit: no undershoot that
++        // could briefly clip the last result while the panel contracts.
++        spring = [CASpringAnimation animation];
++        const double frequency = 6.283185307179586 / duration.InSecondsF();
++        spring.stiffness = frequency * frequency;
++        spring.damping = 2 * frequency;
++      }
++      spring.duration = spring.settlingDuration;
++      NSMutableDictionary* animations =
++          [previous_animations mutableCopy] ?: [NSMutableDictionary dictionary];
++      animations[@"frame"] = spring;
++      window.animations = animations;
++    }
++    [NSAnimationContext runAnimationGroup:^(NSAnimationContext* context) {
++      // A spring's duration is perceptual; let its short settling tail finish.
++      // Zero duration also stops an in-flight resize at its current frame.
++      context.duration = animate ? spring.settlingDuration : 0;
++      [[window animator] setFrame:frame display:YES];
++    } completionHandler:nil];
++    window.animations = previous_animations;
++    return base::ClampRound(NSHeight(window.frame));
 +  }
 +
 +  void SetContour(const SkPath& contour) override {
@@ -875,7 +919,7 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -130,6 +130,7 @@ if (!is_android && toolkit_views) {
+@@ -133,6 +133,7 @@ if (!is_android && toolkit_views) {
        ]
      }
      if (is_mac) {
