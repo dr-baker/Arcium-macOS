@@ -33,8 +33,10 @@ made inside them. Repeating History import can duplicate visits, so leave it off
 for sidebar refreshes.
 
 Check every available Space against the saved sidebar. A successful batch covers
-the selected available data. If the page says some data is unavailable, that
-warning remains after import until a clean reread. A failed or stopped import can
+the selected available data. The picker and import results explain any excluded saved Spaces or Favorites,
+including records assigned to profiles on another Mac. Empty cached profiles do
+not produce a notice. Read failures are reported separately. These details stay
+with the results until a completed reread replaces them. A failed or stopped import can
 leave partial data; stopping does not roll it back. Verify folder order and saved
 records after a normal quit and restart.
 
