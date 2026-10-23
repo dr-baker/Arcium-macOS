@@ -18,7 +18,16 @@
         "OmniboxResultViewTest.Arcium*",
         "CommandBarMaterialTest.*",
         "ArciumOmniboxServiceTest.*",
-        "ArciumCommandBarTest.*"
+        "ArciumNativePanelTest.*",
+        "CommandPanelAppearanceTest.*",
+        "CommandSearchIndexTest.*",
+        "ArciumCommandActionRouterTest.*",
+        "ArciumCommandSessionTest.*",
+        "ArciumCommandIconCacheTest.*",
+        "ArciumCommandContextHistoryTest.*",
+        "ArciumCommandLocalPresentationTest.*",
+        "ArciumCommandEntryRoutingTest.*",
+        "ArciumCommandCorpusTimeTest.*"
       ]
     },
     {
@@ -35,6 +44,10 @@
     "Record existing settings and create only acceptance-owned tabs and Spaces; preserve user items"
   ],
   "steps": [
+    "Verify unset command bar style defaults are Text, Go / Switch, Divot, connected and full width scopes, scope tints, 75% glow, and activity dots; preserve explicit saved overrides",
+    "Open via sidebar plus, horizontal tab-strip plus, File > New Tab, Command-T, Command-L and Command-Option-F; each must open the floating command bar. Click the address bar directly to open its existing input. Cancel each invocation before moving on",
+    "Record first and repeated opening setup/presentation samples from chrome://histograms/Arcium.CommandBar and the exact bundle identity; compare the same window, corpus, material, and input method",
+    "Change an acceptance-owned saved item while the bar is closed, reopen, and verify fresh local results without displaying the dirty snapshot",
     "Press Command-T and inspect the New tab bar before typing; press Escape",
     "Press Command-L, type a test URL, press Return, and inspect the original tab",
     "Press Command-T, type a second test URL, press Return, and inspect both tabs",
@@ -48,6 +61,8 @@
     "Quit normally, restart the same profile, inspect saved-item identity, usage, and the recorded appearance preference, then restore the original appearance and remove only acceptance-owned items"
   ],
   "observables": [
+    "Every explicit new-tab button and keyboard entry opens the command bar; cancellation creates no tab",
+    "The browser retains its local corpus across openings and defers dirty refresh until the panel is active",
     "Command-T and Escape leave tab count and current tab unchanged",
     "Command-L changes the current tab; Command-T Return creates one new ordinary tab",
     "Arrow keys select rows; saved-result Return activates or restores exactly one qualified item",
