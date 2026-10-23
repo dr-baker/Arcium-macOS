@@ -7,10 +7,18 @@ offer; the requester must claim it before changing the build directory.
 
 ## Activation status
 
-The code and temporary-lane tests are ready for review. Production activation
-is pending an approved outside-client T3 connection, a real message-delivery
-test, and an idle handoff from the existing owner. No shared lane has been
-initialized. A request recorded in this document is not a reservation.
+The code and temporary-lane tests are complete. Daniel approved the watcher's
+T3 Auto access on 2026-10-23. The separate OAuth client connected to
+`http://127.0.0.1:3773/mcp`, and a real queued turn offer woke this coordinator
+from `completed` state. Claim, guarded command, release, and pause all passed.
+The offer was delivered once, on its first attempt. Evidence is in
+`/private/tmp/arcium-lane-live-smoke/verification.log` and `final-status.json`
+beside it; that temporary lane is paused and its one-shot watcher has exited.
+
+Production activation still requires an idle handoff from the existing owner,
+landing the tooling at a stable path, and installing the supervised watcher.
+No shared lane has been initialized. A request recorded in this document is
+not a reservation.
 
 Current manual owner: auth-in-Peek,
 `3f69554e-6974-44a2-b4c4-14cdf23f1a47`. On 2026-10-23 Daniel authorized
