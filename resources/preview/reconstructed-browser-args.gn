@@ -1,0 +1,39 @@
+# Reconstructed portable Oct17 dev.sh defaults; original args.gn was not preserved.
+# Machine-specific cc_wrapper/use_remoteexec omitted; binary byte reproduction is not claimed.
+chrome_pgo_phase=0
+clang_use_chrome_plugins=false
+disable_fieldtrial_testing_config=true
+enable_hangout_services_extension=false
+enable_mdns=false
+enable_remoting=false
+enable_reporting=false
+enable_service_discovery=false
+enable_widevine=true
+exclude_unwind_tables=true
+google_api_key=""
+google_default_client_id=""
+google_default_client_secret=""
+safe_browsing_mode=0
+treat_warnings_as_errors=false
+use_official_google_api_keys=false
+use_unofficial_version_number=false
+blink_symbol_level=0
+v8_symbol_level=0
+enable_iterator_debugging=false
+enable_mse_mpeg2ts_stream_parser=true
+enable_rust=true
+enable_swiftshader=true
+enable_updater=false
+fatal_linker_warnings=false
+ffmpeg_branding="Chrome"
+is_clang=true
+is_debug=false
+# Disable development checks when dev.sh switches to component linking.
+dcheck_always_on=false
+is_component_build=true
+proprietary_codecs=true
+symbol_level=1
+use_sysroot=false
+target_cpu = "arm64"
+devtools_skip_typecheck = false
+use_siso = true
