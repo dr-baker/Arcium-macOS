@@ -115,6 +115,42 @@ focused live-edit sheets. Everyday and Advanced color views are inside the color
 sheet. The native backdrop and shortcut recorder remain app-owned. A Space
 change closes customization; profile guards and captured Space IDs remain in force.
 
+General's **Import from Arc** action opens `chrome://setup/?import=arc` in a
+new tab. This standalone route shows only the Space picker. Opening, importing,
+and finishing there do not change setup completion or existing service consent.
+Users select one, several, or all Spaces. The importer creates separate physical
+browser profiles for their attached Arc identities and reuses those destinations
+on later imports. Space names are display labels; opaque identities control
+selection and results.
+
+First-run `chrome://setup` starts with **Coming from Arc?**. **Import from Arc**
+imports all eligible Spaces from an explicit click, with History off. Discovery
+alone never starts an import. Successful **Start browsing** opens an imported
+Space and writes only `helium.completed_onboarding`. It does not grant
+`helium.services.user_consented` or accept the service schema. **Configure**
+continues to the services and search choices. **Choose what to import** opens the
+custom picker. Other-browser import and starting fresh retain the regular setup.
+
+Pins, folders, and profile Favorites come with the selected Spaces. History is
+optional in the picker and resets off after selection changes, rereads, and each
+request. Password-manager setup is skipped without service consent or when
+services or extension access are off. Newly created import destinations set
+services and consent off and mark setup complete; reused destinations retain
+those preferences.
+
+Refreshing a selected Space replaces its source-owned saved tree while preserving
+unselected imported Spaces and independently maintained local records. Cancelling
+may leave partial data, which the page reports. An inventory warning stays visible
+through imports and unsuccessful rereads; only a completed clean inventory clears
+it. Foreign-machine identity rejection remains in the parser. Credentials and
+extensions are not imported by this flow. The importer-host guard prevents
+another import from writing into a destination while its current job is running.
+
+These are source contracts. The [Arc welcome scenario](../devutils/scenarios/arc-welcome.json)
+covers first run, failures, refresh, source-cached icons, and persistence. Native
+acceptance of the new browser-content flow is pending. Earlier native-dialog
+results do not verify this flow; execute its checks against the selected bundle.
+
 ## Floating surfaces
 
 Core resolves surface groups in `surface_style.{h,cc}`. Appearance provides
@@ -539,4 +575,3 @@ The forms retain icon choices in their draft until Create/Save. The direct
 popover saves only the selected icon after the bubble closes, resolving the
 Space by profile path and Space ID. It retains another profile while editing,
 closes before its anchor is replaced and cancels when the target disappears.
-
