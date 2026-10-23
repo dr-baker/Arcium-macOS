@@ -115,6 +115,19 @@ focused live-edit sheets. Everyday and Advanced color views are inside the color
 sheet. The native backdrop and shortcut recorder remain app-owned. A Space
 change closes customization; profile guards and captured Space IDs remain in force.
 
+General's **Import from Arc** action opens the same native sheet used by Welcome.
+This is an operation, not a persistent preference. The C++ import coordinator owns
+source discovery, destination identity, progress, cancellation, and results. Swift
+sends an opaque source token and category choices. The saved sidebar always uses
+Pins; History starts off and resets off on retry or source changes. A central
+importer-host guard also prevents an older browser import dialog from writing into
+the destination while a job is running. Closing an unrelated Settings window does
+not close a sheet attached to Welcome.
+
+The [Arc welcome scenario](../devutils/scenarios/arc-welcome.json) covers first run,
+failures, refresh, source-cached icons, and persistence. Its checks must be executed
+against the selected bundle before claiming runtime verification.
+
 ## Floating surfaces
 
 Core resolves surface groups in `surface_style.{h,cc}`. Appearance provides
@@ -539,4 +552,3 @@ The forms retain icon choices in their draft until Create/Save. The direct
 popover saves only the selected icon after the bubble closes, resolving the
 Space by profile path and Space ID. It retains another profile while editing,
 closes before its anchor is replaced and cancels when the target disappears.
-

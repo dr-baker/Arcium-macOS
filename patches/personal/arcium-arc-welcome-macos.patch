@@ -701,7 +701,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        }
 +    }
 +
-+    static let refreshCaption = "Replaces Spaces and Pins from this Arc profile with Arc's current sidebar, including edits you made to them. Your own Spaces stay."
++    static let refreshCaption = "Refresh replaces the imported Spaces, Pins, folders, and Favorites. Changes you made inside those Spaces will be replaced by Arc's version. Other Spaces stay."
 +    static let historyFinishedCaption = "History import finished. Check History to confirm what was added."
 +    static let historyCaption = "Adds visits. Importing history again adds duplicates."
 +}
