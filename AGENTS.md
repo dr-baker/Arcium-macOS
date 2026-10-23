@@ -35,7 +35,8 @@ in `docs/development-changes.md`. Agents prefix every `he` command with
 - Before a runtime handoff, clarify build only, installed app, or isolated
   testing if the session has not established it.
 - Report proof gates separately, as `docs/agent-workflow.md` lists them.
-- Push to an upstream repository only when Daniel asks.
+- Never touch upstream Helium repositories. Open PRs, merge, and push only
+  to Daniel's `dr-baker` forks.
 
 ## Vocabulary
 
