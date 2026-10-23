@@ -22,7 +22,7 @@
     "Use Ordinary redirect. Disable the site toggle and repeat login; verify normal tab navigation.",
     "Re-enable the toggle, quit normally, and relaunch. Verify the toggle persists and no temporary login Peek is restored.",
     "Repeat in another profile and a private window. Verify auth storage is isolated from the regular profile.",
-    "Close a source tab with an unsent beforeunload draft while Peek is open, cancel the close, then close Peek and the browser normally."
+    "Enable Ask before leaving an unsent draft and type a draft. Start sign-in, accepting the initial leave prompt if shown. Close the source tab while Peek is open, cancel the close, then close Peek and the browser normally."
   ],
   "observables": [
     "The existing source retains its WebContents and document identity, URL query and hash, draft, scroll, and focus.",

@@ -39,6 +39,7 @@ DEEP_BODY = """
 <button id=probe>Check authenticated request</button>
 <pre id=status>Ready</pre><pre id=identity></pre>
 <section id=worksheet><h2>Unsent draft</h2><textarea id=draft placeholder="Write something that must survive sign-in"></textarea></section>
+<label><input id=protectDraft type=checkbox> Ask before leaving an unsent draft</label>
 <div id=rows></div>
 """
 
@@ -56,6 +57,11 @@ setInterval(() => {
   identityView.textContent = JSON.stringify({pageIdentity, tickCount, freezeCount, resumeCount}, null, 2);
 }, 100);
 sessionStorage.setItem('source-only', 'original');
+window.addEventListener('beforeunload', event => {
+  if (!protectDraft.checked || !draft.value) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 rows.innerHTML = Array.from({length: 24}, (_, i) => `<p>Revenue row ${i+1} · $${(i+1)*4317}</p>`).join('');
 window.beginAuth = async (mode = 'cookie') => {
   await fetch('/expire', {method: 'POST'});
@@ -73,7 +79,9 @@ memory.onclick = () => beginAuth('memory');
 ordinary.onclick = () => location.href = '/ordinary-redirect';
 probe.onclick = async () => {
   const response = await fetch('/api/data');
-  statusView.textContent = response.status + ' ' + await response.text();
+  statusView.textContent = response.status + ' ' + await response.text() + '\\n' +
+    JSON.stringify({sourceStorage: sessionStorage.getItem('source-only'),
+      callbackStorage: sessionStorage.getItem('callback-only')}, null, 2);
 };
 """
 
