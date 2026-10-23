@@ -106,6 +106,11 @@ Some things to know early:
 
 Open the Xcode application before preparing an official build.
 
+For a release source archive, extract it with `helium-chromium/` inside the
+outer source directory, install the dependencies above, and run `./build.sh arm64`.
+The archive contains both pinned source trees and does not need Git history.
+Use `build.sh` for archive builds; `he setup` and `he pull` expect a Git checkout.
+
 To notarize the build you need an Apple Developer ID and a valid Apple Developer
 Program membership, and these environment variables:
 

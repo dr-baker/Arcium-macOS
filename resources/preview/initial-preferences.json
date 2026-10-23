@@ -1,0 +1,104 @@
+{
+  "helium": {
+    "browser": {
+      "layout": 2,
+      "centered_location_bar": true,
+      "minimal_location_bar": true,
+      "peek_enabled": true,
+      "mru_tab_cycling": true,
+      "vertical_right_aligned": false
+    },
+    "little_arc": {
+      "external_links": true
+    }
+  },
+  "arcium": {
+    "appearance": {
+      "sidebar_navigation": false,
+      "chrome_ui_scale": 110,
+      "chrome_frame_border_width": 4,
+      "collapsed_sidebar_style": 1,
+      "palette": {
+        "accent": "#1565C0",
+        "configuration": {
+          "accentSource": "Custom accent",
+          "brandLightness": 0.817413612862686,
+          "chroma": 0.06269515770655129,
+          "chromeSource": "Brand tint",
+          "companion": {
+            "chroma": 0.05957708466806952,
+            "hue": 135.18621642245546,
+            "lightness": 0.8649541457188474
+          },
+          "customAccent": {
+            "chroma": 0.16028196827153252,
+            "hue": 255.67334066272542,
+            "lightness": 0.513400819290048
+          },
+          "darkCanvas": 0.17,
+          "harmony": "My second color",
+          "hue": 331.34104095178253,
+          "lightCanvas": 0.97,
+          "neutralChroma": 0.012,
+          "neutralHue": 270.0,
+          "textContrast": 4.5
+        },
+        "darkChromeColor": "#130E12",
+        "lightChromeColor": "#FAF2F9"
+      },
+      "show_toolbar": false
+    },
+    "chrome": {
+      "appearance": {
+        "colorHarmony": "splitComplementary",
+        "enabled": true,
+        "frostedStyle": "automatic",
+        "frostedTintStrength": 1.0,
+        "glassStyle": "regular",
+        "glassTintOpacity": 0.7,
+        "grain": 0.06,
+        "grainScale": 0.5,
+        "matchColorAdjustments": true,
+        "material": "liquidGlass",
+        "materialOpacity": 0.95,
+        "points": [
+          {
+            "color": "#DCB5D6",
+            "id": "yellow",
+            "opacity": 0.5,
+            "radius": 0.8,
+            "x": 0.18,
+            "y": 0.2
+          },
+          {
+            "color": "#C2DCB5",
+            "id": "blue",
+            "opacity": 0.5,
+            "radius": 0.8,
+            "x": 0.8,
+            "y": 0.65
+          },
+          {
+            "color": "#B5DCCF",
+            "id": "point-1",
+            "opacity": 0.5,
+            "radius": 0.8,
+            "x": 0.58,
+            "y": 0.54
+          }
+        ],
+        "tintStrength": 0.4
+      }
+    }
+  },
+  "distribution": {
+    "skip_first_run_ui": true,
+    "suppress_first_run_default_browser_prompt": true,
+    "make_chrome_default": false
+  },
+  "browser": {
+    "theme": {
+      "color_scheme2": 1
+    }
+  }
+}

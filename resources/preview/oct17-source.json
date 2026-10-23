@@ -1,0 +1,18 @@
+{
+  "browser_baseline_date": "2026-10-17",
+  "macos_commit": "3fde10677df908a9a287799ac5511eee5638af7a",
+  "core_commit": "2dc458279f4e6d5f48d67d3872d5863962355c79",
+  "chromium": "151.0.7922.71",
+  "helium_version": "0.15.1.1",
+  "architecture": "arm64",
+  "minimum_macos": "26.0",
+  "source_layout": "Core is included directly in helium-chromium; no submodules.",
+  "preview_changes": [
+    "Native installer and fresh-profile defaults",
+    "README and screenshot",
+    "Single-repository build documentation"
+  ],
+  "binary_provenance": "Preserved October 17 installed app; code pages and sealed resources verified against embedded signatures before re-signing. This is not a fresh reproducible build.",
+  "browser_build": "Optimized component build, not official/PGO release configuration.",
+  "configuration": "resources/preview/reconstructed-browser-args.gn reconstructs portable defaults from the source. Original args.gn and machine overrides were not preserved."
+}
