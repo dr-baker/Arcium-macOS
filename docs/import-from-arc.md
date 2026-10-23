@@ -44,6 +44,8 @@ Import each Arc source profile into its intended Arcium browser profile. The nat
 
 ## Importing again
 
+Uncheck **History** when refreshing your sidebar. History imports append visits; importing the same history again creates duplicate visits. The sidebar refresh behavior below applies to Pins, not History.
+
 **Refreshing a Pins import replaces the source-owned sidebar trees.** It removes or replaces that source profile's imported Spaces, Pins, folders, and Favorites to match the new snapshot. Local Pins and folders added inside those imported Space trees can disappear, and edits to their saved home pages can be replaced. Back up Arcium before refreshing.
 
 Keep items you want to maintain independently in a separate local Space. Check the imported sidebar after every refresh.
