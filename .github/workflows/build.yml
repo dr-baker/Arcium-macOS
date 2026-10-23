@@ -11,6 +11,12 @@ on:
         type: boolean
         description: "Create a release after build is done"
         default: false
+      release-notes-file:
+        required: false
+        description: "Versioned product notes, for example docs/releases/0.2.0-preview.1.md; required when releasing"
+      release-tag:
+        required: false
+        description: "Product release tag, for example 0.2.0-preview.2; required when releasing"
 
 permissions:
   contents: write
@@ -49,7 +55,11 @@ jobs:
         run: brew install coreutils
       - name: Prepare release
         id: bake
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          REQUIRE_RELEASE_TAG: "1"
         run: ./github_prepare_release.sh | tee -a github_actions_release.log
+        shell: bash
       - name: Get built x86-64 binary
         uses: actions/download-artifact@v4
         with:
@@ -61,6 +71,10 @@ jobs:
       - name: List files
         run: ls -la
       - name: Generate release note
+        shell: bash
+        env:
+          RELEASE_NOTES_FILE: ${{ inputs.release-notes-file }}
+          REQUIRE_RELEASE_NOTES: "1"
         run: ./github_generate_release_note.sh | tee -a github_actions_release.log
       - name: List deltas
         id: list_deltas
@@ -82,4 +96,5 @@ jobs:
             ${{ steps.list_deltas.outputs.deltas }}
           name: ${{ steps.bake.outputs.release_name }}
           tag_name: ${{ steps.bake.outputs.release_tag_version }}
+          target_commitish: ${{ github.sha }}
           token: ${{ secrets.GITHUB_TOKEN }}

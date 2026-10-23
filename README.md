@@ -8,7 +8,7 @@ Arcium adds Spaces, Pins, Favorites, Peek, Little Arc, and a customizable macOS 
 
 The preview includes the glass, sidebar, and command bar shown here.
 
-[Download the preview](https://github.com/dr-baker/Arcium-macOS/releases) · [Release notes and limits](docs/preview-release.md) · [Import from Arc](docs/import-from-arc.md) · [Build from source](docs/building.md)
+[Download the preview](https://github.com/dr-baker/Arcium-macOS/releases) · [Changelog](CHANGELOG.md) · [Install and limits](docs/preview-release.md) · [Import from Arc](docs/import-from-arc.md) · [Build from source](docs/building.md)
 
 ## Start browsing
 

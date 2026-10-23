@@ -14,12 +14,7 @@ Coming from Arc? Follow [Import from Arc](import-from-arc.md) for sidebar and hi
 
 ## What changed
 
-- Traffic lights use the navigation row's height, including at larger browser UI scales.
-- Scope colors fade down into the command bar. Omni blends violet, blue, and a faint mint.
-- A typed YouTube search or ChatGPT question remains the default action even when an existing tab matches it.
-- Favorites-only Arc profiles get a visible imported Space. Empty imports preserve the starter Space's identity.
-- Visible browser and onboarding copy says Arcium. Upstream licenses and service attribution remain intact.
-- The macOS product repository now contains the installer, source instructions, gallery, and import guide.
+Read the [0.2.0-preview.1 release notes](releases/0.2.0-preview.1.md) for the published preview, or the [changelog](../CHANGELOG.md) for newer changes in source.
 
 ## Limits
 
@@ -27,7 +22,7 @@ This is an early preview built on Chromium **151.0.7922.71**, not a current Chro
 
 Spaces in one browser profile share cookies and sign-ins. Repeating a Pins import replaces the source-owned Space trees, including local edits inside them. Arc split views import as individual pages, without their split layout. Favorites folders flatten into tiles.
 
-Little Arc handles one eligible HTTP or HTTPS URL per request. A shortcut for an empty Little Arc search window is not implemented. Pinned split views exist in source; broader release validation remains on the roadmap.
+Little Arc handles one eligible HTTP or HTTPS URL per request. A shortcut for an empty Little Arc search window is not implemented.
 
 The Shelf-inspired archive alternative, combined Little Arc/Peek, local model cleanup, and optimized browser control for agents are planned work.
 
