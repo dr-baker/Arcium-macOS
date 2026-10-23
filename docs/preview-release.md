@@ -39,4 +39,4 @@ The release assets record the exact macOS and core revisions, build arguments, c
 
 The installer tests cover fresh defaults, preserving existing profiles, and refusing a symbolic-link profile path. Arc import tests cover parser fixtures, saved sidebar reconciliation, repeated imports, and source ownership. Credential tests use synthetic databases and test keys; they cannot guarantee that a website will accept migrated cookies.
 
-The old October 17 package remains in the [historical Arcium-browser release](https://github.com/dr-baker/Arcium-browser/releases/tag/v0.1.0-preview.1). It has older styling and does not contain these fixes.
+The temporary Arcium-browser repository is retired and its old preview downloads have been removed. Download this preview from [Arcium-macOS releases](https://github.com/dr-baker/Arcium-macOS/releases).

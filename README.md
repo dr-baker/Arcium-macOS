@@ -74,7 +74,7 @@ Arcium keeps Helium's ad and tracker blocking, fingerprinting protections, Chrom
 
 ## Source and development
 
-This is the main macOS product repository. It pins [Arcium core](https://github.com/dr-baker/Arcium) in `helium-chromium/` and owns macOS integration, packaging, and signing. The historical [Arcium-browser preview](https://github.com/dr-baker/Arcium-browser) includes its matching core snapshot directly.
+This is the main macOS product repository. It pins [Arcium core](https://github.com/dr-baker/Arcium) in `helium-chromium/` and owns macOS integration, packaging, and signing. The temporary Arcium-browser repository is retired; current downloads and documentation live here.
 
 ```sh
 git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git
