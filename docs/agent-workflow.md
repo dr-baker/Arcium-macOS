@@ -3,6 +3,11 @@
 How a coding agent picks and runs `he` commands. Source `dev.sh` from the
 checkout you are working in, then prefix every `he` command with `he agent`.
 
+For a build directory enrolled in [build lane coordination](build-lane.md),
+read `he agent lane status --json` and claim its offered reservation before
+changing shared source or output. The reservation spans commands and ends
+after packaging. The linked guide records activation status and recovery.
+
 ## Pick the command
 
 Start every session with `he agent check --json`. It reports the build dir,

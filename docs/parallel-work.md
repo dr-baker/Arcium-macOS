@@ -4,6 +4,11 @@ Read when you dispatch parallel agents or work as one of them. One build dir
 sits at one patch position at a time, so parallel patch work needs one
 integrator and a scratch per worker.
 
+For an enrolled build directory, use the [build lane queue](build-lane.md)
+to request the next integration session. Notes stay in the shared record;
+the watcher messages the next requester when it can claim. Existing explicit
+ownership remains in force until the coordinator completes activation.
+
 ## Roles
 
 Name one **integrator** before dispatching. The integrator owns the shared
