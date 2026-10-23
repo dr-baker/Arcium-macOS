@@ -41,6 +41,7 @@
     "Verify chrome://setup appears in browser content and controls respond immediately. Close unfinished setup, relaunch, and verify it returns.",
     "Verify Coming from Arc is the first question, with Import from Arc primary and Choose what to import secondary. Viewing or leaving the screen must not import. Another browser and Start fresh remain available.",
     "Press Import from Arc once. Verify every locally eligible Space and its attached profile is imported with Pins, folders, Favorites, and History off. Show unavailable-source warnings throughout. Start browsing leaves the imported Space in front without granting service consent or navigating the original window over it. The original setup becomes noninteractive after completion; Configure is optional before completion.",
+    "On the ready screen, verify Start browsing stays primary and Customize appearance is optional. Customize opens Appearance for the imported Space and its attached profile, completes setup without service consent, and leaves the original setup terminal. Failed opening remains retryable; duplicate clicks cannot open another job or import again.",
     "In a separate fresh case, choose what to import. Verify Space names, independent checkboxes, Select all, clearing selection, Favorites-only entries when locally valid, and History off. No Chromium folder picker should be required.",
     "Import selected Spaces across attached Arc identities. Verify distinct physical destination profiles, correct Favorites per identity, measured saved records and ordering, and available cached icons. Do not open private saved pages.",
     "Refresh one selected Space. Preserve unselected imported Spaces, local records, ordering, and unrelated cached icons. Repeat with History off and verify no duplicate sidebar or history records.",
@@ -49,7 +50,8 @@
     "Exercise delayed Start acknowledgement in controller tests: no automatic retry, no duplicate sends or stale request attribution, and cancellation remains available after the active batch is recovered. State explicitly if the native timing cannot be reproduced.",
     "Verify littleBrowser containers and foreign-machine Favorites cannot be attached to local saved Spaces. Missing local machine metadata must not cause guessed profile mapping.",
     "Open Settings > General > Import from Arc. Verify the same content picker opens in a new tab without changing completed setup or service consent. Closing it affects only the import tab.",
-    "Finish first run with optional services off, extensions skipped, and default-browser registration declined. Verify normal close/quit without a crash. Leave a separate fresh walkthrough untouched on the content Welcome page."
+    "Finish first run with optional services off, extensions skipped, and default-browser registration declined. Verify normal close/quit without a crash. Leave a separate fresh walkthrough untouched on the content Welcome page.",
+    "On the non-Arc Finish screen, Customize appearance targets the setup window's own profile and Space. Check the fresh installer palette places the pink glow near the bottom; existing saved glow positions remain unchanged."
   ],
   "observables": [
     "A local sidebar import does not wait for extension preparation or service consent.",

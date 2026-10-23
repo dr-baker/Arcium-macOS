@@ -11,6 +11,8 @@ The big additions go under Highlights; smaller improvements go under Polish and 
 
 ### Polish and fixes
 
+- Choose System for window chrome or content to follow macOS independently. Explicit Light and Dark choices stay separate.
+- Customize appearance after setup, or start browsing immediately. New profiles place the pink glow near the bottom of the window.
 - Keep attached Arc profiles separate, preserve unselected Spaces during refresh, and retain source-cached site icons.
 - New Arc import profiles inherit sidebar and material settings, so imported Pins and Favorites are visible when browsing starts.
 - Setup responds without the old introductory delay. Imports show progress and retryable failures, with optional configuration after migration.
