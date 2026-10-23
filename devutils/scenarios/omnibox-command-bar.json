@@ -23,6 +23,7 @@
         "CommandSearchIndexTest.*",
         "ArciumCommandActionRouterTest.*",
         "ArciumCommandSessionTest.*",
+        "ArciumCommandIconCacheTest.*",
         "ArciumCommandLocalPresentationTest.*",
         "ArciumCommandEntryRoutingTest.*",
         "ArciumCommandCorpusTimeTest.*"
