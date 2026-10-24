@@ -222,7 +222,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "chrome/browser/ui/color/chrome_color_id.h"
  #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
  #include "chrome/browser/ui/helium/arcium_settings_model.h"
-@@ -68,6 +72,10 @@
+@@ -55,6 +59,7 @@
+ #include "chrome/browser/ui/tabs/features.h"
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/frame/browser_widget.h"
+ #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
+ #include "chrome/browser/ui/views/helium/glass_surface.h"
+ #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+@@ -68,6 +73,10 @@
  #include "ui/native_theme/native_theme.h"
  #include "ui/native_theme/native_theme_observer.h"
  #include "ui/views/widget/widget.h"
@@ -233,7 +241,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  
  NSString* const kArciumSettingsUIControllerClassName =
      @"ArciumSettingsUIController";
-@@ -532,6 +540,222 @@ void SetSettingsWindowGlassState(NSWindo
+@@ -532,6 +541,228 @@ void SetSettingsWindowGlassState(NSWindo
  
  }  // namespace
  
@@ -290,9 +298,14 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +// captured target rather than whichever browser was activated most recently.
 +class CommandSettingsPreviewWidget : public views::Widget {
 + public:
-+  CommandSettingsPreviewWidget(Profile* profile, const helium::HeliumSpace* space)
-+      : profile_(profile) {
++  CommandSettingsPreviewWidget(Profile* profile, const helium::HeliumSpace* space,
++                               ui::ColorProviderKey key)
++      : profile_(profile), browser_key_(std::move(key)) {
 +    if (space) theme_ = space->theme();
++  }
++  void UpdateBrowserKey(ui::ColorProviderKey key) {
++    browser_key_ = std::move(key);
++    ThemeChanged();
 +  }
 +  void UpdateSpace(const helium::HeliumSpace* space) {
 +    theme_ = space ? std::optional(space->theme()) : std::nullopt;
@@ -301,10 +314,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +
 + protected:
 +  ui::ColorProviderKey GetColorProviderKey() const override {
-+    auto key = views::Widget::GetColorProviderKey();
-+    const auto system_mode = key.color_mode;
++    auto key = browser_key_;
++    const auto system_mode = views::Widget::GetColorProviderKey().color_mode;
 +    auto* themes = ThemeServiceFactory::GetForProfile(profile_);
-+    key = themes->GetColorProviderKey(key, profile_);
 +    if (!themes->UsingPolicyTheme() &&
 +        key.contrast_mode != ui::ColorProviderKey::ContrastMode::kHigh &&
 +        key.forced_colors == ui::ColorProviderKey::ForcedColors::kNone) {
@@ -327,6 +339,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +
 + private:
 +  raw_ptr<Profile> profile_;
++  ui::ColorProviderKey browser_key_;
 +  std::optional<helium::SpaceTheme> theme_;
 +};
 +
@@ -336,7 +349,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +                        BrowserView* browser_view, const helium::HeliumSpace* space,
 +                        void (^closed)(void))
 +      : controls_(controls), closed_(closed),
-+        browser_widget_(browser_view->GetWidget()) {
++        browser_widget_(browser_view->browser_widget()) {
 +    auto* browser = browser_view->browser();
 +    auto* profile = browser->profile()->GetOriginalProfile();
 +    auto panel = std::make_unique<arcium::CommandPanelView>(
@@ -353,7 +366,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +    delegate_->SetContentsView(std::move(root));
 +    delegate_->RegisterWindowClosingCallback(base::BindOnce(
 +        &CommandSettingsEditor::RequestClose, base::Unretained(this)));
-+    widget_ = std::make_unique<CommandSettingsPreviewWidget>(profile, space);
++    widget_ = std::make_unique<CommandSettingsPreviewWidget>(
++        profile, space, browser_widget_->GetSpaceContentColorProviderKey());
 +    views::Widget::InitParams params(
 +        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
 +        views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -426,7 +440,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +  }
 +  void OnWidgetThemeChanged(views::Widget* widget) override {
 +    if (!widget_) return;
-+    widget_->ThemeChanged();
++    widget_->UpdateBrowserKey(browser_widget_->GetSpaceContentColorProviderKey());
 +  }
 +
 + private:
@@ -443,7 +457,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +  }
 +  NSViewController* controls_;
 +  void (^closed_)(void);
-+  raw_ptr<views::Widget> browser_widget_;
++  raw_ptr<BrowserWidget> browser_widget_;
 +  raw_ptr<CommandSettingsPreviewView> root_ = nullptr;
 +  std::unique_ptr<views::WidgetDelegate> delegate_;
 +  std::unique_ptr<CommandSettingsPreviewWidget> widget_;
@@ -456,7 +470,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  @interface ArciumSettingsContentView : NSView
  @property(nonatomic, copy) void (^effectiveAppearanceChanged)(void);
  @end
-@@ -633,6 +857,8 @@ void SetSettingsWindowGlassState(NSWindo
+@@ -633,6 +864,8 @@ void SetSettingsWindowGlassState(NSWindo
  - (void)publishSnapshot;
  - (void)modelDidChange;
  - (void)updateNativeGlassBackground;
@@ -465,7 +479,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  - (void)removeNativeGlassBackground;
  - (void)applyNativeWindowAppearanceForColorMode:
      (ui::ColorProviderKey::ColorMode)colorMode;
-@@ -688,6 +914,8 @@ void SettingsModelProfileWillBeDestroyed
+@@ -688,6 +921,8 @@ void SettingsModelProfileWillBeDestroyed
  }  // namespace
  
  @implementation ArciumSettingsWindowController {
@@ -474,7 +488,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    Profile* profile_;
    NSValue* profile_key_;
    BOOL profile_destroying_;
-@@ -711,6 +939,60 @@ void SettingsModelProfileWillBeDestroyed
+@@ -711,6 +946,60 @@ void SettingsModelProfileWillBeDestroyed
    id accessibility_notification_token_;
  }
  
@@ -535,7 +549,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  - (BOOL)selectAppearanceSpace:(NSString*)spaceID {
    if (!model_ || !spaceID.length ||
        !model_->SetAppearanceSpace(base::SysNSStringToUTF8(spaceID))) {
-@@ -796,6 +1078,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -796,6 +1085,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)dealloc {
@@ -543,7 +557,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    profile_destroying_ = YES;
    if (accessibility_notification_token_) {
      [NSWorkspace.sharedWorkspace.notificationCenter
-@@ -1755,6 +2038,9 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1755,6 +2045,9 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)modelDidChange {
@@ -553,7 +567,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_ || window_closing_ || model_change_scheduled_ ||
        native_background_update_in_progress_) {
      return;
-@@ -1771,6 +2057,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1771,6 +2064,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)modelProfileWillBeDestroyed {
@@ -561,7 +575,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_) {
      return;
    }
-@@ -1789,6 +2076,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1789,6 +2083,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)prepareForShutdown {
@@ -569,7 +583,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_) {
      return;
    }
-@@ -1817,6 +2105,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1817,6 +2112,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)windowWillClose:(NSNotification*)notification {
@@ -577,7 +591,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    window_closing_ = YES;
    if (model_) {
      model_->SetSurfacePreview(false);
-@@ -2467,6 +2756,14 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2467,6 +2763,14 @@ void SettingsModelProfileWillBeDestroyed
    if (profile_destroying_ || !model_ || !name.length) {
      return;
    }
