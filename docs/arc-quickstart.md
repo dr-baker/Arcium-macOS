@@ -1,64 +1,38 @@
-# Coming from Arc
+# Start using Arcium
 
-Arcium adds an Arc-inspired sidebar workflow to Helium. This guide covers the current preview. See the [release notes](preview-release.md) for its limits.
+For Apple Silicon Macs running macOS 26 or later. [Download the preview](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1), open the DMG, open **Install Arcium**, and click **Install**.
 
-To bring over existing data, start with [Import from Arc](import-from-arc.md). Sidebar import and password migration use different tools.
+## Coming from Arc?
 
-## Set up your workspace
+**Current download, preview.1:** finish setup, open `chrome://settings/importData`, choose your Arc profile, and enable **Import sidebar as Pins**. The dialog imports into the current browser profile. Follow the [import guide](import-from-arc.md#advanced-import) if you use multiple accounts.
 
-Open Settings with **Command-Comma**. In Tabs & Spaces, choose Vertical tabs and the side of the window. In Appearance, adjust sidebar width, browser UI scale, colors, and collapse behavior. UI scale changes browser controls independently of webpage zoom.
+**Next release, preview.2:** the new welcome flow is ready in source, but not published yet:
 
-Use the **+** in the sidebar's Space bar to create a Space. Choose its name, icon, profile, and theme. Right-click a Space icon to edit or delete it. Deletion asks for confirmation; the last Space cannot be deleted.
+1. Click **Import from Arc** for all available Spaces, icons, Pins, folders, and Favorites. Or **Choose what to import** for a subset. Attached profiles are handled automatically.
+2. Choose **Start browsing**, or **Customize appearance** first. Settings stays available with **Command-Comma**.
 
-Spaces hold their own Pins and folders. Local Favorites are shared within the profile. Imported Arc Favorites appear in Spaces belonging to their Arc source profile. Spaces in one profile share cookies and sign-ins, so use separate browser profiles for separate accounts. Choosing a default Space affects new windows and saved items; it does not move existing windows.
+In the new flow, History stays off unless selected. Passwords, extensions, and sign-ins need separate migration. Quit Arc normally before importing to include its latest saved changes.
 
-## Keep useful pages
+## A few shortcuts
 
-A Pin keeps its saved home page while its live tab navigates. Use its return-home control to go back. Closing the live tab leaves the saved Pin dormant; opening it again starts at home. Removing the saved item is a separate action.
-
-Local Favorites stay available across the profile. Pins and folders belong to their Space. Ordinary tabs remain separate from saved sidebar items.
-
-## Find and preview pages
-
-**Command-T** opens the command bar. Search tabs, Pins, Favorites, or the web. Click its input and scroll upward to reveal the scope tabs; the selected scope expands its label.
-
-Hold **Control** and press **Tab** to preview recently used tabs. Control-Tab follows the binding in Keyboard Shortcuts. An explicit Recent Tab action uses recent order and the held-Control preview even when **Cycle tabs by recent use** is off. That preference controls standard tab cycling.
-
-Enable Peek to preview eligible links over the source page, or choose **Open Link in Peek** from a link's context menu. A preview can become an ordinary tab or saved sidebar item. If an unsaved-change prompt prevents closure, cancelling preserves the document.
-
-Enable **Open external links in Little Arc** to open one eligible HTTP or HTTPS link from another app in a compact window. Multiple URLs and other schemes use the ordinary browser path. A shortcut to open an empty Little Arc search window is not implemented.
-
-## Choose your layout
-
-Appearance offers **Top bar** and **Sidebar** navigation. Sidebar navigation is available with left Vertical tabs in ordinary windows outside fullscreen. Incognito, Guest, right-side, horizontal, and fullscreen layouts use the standard top bar while keeping the saved choice.
-
-For an address-bar-free layout, choose Top bar navigation and turn **Show top bar** off. Command-L still gives you a place to enter an address.
-
-Choose **Icon rail** to keep compact sidebar access when collapsed, or **Fully hidden** to hide it. Zen controls let you pin the top bar or sidebar. **Keep top bar visible in Zen mode** also applies to Fully hidden; it is unavailable while Sidebar navigation is active.
-
-Sidebar navigation hides standard toolbar items and the bookmarks bar without changing their preferences. Enable **Show Extensions button** for access to the existing Extensions menu in the sidebar header. Returning to Top bar restores the standard presentation.
-
-## Colors and glass
-
-Give each Space a palette with movable glows and its own Browser and Pages appearance modes. Native Appearance settings also control grain, rounded frame, and border width.
-
-Surface customization separates **Text surfaces**, for the command bar and floating controls, from **Containers**, for the recent-tab switcher and Peek. Each group has its own material, tint intensity, and opacity. Tint controls the theme color; opacity controls neutral light or dark backing. Peek also has separate backdrop blur and dimming.
-
-The current menu offers Flat, Clear, Liquid, Chromium glassmorphic, and Solid materials. Availability depends on the renderer, theme, and policy. Read a disabled control's explanation before changing other settings. Turning off decorative customization preserves its saved colors.
-
-## Shortcuts and optional behavior
-
-Keyboard Shortcuts offers an Arc-inspired preset. It applies supported actions, reports unsupported ones, and saves the previous bindings. Applying it also selects Fully hidden. **Restore previous** restores the saved shortcuts and collapse style, replacing later edits to those settings.
-
-| Action | Control with the relevant default or Arc preset |
+| Do this | Shortcut |
 | --- | --- |
-| Pin or unpin the current page | Command-D |
-| Collapse or expand the sidebar | Command-S |
-| Show or hide the toolbar | Command-Shift-D |
-| Preview recent tabs | Control-Tab |
+| Search tabs, saved pages, or the web | **Command-T** |
+| Enter an address | **Command-L** |
+| Return to a recently used tab | Hold **Control**, press **Tab** |
+| Open Settings | **Command-Comma** |
 
-**Suggest Favorites and Pins in the address bar** controls saved-item suggestions without deleting those items. **Show Spaces in Dock menu** controls Space shortcuts in the Dock. Turning it off uses profile shortcuts when multiple profiles exist, or ordinary window commands for one profile.
+The command bar builds on the omnibox with tabs, Pins, Favorites, and site-search scopes. Choose YouTube for videos or ChatGPT for a fresh conversation.
 
-Automatic Picture-in-Picture is experimental. Its native setting is unavailable while the **Browser initiated automatic picture in picture** feature is off. With that feature enabled, eligible audible video can enter Picture-in-Picture when you switch away. Site permissions still apply; turning the setting on alone does not open a window.
+## Make yourself at home
 
-For detailed behavior and preference ownership, see [feature settings contracts](feature-settings-audit.md) and [native settings bindings](native-settings-bindings.md).
+- **Spaces:** use the **+** in the sidebar's Space bar. Choose a name, icon, profile, and colors. Right-click a Space to edit it.
+- **Pins:** keep a page's saved home while browsing elsewhere. Closing its live tab leaves the Pin in place. Save two pages together as one experimental split Pin.
+- **Favorites:** keep frequent sites close. Local Favorites are shared within a profile; imported Arc Favorites follow their source profile.
+- **Peek:** preview eligible links over the current page, or use **Open Link in Peek** from the link menu.
+- **Little Arc:** open links from other apps in a compact window.
+- **Appearance:** adjust colors, glass, sidebar layout, and UI scale in Settings. New profiles hide the address bar; **Command-L** always gives you somewhere to type.
+
+Spaces in one profile share cookies and sign-ins. Choose separate profiles for separate accounts. In the next release, Browser and Pages can each follow **System**, independently of one another.
+
+[Import details and passwords](import-from-arc.md) · [Release notes](../CHANGELOG.md) · [Preview limits and manual updates](preview-release.md#limits)
