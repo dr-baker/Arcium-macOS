@@ -57,3 +57,5 @@ personal/arcium-arc-import-settings-macos.patch
 personal/arcium-system-appearance-macos.patch
 personal/arcium-onboarding-appearance-macos.patch
 personal/arcium-widevine-experiment-macos.patch
+
+personal/arcium-command-settings-preview-macos.patch

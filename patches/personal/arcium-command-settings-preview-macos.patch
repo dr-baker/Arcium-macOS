@@ -1,0 +1,504 @@
+Description: Edit command-bar appearance beside the interactive native presenter in one Settings sheet.
+
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -37,6 +37,13 @@ public final class ArciumSettingsUIContr
+         store.updateSnapshot(snapshot)
+     }
+ 
++    // Same store and observers as Settings; the native host supplies the real
++    // command panel beside these controls in the same key window.
++    @objc(makeCommandBarEditor)
++    public func makeCommandBarEditor() -> NSViewController {
++        NSHostingController(rootView: AnyView(ArciumCommandBarEditorView(store: store)))
++    }
++
+     // An explicit native deep link; ordinary snapshots keep navigation intact.
+     @objc(selectAppearanceCategory)
+     public func selectAppearanceCategory() -> Bool {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -718,14 +718,6 @@ private struct AppearanceSettingsPage: V
+                 })
+     }
+ 
+-    private func commandLayoutBinding<Value>(_ key: WritableKeyPath<ArciumCommandPanelLayout, Value>) -> Binding<Value> {
+-        Binding(get: { store.snapshot.appearance.commandPanelLayout[keyPath: key] },
+-                set: { value in
+-                    var layout = store.snapshot.appearance.commandPanelLayout
+-                    layout[keyPath: key] = value
+-                    store.setCommandPanelLayout(layout)
+-                })
+-    }
+ 
+     @ObservedObject var store: ArciumSettingsStore
+     @Environment(\.settingsTheme) private var theme
+@@ -735,13 +727,12 @@ private struct AppearanceSettingsPage: V
+     @State private var customization: Customization?
+ 
+     private enum Customization: String, Identifiable {
+-        case colors, surfaces, commandBar
++        case colors, surfaces
+         var id: String { rawValue }
+         var title: String {
+             switch self {
+             case .colors: "Space colors and backdrop"
+             case .surfaces: "Floating surfaces"
+-            case .commandBar: "Command bar"
+             }
+         }
+     }
+@@ -898,7 +889,10 @@ private struct AppearanceSettingsPage: V
+ 
+             Section("Command bar") {
+                 SLabeledControl("Style", description: "Categories, destination icons and scopes.") {
+-                    Button("Customize…") { showCustomization(.commandBar) }
++                    Button("Customize…") {
++                        stopSurfacePreview()
++                        store.actionInvoked(name: "show_command_bar_editor")
++                    }
+                         .buttonStyle(.bordered)
+                         .accessibilityIdentifier("command-bar-customize")
+                 }
+@@ -1084,8 +1078,6 @@ private struct AppearanceSettingsPage: V
+                     backgroundEditor
+                 case .surfaces:
+                     surfaceCustomization
+-                case .commandBar:
+-                    commandBarCustomization
+                 }
+             }
+             .settingsTheme(theme)
+@@ -1177,38 +1169,6 @@ private struct AppearanceSettingsPage: V
+         }
+     }
+ 
+-    private var commandBarCustomization: some View {
+-        SGroupedSections(showsSurfaces: false, showsDividers: false) {
+-            Section("Style") {
+-                Group {
+-                    SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
+-                        (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
+-                    SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
+-                        (value: 0, label: "Actions"), (value: 1, label: "Arrows"),
+-                        (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
+-                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
+-                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
+-                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
+-                        (value: 4, label: "Flat"), (value: 5, label: "Divot")])
+-                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
+-                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options: [
+-                        (value: .flush, label: "Flush"), (value: .iconWidth, label: "Icon-width"),
+-                        (value: .offset, label: "Offset")])
+-                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+-                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
+-                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
+-                            range: 0...2, step: 0.05,
+-                            format: { "\(Int(($0 * 100).rounded()))%" },
+-                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 75% is the default strength."))
+-                        .accessibilityIdentifier("omnibox-scope-glow-strength")
+-                    }
+-                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
+-                }
+-                .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
+-                          || store.snapshot.appearance.commandPanelLayoutManaged)
+-            }
+-        }
+-    }
+ 
+     @ViewBuilder
+     private var backgroundEditor: some View {
+@@ -1649,3 +1609,78 @@ private func shortcutSummary(_ command:
+     if command.bindings.count == 1 { return first.display }
+     return "\(first.display), plus \(command.bindings.count - 1) more"
+ }
++
++private struct ArciumCommandBarControls: View {
++    @ObservedObject var store: ArciumSettingsStore
++
++    private func commandLayoutBinding<Value>(_ key: WritableKeyPath<ArciumCommandPanelLayout, Value>) -> Binding<Value> {
++        Binding(get: { store.snapshot.appearance.commandPanelLayout[keyPath: key] },
++                set: { value in
++                    var layout = store.snapshot.appearance.commandPanelLayout
++                    layout[keyPath: key] = value
++                    store.setCommandPanelLayout(layout)
++                })
++    }
++
++    var body: some View {
++        SGroupedSections(showsSurfaces: false, showsDividers: false) {
++            Section("Style") {
++                Group {
++                    SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
++                        (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
++                    SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
++                        (value: 0, label: "Actions"), (value: 1, label: "Arrows"),
++                        (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
++                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
++                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
++                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
++                        (value: 4, label: "Flat"), (value: 5, label: "Divot")])
++                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
++                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options: [
++                        (value: .flush, label: "Flush"), (value: .iconWidth, label: "Icon-width"),
++                        (value: .offset, label: "Offset")])
++                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
++                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
++                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
++                            range: 0...2, step: 0.05,
++                            format: { "\(Int(($0 * 100).rounded()))%" },
++                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 75% is the default strength."))
++                        .accessibilityIdentifier("omnibox-scope-glow-strength")
++                    }
++                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
++                }
++                .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
++                          || store.snapshot.appearance.commandPanelLayoutManaged)
++            }
++        }
++    }
++
++}
++
++struct ArciumCommandBarEditorView: View {
++    @ObservedObject var store: ArciumSettingsStore
++
++    var body: some View {
++        if let preset = store.preset {
++            let scheme = store.webColorScheme()
++            let style = scheme == .dark ? preset.dark : preset.light
++            let theme = store.snapshot.appearance.spacePalette.theme(
++                fallback: style.theme(brand: preset.brand), colorScheme: scheme)
++            ArciumLiveSettingsSheet(title: "Command bar", onClose: {
++                store.actionInvoked(name: "close_command_bar_editor")
++            }) {
++                Text("Select scopes or type in the preview. Results won't open.")
++                    .settingsFont(\.caption).foregroundStyle(.secondary)
++                ArciumCommandBarControls(store: store)
++            }
++            .settingsTheme(theme)
++            .settingsFont(preset.font)
++            .settingsFontScale(CGFloat(style.surface.fontScale))
++            .settingsLayout(SettingsLayoutConfiguration(
++                pageGutter: 24, compactPageGutter: 16, maximumPageWidth: 960,
++                cardPadding: 14, sectionSpacing: 20, rowSpacing: 7, inputWidth: 220))
++            .environment(\.colorScheme, scheme)
++        }
++    }
++}
++
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -20,6 +20,7 @@
+ 
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/logging.h"
+ #include "base/path_service.h"
+ #include "base/scoped_observation.h"
+@@ -36,6 +37,8 @@
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/chrome_pages.h"
++#include "chrome/browser/ui/omnibox/arcium_command_preview_session.h"
++#include "chrome/browser/ui/omnibox/arcium_command_providers.h"
+ #include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
+ #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
+ #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
+@@ -68,6 +71,10 @@
+ #include "ui/native_theme/native_theme.h"
+ #include "ui/native_theme/native_theme_observer.h"
+ #include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_delegate.h"
++#include "ui/views/controls/native/native_view_host.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_panel.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_bar_material.h"
+ 
+ NSString* const kArciumSettingsUIControllerClassName =
+     @"ArciumSettingsUIController";
+@@ -532,6 +539,178 @@ void SetSettingsWindowGlassState(NSWindo
+ 
+ }  // namespace
+ 
++namespace {
++
++// One key window owns both the SwiftUI controls and the real Views presenter.
++// NativeViewHost is the supported direction for mixing these two view trees.
++class CommandSettingsPreviewView : public views::View {
++ public:
++  explicit CommandSettingsPreviewView(
++      std::unique_ptr<arcium::CommandPanelView> panel) {
++    controls_ = AddChildView(std::make_unique<views::NativeViewHost>());
++    panel_ = AddChildView(std::move(panel));
++    panel_->SetEmbedded(true);
++    preview_height_ = panel_->GetPreferredSize().height();
++  }
++  views::NativeViewHost* controls() { return controls_; }
++  arcium::CommandPanelView* panel() { return panel_; }
++  void SetGeometryChanged(base::RepeatingClosure callback) {
++    geometry_changed_ = std::move(callback);
++  }
++  int ResizePreview(std::optional<int> height) {
++    if (height) {
++      preview_height_ = *height;
++      InvalidateLayout();
++      if (GetWidget()) {
++        GetWidget()->GetRootView()->DeprecatedLayoutImmediately();
++      }
++    }
++    return panel_->height();
++  }
++  int AvailablePreviewWidth() const { return std::max(280, width() - 544); }
++
++ protected:
++  void Layout(PassKey) override {
++    const int controls_width = std::min(520, std::max(0, width() - 320));
++    controls_->SetBounds(0, 0, controls_width, height());
++    panel_->SetBounds(controls_width + 16, 16,
++                      std::max(1, width() - controls_width - 32),
++                      std::clamp(preview_height_, 1, std::max(1, height() - 32)));
++    if (geometry_changed_) {
++      geometry_changed_.Run();
++    }
++  }
++
++ private:
++  raw_ptr<views::NativeViewHost> controls_;
++  raw_ptr<arcium::CommandPanelView> panel_;
++  int preview_height_ = 1;
++  base::RepeatingClosure geometry_changed_;
++};
++
++class CommandSettingsEditor : public views::WidgetObserver {
++ public:
++  CommandSettingsEditor(NSWindow* parent, NSViewController* controls,
++                        BrowserView* browser_view, void (^closed)(void))
++      : controls_(controls), closed_(closed),
++        browser_widget_(browser_view->GetWidget()) {
++    auto* browser = browser_view->browser();
++    auto* profile = browser->profile()->GetOriginalProfile();
++    auto panel = std::make_unique<arcium::CommandPanelView>(
++        std::make_unique<arcium::CommandPreviewSession>(
++            arcium::CreateCommandSession(browser)),
++        base::BindRepeating(&CommandSettingsEditor::RequestClose,
++                            base::Unretained(this)),
++        base::DoNothing());
++    auto root = std::make_unique<CommandSettingsPreviewView>(std::move(panel));
++    root_ = root.get();
++    delegate_ = std::make_unique<views::WidgetDelegate>();
++    delegate_->SetCanActivate(true);
++    delegate_->SetTitle(u"Command bar");
++    delegate_->SetContentsView(std::move(root));
++    delegate_->RegisterWindowClosingCallback(base::BindOnce(
++        &CommandSettingsEditor::RequestClose, base::Unretained(this)));
++    widget_ = std::make_unique<views::Widget>();
++    views::Widget::InitParams params(
++        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
++        views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++    const NSRect visible = (parent.screen ?: NSScreen.mainScreen).visibleFrame;
++    params.bounds = gfx::Rect(0, 0, std::min(1380, static_cast<int>(visible.size.width) - 48),
++                             std::min(720, static_cast<int>(visible.size.height) - 64));
++    params.delegate = delegate_.get();
++    widget_->Init(std::move(params));
++    widget_->SetColorModeOverride(browser_widget_->GetColorMode());
++    widget_->SetUserColorOverride(browser_widget_->user_color_override());
++    root_->controls()->Attach(gfx::NativeView(controls_.view));
++    root_->panel()->SetHeightResizeCallback(base::BindRepeating(
++        [](CommandSettingsEditor* owner, std::optional<int> height,
++           base::TimeDelta duration) {
++          return owner->root_->ResizePreview(height);
++        }, base::Unretained(this)));
++    root_->panel()->BindPreferences(
++        profile->GetPrefs(),
++        base::BindRepeating([](Profile* owner) {
++          return static_cast<float>(arcium::GetChromeUIScale(owner));
++        }, base::Unretained(profile)),
++        base::BindRepeating([](CommandSettingsEditor* owner) {
++          return owner->root_->AvailablePreviewWidth();
++        }, base::Unretained(this)));
++    material_ = std::make_unique<arcium::CommandBarMaterial>(
++        widget_.get(), profile->GetPrefs(),
++        base::BindRepeating([](CommandSettingsEditor* owner) {
++          arcium::CommandBarMaterial::Clip clip;
++          const auto bounds = owner->root_->panel()->bounds();
++          clip.insets = gfx::Insets::TLBR(bounds.y(), bounds.x(),
++              owner->root_->height() - bounds.bottom(),
++              owner->root_->width() - bounds.right());
++          clip.contour = owner->root_->panel()->GetContourPath().makeOffset(
++              bounds.x(), bounds.y());
++          return clip;
++        }, base::Unretained(this)),
++        base::BindRepeating([](CommandSettingsEditor* owner, bool enabled) {
++          owner->root_->panel()->SetNativeMaterial(enabled);
++        }, base::Unretained(this)));
++    const auto refresh = base::BindRepeating([](CommandSettingsEditor* owner) {
++      if (owner->material_) owner->material_->Refresh();
++    }, base::Unretained(this));
++    root_->SetGeometryChanged(refresh);
++    root_->panel()->SetGeometryChangedCallback(refresh);
++    browser_widget_->AddObserver(this);
++    widget_->GetRootView()->DeprecatedLayoutImmediately();
++    material_->Refresh();
++    NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++    [parent beginSheet:window completionHandler:nil];
++  }
++
++  ~CommandSettingsEditor() override {
++    closing_ = true;
++    if (browser_widget_) browser_widget_->RemoveObserver(this);
++    CloseWindow();
++  }
++  void RequestClose() {
++    if (closing_) return;
++    closing_ = true;
++    // Widget callbacks must finish before their client-owned tree is deleted.
++    dispatch_async(dispatch_get_main_queue(), closed_);
++  }
++  void OnWidgetDestroying(views::Widget* widget) override {
++    browser_widget_->RemoveObserver(this);
++    browser_widget_ = nullptr;
++    CloseWindow();
++    RequestClose();
++  }
++  void OnWidgetThemeChanged(views::Widget* widget) override {
++    if (!widget_) return;
++    widget_->SetColorModeOverride(browser_widget_->GetColorMode());
++    widget_->SetUserColorOverride(browser_widget_->user_color_override());
++    widget_->ThemeChanged();
++  }
++
++ private:
++  void CloseWindow() {
++    if (!widget_) return;
++    material_.reset();
++    NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++    if (window.sheetParent) [window.sheetParent endSheet:window];
++    root_->controls()->Detach();
++    widget_->CloseNow();
++    widget_.reset();
++    delegate_.reset();
++    root_ = nullptr;
++  }
++  NSViewController* controls_;
++  void (^closed_)(void);
++  raw_ptr<views::Widget> browser_widget_;
++  raw_ptr<CommandSettingsPreviewView> root_ = nullptr;
++  std::unique_ptr<views::WidgetDelegate> delegate_;
++  std::unique_ptr<views::Widget> widget_;
++  std::unique_ptr<arcium::CommandBarMaterial> material_;
++  bool closing_ = false;
++};
++
++}  // namespace
++
+ @interface ArciumSettingsContentView : NSView
+ @property(nonatomic, copy) void (^effectiveAppearanceChanged)(void);
+ @end
+@@ -633,6 +812,8 @@ void SetSettingsWindowGlassState(NSWindo
+ - (void)publishSnapshot;
+ - (void)modelDidChange;
+ - (void)updateNativeGlassBackground;
++- (void)showCommandBarEditor;
++- (void)closeCommandBarEditor;
+ - (void)removeNativeGlassBackground;
+ - (void)applyNativeWindowAppearanceForColorMode:
+     (ui::ColorProviderKey::ColorMode)colorMode;
+@@ -688,6 +869,7 @@ void SettingsModelProfileWillBeDestroyed
+ }  // namespace
+ 
+ @implementation ArciumSettingsWindowController {
++  std::unique_ptr<CommandSettingsEditor> command_editor_;
+   Profile* profile_;
+   NSValue* profile_key_;
+   BOOL profile_destroying_;
+@@ -711,6 +893,35 @@ void SettingsModelProfileWillBeDestroyed
+   id accessibility_notification_token_;
+ }
+ 
++- (void)showCommandBarEditor {
++  if (command_editor_ || profile_destroying_ || !model_ ||
++      self.window.attachedSheet || !settings_ui_controller_) return;
++  SEL selector = NSSelectorFromString(@"makeCommandBarEditor");
++  if (![settings_ui_controller_ respondsToSelector:selector]) return;
++  BrowserView* target = nullptr;
++  auto* collection = GlobalBrowserCollection::GetInstance();
++  if (!collection) return;
++  collection->ForEach([&](BrowserWindowInterface* browser) {
++    if (IsMatchingNormalBrowser(browser, profile_)) {
++      target = BrowserView::GetBrowserViewForBrowser(browser);
++      return false;
++    }
++    return true;
++  }, BrowserCollection::Order::kActivation);
++  if (!target || !target->GetWidget() || target->GetWidget()->IsClosed()) return;
++  using MakeEditor = NSViewController* (*)(id, SEL);
++  NSViewController* controls = reinterpret_cast<MakeEditor>(objc_msgSend)(
++      settings_ui_controller_, selector);
++  if (!controls) return;
++  __weak ArciumSettingsWindowController* weak_self = self;
++  command_editor_ = std::make_unique<CommandSettingsEditor>(
++      self.window, controls, target, ^{ [weak_self closeCommandBarEditor]; });
++}
++
++- (void)closeCommandBarEditor {
++  command_editor_.reset();
++}
++
+ - (BOOL)selectAppearanceSpace:(NSString*)spaceID {
+   if (!model_ || !spaceID.length ||
+       !model_->SetAppearanceSpace(base::SysNSStringToUTF8(spaceID))) {
+@@ -796,6 +1007,7 @@ void SettingsModelProfileWillBeDestroyed
+ }
+ 
+ - (void)dealloc {
++  [self closeCommandBarEditor];
+   profile_destroying_ = YES;
+   if (accessibility_notification_token_) {
+     [NSWorkspace.sharedWorkspace.notificationCenter
+@@ -1771,6 +1983,7 @@ void SettingsModelProfileWillBeDestroyed
+ }
+ 
+ - (void)modelProfileWillBeDestroyed {
++  [self closeCommandBarEditor];
+   if (profile_destroying_) {
+     return;
+   }
+@@ -1789,6 +2002,7 @@ void SettingsModelProfileWillBeDestroyed
+ }
+ 
+ - (void)prepareForShutdown {
++  [self closeCommandBarEditor];
+   if (profile_destroying_) {
+     return;
+   }
+@@ -1817,6 +2031,7 @@ void SettingsModelProfileWillBeDestroyed
+ }
+ 
+ - (void)windowWillClose:(NSNotification*)notification {
++  [self closeCommandBarEditor];
+   window_closing_ = YES;
+   if (model_) {
+     model_->SetSurfacePreview(false);
+@@ -2467,6 +2682,14 @@ void SettingsModelProfileWillBeDestroyed
+   if (profile_destroying_ || !model_ || !name.length) {
+     return;
+   }
++  if ([name isEqualToString:@"show_command_bar_editor"]) {
++    [self showCommandBarEditor];
++    return;
++  }
++  if ([name isEqualToString:@"close_command_bar_editor"]) {
++    [self closeCommandBarEditor];
++    return;
++  }
+   if ([name isEqualToString:@"reset_chrome_ui_scale"]) {
+     model_->ClearPreference(arcium::kChromeUIScalePref);
+     [self modelDidChange];
