@@ -78,6 +78,16 @@ as `he push`; that is the one case the tooling cannot detect.
 
 Turn it off with `HELIUM_KEEP_TIMESTAMPS=0`.
 
+## Desktop build resource policy
+
+Development builds default to up to 13 local jobs and use macOS background CPU/I/O
+backoff under sustained CPU, memory or swap pressure. The dry run gets the
+same admission check. `--jobs N` or `HELIUM_BUILD_JOBS=N` changes the startup
+ceiling. See [resource backoff](build-lane.md#desktop-resource-backoff) for
+thresholds, status files and the limits of OS scheduling policy. This changes
+development execution only; it does not change GN arguments or invalidate
+compiler commands. `build.sh` release execution is unchanged.
+
 ## Records Ninja cannot see
 
 `he check` reports what the build graph cannot know:

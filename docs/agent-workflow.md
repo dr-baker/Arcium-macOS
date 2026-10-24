@@ -74,6 +74,11 @@ needed. Launches require a matching completed-build record; after changing
 GN arguments, build `chrome` before running it. The modes share one source
 tree and one build-dir lock, so do not build them concurrently.
 
+Builds default to up to 13 local jobs and use [desktop resource backoff](build-lane.md#desktop-resource-backoff).
+Use `--jobs N` for a different ceiling. Pressure can delay launch while the
+reservation remains owned; `lane status --json` reports the reason and latest
+resource sample. Do not bypass the supervisor with raw Ninja/Siso commands.
+
 ## Stay inside `he`
 
 In a build dir, run patch and build work through `he` so the lock and the
