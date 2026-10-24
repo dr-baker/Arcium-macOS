@@ -16,7 +16,7 @@ runs:
       run: sudo rm -rf $ANDROID_HOME
       shell: bash
     - name: Disable Spotlight
-      run: sudo mdutil -a -i off
+      run: sudo mdutil -a -i off || echo "::warning::Spotlight indexing could not be disabled; continuing with validation."
       shell: bash
     - name: Setup Environment and Toolchain
       run: ./github_setup_env_toolchain.sh ${{ inputs.arch }} | tee -a github_actions_setup_env_toolchain.log
