@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -882,28 +882,6 @@ private struct AppearanceSettingsPage: V
+@@ -892,28 +892,6 @@ private struct AppearanceSettingsPage: V
                  ), options: store.snapshot.tabs.layoutOptions.map { (value: $0.value, label: $0.label) },
                      description: "Choose a compact, classic, or sidebar layout.")
                  .disabled(!store.snapshot.tabs.hasValue("helium_layout") || store.snapshot.tabs.isManaged("helium_layout"))
@@ -31,7 +31,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  SSlider("Browser UI scale", value: Binding(
                      get: { Double(store.snapshot.appearance.chromeUIScale) },
                      set: { store.setChromeUIScale($0) }
-@@ -954,6 +932,28 @@ private struct AppearanceSettingsPage: V
+@@ -964,6 +942,28 @@ private struct AppearanceSettingsPage: V
              }
  
              Section("Address bar") {

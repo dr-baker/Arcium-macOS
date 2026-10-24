@@ -26,7 +26,7 @@ Index: src/chrome/browser/ui/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/BUILD.gn
 +++ src/chrome/browser/ui/BUILD.gn
-@@ -887,18 +887,9 @@ static_library("ui") {
+@@ -978,18 +978,9 @@ static_library("ui") {
      "//components/reading_list/core",
      "//components/renderer_context_menu",
      "//components/resources",
@@ -45,7 +45,7 @@ Index: src/chrome/browser/ui/BUILD.gn
      "//components/schema_org/common:improved_mojom",
      "//components/search_engines",
      "//components/security_interstitials/content:security_interstitial_page",
-@@ -5686,7 +5677,6 @@ group("ui_public_dependencies") {
+@@ -5835,7 +5826,6 @@ group("ui_public_dependencies") {
      "//components/dom_distiller/core",
      "//components/enterprise/buildflags",
      "//components/paint_preview/buildflags",

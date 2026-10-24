@@ -1,0 +1,360 @@
+--- a/chrome/browser/mac/BUILD.gn
++++ b/chrome/browser/mac/BUILD.gn
+@@ -81,6 +81,8 @@ source_set("impl") {
+     "dock.mm",
+     "exception_processor.mm",
+     "initial_prefs.mm",
++    "initial_prefs_paths.cc",
++    "initial_prefs_paths.h",
+     "install_from_dmg.mm",
+     "key_window_notifier.cc",
+     "metrics.mm",
+@@ -106,6 +108,7 @@ source_set("unit_tests") {
+     "auth_session_request_unittest.mm",
+     "code_sign_clone_manager_unittest.mm",
+     "exception_processor_unittest.mm",
++    "initial_prefs_paths_unittest.cc",
+     "metrics_unittest.mm",
+   ]
+   deps = [
+@@ -135,3 +138,20 @@ source_set("browser_tests") {
+     "//testing/gtest",
+   ]
+ }
++
++# Keep distribution-default tests small enough to run without browser_tests.
++test("arcium_dmg_unit_tests") {
++  sources = [
++    "initial_prefs_paths.cc",
++    "initial_prefs_paths.h",
++    "initial_prefs_paths_unittest.cc",
++  ]
++  deps = [
++    "//base",
++    "//base/test:run_all_unittests",
++    "//base/test:test_support",
++    "//build:branding_buildflags",
++    "//chrome/common:constants",
++    "//testing/gtest",
++  ]
++}
+--- a/chrome/browser/mac/initial_prefs.h
++++ b/chrome/browser/mac/initial_prefs.h
+@@ -10,8 +10,7 @@
+ namespace initial_prefs {
+ 
+ // Returns the path to the initial preferences file. Note that this path may be
+-// empty (in the case where this type of build cannot have an initial
+-// preferences file) or may not actually exist on the filesystem.
++// empty if no template exists or this build cannot have initial preferences.
+ base::FilePath InitialPrefsPath();
+ 
+ }  // namespace initial_prefs
+--- a/chrome/browser/mac/initial_prefs.mm
++++ b/chrome/browser/mac/initial_prefs.mm
+@@ -4,10 +4,13 @@
+ 
+ #include "chrome/browser/mac/initial_prefs.h"
+ 
++#include "base/apple/bundle_locations.h"
+ #include "base/apple/foundation_util.h"
+-#include "base/files/file_util.h"
++#include "base/path_service.h"
+ #include "build/branding_buildflags.h"
++#include "chrome/browser/mac/initial_prefs_paths.h"
+ #include "chrome/common/channel_info.h"
++#include "chrome/common/chrome_paths.h"
+ #include "chrome/common/chrome_paths_internal.h"
+ #include "components/version_info/version_info.h"
+ 
+@@ -17,20 +20,10 @@ namespace {
+ // This should be NSApplicationSupportDirectory, but it has already been
+ // released using NSLibraryDirectory.
+ const NSSearchPathDirectory kSearchPath = NSLibraryDirectory;
+-// Note: the actual filename here still contains the word "master" despite the
+-// migration of the rest of this code to more inclusive language. Unfortunately
+-// the file with this filename is the documented way to set initial preferences,
+-// so changing this filename will require some care.
+-// See https://crbug.com/40701168 for details.
+ const char kInitialPreferencesDirectory[] = "Google";
+-const char kInitialPreferencesFileName[] = "Google Chrome Initial Preferences";
+-const char kLegacyInitialPreferencesFileName[] =
+-    "Google Chrome Master Preferences";
+ #else
+ const NSSearchPathDirectory kSearchPath = NSApplicationSupportDirectory;
+ const char kInitialPreferencesDirectory[] = "Chromium";
+-const char kInitialPreferencesFileName[] = "Chromium Initial Preferences";
+-const char kLegacyInitialPreferencesFileName[] = "Chromium Master Preferences";
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ 
+ }  // namespace
+@@ -45,39 +38,23 @@ base::FilePath InitialPrefsPath() {
+     return base::FilePath();
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ 
+-  // On official builds, try
+-  //~/Library/Application Support/Google/Chrome/Google Chrome Master Preferences
+-  // On chromium builds, try
+-  //~/Library/Application Support/Chromium/Chromium Master Preferences
++  // Preserve user and system templates before trying the signed app's defaults.
+   // This intentionally doesn't use eventual --user-data-dir overrides.
+-  base::FilePath user_application_support_path;
+-  if (chrome::GetDefaultUserDataDirectory(&user_application_support_path)) {
+-    base::FilePath new_path =
+-        user_application_support_path.Append(kInitialPreferencesFileName);
+-    if (base::PathExists(new_path))
+-      return new_path;
+-
+-    base::FilePath old_path =
+-        user_application_support_path.Append(kLegacyInitialPreferencesFileName);
+-    if (base::PathExists(old_path))
+-      return old_path;
++  base::FilePath user_data_directory;
++  if (!chrome::GetDefaultUserDataDirectory(&user_data_directory)) {
++    user_data_directory.clear();
+   }
+-
+-  // On official builds, try /Library/Google/Google Chrome Master Preferences
+-  // On chromium builds, try
+-  // /Library/Application Support/Chromium/Chromium Master Preferences
+-  base::FilePath search_path;
+-  if (!base::apple::GetLocalDirectory(kSearchPath, &search_path)) {
+-    return base::FilePath();
++  base::FilePath system_preferences_directory;
++  if (base::apple::GetLocalDirectory(kSearchPath,
++                                     &system_preferences_directory)) {
++    system_preferences_directory =
++        system_preferences_directory.Append(kInitialPreferencesDirectory);
+   }
+-
+-  base::FilePath new_path = search_path.Append(kInitialPreferencesDirectory)
+-                                .Append(kInitialPreferencesFileName);
+-  if (base::PathExists(new_path))
+-    return new_path;
+-
+-  return search_path.Append(kInitialPreferencesDirectory)
+-      .Append(kLegacyInitialPreferencesFileName);
++  base::FilePath effective_user_data_directory;
++  base::PathService::Get(chrome::DIR_USER_DATA, &effective_user_data_directory);
++  return FindInitialPrefsInDirectories(
++      user_data_directory, system_preferences_directory,
++      base::apple::OuterBundlePath(), effective_user_data_directory);
+ }
+ 
+ }  // namespace initial_prefs
+--- /dev/null
++++ b/chrome/browser/mac/initial_prefs_paths.cc
+@@ -0,0 +1,60 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/mac/initial_prefs_paths.h"
++
++#include <array>
++
++#include "base/files/file_util.h"
++#include "build/branding_buildflags.h"
++#include "chrome/common/chrome_constants.h"
++
++namespace initial_prefs {
++
++base::FilePath FindInitialPrefsInDirectories(
++    const base::FilePath& user_data_directory,
++    const base::FilePath& system_preferences_directory,
++    const base::FilePath& app_bundle,
++    const base::FilePath& effective_user_data_directory) {
++#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
++  constexpr char kPreferences[] = "Google Chrome Initial Preferences";
++  constexpr char kLegacyPreferences[] = "Google Chrome Master Preferences";
++#else
++  constexpr char kPreferences[] = "Chromium Initial Preferences";
++  constexpr char kLegacyPreferences[] = "Chromium Master Preferences";
++#endif
++  const auto in_directory = [](const base::FilePath& directory,
++                               const char* name) {
++    return directory.empty() ? base::FilePath() : directory.Append(name);
++  };
++  const std::array candidates = {
++      in_directory(user_data_directory, kPreferences),
++      in_directory(user_data_directory, kLegacyPreferences),
++      in_directory(system_preferences_directory, kPreferences),
++      in_directory(system_preferences_directory, kLegacyPreferences),
++  };
++  for (const auto& path : candidates) {
++    if (!path.empty() && base::PathExists(path)) {
++      return path;
++    }
++  }
++  // A profile launched with --no-first-run may have preferences but no
++  // first-run sentinel. Never let the distribution template reset that existing
++  // profile. DIR_USER_DATA honors --user-data-dir; the default directory above
++  // does not.
++  if (app_bundle.empty() || effective_user_data_directory.empty() ||
++      base::PathExists(
++          effective_user_data_directory.Append(chrome::kLocalStateFilename)) ||
++      base::PathExists(
++          effective_user_data_directory.Append(chrome::kInitialProfile)
++              .Append(chrome::kPreferencesFilename))) {
++    return base::FilePath();
++  }
++  const auto bundled = app_bundle.Append("Contents")
++                           .Append("Resources")
++                           .Append("initial_preferences");
++  return base::PathExists(bundled) ? bundled : base::FilePath();
++}
++
++}  // namespace initial_prefs
+--- /dev/null
++++ b/chrome/browser/mac/initial_prefs_paths.h
+@@ -0,0 +1,23 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_MAC_INITIAL_PREFS_PATHS_H_
++#define CHROME_BROWSER_MAC_INITIAL_PREFS_PATHS_H_
++
++#include "base/files/file_path.h"
++
++namespace initial_prefs {
++
++// Existing user and system templates take precedence over bundled defaults.
++// Bundled defaults are used only before the effective profile has saved state.
++// Empty directories are ignored. Returns an empty path if no template exists.
++base::FilePath FindInitialPrefsInDirectories(
++    const base::FilePath& user_data_directory,
++    const base::FilePath& system_preferences_directory,
++    const base::FilePath& app_bundle,
++    const base::FilePath& effective_user_data_directory);
++
++}  // namespace initial_prefs
++
++#endif  // CHROME_BROWSER_MAC_INITIAL_PREFS_PATHS_H_
+--- /dev/null
++++ b/chrome/browser/mac/initial_prefs_paths_unittest.cc
+@@ -0,0 +1,124 @@
++// Copyright 2026 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/mac/initial_prefs_paths.h"
++
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "build/branding_buildflags.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace initial_prefs {
++namespace {
++
++#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
++constexpr char kPreferences[] = "Google Chrome Initial Preferences";
++constexpr char kLegacyPreferences[] = "Google Chrome Master Preferences";
++#else
++constexpr char kPreferences[] = "Chromium Initial Preferences";
++constexpr char kLegacyPreferences[] = "Chromium Master Preferences";
++#endif
++
++class ArciumInitialPrefsTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(temporary_.CreateUniqueTempDir());
++    user_ = temporary_.GetPath().Append("user");
++    system_ = temporary_.GetPath().Append("system");
++    bundle_ = temporary_.GetPath().Append("Arcium.app");
++    effective_ = user_;
++  }
++
++  void Write(const base::FilePath& path) {
++    ASSERT_TRUE(base::CreateDirectory(path.DirName()));
++    ASSERT_TRUE(base::WriteFile(path, "{}"));
++  }
++
++  base::FilePath Find() {
++    return FindInitialPrefsInDirectories(user_, system_, bundle_, effective_);
++  }
++
++  base::FilePath Bundled() {
++    return bundle_.Append("Contents/Resources/initial_preferences");
++  }
++
++  base::ScopedTempDir temporary_;
++  base::FilePath user_;
++  base::FilePath system_;
++  base::FilePath bundle_;
++  base::FilePath effective_;
++};
++
++TEST_F(ArciumInitialPrefsTest, BundledDefaultsDoNotCreateAUserProfile) {
++  Write(Bundled());
++  EXPECT_EQ(Bundled(), Find());
++  EXPECT_FALSE(base::PathExists(user_));
++}
++
++TEST_F(ArciumInitialPrefsTest, UserAndSystemTemplatesKeepTheirPrecedence) {
++  Write(Bundled());
++  EXPECT_EQ(Bundled(), Find());
++  const auto system_legacy = system_.Append(kLegacyPreferences);
++  Write(system_legacy);
++  EXPECT_EQ(system_legacy, Find());
++  const auto system_current = system_.Append(kPreferences);
++  Write(system_current);
++  EXPECT_EQ(system_current, Find());
++  const auto user_legacy = user_.Append(kLegacyPreferences);
++  Write(user_legacy);
++  EXPECT_EQ(user_legacy, Find());
++  const auto user_current = user_.Append(kPreferences);
++  Write(user_current);
++  EXPECT_EQ(user_current, Find());
++}
++
++TEST_F(ArciumInitialPrefsTest, MissingTemplatesReturnAnEmptyPath) {
++  EXPECT_TRUE(Find().empty());
++  EXPECT_TRUE(FindInitialPrefsInDirectories({}, {}, {}, {}).empty());
++}
++
++TEST_F(ArciumInitialPrefsTest, BundleFallbackWorksWithoutSystemDirectories) {
++  Write(Bundled());
++  EXPECT_EQ(Bundled(),
++            FindInitialPrefsInDirectories({}, {}, bundle_, effective_));
++}
++
++TEST_F(ArciumInitialPrefsTest, ExistingPreferencesWithoutSentinelArePreserved) {
++  Write(Bundled());
++  const auto preferences = user_.Append("Default/Preferences");
++  Write(preferences);
++  EXPECT_FALSE(base::PathExists(user_.Append("First Run")));
++  EXPECT_TRUE(Find().empty());
++  EXPECT_TRUE(base::PathExists(preferences));
++}
++
++TEST_F(ArciumInitialPrefsTest,
++       ExistingLocalStateDoesNotReceiveBundledDefaults) {
++  Write(Bundled());
++  Write(user_.Append("Local State"));
++  EXPECT_TRUE(Find().empty());
++  // Explicit user and system templates retain Chromium's existing behavior.
++  const auto system_current = system_.Append(kPreferences);
++  Write(system_current);
++  EXPECT_EQ(system_current, Find());
++}
++
++TEST_F(ArciumInitialPrefsTest, ExistingOverrideProfileDoesNotReceiveDefaults) {
++  Write(Bundled());
++  effective_ = temporary_.GetPath().Append("overridden-user-data-dir");
++  Write(effective_.Append("Default/Preferences"));
++  EXPECT_TRUE(Find().empty());
++  EXPECT_FALSE(base::PathExists(user_));
++}
++
++TEST_F(ArciumInitialPrefsTest, FreshOverrideIgnoresDefaultProfileState) {
++  Write(Bundled());
++  Write(user_.Append("Local State"));
++  effective_ = temporary_.GetPath().Append("fresh-user-data-dir");
++  EXPECT_EQ(Bundled(), Find());
++  EXPECT_FALSE(base::PathExists(effective_));
++}
++
++}  // namespace
++}  // namespace initial_prefs

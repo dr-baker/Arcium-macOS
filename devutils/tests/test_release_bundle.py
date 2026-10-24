@@ -92,6 +92,11 @@ class ReleaseBundleTests(unittest.TestCase):
         self.assertEqual(root["CFBundleName"], "Arcium")
         self.assertEqual(root["CrProductDirName"], "Arcium")
         self.assertEqual(root["CFBundleExecutable"], "Helium")
+        self.assertEqual(
+            (self.destination / "Contents/Resources/initial_preferences").read_bytes(),
+            arcium_app.INITIAL_PREFERENCES.read_bytes(),
+        )
+        self.assertFalse((self.source / "Contents/Resources/initial_preferences").exists())
         helper = self._read_plist(
             self.destination
             / "Contents/Frameworks/Helium Helper.app/Contents/Info.plist"

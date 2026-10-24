@@ -152,9 +152,13 @@ def main(argv: list[str] | None = None) -> int:
     completed.add_argument("targets", nargs="+")
     commands.add_parser("verify-build")
     commands.add_parser("configuration-current")
+    runner = commands.add_parser("build-run")
+    runner.add_argument("--jobs", type=int)
+    runner.add_argument("targets", nargs="+")
     guard = commands.add_parser("agent-guard")
     guard.add_argument("--edge-budget", type=int, default=None)
     guard.add_argument("--approved", action="store_true")
+    guard.add_argument("--jobs", type=int)
     guard.add_argument("targets", nargs="*")
     space = commands.add_parser("space")
     space.add_argument("--need-gib", type=float, required=True)
@@ -200,6 +204,17 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "configuration-current":
             return 1 if (not (paths.out / "args.gn").is_file()
                          or records.stamp_drift(paths, ("gn-defaults",))) else 0
+        elif args.command == "build-run":
+            from . import resources
+            from .lock import _nested
+            if not _nested(paths.state / "lane.lock"):
+                raise HeError("build-run requires the active he build command lock")
+            jobs = resources.jobs_ceiling(args.jobs)
+            command = [sys.executable, str(paths.src / "third_party/depot_tools/autoninja.py"),
+                       "-k", "0", "-j", "{HELIUM_BUILD_JOBS}", "-C", str(paths.out), *args.targets]
+            if any(target.startswith("-") for target in args.targets):
+                raise HeError("build targets cannot contain scheduler options; use --jobs")
+            return resources.run(paths, command, jobs=jobs).returncode
         elif args.command == "acquisition":
             if args.action == "record":
                 records.record_acquisition(paths, args.source_mode)
@@ -255,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
             budget = args.edge_budget if args.edge_budget is not None else int(
                 os.environ.get("HELIUM_EDGE_BUDGET", agent.DEFAULT_EDGE_BUDGET))
             edges = agent.guard_build(paths, args.targets, budget=budget, approved=args.approved,
+                                      jobs=args.jobs,
                                       problems=[p for p in problems(paths) if not p.startswith("timestamp snapshot")])
             print(edges)
         elif args.command == "space":
