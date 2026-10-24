@@ -6,7 +6,7 @@ A browser for people who love a good sidebar. Built on [Helium](https://helium.c
 
 **[Download for Mac](https://github.com/dr-baker/Arcium-macOS/releases/download/0.2.0-preview.1/Arcium-0.2.0-preview.1-macOS-arm64.dmg)** · [RIP Arc: release notes](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1) · [Quickstart](docs/arc-quickstart.md)
 
-Apple Silicon · macOS 26+ · Preview.1 · Manual updates
+Apple Silicon · macOS 26+ · 0.1.0 Preview · Manual updates
 
 <a href="docs/assets/command-bar.png"><img src="docs/assets/command-bar.png" width="720" alt="Arcium's glass command bar, site search scopes, and sidebar with loaded Favorites and Pins"></a>
 
