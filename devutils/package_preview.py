@@ -148,7 +148,7 @@ def main() -> int:
         return 0
 
     sys.path.insert(0, str(repo / 'devutils'))
-    from he import builds, catalog, quilt, timestamps
+    from he import apps, builds, catalog, quilt, timestamps
     from he.common import make_paths
     from he.lock import run_locked
     from arcium.bundle import signing_identity, verify_identity
