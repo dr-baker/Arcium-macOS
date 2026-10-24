@@ -875,7 +875,7 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -130,6 +130,7 @@ if (!is_android && toolkit_views) {
+@@ -133,6 +133,7 @@ if (!is_android && toolkit_views) {
        ]
      }
      if (is_mac) {
