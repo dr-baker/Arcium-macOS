@@ -22,7 +22,7 @@ Unreleased changes are in source, not the current download. [Roadmap](README.md#
 
 Draft candidate notes: [0.2.0-preview.2](docs/releases/0.2.0-preview.2.md). This version is not published.
 
-## RIP Arc · 0.2.0-preview.1
+## Arcium 0.1.0 (Preview) — RIP Arc
 
 October 23, 2026 · [Release and download](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1)
 
