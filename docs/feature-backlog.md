@@ -13,23 +13,12 @@ The original four suggestions were implemented and validated on macOS 26.6.2 in 
 3. Save split screens as durable Pins and verify their page ownership and lifecycle.
 4. Keep corner rounding concentric throughout the app, especially between the native window and browser content. Honor macOS window policy and account for Golden Gate's corner APIs.
 
-The Peek sign-in feature below is the fifth suggestion and is implemented and validated.
+The Peek sign-in feature below is the fifth suggestion and remains in development outside main.
 
 ## Open sign-in redirects in Peek while preserving the original page
 
 ID: ARCIUM-BACKLOG-PEEK-AUTH
-Status: Implemented and validated on October 23, 2026. All 514 patches applied with zero fuzz after incorporating current main. The browser and `arcium_feature_settings_browser_tests` compiled; the final run passed all 16 focused Peek browser tests with automatic retries disabled. Native acceptance passed in a standalone Dev app with an isolated profile. The installed browser was not replaced.
-
-The implementation adds a per-origin page-menu option, **Sign in with Peek on this site**. Recognized GET sign-in detours open in the source profile. Peek shows a still image of the dashboard while its original document is frozen and protected from navigation and discard. Closing Peek resumes that document without a reload. **Continue in tab** promotes the live login page. The initial sessionStorage namespace is cloned for callback state such as PKCE verifiers; callback writes and JavaScript memory do not transfer back to the source.
-
-If a protected destination never committed, closing Peek retries its exact URL once, including query and hash. Automatic renderer retries from the same document are suppressed after dismissal; a new user gesture permits another attempt. POST and form-submission flows retain normal browser behavior. Endpoint recognition is conservative and does not guarantee coverage of every identity provider.
-
-The local two-origin fixture is `devutils/peek_auth_site.py`. All three HTTP tests passed, covering expiration, the wrong return destination, and a one-use PKCE exchange. Standalone browser checks passed for PKCE success and the memory-only-state fallback. All eight new Chromium browser tests and eight existing Peek tests passed. The `peek-auth` scenario covers browser state, cancellation, promotion, profile isolation, persistence, and teardown. The fixture exposes source storage state and an optional unsaved-draft close prompt for native acceptance. It represents shared-cookie SSO and cloned sessionStorage state, not a production Snowflake or Okta tenant, WebAuthn, MFA, or server-side SSO policy.
-
-Native checks covered cookie and PKCE login, frozen-source identity and draft preservation, storage isolation, exact deep-URL recovery, cancellation, Continue in tab, opt-out, private and separate profiles, canceled source close with an unsent draft, and normal quit/relaunch. The site preference persisted and temporary login Peeks did not return. Native review found a missing Escape route; the fix preserves command-panel and exclusive-access precedence, and a shortcut-dispatch regression test covers auth and ordinary Peek.
-
-One earlier run failed the existing `ProductionNavigationAndWebsiteInteractions` test with “RenderFrame deleted” while waiting for user activation to expire. It passed in an isolated diagnostic run and in the final full suite; the cause remains unconfirmed and the failed-run log is retained with the validation artifacts. Real Snowflake/Okta login, MFA, and WebAuthn remain manual checks.
-
+Status: In development. Removed from local main pending further work. The implementation and test fixture remain on `feature/peek-auth`; the Snowflake follow-up remains on outer branch `fix/peek-snowflake-auth` and core branch `fix/peek-snowflake-auth-core`.
 
 An expired session can redirect the current tab through authentication and then land on a dashboard, losing the user's place. Add a simple opt-in option, preferably per site, that routes qualifying sign-in detours into Peek. The user completes login and closes Peek manually to resume the original page. Target authentication detours, not ordinary HTTP redirects. Manual close avoids inferring authentication completion from cookies.
 
