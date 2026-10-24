@@ -59,7 +59,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
  #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
  #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
  #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
-@@ -143,6 +144,29 @@ BrowserNativeWidgetMac::BrowserNativeWid
+@@ -144,6 +145,29 @@ BrowserNativeWidgetMac::BrowserNativeWid
      : views::NativeWidgetMac(browser_widget), browser_view_(browser_view) {
    CHECK(browser_widget);
    CHECK(browser_view);
@@ -89,7 +89,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
    if (GetRemoteCocoaApplicationHost()) {
      // Only add observer on PWA.
      chrome::AddCommandObserver(browser_view_->browser(), IDC_BACK, this);
-@@ -150,7 +174,9 @@ BrowserNativeWidgetMac::BrowserNativeWid
+@@ -151,7 +175,9 @@ BrowserNativeWidgetMac::BrowserNativeWid
    }
  }
  
@@ -100,7 +100,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
  
  BrowserWindowTouchBarController* BrowserNativeWidgetMac::GetTouchBarController()
      const {
-@@ -213,15 +239,18 @@ void BrowserNativeWidgetMac::OnWindowFul
+@@ -214,15 +240,18 @@ void BrowserNativeWidgetMac::OnWindowFul
  
  void BrowserNativeWidgetMac::OnWidgetDestroyed(views::Widget* widget) {
    CHECK(browser_view_);
@@ -119,7 +119,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
    NativeWidgetMac::OnWidgetDestroyed(widget);
  }
  
-@@ -563,8 +592,7 @@ NativeWidgetMacNSWindow* BrowserNativeWi
+@@ -570,8 +599,7 @@ NativeWidgetMacNSWindow* BrowserNativeWi
    CHECK(browser_view_);
    NativeWidgetMacNSWindow* ns_window = NativeWidgetMac::CreateNSWindow(params);
    SetGlassFrameWindowState(
@@ -129,7 +129,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
    touch_bar_delegate_ = [[BrowserWindowTouchBarViewsDelegate alloc]
        initWithBrowser:browser_view_->browser()
                 window:ns_window];
-@@ -605,6 +633,7 @@ void BrowserNativeWidgetMac::OnWidgetThe
+@@ -612,6 +640,7 @@ void BrowserNativeWidgetMac::OnWidgetThe
  
  void BrowserNativeWidgetMac::OnWindowDestroying(
      gfx::NativeWindow native_window) {
@@ -137,7 +137,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
    // Clear delegates set in CreateNSWindow() to prevent objects with a reference
    // to |window| attempting to validate commands by looking for a Browser*.
    NativeWidgetMacNSWindow* ns_window =
-@@ -730,17 +759,75 @@ void BrowserNativeWidgetMac::SetGlassFra
+@@ -737,17 +766,75 @@ void BrowserNativeWidgetMac::SetGlassFra
    [ns_window setOpaque:!enabled];
  }
  
@@ -218,7 +218,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
      last_color_mode_.reset();
      last_theme_color_.reset();
      return;
-@@ -755,33 +842,51 @@ void BrowserNativeWidgetMac::UpdateBackg
+@@ -762,33 +849,51 @@ void BrowserNativeWidgetMac::UpdateBackg
    auto color_mode = widget->GetColorMode();
    auto theme_color = widget->GetColorProvider()->GetColor(kColorToolbar);
  

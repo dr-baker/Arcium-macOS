@@ -54,10 +54,11 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.assertEqual("apply", arguments[1])
         self.assertEqual("--no-fuzz", arguments[2])
 
-    def test_sanity_check_runs_setup_without_reset(self) -> None:
+    def test_sanity_check_build_exit_statuses_and_setup(self) -> None:
         src_dir = self.root / "source"
         (self.root / "dev.sh").write_text(
             f"_src_dir={str(src_dir)!r}\n"
+            f"_out_dir={str(src_dir / 'out/Default')!r}\n"
             "mkdir -p \"$_src_dir\"\n"
             "he() {\n"
             "  printf '%s\\n' \"$*\" >> \"$HE_CALLS\"\n"
@@ -75,23 +76,28 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.write_executable(self.bin_dir / "pip3.14", "#!/bin/bash\nexit 0\n")
         self.write_executable(
             self.bin_dir / "timeout",
-            "#!/bin/bash\nexit 124\n",
+            '#!/bin/bash\nexit "$SMOKE_STATUS"\n',
         )
 
         environment = self.entrypoint_environment()
         environment["HE_CALLS"] = str(calls)
-        result = subprocess.run(
-            [str(SANITY_SCRIPT)],
-            cwd=self.root,
-            env=environment,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
+        for status, expected in ((0, 0), (124, 0), (1, 1), (125, 1), (127, 1), (137, 1)):
+            with self.subTest(status=status):
+                calls.unlink(missing_ok=True)
+                result = subprocess.run(
+                    [str(SANITY_SCRIPT)],
+                    cwd=self.root,
+                    env={**environment, "SMOKE_STATUS": str(status)},
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
 
-        self.assertEqual(0, result.returncode, result.stdout)
-        self.assertEqual("setup --force\n", calls.read_text(encoding="utf-8"))
+                self.assertEqual(expected, result.returncode, result.stdout)
+                self.assertEqual("setup --force\n", calls.read_text(encoding="utf-8"))
+                if expected:
+                    self.assertIn(f"failed with status code {status}", result.stdout)
 
     def test_local_build_passes_no_fuzz_to_patch_utility(self) -> None:
         self.install_python_stub()

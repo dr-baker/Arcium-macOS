@@ -48,7 +48,8 @@ def planned_edges(output: str) -> int:
     return sum(1 for line in body if not _SISO_NOISE.match(line))
 
 
-def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool, problems: list[str]) -> int:
+def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool, problems: list[str],
+                jobs: int | None = None) -> int:
     """Refuse a build an agent should not start; return the planned edge count."""
     if not targets:
         raise HeError("he agent build needs explicit targets, for example: he agent build chrome")
@@ -57,13 +58,17 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
     if problems:
         raise HeError("he check reports problems; fix them first:\n  " + "\n  ".join(problems))
     out = paths.out
-    command = ["python3", str(paths.src / "third_party" / "depot_tools" / "autoninja.py"), "-C", str(out), "-n", *targets]
+    from . import resources
+    command = ["python3", str(paths.src / "third_party" / "depot_tools" / "autoninja.py"),
+               "-j", "{HELIUM_BUILD_JOBS}", "-C", str(out), "-n", *targets]
     environment = {**os.environ, "SISO_PATH": str(paths.src / "third_party" / "siso" / "cipd" / "siso")}
     import sys
     print(f"he agent build: dry run of {' '.join(targets)} to check the edge budget "
           "(loading the build graph takes 30-60 s)", file=sys.stderr, flush=True)
-    result = subprocess.run(command, cwd=paths.src, env=environment, capture_output=True,
-                            text=True, errors="replace", check=False)
+    # The dry run can run GN and load a large graph. Give it the same resource
+    # admission and OS policy as compilation, while preserving its diagnostics.
+    result = resources.run(paths, command, jobs=resources.jobs_ceiling(jobs), capture_output=True, phase="plan",
+                           environment=environment)
     if result.returncode:
         raise HeError(f"dry run failed:\n{(result.stdout + result.stderr).strip()[-2000:]}")
     output = result.stdout + result.stderr
@@ -85,6 +90,7 @@ def guard_build(paths: Paths, targets: list[str], *, budget: int, approved: bool
 
 def status(paths: Paths, problems: list[str]) -> dict:
     from .lane import Lane
+    from . import resources
     series = quilt.read_list(paths.catalog / "series.merged")
     applied = quilt.applied(paths.src)
     scratch_root = paths.state / "scratch"
@@ -100,6 +106,7 @@ def status(paths: Paths, problems: list[str]) -> dict:
         "build_dir": str(paths.build_dir),
         "build_mode": paths.build_mode,
         "lane": Lane(paths.state).status(),
+        "build_resources": resources.status(paths.state),
         "output_dir": str(paths.out),
         "scratch": (paths.state / "scratch.json").is_file(),
         "patches": {"series": len(series), "applied": len(applied), "top": applied[-1] if applied else None},

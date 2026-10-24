@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Plan or stage a signed browser/installer/archive using canonical Arcium helpers."""
+"""Stage a signed browser, drag-to-Applications DMG and notarization archive."""
 from __future__ import annotations
 
 import argparse
 import datetime
 import json
-import os
 from pathlib import Path
 import plistlib
 import shlex
@@ -58,6 +57,33 @@ def verify_credits(out: Path) -> None:
                            'and rebuild chrome before packaging')
 
 
+def archive_browser(browser: Path, archive: Path, identity: str, team_id: str) -> None:
+    """Archive the browser itself, so Xcode notarizes the drag-install payload."""
+    from he import apps
+
+    archived_app = archive / 'Products/Applications/Arcium.app'
+    archived_app.parent.mkdir(parents=True, exist_ok=False)
+    apps.copy_app(browser, archived_app)
+    apps.verify_signature(archived_app)
+    info = load_plist(archived_app / 'Contents/Info.plist')
+    archs = capture('/usr/bin/lipo', '-archs', str(apps.executable(archived_app))).split()
+    write_plist(archive / 'Info.plist', {
+        'ArchiveVersion': 2,
+        'CreationDate': datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        'Name': 'Arcium',
+        'SchemeName': 'Arcium',
+        'ApplicationProperties': {
+            'ApplicationPath': 'Applications/Arcium.app',
+            'Architectures': archs,
+            'CFBundleIdentifier': info['CFBundleIdentifier'],
+            'CFBundleShortVersionString': info['CFBundleShortVersionString'],
+            'CFBundleVersion': info['CFBundleVersion'],
+            'SigningIdentity': identity,
+            'Team': team_id,
+        },
+    })
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', type=Path, required=True)
@@ -83,9 +109,10 @@ def main() -> int:
     core = repo / 'helium-chromium'
     source_paths = [repo / 'devutils/arcium/install.py',
                     repo / 'devutils/package_preview.py',
-                    repo / 'devutils/preview-installer/build.sh',
-                    repo / 'devutils/preview-installer/main.swift',
-                    repo / 'resources/preview/Installer-Info.plist',
+                    repo / 'devutils/release_dmg.py',
+                    repo / 'resources/dmg.json',
+                    repo / 'resources/dmg-background.png',
+                    repo / 'resources/dmg-background@2x.png',
                     repo / 'resources/preview/initial-preferences.json']
     for path in source_paths:
         if not path.is_file():
@@ -108,7 +135,7 @@ def main() -> int:
     plan = {
         'source': str(out / 'Helium.app'),
         'browser': str(destination / 'browser/Arcium.app'),
-        'installer': str(destination / 'installer/Install-Arcium.app'),
+        'disk_image': str(destination / 'Arcium.dmg'),
         'archive': str(destination / 'Arcium-Preview.xcarchive'),
         'macos_commit': outer_commit,
         'core_commit': core_commit,
@@ -126,6 +153,7 @@ def main() -> int:
     from he.lock import run_locked
     from arcium.bundle import signing_identity, verify_identity
     from arcium.install import package
+    from release_dmg import create_disk_image
 
     if not args.inside_lock:
         argv = [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:], '--inside-lock']
@@ -148,33 +176,10 @@ def main() -> int:
     if builds.require_completed(out, 'daily') != receipt:
         raise RuntimeError('shared output changed during packaging')
 
-    installer = destination / 'installer/Install-Arcium.app'
-    env = {**os.environ, 'ARCIUM_CODESIGN_IDENTITY': identity, 'PYTHONDONTWRITEBYTECODE': '1'}
-    run('/bin/bash', str(repo / 'devutils/preview-installer/build.sh'), str(browser), str(installer), env=env)
-    apps.verify_signature(installer)
+    create_disk_image(browser, destination / 'Arcium.dmg', identity)
 
     archive = destination / 'Arcium-Preview.xcarchive'
-    archived_app = archive / 'Products/Applications/Install-Arcium.app'
-    archived_app.parent.mkdir(parents=True, exist_ok=False)
-    apps.copy_app(installer, archived_app)
-    apps.verify_signature(archived_app)
-    info = load_plist(archived_app / 'Contents/Info.plist')
-    archs = capture('/usr/bin/lipo', '-archs', str(apps.executable(archived_app))).split()
-    write_plist(archive / 'Info.plist', {
-        'ArchiveVersion': 2,
-        'CreationDate': datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
-        'Name': 'Install Arcium',
-        'SchemeName': 'Install Arcium',
-        'ApplicationProperties': {
-            'ApplicationPath': 'Applications/Install-Arcium.app',
-            'Architectures': archs,
-            'CFBundleIdentifier': info['CFBundleIdentifier'],
-            'CFBundleShortVersionString': info['CFBundleShortVersionString'],
-            'CFBundleVersion': info['CFBundleVersion'],
-            'SigningIdentity': identity,
-            'Team': args.team_id,
-        },
-    })
+    archive_browser(browser, archive, identity, args.team_id)
     options = destination / 'NotarizationOptions.plist'
     write_plist(options, {
         'destination': 'upload',
@@ -194,8 +199,11 @@ def main() -> int:
                       '-exportOptionsPlist', str(options), '-exportPath', str(destination / 'upload-export')]
     export_commands = [
         ['/usr/bin/xcodebuild', '-exportNotarizedApp', '-archivePath', str(archive), '-exportPath', str(export)],
-        ['/usr/bin/codesign', '--verify', '--deep', '--strict', str(export / 'Install-Arcium.app')],
-        ['/usr/bin/xcrun', 'stapler', 'validate', str(export / 'Install-Arcium.app')],
+        ['/usr/bin/codesign', '--verify', '--deep', '--strict', str(export / 'Arcium.app')],
+        ['/usr/bin/xcrun', 'stapler', 'validate', str(export / 'Arcium.app')],
+        [sys.executable, str(repo / 'devutils/release_dmg.py'),
+         '--app', str(export / 'Arcium.app'), '--destination', str(export / 'Arcium.dmg'),
+         '--identity', identity],
     ]
     upload_script = destination / 'upload-notarization.sh'
     upload_script.write_text('#!/bin/bash\nset -euo pipefail\n' + shlex.join(upload_command) + '\n')

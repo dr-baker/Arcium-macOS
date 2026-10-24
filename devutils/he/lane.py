@@ -104,14 +104,17 @@ class Lane:
             yield
 
     def status(self):
+        from . import resources
         if not self.db.exists():
-            return {"enabled": False, "build_dir": str(self.state.parent)}
+            return {"enabled": False, "build_dir": str(self.state.parent),
+                    "build_resources": resources.status(self.state)}
         with self.transaction() as (_, data):
             result = json.loads(json.dumps(data))
         if result["owner"]:
             result["owner"].pop("token", None)
         result["enabled"] = True
         result["build_dir"] = str(self.state.parent)
+        result["build_resources"] = resources.status(self.state)
         watcher = result["watcher"]
         result["watcher_healthy"] = bool(watcher and time.time() - watcher["seen"] < 30)
         return result
