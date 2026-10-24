@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -951,6 +951,18 @@ private struct AppearanceSettingsPage: V
+@@ -961,6 +961,18 @@ private struct AppearanceSettingsPage: V
                  .disabled(!store.snapshot.appearance.chromeFrameBorderWidthAvailable
                      || store.snapshot.appearance.chromeFrameBorderWidthManaged
                      || !store.snapshot.appearance.roundedFrame)
@@ -21,7 +21,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  BooleanSetting(
                      title: "Centered address bar",
                      description: nil,
-@@ -960,7 +972,19 @@ private struct AppearanceSettingsPage: V
+@@ -970,7 +982,19 @@ private struct AppearanceSettingsPage: V
                      unavailableReason: store.snapshot.appearance.sidebarNavigationConfigured
                          ? "Sidebar navigation uses a fixed address bar position." : nil
                  )
@@ -42,7 +42,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              }
  
              Section("Zen mode") {
-@@ -971,16 +995,6 @@ private struct AppearanceSettingsPage: V
+@@ -981,16 +1005,6 @@ private struct AppearanceSettingsPage: V
                      value: booleanBinding("zen_mode")
                  )
                  BooleanSetting(
@@ -63,7 +63,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -564,6 +564,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -571,6 +571,7 @@ struct ArciumAppearanceSnapshot: Equatab
      var roundedFrame = false
      var centeredLocationBar = false
      var minimalLocationBar = false
@@ -71,7 +71,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var showHomeButton = false
      var showBackButton = false
      var showForwardButton = false
-@@ -684,6 +685,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -691,6 +692,7 @@ struct ArciumAppearanceSnapshot: Equatab
          roundedFrame = boolean(dictionary["roundedFrame"])
          centeredLocationBar = boolean(dictionary["centeredLocationBar"])
          minimalLocationBar = boolean(dictionary["minimalLocationBar"])
@@ -79,7 +79,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          showHomeButton = boolean(dictionary["showHomeButton"])
          showBackButton = boolean(dictionary["showBackButton"])
          showForwardButton = boolean(dictionary["showForwardButton"])
-@@ -1239,6 +1241,7 @@ final class ArciumSettingsStore: Observa
+@@ -1246,6 +1248,7 @@ final class ArciumSettingsStore: Observa
          case "rounded_frame": snapshot.appearance.roundedFrame
          case "centered_location_bar": snapshot.appearance.centeredLocationBar
          case "minimal_location_bar": snapshot.appearance.minimalLocationBar
@@ -87,7 +87,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          case "show_home_button": snapshot.appearance.showHomeButton
          case "show_back_button": snapshot.appearance.showBackButton
          case "show_forward_button": snapshot.appearance.showForwardButton
-@@ -1260,8 +1263,13 @@ final class ArciumSettingsStore: Observa
+@@ -1267,8 +1270,13 @@ final class ArciumSettingsStore: Observa
      }
  
      func setAppearanceBoolean(_ key: String, value: Bool) {
@@ -170,7 +170,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -494,6 +494,49 @@ final class ArciumSettingsUIContractTest
+@@ -614,6 +614,49 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor

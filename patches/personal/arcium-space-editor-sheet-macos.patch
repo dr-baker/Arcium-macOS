@@ -299,7 +299,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      func testTintColorEditingDoesNotRequireOrCreateGlowPoints() throws {
          var empty = makeConfiguration()
          empty.colorEffect = .tint
-@@ -1958,3 +1995,11 @@ final class ArciumSettingsUIContractTest
+@@ -2037,3 +2074,11 @@ final class ArciumSettingsUIContractTest
          }
      }
  }

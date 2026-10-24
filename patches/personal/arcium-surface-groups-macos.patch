@@ -78,7 +78,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
           "controlFinish": controlFinish, "controlTint": controlTint, "controlEdge": controlEdge,
           "scrimBlur": scrimBlur, "scrimDim": scrimDim]
      }
-@@ -569,18 +586,21 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -571,18 +588,21 @@ struct ArciumAppearanceSnapshot: Equatab
          commandBarAppearanceAvailable && !commandBarAppearanceManaged
      }
      var surfaceSet = "glass"
@@ -106,7 +106,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          }
      }
      var surfaceTuning = ArciumSurfaceTuning()
-@@ -1002,13 +1022,21 @@ final class ArciumSettingsStore: Observa
+@@ -1019,13 +1039,21 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "command_bar_appearance", value: appearance)
      }
  
@@ -130,7 +130,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          if snapshot.appearance.commandBarAppearance != 2 {
              setCommandBarAppearance(2)
          }
-@@ -1029,6 +1057,9 @@ final class ArciumSettingsStore: Observa
+@@ -1046,6 +1074,9 @@ final class ArciumSettingsStore: Observa
          guard snapshot.appearance.canEditSurfaceSet,
                ArciumAppearanceSnapshot.surfaceSetValues.contains(surfaceSet) else { return }
          settingChanged(key: "surface_set", value: surfaceSet)
@@ -193,7 +193,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      private var appearanceBinding: Binding<SettingsAppearance> {
          let spaceID = store.snapshot.appearance.spacePalette.id
          return Binding(get: { store.appearanceMode() },
-@@ -646,20 +660,33 @@ private struct AppearanceSettingsPage: V
+@@ -671,20 +685,33 @@ private struct AppearanceSettingsPage: V
  
              SSectionCard(title: "Floating surfaces") {
                  SPicker("Preset", selection: Binding(
@@ -237,7 +237,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              }
              .onDisappear {
                  if surfacePreview {
-@@ -668,63 +695,71 @@ private struct AppearanceSettingsPage: V
+@@ -693,63 +720,71 @@ private struct AppearanceSettingsPage: V
                  }
              }
  
@@ -299,13 +299,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                        SSlider("Tint Intensity", value: surfaceTuningBinding(\.panelTint), range: 0...1, step: 0.01,
 +                                format: Self.percent,
 +                                help: SHelp(description: "Strength of the theme color in the material."),
-+                                commitMode: .debounced(milliseconds: 80))
+                                 commitMode: .debounced(milliseconds: 80))
+-                            .accessibilityIdentifier("surface-panel-blur")
 +                            .accessibilityIdentifier("surface-panel-tint")
 +                        SSlider("Opacity", value: surfaceTuningBinding(\.panelOpacity), range: 0...1, step: 0.01,
 +                                format: Self.percent,
 +                                help: SHelp(description: "Neutral light or dark backing, independent of theme tint. 100% is opaque."),
-                                 commitMode: .debounced(milliseconds: 80))
--                            .accessibilityIdentifier("surface-panel-blur")
++                                commitMode: .debounced(milliseconds: 80))
 +                            .accessibilityIdentifier("surface-container-opacity")
 +                        if store.snapshot.appearance.effectivePanelMaterial == "glassmorphic" {
 +                            SSlider("Blur", value: surfaceTuningBinding(\.panelBlur), range: 0...30, step: 1,

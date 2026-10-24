@@ -277,6 +277,7 @@ ___helium_setup_presetup() {
     # Full-source build dirs keep Chromium's test data for browser_tests.
     if [ "$_he_source_mode" != full ]; then
         python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+        "$_python_env_bin" "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
     fi
     ___helium_toolchain
     ___helium_resources

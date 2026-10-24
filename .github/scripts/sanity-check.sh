@@ -30,7 +30,7 @@ if grep -q 'offset .* lines' setup.log; then
 fi
 
 cd "$_src_dir"
-timeout 30 ninja -C out/Default chrome chromedriver
+timeout 30 ninja -C "$_out_dir" chrome chromedriver
 _status_code=$?
 
 if [ $_status_code != 124 ]; then
