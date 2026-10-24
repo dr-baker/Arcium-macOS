@@ -4,15 +4,16 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
-@@ -37,6 +37,13 @@ public final class ArciumSettingsUIContr
+@@ -37,6 +37,14 @@ public final class ArciumSettingsUIContr
          store.updateSnapshot(snapshot)
      }
  
 +    // Same store and observers as Settings; the native host supplies the real
 +    // command panel beside these controls in the same key window.
-+    @objc(makeCommandBarEditor)
-+    public func makeCommandBarEditor() -> NSViewController {
-+        NSHostingController(rootView: AnyView(ArciumCommandBarEditorView(store: store)))
++    @objc(makeCommandBarEditorWithPreviewAvailable:)
++    public func makeCommandBarEditor(previewAvailable: Bool) -> NSViewController {
++        NSHostingController(rootView: AnyView(ArciumCommandBarEditorView(
++            store: store, previewAvailable: previewAvailable)))
 +    }
 +
      // An explicit native deep link; ordinary snapshots keep navigation intact.
@@ -112,7 +113,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      @ViewBuilder
      private var backgroundEditor: some View {
-@@ -1649,3 +1609,78 @@ private func shortcutSummary(_ command:
+@@ -1649,3 +1609,81 @@ private func shortcutSummary(_ command:
      if command.bindings.count == 1 { return first.display }
      return "\(first.display), plus \(command.bindings.count - 1) more"
  }
@@ -166,6 +167,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +
 +struct ArciumCommandBarEditorView: View {
 +    @ObservedObject var store: ArciumSettingsStore
++    let previewAvailable: Bool
 +
 +    var body: some View {
 +        if let preset = store.preset {
@@ -176,7 +178,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            ArciumLiveSettingsSheet(title: "Command bar", onClose: {
 +                store.actionInvoked(name: "close_command_bar_editor")
 +            }) {
-+                Text("Select scopes or type in the preview. Results won't open.")
++                Text(previewAvailable
++                     ? "Select scopes or type in the preview. Results won't open."
++                     : "Open a browser window to preview scopes and results.")
 +                    .settingsFont(\.caption).foregroundStyle(.secondary)
 +                ArciumCommandBarControls(store: store)
 +            }
@@ -203,7 +207,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "base/logging.h"
  #include "base/path_service.h"
  #include "base/scoped_observation.h"
-@@ -36,6 +37,8 @@
+@@ -36,11 +37,14 @@
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/chrome_pages.h"
@@ -212,7 +216,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
  #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
  #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
-@@ -68,6 +71,10 @@
+ #include "chrome/browser/ui/cocoa/arcium_widevine_installer.h"
+ #include "chrome/browser/ui/color/arcium_space_color_mixer.h"
++#include "chrome/browser/ui/color/arcium_space_palette_initializer.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/helium/arcium_settings_model.h"
+@@ -68,6 +72,10 @@
  #include "ui/native_theme/native_theme.h"
  #include "ui/native_theme/native_theme_observer.h"
  #include "ui/views/widget/widget.h"
@@ -223,7 +233,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  
  NSString* const kArciumSettingsUIControllerClassName =
      @"ArciumSettingsUIController";
-@@ -532,6 +539,178 @@ void SetSettingsWindowGlassState(NSWindo
+@@ -532,6 +540,222 @@ void SetSettingsWindowGlassState(NSWindo
  
  }  // namespace
  
@@ -255,7 +265,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +    }
 +    return panel_->height();
 +  }
-+  int AvailablePreviewWidth() const { return std::max(280, width() - 544); }
++  int AvailablePreviewWidth() const { return std::max(280, panel_->width()); }
 +
 + protected:
 +  void Layout(PassKey) override {
@@ -276,10 +286,55 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +  base::RepeatingClosure geometry_changed_;
 +};
 +
++// Resolve the same complete Space palette as BrowserWidget, using Settings'
++// captured target rather than whichever browser was activated most recently.
++class CommandSettingsPreviewWidget : public views::Widget {
++ public:
++  CommandSettingsPreviewWidget(Profile* profile, const helium::HeliumSpace* space)
++      : profile_(profile) {
++    if (space) theme_ = space->theme();
++  }
++  void UpdateSpace(const helium::HeliumSpace* space) {
++    theme_ = space ? std::optional(space->theme()) : std::nullopt;
++    ThemeChanged();
++  }
++
++ protected:
++  ui::ColorProviderKey GetColorProviderKey() const override {
++    auto key = views::Widget::GetColorProviderKey();
++    const auto system_mode = key.color_mode;
++    auto* themes = ThemeServiceFactory::GetForProfile(profile_);
++    key = themes->GetColorProviderKey(key, profile_);
++    if (!themes->UsingPolicyTheme() &&
++        key.contrast_mode != ui::ColorProviderKey::ContrastMode::kHigh &&
++        key.forced_colors == ui::ColorProviderKey::ForcedColors::kNone) {
++      const auto palette = helium::SpacePaletteKey(
++          theme_ ? &*theme_ : nullptr,
++          helium::ReadGlassSurfaceConfiguration(profile_->GetPrefs()));
++      key.user_color = palette.seed;
++      key.user_color_source = ui::ColorProviderKey::UserColorSource::kAccent;
++      key.custom_theme = nullptr;
++      key.color_mode = system_mode;
++      if (theme_ && theme_->mode != helium::SpaceTheme::Mode::kAuto) {
++        key.color_mode = theme_->mode == helium::SpaceTheme::Mode::kDark
++                             ? ui::ColorProviderKey::ColorMode::kDark
++                             : ui::ColorProviderKey::ColorMode::kLight;
++      }
++      key.app_controller = arcium::GetSpacePaletteInitializer(palette);
++    }
++    return key;
++  }
++
++ private:
++  raw_ptr<Profile> profile_;
++  std::optional<helium::SpaceTheme> theme_;
++};
++
 +class CommandSettingsEditor : public views::WidgetObserver {
 + public:
 +  CommandSettingsEditor(NSWindow* parent, NSViewController* controls,
-+                        BrowserView* browser_view, void (^closed)(void))
++                        BrowserView* browser_view, const helium::HeliumSpace* space,
++                        void (^closed)(void))
 +      : controls_(controls), closed_(closed),
 +        browser_widget_(browser_view->GetWidget()) {
 +    auto* browser = browser_view->browser();
@@ -298,7 +353,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +    delegate_->SetContentsView(std::move(root));
 +    delegate_->RegisterWindowClosingCallback(base::BindOnce(
 +        &CommandSettingsEditor::RequestClose, base::Unretained(this)));
-+    widget_ = std::make_unique<views::Widget>();
++    widget_ = std::make_unique<CommandSettingsPreviewWidget>(profile, space);
 +    views::Widget::InitParams params(
 +        views::Widget::InitParams::CLIENT_OWNS_WIDGET,
 +        views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
@@ -308,8 +363,6 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +                             std::min(720, static_cast<int>(visible.size.height) - 64));
 +    params.delegate = delegate_.get();
 +    widget_->Init(std::move(params));
-+    widget_->SetColorModeOverride(browser_widget_->GetColorMode());
-+    widget_->SetUserColorOverride(browser_widget_->user_color_override());
 +    root_->controls()->Attach(gfx::NativeView(controls_.view));
 +    root_->panel()->SetHeightResizeCallback(base::BindRepeating(
 +        [](CommandSettingsEditor* owner, std::optional<int> height,
@@ -356,6 +409,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +    if (browser_widget_) browser_widget_->RemoveObserver(this);
 +    CloseWindow();
 +  }
++  void UpdateSpace(const helium::HeliumSpace* space) {
++    if (widget_) widget_->UpdateSpace(space);
++  }
 +  void RequestClose() {
 +    if (closing_) return;
 +    closing_ = true;
@@ -370,8 +426,6 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +  }
 +  void OnWidgetThemeChanged(views::Widget* widget) override {
 +    if (!widget_) return;
-+    widget_->SetColorModeOverride(browser_widget_->GetColorMode());
-+    widget_->SetUserColorOverride(browser_widget_->user_color_override());
 +    widget_->ThemeChanged();
 +  }
 +
@@ -392,7 +446,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +  raw_ptr<views::Widget> browser_widget_;
 +  raw_ptr<CommandSettingsPreviewView> root_ = nullptr;
 +  std::unique_ptr<views::WidgetDelegate> delegate_;
-+  std::unique_ptr<views::Widget> widget_;
++  std::unique_ptr<CommandSettingsPreviewWidget> widget_;
 +  std::unique_ptr<arcium::CommandBarMaterial> material_;
 +  bool closing_ = false;
 +};
@@ -402,7 +456,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  @interface ArciumSettingsContentView : NSView
  @property(nonatomic, copy) void (^effectiveAppearanceChanged)(void);
  @end
-@@ -633,6 +812,8 @@ void SetSettingsWindowGlassState(NSWindo
+@@ -633,6 +857,8 @@ void SetSettingsWindowGlassState(NSWindo
  - (void)publishSnapshot;
  - (void)modelDidChange;
  - (void)updateNativeGlassBackground;
@@ -411,51 +465,77 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  - (void)removeNativeGlassBackground;
  - (void)applyNativeWindowAppearanceForColorMode:
      (ui::ColorProviderKey::ColorMode)colorMode;
-@@ -688,6 +869,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -688,6 +914,8 @@ void SettingsModelProfileWillBeDestroyed
  }  // namespace
  
  @implementation ArciumSettingsWindowController {
 +  std::unique_ptr<CommandSettingsEditor> command_editor_;
++  NSWindow* command_controls_sheet_;
    Profile* profile_;
    NSValue* profile_key_;
    BOOL profile_destroying_;
-@@ -711,6 +893,35 @@ void SettingsModelProfileWillBeDestroyed
+@@ -711,6 +939,60 @@ void SettingsModelProfileWillBeDestroyed
    id accessibility_notification_token_;
  }
  
 +- (void)showCommandBarEditor {
-+  if (command_editor_ || profile_destroying_ || !model_ ||
-+      self.window.attachedSheet || !settings_ui_controller_) return;
-+  SEL selector = NSSelectorFromString(@"makeCommandBarEditor");
++  if (command_editor_ || command_controls_sheet_ || profile_destroying_ ||
++      !model_ || self.window.attachedSheet || !settings_ui_controller_) return;
++  SEL selector = NSSelectorFromString(@"makeCommandBarEditorWithPreviewAvailable:");
 +  if (![settings_ui_controller_ respondsToSelector:selector]) return;
++  const auto* space = model_->GetAppearanceSpace();
 +  BrowserView* target = nullptr;
++  auto* primary = space ? space->GetPrimaryBrowser() : nullptr;
++  if (IsMatchingNormalBrowser(primary, profile_)) {
++    target = BrowserView::GetBrowserViewForBrowser(primary);
++  }
 +  auto* collection = GlobalBrowserCollection::GetInstance();
-+  if (!collection) return;
-+  collection->ForEach([&](BrowserWindowInterface* browser) {
-+    if (IsMatchingNormalBrowser(browser, profile_)) {
-+      target = BrowserView::GetBrowserViewForBrowser(browser);
-+      return false;
-+    }
-+    return true;
-+  }, BrowserCollection::Order::kActivation);
-+  if (!target || !target->GetWidget() || target->GetWidget()->IsClosed()) return;
-+  using MakeEditor = NSViewController* (*)(id, SEL);
++  if (!target && collection) {
++    collection->ForEach([&](BrowserWindowInterface* browser) {
++      if (IsMatchingNormalBrowser(browser, profile_)) {
++        target = BrowserView::GetBrowserViewForBrowser(browser);
++        return false;
++      }
++      return true;
++    }, BrowserCollection::Order::kActivation);
++  }
++  if (target && (!target->GetWidget() || target->GetWidget()->IsClosed())) target = nullptr;
++  using MakeEditor = NSViewController* (*)(id, SEL, BOOL);
 +  NSViewController* controls = reinterpret_cast<MakeEditor>(objc_msgSend)(
-+      settings_ui_controller_, selector);
++      settings_ui_controller_, selector, target != nullptr);
 +  if (!controls) return;
++  if (!target) {
++    // Settings remains usable after the last browser closes. The same controls
++    // are available in a normal sheet, with an explicit unavailable preview.
++    command_controls_sheet_ = [[NSWindow alloc]
++        initWithContentRect:NSMakeRect(0, 0, 520, 620)
++                  styleMask:NSWindowStyleMaskBorderless
++                    backing:NSBackingStoreBuffered defer:NO];
++    command_controls_sheet_.releasedWhenClosed = NO;
++    command_controls_sheet_.contentViewController = controls;
++    [self.window beginSheet:command_controls_sheet_ completionHandler:nil];
++    return;
++  }
 +  __weak ArciumSettingsWindowController* weak_self = self;
 +  command_editor_ = std::make_unique<CommandSettingsEditor>(
-+      self.window, controls, target, ^{ [weak_self closeCommandBarEditor]; });
++      self.window, controls, target, space,
++      ^{ [weak_self closeCommandBarEditor]; });
 +}
 +
 +- (void)closeCommandBarEditor {
 +  command_editor_.reset();
++  if (command_controls_sheet_) {
++    [command_controls_sheet_.sheetParent endSheet:command_controls_sheet_];
++    [command_controls_sheet_ orderOut:nil];
++    [command_controls_sheet_ close];
++    command_controls_sheet_ = nil;
++  }
 +}
 +
  - (BOOL)selectAppearanceSpace:(NSString*)spaceID {
    if (!model_ || !spaceID.length ||
        !model_->SetAppearanceSpace(base::SysNSStringToUTF8(spaceID))) {
-@@ -796,6 +1007,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -796,6 +1078,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)dealloc {
@@ -463,7 +543,17 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    profile_destroying_ = YES;
    if (accessibility_notification_token_) {
      [NSWorkspace.sharedWorkspace.notificationCenter
-@@ -1771,6 +1983,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1755,6 +2038,9 @@ void SettingsModelProfileWillBeDestroyed
+ }
+ 
+ - (void)modelDidChange {
++  if (command_editor_ && model_) {
++    command_editor_->UpdateSpace(model_->GetAppearanceSpace());
++  }
+   if (profile_destroying_ || window_closing_ || model_change_scheduled_ ||
+       native_background_update_in_progress_) {
+     return;
+@@ -1771,6 +2057,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)modelProfileWillBeDestroyed {
@@ -471,7 +561,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_) {
      return;
    }
-@@ -1789,6 +2002,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1789,6 +2076,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)prepareForShutdown {
@@ -479,7 +569,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_) {
      return;
    }
-@@ -1817,6 +2031,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1817,6 +2105,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)windowWillClose:(NSNotification*)notification {
@@ -487,7 +577,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    window_closing_ = YES;
    if (model_) {
      model_->SetSurfacePreview(false);
-@@ -2467,6 +2682,14 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2467,6 +2756,14 @@ void SettingsModelProfileWillBeDestroyed
    if (profile_destroying_ || !model_ || !name.length) {
      return;
    }
