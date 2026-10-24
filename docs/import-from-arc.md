@@ -8,7 +8,7 @@ This guide describes the new setup flow in source. The published `0.2.0-preview.
 
 On the first screen, **Import from Arc** imports all eligible saved Spaces with their Pins, folders, and Favorites. Arcium reads the list when the screen opens, but imports only after you click. History stays off.
 
-![Arcium's first setup screen with one-click Arc import and a choice of specific Spaces](assets/arc-welcome.png)
+<a href="assets/arc-welcome.png"><img src="assets/arc-welcome.png" width="360" alt="Arcium setup offers one-click Arc import or a choice of specific Spaces"></a>
 
 Browser-content setup in the unreleased `0.2.0-preview.2` candidate. Published `0.2.0-preview.1` uses [Advanced import](#advanced-import).
 
@@ -26,7 +26,7 @@ Some saved data may be unavailable on this Mac. The page keeps that warning visi
 
 | Data | Result |
 | --- | --- |
-| Spaces | Separate workspaces, with their attached profiles kept apart |
+| Spaces and their icons | Separate workspaces with original emoji or supported icons, and attached profiles kept apart |
 | Pins and folders | Saved pages, folder order, and nested folders |
 | Favorites | Shared across the imported Spaces belonging to that Arc profile |
 | Cached favicons | Copied from Arc when available |
