@@ -11,6 +11,8 @@ The big additions go under Highlights; smaller improvements go under Polish and 
 
 ### Polish and fixes
 
+- Install Widevine from an existing Google Chrome installation in General settings for experimental protected-media playback. Requires an Arcium relaunch.
+- Keep Arc Space emoji and supported icons when importing. Choose Spaces from a compact list, and preserve icons edited in Arcium when refreshing an import.
 - Choose System for window chrome or content to follow macOS independently. Explicit Light and Dark choices stay separate.
 - Customize appearance after setup, or start browsing immediately. New profiles place the pink glow near the bottom of the window.
 - Keep attached Arc profiles separate, preserve unselected Spaces during refresh, and retain source-cached site icons.

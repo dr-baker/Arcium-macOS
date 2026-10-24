@@ -1,6 +1,6 @@
 --- a/chrome/browser/ui/cocoa/main_menu_builder.mm
 +++ b/chrome/browser/ui/cocoa/main_menu_builder.mm
-@@ -304,19 +304,6 @@ NSMenuItem* BuildViewMenu(NSApplication*
+@@ -306,19 +306,6 @@ NSMenuItem* BuildViewMenu(NSApplication*
                    .command_id(IDC_TOGGLE_FULLSCREEN_TOOLBAR),
                Item(IDS_CONTEXT_MENU_SHOW_FULL_URLS)
                    .command_id(IDC_SHOW_FULL_URLS),
@@ -20,7 +20,7 @@
                Item(IDS_CUSTOMIZE_TOUCH_BAR)
                    .tag(IDC_CUSTOMIZE_TOUCH_BAR)
                    .action(@selector(toggleTouchBarCustomizationPalette:))
-@@ -545,7 +532,8 @@ NSMenuItem* BuildTabMenu(NSApplication*
+@@ -547,7 +534,8 @@ NSMenuItem* BuildTabMenu(NSApplication*
  
    // clang-format off
    NSMenuItem* item =
@@ -30,7 +30,7 @@
            .tag(IDC_TAB_MENU)
            .submenu({
                Item(is_rtl ? IDS_TAB_CXMENU_NEWTABTOLEFT
-@@ -606,26 +594,9 @@ NSMenuItem* BuildHelpMenu(NSApplication*
+@@ -608,26 +596,9 @@ NSMenuItem* BuildHelpMenu(NSApplication*
      return nil;
    }
  
@@ -58,7 +58,7 @@
            .Build();
    // clang-format on
  
-@@ -648,11 +619,11 @@ NSMenu* BuildMainMenu(NSApplication* nsa
+@@ -650,11 +621,11 @@ NSMenu* BuildMainMenu(NSApplication* nsa
             &BuildFileMenu,
             &BuildEditMenu,
             &BuildViewMenu,

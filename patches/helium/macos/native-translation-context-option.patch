@@ -1,6 +1,6 @@
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -665,6 +665,9 @@ are declared in tools/grit/grit_args.gni
+@@ -656,6 +656,9 @@ are declared in tools/grit/grit_args.gni
          <message name="IDS_CONTENT_CONTEXT_LIVE_CAPTION_DISABLE" desc="The name of the Live Caption command in the content area context menu to disable Live Caption">
            &amp;Disable Live Caption
          </message>
@@ -518,7 +518,7 @@
 +@end
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
-@@ -486,6 +486,7 @@
+@@ -459,6 +459,7 @@
  #define IDC_CONTENT_CONTEXT_USE_PASSKEY_FROM_ANOTHER_DEVICE 50194
  // Listen to this page context menu.
  #define IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE 50195
@@ -539,7 +539,7 @@
    E(kActionContentContextLanguageSettings, \
 --- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 +++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-@@ -631,6 +631,7 @@ const std::map<int, int>& GetIdcToUmaMap
+@@ -630,6 +630,7 @@ const std::map<int, int>& GetIdcToUmaMap
         {IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY, 167},
         {IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS, 168},
         {IDC_CONTENT_CONTEXT_FORCE_PASTE, 169},
@@ -547,7 +547,7 @@
         // UMA value 170 is owned by Arcium-macOS system translation.
         {IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC, 171},
         {IDC_CONTENT_CONTEXT_OPENLINKPEEK, 172},
-@@ -681,6 +682,7 @@ const std::map<int, int>& GetIdcToUmaMap
+@@ -679,6 +680,7 @@ const std::map<int, int>& GetIdcToUmaMap
         {IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 31},
         {IDC_CONTENT_CONTEXT_GLICSHAREIMAGE, 32},
         {IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY, 33},
@@ -564,15 +564,15 @@
 +  <int value="34" label="Translate with macOS system translation"/>
    <int value="35" label="Open link in Little Arc"/>
    <int value="36" label="Open link in Peek"/>
-   <int value="37" label="Sign in with Peek on this site"/>
-@@ -375,6 +376,7 @@ chromium-metrics-reviews@google.com.
+ </enum>
+@@ -374,6 +375,7 @@ chromium-metrics-reviews@google.com.
    <int value="167" label="IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY"/>
    <int value="168" label="IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS"/>
    <int value="169" label="IDC_CONTENT_CONTEXT_FORCE_PASTE"/>
 +  <int value="170" label="IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE"/>
    <int value="171" label="IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC"/>
    <int value="172" label="IDC_CONTENT_CONTEXT_OPENLINKPEEK"/>
-   <int value="173" label="IDC_CONTENT_CONTEXT_PEEK_AUTH"/>
+ </enum>
 --- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac.h
 +++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac.h
 @@ -7,6 +7,8 @@

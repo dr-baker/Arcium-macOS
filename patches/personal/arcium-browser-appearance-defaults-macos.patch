@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -615,14 +615,14 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -627,14 +627,14 @@ struct ArciumAppearanceSnapshot: Equatab
      var canEditSurfaceTuning: Bool {
          surfaceTuningAvailable && canEditSurfaceSet
      }
@@ -20,7 +20,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var chromeUIScaleIsDefault = true
      var chromeUIScaleAvailable = false
      var chromeUIScaleManaged = false
-@@ -655,7 +655,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -667,7 +667,7 @@ struct ArciumAppearanceSnapshot: Equatab
          surfaceTuningAvailable = strictBoolean(dictionary["surfaceTuningAvailable"]) ?? false
          commandBarAppearanceAvailable = strictBoolean(dictionary["commandBarAppearanceAvailable"]) ?? false
          commandBarAppearanceManaged = strictBoolean(dictionary["commandBarAppearanceManaged"]) ?? false
@@ -29,7 +29,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          let parsedCollapsedSidebarStyleOptions = choices(dictionary["collapsedSidebarStyleOptions"])
              .filter { (0...1).contains($0.value) }
          if !parsedCollapsedSidebarStyleOptions.isEmpty {
-@@ -663,10 +663,10 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -675,10 +675,10 @@ struct ArciumAppearanceSnapshot: Equatab
          }
          collapsedSidebarStyleAvailable = strictBoolean(dictionary["collapsedSidebarStyleAvailable"]) ?? false
          collapsedSidebarStyleManaged = strictBoolean(dictionary["collapsedSidebarStyleManaged"]) ?? false
@@ -46,7 +46,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -1070,7 +1070,7 @@ final class ArciumSettingsUIContractTest
+@@ -1225,7 +1225,7 @@ final class ArciumSettingsUIContractTest
                  "chromeUIScaleManaged": false
              ]
          ]))

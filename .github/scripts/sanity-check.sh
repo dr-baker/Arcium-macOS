@@ -30,10 +30,11 @@ if grep -q 'offset .* lines' setup.log; then
 fi
 
 cd "$_src_dir"
-timeout 30 ninja -C out/Default chrome chromedriver
+timeout 30 ninja -C "$_out_dir" chrome chromedriver
 _status_code=$?
 
-if [ $_status_code != 124 ]; then
+# The smoke build may finish successfully before the time limit.
+if [ "$_status_code" -ne 0 ] && [ "$_status_code" -ne 124 ]; then
     echo "failed with status code $_status_code" >&2
     exit 1
 fi

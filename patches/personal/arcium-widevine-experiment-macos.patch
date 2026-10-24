@@ -1,0 +1,524 @@
+Index: src/chrome/browser/ui/cocoa/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/BUILD.gn
++++ src/chrome/browser/ui/cocoa/BUILD.gn
+@@ -127,6 +127,7 @@ source_set("cocoa") {
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+ 
+   deps = [
++    ":arcium_widevine_installer",
+     "//chrome/app:command_ids",
+     "//chrome/app/theme:chrome_unscaled_resources_grit",
+     "//chrome/browser:app_controller_mac",
+@@ -214,3 +215,16 @@ source_set("cocoa") {
+     ]
+   }
+ }
++
++source_set("arcium_widevine_installer") {
++  public = [ "arcium_widevine_installer.h" ]
++  sources = [ "arcium_widevine_installer.cc" ]
++  public_deps = [ "//base" ]
++  deps = [
++    "//components/cdm/common",
++    "//components/prefs",
++    "//components/update_client",
++    "//media",
++    "//media/cdm:cdm_paths",
++  ]
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -549,6 +549,18 @@ private struct GeneralSettingsPage: View
+                     }
+                 }
+ 
++                Section("Experimental") {
++                    SLabeledControl("Protected media",
++                                    description: "Requires Google Chrome and an Arcium relaunch.",
++                                    alignment: .trailing) {
++                        Button("Install from Chrome") {
++                            store.actionInvoked(name: "install_widevine_from_chrome")
++                        }
++                        .buttonStyle(.settings(.secondary))
++                        .accessibilityLabel("Install Widevine from Google Chrome")
++                    }
++                }
++
+                 Button("More settings…") {
+                     store.actionInvoked(name: "open_advanced")
+                 }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -21,9 +21,11 @@
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
+ #include "base/logging.h"
++#include "base/path_service.h"
+ #include "base/scoped_observation.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/values.h"
++#include "chrome/browser/browser_process.h"
+ #include "chrome/browser/prefs/session_startup_pref.h"
+ #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+ #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
+@@ -37,6 +39,7 @@
+ #include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
+ #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
+ #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
++#include "chrome/browser/ui/cocoa/arcium_widevine_installer.h"
+ #include "chrome/browser/ui/color/arcium_space_color_mixer.h"
+ #include "chrome/browser/ui/color/chrome_color_id.h"
+ #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+@@ -57,6 +60,7 @@
+ #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "chrome/browser/ui/views/helium/glass_surface_mac.h"
+ #include "chrome/browser/ui/views/helium/surface_style.h"
++#include "chrome/common/chrome_paths.h"
+ #include "chrome/common/pref_names.h"
+ #include "components/prefs/pref_service.h"
+ #include "third_party/blink/public/common/features.h"
+@@ -643,6 +647,7 @@ void SetSettingsWindowGlassState(NSWindo
+                    completion:(void (^)(NSModalResponse response))completion;
+ - (void)showPresetFailure:(browser_shortcuts::arcium::PresetResult)result;
+ - (void)showUnavailableArcShortcuts;
++- (void)installWidevineFromChrome;
+ - (void)beginRecordingForCommand:(int)commandID shortcut:(NSString*)shortcut;
+ - (void)finishRecording:(ArciumShortcutRecorderButton*)recorder;
+ - (void)assignRecordedShortcut:(NSString*)serialized
+@@ -686,6 +691,7 @@ void SettingsModelProfileWillBeDestroyed
+   Profile* profile_;
+   NSValue* profile_key_;
+   BOOL profile_destroying_;
++  BOOL widevine_installing_;
+ 
+   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
+   std::unique_ptr<arcium_settings::ArciumSettingsModel> model_;
+@@ -1867,6 +1873,69 @@ void SettingsModelProfileWillBeDestroyed
+                 }];
+ }
+ 
++- (void)installWidevineFromChrome {
++  if (profile_destroying_ || !model_ || widevine_installing_ ||
++      !model_->profile()->IsRegularProfile() ||
++      model_->profile()->IsOffTheRecord()) {
++    return;
++  }
++  NSURL* chrome_url = [NSWorkspace.sharedWorkspace
++      URLForApplicationWithBundleIdentifier:@"com.google.Chrome"];
++  base::FilePath destination;
++  if (!chrome_url || !base::PathService::Get(
++                     chrome::DIR_COMPONENT_UPDATED_WIDEVINE_CDM, &destination)) {
++    [self presentAlertWithTitle:@"Couldn't install Widevine"
++                informativeText:chrome_url ? @"Arcium could not find its component folder."
++                                       : @"Install Google Chrome first, then try again."
++               firstButtonTitle:@"OK"
++              secondButtonTitle:nil
++                     completion:nil];
++    return;
++  }
++  NSURL* source_url = [chrome_url URLByAppendingPathComponent:
++      @"Contents/Frameworks/Google Chrome Framework.framework/Libraries/WidevineCdm"];
++  const base::FilePath source(source_url.fileSystemRepresentation);
++  widevine_installing_ = YES;
++  __weak ArciumSettingsWindowController* weak_self = self;
++  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
++    @autoreleasepool {
++      const auto result =
++          arcium_settings::InstallWidevineFromChrome(source, destination);
++      dispatch_async(dispatch_get_main_queue(), ^{
++        const bool selected = result.has_value() && g_browser_process &&
++            arcium_settings::SelectInstalledWidevineVersion(
++                g_browser_process->local_state(), *result);
++        ArciumSettingsWindowController* controller = weak_self;
++        if (!controller || controller->profile_destroying_ ||
++            controller->window_closing_) {
++          return;
++        }
++        controller->widevine_installing_ = NO;
++        NSString* message;
++        if (!result.has_value()) {
++          message = base::SysUTF8ToNSString(result.error());
++        } else if (!selected) {
++          message = @"Widevine was copied, but Arcium could not select it for "
++                     "the next launch. Try again before quitting.";
++        } else {
++          message = [NSString stringWithFormat:
++              @"Widevine %@ is installed. Quit and reopen Arcium, then try "
++               "Netflix or another streaming service. Playback is experimental.",
++              base::SysUTF8ToNSString(result->GetString())];
++        }
++        NSString* title = result.has_value() && selected
++                              ? @"Widevine installed"
++                              : @"Couldn't install Widevine";
++        [controller presentAlertWithTitle:title
++                          informativeText:message
++                         firstButtonTitle:@"OK"
++                        secondButtonTitle:nil
++                               completion:nil];
++      });
++    }
++  });
++}
++
+ - (void)showPresetFailure:(browser_shortcuts::arcium::PresetResult)result {
+   [self presentAlertWithTitle:@"Shortcut settings were not changed"
+               informativeText:PresetFailureMessage(result)
+@@ -2418,6 +2487,8 @@ void SettingsModelProfileWillBeDestroyed
+     [self resetAllShortcuts];
+   } else if ([name isEqualToString:@"show_unavailable_arc_shortcuts"]) {
+     [self showUnavailableArcShortcuts];
++  } else if ([name isEqualToString:@"install_widevine_from_chrome"]) {
++    [self installWidevineFromChrome];
+   } else if ([name isEqualToString:@"open_arc_import"]) {
+     Profile* profile = model_->profile();
+     if (profile && profile->IsRegularProfile() && !profile->IsOffTheRecord()) {
+Index: src/chrome/browser/ui/cocoa/arcium_widevine_installer.cc
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_widevine_installer.cc
+@@ -0,0 +1,114 @@
++// Copyright 2026 The Arcium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/cocoa/arcium_widevine_installer.h"
++
++#include <stdio.h>
++
++#include "base/functional/bind.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/no_destructor.h"
++#include "base/synchronization/lock.h"
++#include "components/cdm/common/cdm_manifest.h"
++#include "components/prefs/pref_service.h"
++#include "components/update_client/activity_data_service.h"
++#include "components/update_client/persisted_data.h"
++#include "media/base/cdm_capability.h"
++#include "media/cdm/cdm_paths.h"
++
++namespace arcium_settings {
++namespace {
++
++base::FilePath LibraryPath(const base::FilePath& directory) {
++  return media::GetPlatformSpecificDirectory(directory)
++      .AppendASCII("libwidevinecdm.dylib");
++}
++
++bool SamePayload(const base::FilePath& source, const base::FilePath& other) {
++  return base::ContentsEqual(source.AppendASCII("manifest.json"),
++                             other.AppendASCII("manifest.json")) &&
++         base::ContentsEqual(LibraryPath(source), LibraryPath(other));
++}
++
++}  // namespace
++
++base::expected<base::Version, std::string> InstallWidevineFromChrome(
++    const base::FilePath& source,
++    const base::FilePath& component_root) {
++  // Settings for different profiles share the component directory.
++  static base::NoDestructor<base::Lock> install_lock;
++  base::AutoLock hold(*install_lock);
++
++  media::CdmCapability capability;
++  if (!ParseCdmManifestFromPath(source.AppendASCII("manifest.json"),
++                                &capability)) {
++    return base::unexpected(
++        "Chrome's Widevine module is missing or incompatible with Arcium. "
++        "Update Google Chrome, then try again.");
++  }
++  if (!base::PathExists(LibraryPath(source))) {
++    return base::unexpected(
++        "Chrome's Widevine module does not include a library for this Mac. "
++        "Install Google Chrome for this Mac, then try again.");
++  }
++
++  const auto destination =
++      component_root.AppendASCII(capability.version.GetString());
++  if (base::PathExists(destination)) {
++    if (SamePayload(source, destination)) {
++      return capability.version;
++    }
++    return base::unexpected(
++        "A different Widevine copy with this version is already installed. "
++        "Existing files were left unchanged.");
++  }
++  if (!base::CreateDirectory(component_root)) {
++    return base::unexpected("Arcium could not create its Widevine folder.");
++  }
++
++  base::ScopedTempDir staging;
++  if (!staging.CreateUniqueTempDirUnderPath(component_root)) {
++    return base::unexpected("Arcium could not prepare the Widevine copy.");
++  }
++  const auto payload = staging.GetPath().AppendASCII("payload");
++  if (!base::CopyDirectory(source, payload, true)) {
++    return base::unexpected(
++        "Arcium could not copy Widevine from Chrome. Check available disk "
++        "space and try again.");
++  }
++  // Do not publish a partial copy or one changed by a concurrent Chrome update.
++  media::CdmCapability staged_capability;
++  if (!ParseCdmManifestFromPath(payload.AppendASCII("manifest.json"),
++                                &staged_capability) ||
++      staged_capability.version != capability.version ||
++      !SamePayload(source, payload)) {
++    return base::unexpected(
++        "Chrome's Widevine files changed while copying. Try again after "
++        "Chrome finishes updating.");
++  }
++  // Both paths are on the same volume. Never fall back to a recursive copy or
++  // overwrite a version installed by another process while we were staging.
++  if (renamex_np(payload.value().c_str(), destination.value().c_str(),
++                 RENAME_EXCL) != 0 && !SamePayload(source, destination)) {
++    return base::unexpected("Arcium could not finish installing Widevine.");
++  }
++  return capability.version;
++}
++
++bool SelectInstalledWidevineVersion(PrefService* local_state,
++                                   const base::Version& version) {
++  if (!local_state || !version.IsValid() ||
++      !local_state->FindPreference(update_client::kPersistedDataPreference)) {
++    return false;
++  }
++  auto persisted = update_client::CreatePersistedData(
++      base::BindRepeating([](PrefService* prefs) { return prefs; }, local_state),
++      nullptr);
++  // Component ID derived from Widevine's public component signing key.
++  persisted->SetProductVersion("oimompecagnajdejgnnjijobebaeigek", version);
++  return true;
++}
++
++}  // namespace arcium_settings
+Index: src/chrome/browser/ui/cocoa/arcium_widevine_installer.h
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_widevine_installer.h
+@@ -0,0 +1,32 @@
++// Copyright 2026 The Arcium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_UI_COCOA_ARCIUM_WIDEVINE_INSTALLER_H_
++#define CHROME_BROWSER_UI_COCOA_ARCIUM_WIDEVINE_INSTALLER_H_
++
++#include <string>
++
++#include "base/files/file_path.h"
++#include "base/types/expected.h"
++#include "base/version.h"
++
++class PrefService;
++
++namespace arcium_settings {
++
++// Copies a compatible, locally installed Chrome CDM into the browser's
++// WidevineCdm component root. Performs blocking I/O. Existing versions and
++// Chrome's source files are preserved. Registration happens on next launch.
++base::expected<base::Version, std::string> InstallWidevineFromChrome(
++    const base::FilePath& source,
++    const base::FilePath& component_root);
++
++// Selects the copied version for component registration on next launch.
++// Must run on the local-state preference sequence, even if Settings has closed.
++bool SelectInstalledWidevineVersion(PrefService* local_state,
++                                   const base::Version& version);
++
++}  // namespace arcium_settings
++
++#endif  // CHROME_BROWSER_UI_COCOA_ARCIUM_WIDEVINE_INSTALLER_H_
+Index: src/chrome/browser/ui/cocoa/arcium_widevine_installer_unittest.cc
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_widevine_installer_unittest.cc
+@@ -0,0 +1,162 @@
++// Copyright 2026 The Arcium Authors
++// You can use, redistribute, and/or modify this source code under
++// the terms of the GPL-3.0 license that can be found in the LICENSE file.
++
++#include "chrome/browser/ui/cocoa/arcium_widevine_installer.h"
++
++#include <utility>
++
++#include "base/files/file_enumerator.h"
++#include "base/files/file_util.h"
++#include "base/files/scoped_temp_dir.h"
++#include "base/json/json_file_value_serializer.h"
++#include "base/strings/string_number_conversions.h"
++#include "base/values.h"
++#include "components/prefs/testing_pref_service.h"
++#include "components/update_client/persisted_data.h"
++#include "media/cdm/api/content_decryption_module.h"
++#include "media/cdm/cdm_paths.h"
++#include "media/cdm/supported_cdm_versions.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace arcium_settings {
++namespace {
++
++class ArciumWidevineInstallerTest : public testing::Test {
++ protected:
++  void SetUp() override {
++    ASSERT_TRUE(temp_.CreateUniqueTempDir());
++    source_ = temp_.GetPath().AppendASCII("ChromeWidevine");
++    components_ = temp_.GetPath().AppendASCII("ArciumWidevine");
++    ASSERT_TRUE(base::CreateDirectory(Library(source_).DirName()));
++    ASSERT_TRUE(base::WriteFile(Library(source_), "chrome-cdm-fixture"));
++    WriteManifest("1.2.3.4");
++  }
++
++  base::FilePath Library(const base::FilePath& root) {
++    return media::GetPlatformSpecificDirectory(root)
++        .AppendASCII("libwidevinecdm.dylib");
++  }
++
++  void WriteManifest(const std::string& version, bool compatible = true) {
++    static_assert(media::kSupportedCdmInterfaceVersions[0].enabled);
++    base::DictValue manifest;
++    manifest.Set("version", version);
++    manifest.Set("x-cdm-module-versions",
++                 base::NumberToString(CDM_MODULE_VERSION));
++    manifest.Set("x-cdm-interface-versions",
++                 base::NumberToString(compatible
++                     ? media::kSupportedCdmInterfaceVersions[0].version : 0));
++    manifest.Set("x-cdm-host-versions",
++                 base::NumberToString(media::kMinSupportedCdmHostVersion));
++    manifest.Set("x-cdm-codecs", "vp8,vp09,av01");
++    manifest.Set("x-cdm-persistent-license-support", false);
++    manifest.Set("x-cdm-supported-encryption-schemes",
++                 base::ListValue().Append("cenc").Append("cbcs"));
++    ASSERT_TRUE(JSONFileValueSerializer(source_.AppendASCII("manifest.json"))
++                    .Serialize(manifest));
++  }
++
++  base::ScopedTempDir temp_;
++  base::FilePath source_;
++  base::FilePath components_;
++};
++
++TEST_F(ArciumWidevineInstallerTest, CopiesCompleteVersionAndPreservesSource) {
++  ASSERT_TRUE(base::WriteFile(source_.AppendASCII("LICENSE"), "fixture-license"));
++  const auto result = InstallWidevineFromChrome(source_, components_);
++  ASSERT_TRUE(result.has_value()) << result.error();
++  EXPECT_EQ(result->GetString(), "1.2.3.4");
++  const auto installed = components_.AppendASCII("1.2.3.4");
++  EXPECT_TRUE(base::ContentsEqual(Library(source_), Library(installed)));
++  EXPECT_TRUE(base::ContentsEqual(source_.AppendASCII("manifest.json"),
++                                  installed.AppendASCII("manifest.json")));
++  EXPECT_TRUE(base::ContentsEqual(source_.AppendASCII("LICENSE"),
++                                  installed.AppendASCII("LICENSE")));
++  base::FileEnumerator folders(components_, false,
++                               base::FileEnumerator::DIRECTORIES);
++  EXPECT_EQ(folders.Next(), installed);
++  EXPECT_TRUE(folders.Next().empty());
++}
++
++TEST_F(ArciumWidevineInstallerTest, RepeatedInstallPreservesExistingFiles) {
++  ASSERT_TRUE(InstallWidevineFromChrome(source_, components_).has_value());
++  const auto marker = components_.AppendASCII("1.2.3.4").AppendASCII("keep-me");
++  ASSERT_TRUE(base::WriteFile(marker, "keep"));
++  EXPECT_TRUE(InstallWidevineFromChrome(source_, components_).has_value());
++  EXPECT_TRUE(base::PathExists(marker));
++}
++
++TEST_F(ArciumWidevineInstallerTest, RejectsIncompatibleModuleWithoutPublishing) {
++  WriteManifest("1.2.3.4", false);
++  EXPECT_FALSE(InstallWidevineFromChrome(source_, components_).has_value());
++  EXPECT_FALSE(base::PathExists(components_));
++}
++
++TEST_F(ArciumWidevineInstallerTest, RejectsPathTraversalVersion) {
++  WriteManifest("../escaped");
++  EXPECT_FALSE(InstallWidevineFromChrome(source_, components_).has_value());
++  EXPECT_FALSE(base::PathExists(temp_.GetPath().AppendASCII("escaped")));
++  EXPECT_FALSE(base::PathExists(components_));
++}
++
++TEST_F(ArciumWidevineInstallerTest, RejectsMissingArchitectureLibrary) {
++  ASSERT_TRUE(base::DeleteFile(Library(source_)));
++  EXPECT_FALSE(InstallWidevineFromChrome(source_, components_).has_value());
++  EXPECT_FALSE(base::PathExists(components_));
++}
++
++TEST_F(ArciumWidevineInstallerTest, RefusesToOverwriteDifferentExistingVersion) {
++  ASSERT_TRUE(InstallWidevineFromChrome(source_, components_).has_value());
++  ASSERT_TRUE(base::WriteFile(Library(source_), "changed-cdm-fixture"));
++  EXPECT_FALSE(InstallWidevineFromChrome(source_, components_).has_value());
++  std::string installed;
++  ASSERT_TRUE(base::ReadFileToString(
++      Library(components_.AppendASCII("1.2.3.4")), &installed));
++  EXPECT_EQ(installed, "chrome-cdm-fixture");
++}
++
++TEST_F(ArciumWidevineInstallerTest, KeepsOlderVersionsWhenInstallingNewVersion) {
++  ASSERT_TRUE(InstallWidevineFromChrome(source_, components_).has_value());
++  WriteManifest("2.3.4.5");
++  EXPECT_TRUE(InstallWidevineFromChrome(source_, components_).has_value());
++  EXPECT_TRUE(base::PathExists(Library(components_.AppendASCII("1.2.3.4"))));
++  EXPECT_TRUE(base::PathExists(Library(components_.AppendASCII("2.3.4.5"))));
++}
++
++TEST_F(ArciumWidevineInstallerTest, ReportsUnwritableComponentLocation) {
++  ASSERT_TRUE(base::WriteFile(components_, "file-instead-of-directory"));
++  EXPECT_FALSE(InstallWidevineFromChrome(source_, components_).has_value());
++  std::string original;
++  ASSERT_TRUE(base::ReadFileToString(components_, &original));
++  EXPECT_EQ(original, "file-instead-of-directory");
++}
++
++TEST(ArciumWidevineSelectionTest, SelectsCopiedVersionWithoutChangingOtherMetadata) {
++  TestingPrefServiceSimple local_state;
++  update_client::RegisterPersistedDataPrefs(local_state.registry());
++  base::DictValue data;
++  data.SetByDottedPath("apps.oimompecagnajdejgnnjijobebaeigek.pv", "0.1");
++  data.SetByDottedPath("apps.oimompecagnajdejgnnjijobebaeigek.cohort", "keep");
++  data.SetByDottedPath("apps.othercomponent.pv", "9.9");
++  local_state.SetDict(update_client::kPersistedDataPreference, std::move(data));
++  ASSERT_TRUE(SelectInstalledWidevineVersion(&local_state, base::Version("1.2.3.4")));
++  const auto& selected = local_state.GetDict(update_client::kPersistedDataPreference);
++  ASSERT_TRUE(selected.FindStringByDottedPath("apps.oimompecagnajdejgnnjijobebaeigek.pv"));
++  EXPECT_EQ(*selected.FindStringByDottedPath("apps.oimompecagnajdejgnnjijobebaeigek.pv"),
++            "1.2.3.4");
++  EXPECT_EQ(*selected.FindStringByDottedPath("apps.oimompecagnajdejgnnjijobebaeigek.cohort"),
++            "keep");
++  EXPECT_EQ(*selected.FindStringByDottedPath("apps.othercomponent.pv"), "9.9");
++}
++
++TEST(ArciumWidevineSelectionTest, RejectsUnavailablePreferencesAndInvalidVersion) {
++  TestingPrefServiceSimple local_state;
++  EXPECT_FALSE(SelectInstalledWidevineVersion(nullptr, base::Version("1.2.3.4")));
++  EXPECT_FALSE(SelectInstalledWidevineVersion(&local_state, base::Version("1.2.3.4")));
++  update_client::RegisterPersistedDataPrefs(local_state.registry());
++  EXPECT_FALSE(SelectInstalledWidevineVersion(&local_state, base::Version()));
++}
++
++}  // namespace
++}  // namespace arcium_settings
+Index: src/chrome/test/BUILD.gn
+===================================================================
+--- src.orig/chrome/test/BUILD.gn
++++ src/chrome/test/BUILD.gn
+@@ -11551,8 +11551,16 @@ if (!is_android && toolkit_views) {
+       sources += [
+         "../browser/ui/browser_shortcuts/arcium_shortcut_presets_unittest.cc",
+         "../browser/ui/browser_shortcuts/browser_shortcut_platform_mac_unittest.mm",
++        "../browser/ui/cocoa/arcium_widevine_installer_unittest.cc",
++      ]
++      deps += [
++        "//chrome/browser/ui/cocoa:arcium_widevine_installer",
++        "//components/prefs:test_support",
++        "//components/update_client",
++        "//media",
++        "//media/cdm:cdm_api",
++        "//media/cdm:cdm_paths",
+       ]
+-      deps += [ "//components/prefs:test_support" ]
+       data_deps = [ "//chrome:chrome_framework" ]
+     } else if (is_linux || is_chromeos || is_win) {
+       data_deps = [ "//chrome:packed_resources" ]
