@@ -153,17 +153,8 @@ if [ -z "${OUT_DMG_PATH:-}" ]; then
   OUT_DMG_PATH="$_root_dir/build/arcium_${_chromium_version}-${_ungoogled_revision}.${_package_revision}_macos.dmg"
 fi
 
-if command -v appdmg 2>&1 >/dev/null || [ -n "${NEEDS_APPDMG:-}" ]; then
-  ln -sf "$_root_dir/resources/dmg.json" out/Default
-  appdmg out/Default/dmg.json "$OUT_DMG_PATH"
-else
-  echo "no appdmg, falling back to stock .dmg" >&2
-  chrome/installer/mac/pkg-dmg \
-    --sourcefile --source "$_release_app" \
-    --target "$OUT_DMG_PATH" \
-    --volname Arcium --symlink /Applications:/Applications \
-    --format ULMO --verbosity 2
-fi
+python3 "$_root_dir/devutils/release_dmg.py" \
+  --app "$_release_app" --destination "$OUT_DMG_PATH"
 
 if [ -n "${MACOS_CERTIFICATE_NAME-}" ]; then
   codesign \

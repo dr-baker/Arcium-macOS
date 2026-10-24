@@ -90,6 +90,65 @@ needs recovery. A failed build does not automatically give the lane away.
 Foreground GUI and installed-browser permissions remain separate. Tests of
 an independent copied app can continue after releasing shared build ownership.
 
+## Desktop resource backoff
+
+`he agent build` defaults to one fewer job than logical CPUs, capped at **13
+local jobs**. This favors unattended builds. `--jobs N` or
+`HELIUM_BUILD_JOBS=N` sets the ceiling; it no longer inherits an unrestricted
+autoninja default. Both Ninja and Siso receive the limit, including Siso
+configured for remote execution but running offline. A stricter existing
+`SISO_LIMITS` local ceiling stays in effect. Use `--jobs`, rather than raw
+`-j` or `-local_jobs` flags.
+
+The dry run and actual build each run under a resource supervisor inside the
+existing command lock. On macOS they start with a utility QoS clamp; an
+unhealthy or unavailable initial sample also enables background CPU/I/O
+policy. The supervisor samples CPU activity, memory
+headroom (`memory_pressure -Q`, query only), and swap-out growth every two
+seconds, plus sampling time:
+
+| Observation | Response |
+| --- | --- |
+| CPU activity at least 90% for six seconds | Apply background CPU/I/O policy to owned processes |
+| Memory headroom below 15%, or swap growth above 16 MiB/s | Apply background policy immediately |
+| Pressure already present before launch | Keep the command waiting, retaining its reservation and lock |
+| CPU below 75%, memory headroom at least 25%, swap growth below 1 MiB/s for 20 seconds | Remove background policy, retaining the utility QoS clamp |
+| CPU or memory sensor unavailable | Start at one job, retain background policy |
+
+Backoff changes macOS scheduling policy on the running build and discovered
+descendants. It never suspends jobs, restarts the graph, or changes GN/compiler
+commands. Processes are tracked by ancestry, user and birth time, including
+known children that reparent; names alone never authorize a policy change.
+Builds using sccache enable `SCCACHE_CLIENT_SIDE=1`, supported by the installed
+0.17 release. Compilation then stays under owned clients while the daemon
+continues serving the existing shared cache. The pinned Siso passes this
+setting through local compile rules. This avoids changing `cc_wrapper` or
+invalidating compiler commands. Configured sccache wrappers require version
+0.17 or later; `SCCACHE_ERROR_LOG` and distributed scheduling are incompatible
+and produce a preflight error rather than silently escaping backoff.
+Preexisting shared cache daemons and their unrelated compiler children remain
+outside this control. The local-job ceiling still bounds outstanding compile
+requests; it is not a cap on every subprocess or thread within an action.
+
+Siso cannot change local concurrency during a run. OS backoff improves CPU/I/O
+responsiveness, but does not reclaim memory already held by running actions.
+These defaults need observation on the next real build; lightweight tests do
+not establish a full-build memory limit or guarantee desktop latency.
+
+`he agent lane status --json` and `he agent check --json` expose
+`build_resources`, including the requested/effective startup jobs, desired OS
+policy, latest sample, policy errors and monitor freshness. Detailed state is
+in `.arcium/build-resources.json`; transitions append to
+`.arcium/build-resources.jsonl`. A stale monitor is evidence for recovery,
+never permission to steal the lane. Real completed-action progress is explicitly
+unavailable in this resource record; a fresh sample does not prove a build is
+making progress. Build completion, pressure relief and
+monitor exit do not release the reservation. Keep it through packaging.
+
+Re-source the updated canonical `dev.sh` while preserving
+`HELIUM_DEV_WORKTREE` to adopt this behavior. The notification watcher needs no
+restart: resource control belongs to each executing build command.
+
 Use `lane cancel REQUEST --thread THREAD_ID` when the task no longer needs a
 turn. `lane defer` removes an unready request from the eligible queue;
 `lane requeue` places it at the tail. Delivered offers expire after 15 minutes

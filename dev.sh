@@ -277,6 +277,7 @@ ___helium_setup_presetup() {
     # Full-source build dirs keep Chromium's test data for browser_tests.
     if [ "$_he_source_mode" != full ]; then
         python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+        "$_python_env_bin" "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
     fi
     ___helium_toolchain
     ___helium_resources
@@ -369,13 +370,10 @@ ___helium_build() {
                 ;;
             --jobs)
                 case "${2:-}" in ''|*[!0-9]*|0) echo "usage: he build [--jobs N] [TARGET...]" >&2; return 2 ;; esac
-                if grep -Eq '^[[:space:]]*use_siso[[:space:]]*=[[:space:]]*true' "$_out_dir/args.gn" 2>/dev/null; then
-                    jobs=("-local_jobs=$2")
-                else
-                    jobs=(-j "$2")
-                fi
+                jobs=(--jobs "$2")
                 shift 2
                 ;;
+            -*) echo "error: unknown build option $1; use --jobs N for concurrency" >&2; return 2 ;;
             *) targets+=("$1"); shift ;;
         esac
     done
@@ -383,7 +381,7 @@ ___helium_build() {
     if [ "${HELIUM_AGENT_MODE:-}" = 1 ]; then
         # Explicit targets, no pending snapshot, a clean he check, and a
         # dry-run plan within the edge budget (see docs/agent-workflow.md).
-        ___helium_he agent-guard "${guard[@]}" "${targets[@]}" >/dev/null
+        ___helium_he agent-guard "${guard[@]}" "${jobs[@]}" "${targets[@]}" >/dev/null
     fi
     [ "${#targets[@]}" -gt 0 ] || targets=(chrome chromedriver)
     ___helium_he acquisition require
@@ -393,8 +391,7 @@ ___helium_build() {
     ___helium_use_build_tmpdir
     [ -z "${SISO_REAPI_ADDRESS:-}" ] || export SISO_REAPI_INSTANCE="${SISO_REAPI_INSTANCE:-main}"
     cd "$_src_dir"
-    SISO_PATH="$_siso_path" python3 "$_depot_tools_dir/autoninja.py" \
-    -k 0 "${jobs[@]}" -C "$_out_dir" "${targets[@]}"
+    SISO_PATH="$_siso_path" ___helium_he build-run "${jobs[@]}" -- "${targets[@]}" || return $?
     ___helium_he completed-build -- "${targets[@]}"
 }
 

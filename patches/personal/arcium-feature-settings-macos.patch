@@ -40,7 +40,7 @@ Index: src/chrome/browser/prefs/browser_prefs.cc
 ===================================================================
 --- src.orig/chrome/browser/prefs/browser_prefs.cc
 +++ src/chrome/browser/prefs/browser_prefs.cc
-@@ -1614,6 +1614,7 @@ void RegisterLocalState(PrefRegistrySimp
+@@ -1618,6 +1618,7 @@ void RegisterLocalState(PrefRegistrySimp
  
  #if BUILDFLAG(IS_MAC)
    confirm_quit::RegisterLocalState(registry);
