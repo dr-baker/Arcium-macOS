@@ -23,7 +23,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -718,14 +718,6 @@ private struct AppearanceSettingsPage: V
+@@ -706,14 +706,6 @@ private struct AppearanceSettingsPage: V
                  })
      }
  
@@ -38,7 +38,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      @ObservedObject var store: ArciumSettingsStore
      @Environment(\.settingsTheme) private var theme
-@@ -735,13 +727,12 @@ private struct AppearanceSettingsPage: V
+@@ -723,13 +715,12 @@ private struct AppearanceSettingsPage: V
      @State private var customization: Customization?
  
      private enum Customization: String, Identifiable {
@@ -53,7 +53,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              }
          }
      }
-@@ -898,7 +889,10 @@ private struct AppearanceSettingsPage: V
+@@ -886,7 +877,10 @@ private struct AppearanceSettingsPage: V
  
              Section("Command bar") {
                  SLabeledControl("Style", description: "Categories, destination icons and scopes.") {
@@ -65,7 +65,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                          .buttonStyle(.bordered)
                          .accessibilityIdentifier("command-bar-customize")
                  }
-@@ -1084,8 +1078,6 @@ private struct AppearanceSettingsPage: V
+@@ -1072,8 +1066,6 @@ private struct AppearanceSettingsPage: V
                      backgroundEditor
                  case .surfaces:
                      surfaceCustomization
@@ -74,7 +74,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  }
              }
              .settingsTheme(theme)
-@@ -1177,38 +1169,6 @@ private struct AppearanceSettingsPage: V
+@@ -1165,38 +1157,6 @@ private struct AppearanceSettingsPage: V
          }
      }
  
@@ -113,7 +113,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  
      @ViewBuilder
      private var backgroundEditor: some View {
-@@ -1649,3 +1609,81 @@ private func shortcutSummary(_ command:
+@@ -1637,3 +1597,81 @@ private func shortcutSummary(_ command:
      if command.bindings.count == 1 { return first.display }
      return "\(first.display), plus \(command.bindings.count - 1) more"
  }
@@ -205,9 +205,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "base/functional/bind.h"
 +#include "base/functional/callback_helpers.h"
  #include "base/logging.h"
- #include "base/path_service.h"
  #include "base/scoped_observation.h"
-@@ -36,11 +37,14 @@
+ #include "base/strings/sys_string_conversions.h"
+@@ -34,10 +35,13 @@
  #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
  #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
  #include "chrome/browser/ui/chrome_pages.h"
@@ -216,13 +216,12 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
  #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
  #import "chrome/browser/ui/cocoa/arcium_shortcut_recorder.h"
- #include "chrome/browser/ui/cocoa/arcium_widevine_installer.h"
  #include "chrome/browser/ui/color/arcium_space_color_mixer.h"
 +#include "chrome/browser/ui/color/arcium_space_palette_initializer.h"
  #include "chrome/browser/ui/color/chrome_color_id.h"
  #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
  #include "chrome/browser/ui/helium/arcium_settings_model.h"
-@@ -55,6 +59,7 @@
+@@ -52,6 +56,7 @@
  #include "chrome/browser/ui/tabs/features.h"
  #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
  #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -230,7 +229,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
  #include "chrome/browser/ui/views/helium/glass_surface.h"
  #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
-@@ -68,6 +73,10 @@
+@@ -64,6 +69,10 @@
  #include "ui/native_theme/native_theme.h"
  #include "ui/native_theme/native_theme_observer.h"
  #include "ui/views/widget/widget.h"
@@ -241,7 +240,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  
  NSString* const kArciumSettingsUIControllerClassName =
      @"ArciumSettingsUIController";
-@@ -532,6 +541,228 @@ void SetSettingsWindowGlassState(NSWindo
+@@ -528,6 +537,228 @@ void SetSettingsWindowGlassState(NSWindo
  
  }  // namespace
  
@@ -470,7 +469,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  @interface ArciumSettingsContentView : NSView
  @property(nonatomic, copy) void (^effectiveAppearanceChanged)(void);
  @end
-@@ -633,6 +864,8 @@ void SetSettingsWindowGlassState(NSWindo
+@@ -629,6 +860,8 @@ void SetSettingsWindowGlassState(NSWindo
  - (void)publishSnapshot;
  - (void)modelDidChange;
  - (void)updateNativeGlassBackground;
@@ -479,7 +478,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  - (void)removeNativeGlassBackground;
  - (void)applyNativeWindowAppearanceForColorMode:
      (ui::ColorProviderKey::ColorMode)colorMode;
-@@ -688,6 +921,8 @@ void SettingsModelProfileWillBeDestroyed
+@@ -683,6 +916,8 @@ void SettingsModelProfileWillBeDestroyed
  }  // namespace
  
  @implementation ArciumSettingsWindowController {
@@ -488,7 +487,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    Profile* profile_;
    NSValue* profile_key_;
    BOOL profile_destroying_;
-@@ -711,6 +946,60 @@ void SettingsModelProfileWillBeDestroyed
+@@ -705,6 +940,60 @@ void SettingsModelProfileWillBeDestroyed
    id accessibility_notification_token_;
  }
  
@@ -549,7 +548,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  - (BOOL)selectAppearanceSpace:(NSString*)spaceID {
    if (!model_ || !spaceID.length ||
        !model_->SetAppearanceSpace(base::SysNSStringToUTF8(spaceID))) {
-@@ -796,6 +1085,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -790,6 +1079,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)dealloc {
@@ -557,7 +556,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    profile_destroying_ = YES;
    if (accessibility_notification_token_) {
      [NSWorkspace.sharedWorkspace.notificationCenter
-@@ -1755,6 +2045,9 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1749,6 +2039,9 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)modelDidChange {
@@ -567,7 +566,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_ || window_closing_ || model_change_scheduled_ ||
        native_background_update_in_progress_) {
      return;
-@@ -1771,6 +2064,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1765,6 +2058,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)modelProfileWillBeDestroyed {
@@ -575,7 +574,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_) {
      return;
    }
-@@ -1789,6 +2083,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1783,6 +2077,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)prepareForShutdown {
@@ -583,7 +582,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if (profile_destroying_) {
      return;
    }
-@@ -1817,6 +2112,7 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1811,6 +2106,7 @@ void SettingsModelProfileWillBeDestroyed
  }
  
  - (void)windowWillClose:(NSNotification*)notification {
@@ -591,7 +590,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    window_closing_ = YES;
    if (model_) {
      model_->SetSurfacePreview(false);
-@@ -2467,6 +2763,14 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2398,6 +2694,14 @@ void SettingsModelProfileWillBeDestroyed
    if (profile_destroying_ || !model_ || !name.length) {
      return;
    }
