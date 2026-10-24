@@ -1,94 +1,61 @@
 # Arcium
 
-Helium's privacy and speed, with Arc-inspired polish.
+**Helium's privacy and speed, with Arc polish.**
 
-Arcium adds Spaces, Pins, Favorites, Peek, Little Arc, and a customizable macOS sidebar to [Helium](https://helium.computer/). Keep the browsing engine and extensions you know, then shape the workspace around your pages.
+A browser for people who love a good sidebar. Built on [Helium](https://helium.computer/), with Spaces, Pins, Favorites, Peek, and glass you can make your own.
 
-![Arcium with a pastel sidebar, loaded Favorites and Pins, and a public Apple page](docs/assets/arcium-layout.png)
+**[Download for Mac](https://github.com/dr-baker/Arcium-macOS/releases/download/0.2.0-preview.1/Arcium-0.2.0-preview.1-macOS-arm64.dmg)** · [RIP Arc: release notes](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1) · [Quickstart](docs/arc-quickstart.md)
 
-The preview includes the glass, sidebar, and command bar shown here.
+Apple Silicon · macOS 26+ · Preview.1 · Manual updates
 
-[Download the preview](https://github.com/dr-baker/Arcium-macOS/releases) · [Changelog](CHANGELOG.md) · [Install and limits](docs/preview-release.md) · [Import from Arc](docs/import-from-arc.md) · [Build from source](docs/building.md)
+<a href="docs/assets/command-bar.png"><img src="docs/assets/command-bar.png" width="720" alt="Arcium's glass command bar, site search scopes, and sidebar with loaded Favorites and Pins"></a>
+
+## Moving on from Arc?
+
+Keep the workflow you came for: Spaces, pinned pages, Favorites, and a sidebar that feels like home. [Bring your Arc sidebar](docs/import-from-arc.md), then make Arcium yours.
+
+**Next release: migrate in just one click.** The new welcome screen brings over available Spaces, their icons, Pins, folders, and Favorites. Choose specific Spaces if you prefer; Arcium handles their attached profiles. Then **Start browsing**, or **Customize appearance**.
+
+<a href="docs/assets/arc-welcome.png"><img src="docs/assets/arc-welcome.png" width="360" alt="The next release's welcome screen offers Import from Arc and Choose what to import"></a>
+
+One-click setup is merged but not in the preview.1 download. That version uses the [Arc import dialog](docs/import-from-arc.md#advanced-import). Passwords and sign-ins need [separate migration](docs/import-from-arc.md#passwords-and-cookies).
+
+## The omnibox, built out
+
+Keep the omnibox's address entry, suggestions, and search. Arcium adds a glass command bar for tabs, Pins, and Favorites, plus site-search scopes: search YouTube, find something on X, or send a question to a new ChatGPT chat. Press **Command-T** to begin.
+
+## Your browser, your workspace
+
+Give each Space its own colors and Pins. Customize glass, move the sidebar, or hide the address bar. Keep Favorites close, save split views as Pins, and use **Control-Tab** to return to recently used tabs.
+
+<a href="docs/assets/appearance.png"><img src="docs/assets/appearance.png" width="318" alt="Native appearance settings for colors and glass"></a>
+<a href="docs/assets/recent-tabs.png"><img src="docs/assets/recent-tabs.png" width="375" alt="Recent tabs with page thumbnails"></a>
+
+## A quick look, without losing your place
+
+**Peek** previews a link over your current page. **Little Arc** opens links from other apps in a compact window. Keep reading, or turn the page into a tab or Pin.
+
+<a href="docs/assets/peek.png"><img src="docs/assets/peek.png" width="375" alt="Peek previews a page over the browser"></a>
+<a href="docs/assets/little-arc.png"><img src="docs/assets/little-arc.png" width="303" alt="Little Arc opens an external link in a compact window"></a>
 
 ## Start browsing
 
-Apple Silicon · macOS 26 or later
+1. Open the download, open **Install Arcium**, and click **Install**.
+2. Finish setup, then [import from Arc](docs/import-from-arc.md) if you're switching.
+3. Browse. **Command-L** opens the command bar; **Command-Comma** opens Settings.
 
-1. Download the DMG, open **Install Arcium**, and click **Install**.
-2. Finish the first-run setup, then press **Command-Comma** for native Settings.
-3. Coming from Arc? Follow the [import guide](docs/import-from-arc.md) before bringing over your sidebar.
-
-New profiles start with a pastel sidebar, a hidden address bar, Peek, recent-tab cycling, and Little Arc. Press **Command-L** whenever you need an address. Existing profiles keep their settings. This is an early preview with manual updates; read the [release limits](docs/preview-release.md) before everyday use.
+New profiles start with pastel colors and a hidden address bar. Existing profiles keep their settings. Read the [preview limits](docs/preview-release.md#limits), including the older Chromium base, before everyday use.
 
 ## What's next
 
-- **Pinned split views.** Finish validating saved pairs, layout restoration, and closing both panes as one item.
-- **A Shelf-inspired alternative to auto-archiving.** Put tabs aside without losing track of them.
-- **Little Arc + Peek.** Bring external links and in-browser previews into one interaction.
-- **Local LLM tab cleanup.** Help sort an overcrowded workspace with a local model.
-- **Browser control for agents.** Build an efficient interface for agents to operate the browser.
+**Next release:** one-click Arc migration, original Space icons, clearer split Pins, and independent System appearance for the browser and pages. [Changelog](CHANGELOG.md)
 
-These are planned directions. Chromium updates and release reliability come first.
+**On the roadmap:** a Shelf-inspired alternative to auto-archiving; Little Arc and Peek brought together; local LLM tab cleanup; efficient browser control for agents. Chromium updates and release reliability come first.
 
-## Bring your Arc sidebar
+## Open source, built on Helium
 
-The unreleased `0.2.0-preview.2` candidate imports available Spaces, Pins, folders, and Favorites in one click, or lets you choose specific Spaces. History starts off. See the [import guide](docs/import-from-arc.md) for account separation and refresh limits.
+Helium supplies ad and tracker blocking, fingerprinting protections, Chromium extensions, and split views. Arcium builds on that foundation with its own workspace and native macOS controls.
 
-![Arcium's pink browser-content setup with Import from Arc and Choose what to import](docs/assets/arc-welcome.png)
+[Arcium core](https://github.com/dr-baker/Arcium) owns shared behavior; this repository packages the Mac app. [Build from source](docs/building.md) with `git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git`.
 
-This screenshot shows the unreleased candidate's browser-content setup. Published `0.2.0-preview.1` uses the [older import dialog](docs/import-from-arc.md#advanced-import).
-
-## Make it yours
-
-Choose a sidebar layout and collapse behavior, move navigation, or hide the top bar. Give Spaces their own colors, then adjust grain, glass, borders, and browser UI scale without changing webpage zoom.
-
-There are separate material, tint, and opacity controls for command bars and floating controls, and for the recent-tab switcher and Peek. Peek's backdrop has its own blur and dimming controls.
-
-![Native appearance settings with Space colors and the Glass preset](docs/assets/appearance.png)
-
-## One command bar
-
-Press **Command-T** to find tabs, Pins, Favorites, or a new page. Choose YouTube to search videos or ChatGPT to start a fresh chat. Soft scope colors spill down into the glass. Omni blends violet, blue, and mint.
-
-![Arcium command bar with default glass, loaded site icons, and soft scope colors](docs/assets/command-bar.png)
-
-## Pins, Favorites, and Spaces
-
-Local Favorites are shared across a profile. Imported Arc Favorites appear in Spaces belonging to their Arc source profile. Pins and folders belong to a Space. A Pin remembers its home page after you follow links, and closing its live tab leaves the saved item in the sidebar.
-
-Create Spaces for work, reading, or a project, each with its own Pins and styling. Spaces inside one profile share cookies and sign-ins. Use separate browser profiles for separate accounts.
-
-![Create a Space with a profile and its own light lilac theme](docs/assets/spaces.png)
-
-## Find the tab you just used
-
-Hold **Control** and press **Tab** to preview recent tabs. Keyboard Shortcuts also offers explicit Recent Tab actions and an Arc-inspired preset.
-
-![The recent-tab switcher with public page thumbnails](docs/assets/recent-tabs.png)
-
-## Peek and Little Arc
-
-Peek opens eligible links over the page you're reading. You can also choose it from a link's context menu, then promote the preview to a tab or sidebar item.
-
-![A Peek preview with close, open-in-tab, and open-in-sidebar controls](docs/assets/peek.png)
-
-Little Arc opens a link from another app in a compact window. It currently handles one eligible HTTP or HTTPS link per request. Opening an empty Little Arc search window by shortcut is not implemented.
-
-![Little Arc displaying a public Apple page](docs/assets/little-arc.png)
-
-## The Helium foundation
-
-Arcium keeps Helium's ad and tracker blocking, fingerprinting protections, Chromium extensions, and split views. The work here focuses on the sidebar, tab workflow, and native macOS integration.
-
-## Source and development
-
-This is the main macOS product repository. It pins [Arcium core](https://github.com/dr-baker/Arcium) in `helium-chromium/` and owns macOS integration, packaging, and signing. The temporary Arcium-browser repository is retired; current downloads and documentation live here.
-
-```sh
-git clone --recurse-submodules https://github.com/dr-baker/Arcium-macOS.git
-cd Arcium-macOS
-```
-
-Continue with the [build guide](docs/building.md). For daily use, see the [quickstart](docs/arc-quickstart.md), [Arc import guide](docs/import-from-arc.md), and [advanced credential migration](docs/arc-daily-driver-migration.md). Developers can follow the [agent workflow](docs/agent-workflow.md), [parallel work rules](docs/parallel-work.md), and [feature settings contracts](docs/feature-settings-audit.md).
-
-Arcium is independent of The Browser Company. It descends from [Helium for macOS](https://github.com/imputnet/helium-macos) and [ungoogled-chromium-macos](https://github.com/ungoogled-software/ungoogled-chromium-macos). Original Arcium additions are [GPL-3.0](LICENSE); imported code keeps its original licenses.
+Independent of The Browser Company. Descended from [Helium for macOS](https://github.com/imputnet/helium-macos) and [ungoogled-chromium-macos](https://github.com/ungoogled-software/ungoogled-chromium-macos). Original Arcium additions are [GPL-3.0](LICENSE); imported code keeps its original licenses.

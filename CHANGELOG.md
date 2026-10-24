@@ -1,6 +1,6 @@
 # Arcium changelog
 
-The big additions go under Highlights; smaller improvements go under Polish and fixes. Unreleased changes are in source and may not be in your download yet. Plans and implementation notes live in the [feature backlog](docs/feature-backlog.md).
+Unreleased changes are in source, not the current download. [Roadmap](README.md#whats-next) · [Feature backlog](docs/feature-backlog.md)
 
 ## Unreleased
 
@@ -21,6 +21,15 @@ The big additions go under Highlights; smaller improvements go under Polish and 
 
 Draft candidate notes: [0.2.0-preview.2](docs/releases/0.2.0-preview.2.md). This version is not published.
 
-## Releases
+## RIP Arc · 0.2.0-preview.1
 
-- [0.2.0-preview.1](docs/releases/0.2.0-preview.1.md) · October 23, 2026
+October 23, 2026 · [Release and download](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1)
+
+- Spaces, Pins, folders, Favorites, and experimental split Pins.
+- A glass command bar built on the omnibox, with YouTube, X, and ChatGPT searches.
+- Space colors, glass controls, sidebar layouts, and native Settings.
+- Control-Tab recent tabs, Peek, and Little Arc.
+- Arc sidebar and optional History import through the original dialog.
+- Pink app icon, aligned traffic lights, and soft command-bar glows.
+
+[Full release notes and limits](docs/releases/0.2.0-preview.1.md)

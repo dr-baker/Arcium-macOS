@@ -1,8 +1,8 @@
-# Arcium preview
+# Arcium preview.1
 
-This preview is for Apple Silicon Macs running macOS 26 or later. It includes the current sidebar, glass controls, top-down command bar glows, pink icon, and Arcium onboarding.
+This preview is for Apple Silicon Macs running macOS 26 or later. It includes the sidebar, glass controls, top-down command bar glows, pink icon, and original Arcium onboarding. The one-click Arc welcome flow is in source for the next release.
 
-[Download Arcium](https://github.com/dr-baker/Arcium-macOS/releases).
+[Download Arcium](https://github.com/dr-baker/Arcium-macOS/releases/download/0.2.0-preview.1/Arcium-0.2.0-preview.1-macOS-arm64.dmg) · [RIP Arc: launch changelog](releases/0.2.0-preview.1.md).
 
 ## Install
 
