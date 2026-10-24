@@ -4,7 +4,7 @@
 
 A browser for people who love a good sidebar. Built on [Helium](https://helium.computer/), with Spaces, Pins, Favorites, Peek, and glass you can make your own.
 
-**[Download for Mac](https://github.com/dr-baker/Arcium-macOS/releases/download/0.2.0-preview.1/Arcium-0.2.0-preview.1-macOS-arm64.dmg)** · [RIP Arc: first release](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1) · [Quickstart](docs/arc-quickstart.md)
+**[Download for Mac](https://github.com/dr-baker/Arcium-macOS/releases/download/0.2.0-preview.1/Arcium-0.2.0-preview.1-macOS-arm64.dmg)** · [RIP Arc: release notes](https://github.com/dr-baker/Arcium-macOS/releases/tag/0.2.0-preview.1) · [Quickstart](docs/arc-quickstart.md)
 
 Apple Silicon · macOS 26+ · Preview.1 · Manual updates
 
@@ -29,7 +29,6 @@ Keep the omnibox's address entry, suggestions, and search. Arcium adds a glass c
 Give each Space its own colors and Pins. Customize glass, move the sidebar, or hide the address bar. Keep Favorites close, save split views as Pins, and use **Control-Tab** to return to recently used tabs.
 
 <a href="docs/assets/appearance.png"><img src="docs/assets/appearance.png" width="318" alt="Native appearance settings for colors and glass"></a>
-<a href="docs/assets/spaces.png"><img src="docs/assets/spaces.png" width="375" alt="A Space with its own profile and colors"></a>
 <a href="docs/assets/recent-tabs.png"><img src="docs/assets/recent-tabs.png" width="375" alt="Recent tabs with page thumbnails"></a>
 
 ## A quick look, without losing your place
