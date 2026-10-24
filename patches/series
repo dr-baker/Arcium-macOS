@@ -56,3 +56,5 @@ personal/arcium-concentric-window-corners-macos.patch
 personal/arcium-arc-import-settings-macos.patch
 personal/arcium-system-appearance-macos.patch
 personal/arcium-onboarding-appearance-macos.patch
+
+personal/arcium-command-settings-preview-macos.patch
