@@ -1,7 +1,7 @@
 #!/bin/bash
 set -exo pipefail
 
-sudo mdutil -a -i off
+sudo mdutil -a -i off || echo "::warning::Spotlight indexing could not be disabled; continuing with validation."
 
 brew install ninja coreutils python@3.14 quilt llvm@20 --overwrite
 brew unlink python || true
