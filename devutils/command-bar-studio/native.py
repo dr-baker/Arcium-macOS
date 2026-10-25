@@ -206,25 +206,38 @@ def iterate(jobs, keep_edits=False, launch_app=True):
         log.write(json.dumps({'total_seconds': round(elapsed, 3), 'app': str(app)}) + '\n')
     print(f'Actual renderer build + signed packaging: {elapsed:.2f}s')
     if launch_app: launch(app)
+    return app
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['run', 'build', 'bootstrap', 'capture', 'package', 'controls', 'launch'], nargs='?', default='run')
+    parser.add_argument('action', choices=['run', 'build', 'bootstrap', 'capture', 'package', 'controls', 'launch', 'test'], nargs='?', default='run')
     parser.add_argument('--build-dir', type=Path, default=Path(os.environ['HELIUM_BUILD_DIR']) if os.environ.get('HELIUM_BUILD_DIR') else None)
     parser.add_argument('--jobs', type=int, default=6)
     parser.add_argument('--keep-edits', action='store_true')
     parser.add_argument('--no-launch', action='store_true', help='Package controls without replacing the running app')
     args = parser.parse_args()
     if not 1 <= args.jobs <= 13: parser.error('--jobs must be 1...13')
+    if args.action == 'test':
+        app = iterate(args.jobs, args.keep_edits, launch_app=False)
+        for close_mode in ('done', 'window', 'quit'):
+            report = STATE / f'interaction-checks-{close_mode}.json'
+            report.unlink(missing_ok=True)
+            command([app / 'Contents/MacOS/ArciumCommandBarStudio', '--interaction-check-report=' + str(report),
+                     '--interaction-close=' + close_mode], timeout=30)
+            result = json.loads(report.read_text())
+            if not result.get('passed'): raise RuntimeError(f'Native interaction checks failed: {result}')
+            print(json.dumps(result, indent=2))
+        return
     if args.action == 'controls': controls(launch_app=not args.no_launch); return
     if args.action in ('run', 'build'):
         iterate(args.jobs, args.keep_edits, launch_app=args.action == 'run'); return
     if args.action == 'capture':
         if not args.build_dir: parser.error('--build-dir or HELIUM_BUILD_DIR required')
         import sdk
-        package(args.build_dir)
-        sdk.export(args.build_dir / 'src'); return
+        sdk.export(args.build_dir / 'src')
+        executable = sdk.build(args.jobs)
+        package(args.build_dir, executable_override=executable); return
     if args.action == 'bootstrap':
         tooling(['build', '--daily', 'arcium_command_bar_studio'])
         # Packaging keeps the same durable reservation and verifies its owner.

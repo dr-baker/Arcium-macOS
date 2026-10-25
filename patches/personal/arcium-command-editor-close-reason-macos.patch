@@ -1,0 +1,41 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -63,7 +63,7 @@
+     @available(*, unavailable)
+     required init?(coder: NSCoder) { fatalError("Command bar editor does not support storyboards") }
+     override func cancelOperation(_ sender: Any?) {
+-        store.actionInvoked(name: "close_command_bar_editor")
++        store.actionInvoked(name: "close_command_bar_editor", payload: ["reason": "cancel"])
+     }
+ }
+ 
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -369,6 +369,7 @@
+ private struct ArciumLiveSettingsSheet<Content: View>: View {
+     let title: String
+     var onClose: (() -> Void)? = nil
++    var onCancel: (() -> Void)? = nil
+     @ViewBuilder let content: Content
+     @Environment(\.dismiss) private var dismiss
+     @Environment(\.settingsTheme) private var theme
+@@ -397,7 +398,7 @@
+         }
+         .settingsSheetSurface()
+         .frame(minWidth: 520, idealWidth: 680, minHeight: 400, idealHeight: 620)
+-        .onExitCommand { close() }
++        .onExitCommand { if let onCancel { onCancel() } else { close() } }
+     }
+     private func close() {
+         if let onClose { onClose() } else { dismiss() }
+@@ -1672,7 +1673,9 @@
+             let theme = store.snapshot.appearance.spacePalette.theme(
+                 fallback: style.theme(brand: preset.brand), colorScheme: scheme)
+             ArciumLiveSettingsSheet(title: "Command bar", onClose: {
+-                store.actionInvoked(name: "close_command_bar_editor")
++                store.actionInvoked(name: "close_command_bar_editor", payload: ["reason": "done"])
++            }, onCancel: {
++                store.actionInvoked(name: "close_command_bar_editor", payload: ["reason": "cancel"])
+             }) {
+                 Text(previewAvailable
+                      ? "Select scopes or type to filter the examples. Results won't open."

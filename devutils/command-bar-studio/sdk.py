@@ -204,6 +204,9 @@ def sync():
         for path, text in patches:
             prepare.apply_patch(files, text, str(path))
     finally: prepare.selected = previous
+    host = 'chrome/test/arcium_command_bar_studio_mac.mm'
+    if host in manifest['editable_sources']:
+        files[host] = (LAB / 'native_host.mm').read_text().splitlines()
     pending = {}
     for path, lines in files.items():
         data = ('\n'.join(lines) + '\n').encode()

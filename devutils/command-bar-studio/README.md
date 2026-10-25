@@ -32,14 +32,24 @@ devutils/command-bar-studio/studio          # Sync production patches, build, si
 devutils/command-bar-studio/studio build    # Build and sign without launching.
 devutils/command-bar-studio/studio controls # Rebuild the actual Swift inspector, then launch.
 devutils/command-bar-studio/studio launch   # Launch the last packaged app.
+devutils/command-bar-studio/studio test     # Native cancellation and window-lifecycle checks.
 ```
 
 Inspector edits update the actual renderer immediately. Click into the preview,
 type a query, navigate scopes and results, and compare activity and destination
-indicators. Result actions are inert. The app stores only its own configuration
-under `org.arcium.CommandBarStudioNative`; Copy Configuration exports the browser
+indicators. Result actions are inert. Escape and clicks in the preview margin
+keep Studio open. Done, window close, and Quit retain their explicit
+application-close behavior.
+
+The app stores only its own configuration under `org.arcium.CommandBarStudioNative`; Copy Configuration exports the browser
 schema. It never writes browser preferences.
 
+The captured SDK is already sufficient for everyday run, build, controls, and
+test commands. Those commands neither request a build-lane turn nor touch shared
+Chromium output. Bootstrap is only for an explicit dependency refresh.
+
+For host changes, edit `native_host.mm`; its tracked source is synchronized into
+the private SDK automatically. The bootstrap patch carries a matching snapshot.
 For renderer changes, edit the owning production patch and run Studio again.
 The private Ninja graph contains eleven production translation units and one
 link step. It uses captured compiler flags, generated headers, component
@@ -64,6 +74,11 @@ normally quits only the recorded native Studio PID after its replacement is
 ready. Failed builds leave the existing app alone. Runtime libraries and Swift
 resources are copied into each app. Diagnostics and timings are under
 `.build/native/`; compiler-only timings are under `.build/native-sdk/`.
+
+The native test command checks production Escape and margin-click handlers,
+inspector cancellation, opening/closing/switching temporary AppKit windows, and
+normal shutdown through Done, native window close, and application Quit. Its
+temporary processes leave an already running Studio alone.
 
 ## Validation and earlier prototype
 

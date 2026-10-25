@@ -56,4 +56,32 @@ class FrozenSDKTests(unittest.TestCase):
             run.assert_not_called()
 
 
+class HostSourceTests(unittest.TestCase):
+    def test_tracked_host_replaces_bootstrap_snapshot(self):
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for repo in (root, root / 'helium-chromium'):
+                (repo / 'patches').mkdir(parents=True)
+                (repo / 'patches/series').write_text('')
+            lab = root / 'lab'; lab.mkdir()
+            (lab / 'native_host.mm').write_text('fixed standalone host\n')
+            frozen = root / 'sdk'; source = frozen / 'src'
+            host = 'chrome/test/arcium_command_bar_studio_mac.mm'
+            (source / host).parent.mkdir(parents=True)
+            (source / host).write_text('old bootstrap host\n')
+            (frozen / 'manifest.json').write_text(json.dumps({
+                'frozen_files': [host], 'editable_sources': [host],
+                'source_hashes': {host: sdk.digest(source / host)}}))
+            prepare_spec = importlib.util.spec_from_file_location('prepare', MODULE.parent / 'prepare.py')
+            prepare = importlib.util.module_from_spec(prepare_spec)
+            prepare_spec.loader.exec_module(prepare)
+            with patch.object(sdk, 'SDK', frozen), patch.object(sdk, 'ROOT', root), \
+                 patch.object(sdk, 'LAB', lab), patch.dict(sys.modules, {'prepare': prepare}):
+                sdk.sync()
+            self.assertEqual((source / host).read_text(), 'fixed standalone host\n')
+            self.assertEqual(json.loads((frozen / 'manifest.json').read_text())['source_hashes'][host],
+                             sdk.digest(source / host))
+
+
 if __name__ == '__main__': unittest.main()

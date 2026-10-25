@@ -54,7 +54,7 @@
  
 --- /dev/null
 +++ b/chrome/test/arcium_command_bar_studio_mac.mm
-@@ -0,0 +1,468 @@
+@@ -0,0 +1,564 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -106,6 +106,9 @@
 +#include "ui/compositor/test/test_context_factories.h"
 +#include "ui/display/screen.h"
 +#include "ui/gfx/font_util.h"
++#include "ui/events/event.h"
++#include "ui/events/event_handler.h"
++#include "ui/events/keycodes/keyboard_codes.h"
 +#include "ui/gfx/image/image_skia_util_mac.h"
 +#include "ui/compositor/compositor.h"
 +#include "ui/gl/init/gl_factory.h"
@@ -284,7 +287,7 @@
 +    CHECK(controls_);
 +    auto panel = std::make_unique<arcium::CommandPanelView>(
 +        std::make_unique<arcium::CommandExampleSession>(ExampleScopes()),
-+        base::BindRepeating(&Studio::RequestClose, base::Unretained(this)), base::DoNothing());
++        base::DoNothing(), base::DoNothing());
 +    auto root = std::make_unique<StudioRoot>(std::move(panel)); root_ = root.get();
 +    widget_delegate_ = std::make_unique<views::WidgetDelegate>();
 +    widget_delegate_->SetCanActivate(true);
@@ -368,8 +371,86 @@
 +    if (backdrop_ && backdrop_.superview.subviews.firstObject != backdrop_)
 +      [backdrop_.superview addSubview:backdrop_ positioned:NSWindowBelow relativeTo:nil];
 +  }
++  void EditorCloseRequested(NSDictionary* payload) {
++    editor_close_reason_ = payload[@"reason"];
++    if ([editor_close_reason_ isEqualToString:@"done"]) RequestClose();
++  }
++  base::WeakPtr<Studio> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
++  bool RunInteractionChecks(const std::string& report_path) {
++    auto* panel = root_->panel();
++    NSMutableDictionary* checks = [NSMutableDictionary dictionary];
++    for (int repeat = 0; repeat < 8; ++repeat) {
++      panel->HandleKeyEvent(nullptr, ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_ESCAPE, 0));
++    }
++    checks[@"escape_keeps_studio_open"] = @(!closing_);
++    [controls_ cancelOperation:nil];
++    checks[@"inspector_escape_keeps_studio_open"] =
++        @(!closing_ && [editor_close_reason_ isEqualToString:@"cancel"]);
++    const bool outside = !panel->GetContourPath().contains(0, 0);
++    if (!closing_ && outside) {
++      ui::MouseEvent margin(ui::EventType::kMousePressed, gfx::PointF(0, 0), gfx::PointF(0, 0),
++          base::TimeTicks::Now(), ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
++      static_cast<ui::EventHandler*>(panel)->OnMouseEvent(&margin);
++      checks[@"margin_click_keeps_studio_open"] = @(!closing_ && margin.handled());
++    } else {
++      checks[@"margin_click_keeps_studio_open"] = @NO;
++    }
++    if (!closing_) {
++      panel->HandleKeyEvent(nullptr, ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RETURN, 0));
++      checks[@"example_execution_keeps_studio_open"] = @(!closing_);
++      NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++      NSView* hit = [window.contentView hitTest:NSMakePoint(60, window.contentView.bounds.size.height - 160)];
++      checks[@"native_content_accepts_hits"] = @(hit != nil && hit != backdrop_);
++    } else {
++      checks[@"example_execution_keeps_studio_open"] = @NO;
++      checks[@"native_content_accepts_hits"] = @NO;
++    }
++    if (!closing_) {
++      NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++      bool lifecycle_ok = true;
++      for (int repeat = 0; repeat < 4 && !closing_; ++repeat) {
++        NSWindow* fixture = [[NSWindow alloc] initWithContentRect:NSMakeRect(120, 120, 260, 120)
++            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
++            backing:NSBackingStoreBuffered defer:NO];
++        fixture.releasedWhenClosed = NO;
++        fixture.title = @"Studio lifecycle check";
++        [fixture makeKeyAndOrderFront:nil];
++        base::RunLoop settle(base::RunLoop::Type::kNestableTasksAllowed);
++        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++            FROM_HERE, settle.QuitClosure(), base::Milliseconds(75));
++        settle.Run();
++        lifecycle_ok &= !closing_;
++        [window makeKeyAndOrderFront:nil];
++        [fixture close];
++        base::RunLoop finish(base::RunLoop::Type::kNestableTasksAllowed);
++        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
++            FROM_HERE, finish.QuitClosure(), base::Milliseconds(75));
++        finish.Run();
++        lifecycle_ok &= !closing_ && window.visible;
++      }
++      checks[@"opening_closing_switching_windows_keeps_studio_open"] = @(lifecycle_ok);
++    } else {
++      checks[@"opening_closing_switching_windows_keeps_studio_open"] = @NO;
++    }
++    auto close_mode = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII("interaction-close");
++    if (close_mode == "window") {
++      [widget_->GetNativeWindow().GetNativeNSWindow() close];
++    } else if (close_mode == "quit") {
++      [NSApp terminate:nil];
++    } else {
++      [delegate_ actionInvokedWithName:@"close_command_bar_editor" payload:@{@"reason": @"done"}];
++    }
++    checks[@"explicit_close_requests_normal_shutdown"] = @(closing_);
++    bool passed = true;
++    for (NSNumber* value in checks.allValues) passed &= value.boolValue;
++    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks};
++    NSData* data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
++    if (![data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES]) return false;
++    return passed;
++  }
 +  void RequestClose() {
 +    if (closing_) return; closing_ = true;
++    fprintf(stderr, "Studio: explicit application close requested\n");
 +    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE, quit_);
 +  }
 +  void Change(NSString* key, id value) {
@@ -442,6 +523,7 @@
 +  ArciumNativeStudioDelegate* delegate_;
 +  NSViewController* controller_;
 +  NSViewController* controls_;
++  NSString* editor_close_reason_ = nil;
 +  ArciumStudioBackdrop* backdrop_ = nil;
 +  raw_ptr<StudioRoot> root_ = nullptr;
 +  std::unique_ptr<views::WidgetDelegate> widget_delegate_;
@@ -456,7 +538,8 @@
 +@implementation ArciumNativeStudioDelegate
 +- (void)settingChangedWithKey:(NSString*)key value:(id)value { if (_studio) _studio->Change(key, value); }
 +- (void)actionInvokedWithName:(NSString*)name payload:(NSDictionary*)payload {
-+  if ([name isEqualToString:@"close_command_bar_editor"] && _studio) _studio->RequestClose();
++  if ([name isEqualToString:@"close_command_bar_editor"] && _studio)
++    _studio->EditorCloseRequested(payload);
 +}
 +- (void)toggleStudioAppearance:(id)sender { if (_studio) _studio->ToggleAppearance(); }
 +- (void)resetStudio:(id)sender { if (_studio) _studio->Reset(); }
@@ -495,7 +578,7 @@
 +    NSURL* runtime = [NSBundle.mainBundle.privateFrameworksURL
 +        URLByAppendingPathComponent:@"ArciumStudioRuntime.framework"];
 +    base::apple::SetOverrideFrameworkBundlePath(base::FilePath(runtime.fileSystemRepresentation));
-+    base::NoDestructor<base::TestMemoryConsumerRegistry> memory_consumers;
++    static base::NoDestructor<base::TestMemoryConsumerRegistry> memory_consumers;
 +    mojo::core::Init(); gl::init::InitializeGLOneOff(gl::GpuPreference::kDefault);
 +    CHECK(base::i18n::InitializeICU()); ui::RegisterPathProvider();
 +    base::TestDiscardableMemoryAllocator allocator;
@@ -509,17 +592,30 @@
 +          if (key.app_controller) key.app_controller->AddColorMixers(provider, key);
 +        }));
 +    ui::InitializeInputMethodForTesting();
++    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report");
 +    {
 +      views::DesktopTestViewsDelegate views_delegate;
 +      views_delegate.set_context_factory(factories.GetContextFactory());
 +      display::ScopedNativeScreen screen;
 +      base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
 +      base::test::ScopedDisableRunLoopTimeout no_timeout;
-+      { Studio studio(run_loop.QuitClosure()); run_loop.Run(); }
++      {
++        Studio studio(run_loop.QuitClosure());
++        if (command->HasSwitch("interaction-check-report")) {
++          base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
++              base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, base::CommandLine* flags) {
++                if (!owner) return;
++                *passed = owner->RunInteractionChecks(flags->GetSwitchValueASCII("interaction-check-report"));
++                owner->RequestClose();
++              }, studio.GetWeakPtr(), &interaction_checks_passed, base::Unretained(command)), base::Milliseconds(800));
++        }
++        run_loop.Run();
++      }
 +      base::RunLoop().RunUntilIdle();
 +    }
 +    ui::ResourceBundle::CleanupSharedInstance();
 +    ui::ShutdownInputMethodForTesting();
-+    return 0;
++    fprintf(stderr, "Studio: normal application teardown complete\n");
++    return interaction_checks_passed ? 0 : 1;
 +  }
 +}
