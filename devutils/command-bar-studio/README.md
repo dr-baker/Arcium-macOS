@@ -41,6 +41,11 @@ Settings. The versioned design file contains browser layout only. A workshop
 scenario can additionally contain context and example state; importing it into
 browser Settings applies only its `layout` member.
 
+Choose **Minimal**, **Subtle**, **Stacked** or **Peek** for scope geometry.
+**Advanced…** opens Scope height, Scope width and Attach Scopes, in that order.
+Style changes preserve result count, labels, icons and lighting. A geometry
+combination outside the four styles is shown as Custom.
+
 ## Scenarios without compiling
 
 ```sh
