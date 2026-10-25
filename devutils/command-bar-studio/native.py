@@ -180,9 +180,7 @@ def latest_app():
     return Path(json.loads(latest.read_text())['app'])
 
 
-def controls(launch_app=True):
-    source_app = latest_app()
-    start = time.monotonic()
+def build_settings(jobs):
     command([sys.executable, LAB / 'prepare.py', '--settings-only'])
     cache = LAB / '.build'
     env = dict(os.environ, CLANG_MODULE_CACHE_PATH=str(cache / 'module-cache'),
@@ -190,17 +188,21 @@ def controls(launch_app=True):
     command(['swift', 'build', '--package-path', cache / 'ProductionSettings',
              '--scratch-path', cache / 'native-settings', '--cache-path', cache / 'cache',
              '--config-path', cache / 'config', '--security-path', cache / 'security',
-             '--disable-sandbox', '-j', '6', '--product', 'ArciumSettingsUI'], env=env)
-    app = package(source_app=source_app, settings_output=(cache / 'native-settings/debug').resolve(strict=True))
-    print(f'Controls build + native packaging: {time.monotonic() - start:.2f}s')
-    if launch_app: launch(app)
+             '--disable-sandbox', '-j', str(jobs), '--product', 'ArciumSettingsUI'], env=env)
+    return (cache / 'native-settings/debug').resolve(strict=True)
+
+
+def controls(launch_app=True, jobs=6):
+    # Controls and renderer must come from the same current production sources.
+    return iterate(jobs, launch_app=launch_app)
 
 
 def iterate(jobs, keep_edits=False, launch_app=True):
     import sdk
     start = time.monotonic()
     executable = sdk.build(jobs, keep_edits)
-    app = package(source_app=latest_app(), executable_override=executable)
+    settings_output = build_settings(jobs)
+    app = package(source_app=latest_app(), settings_output=settings_output, executable_override=executable)
     elapsed = time.monotonic() - start
     with (STATE / 'timings.jsonl').open('a') as log:
         log.write(json.dumps({'total_seconds': round(elapsed, 3), 'app': str(app)}) + '\n')
@@ -229,7 +231,7 @@ def main():
             if not result.get('passed'): raise RuntimeError(f'Native interaction checks failed: {result}')
             print(json.dumps(result, indent=2))
         return
-    if args.action == 'controls': controls(launch_app=not args.no_launch); return
+    if args.action == 'controls': controls(launch_app=not args.no_launch, jobs=args.jobs); return
     if args.action in ('run', 'build'):
         iterate(args.jobs, args.keep_edits, launch_app=args.action == 'run'); return
     if args.action == 'capture':

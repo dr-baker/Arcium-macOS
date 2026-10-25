@@ -30,10 +30,14 @@ experiments and move that directory aside before refreshing it.
 ```sh
 devutils/command-bar-studio/studio          # Sync production patches, build, sign, launch.
 devutils/command-bar-studio/studio build    # Build and sign without launching.
-devutils/command-bar-studio/studio controls # Rebuild the actual Swift inspector, then launch.
+devutils/command-bar-studio/studio controls # Rebuild renderer and Swift inspector, then launch.
 devutils/command-bar-studio/studio launch   # Launch the last packaged app.
 devutils/command-bar-studio/studio test     # Native cancellation and window-lifecycle checks.
 ```
+
+Every run/build/controls/test iteration synchronizes the production renderer and
+Swift inspector before packaging them together. Both builds are incremental. A
+failure in either build leaves the running app and latest package untouched.
 
 Inspector edits update the actual renderer immediately. Click into the preview,
 type a query, navigate scopes and results, and compare activity and destination
