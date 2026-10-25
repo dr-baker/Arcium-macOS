@@ -53,9 +53,11 @@
 #include "ui/events/event_handler.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
+#include "ui/gfx/animation/slide_animation.h"
 #include "ui/compositor/compositor.h"
 #include "ui/gl/init/gl_factory.h"
 #include "ui/views/controls/native/native_view_host.h"
+#include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/desktop_test_views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -348,7 +350,8 @@ class Studio {
       checks[@"example_execution_keeps_studio_open"] = @NO;
       checks[@"native_content_accepts_hits"] = @NO;
     }
-    if (!closing_) {
+    const bool appearance_only = base::CommandLine::ForCurrentProcess()->HasSwitch("appearance-only");
+    if (!closing_ && !appearance_only) {
       NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
       bool lifecycle_ok = true;
       for (int repeat = 0; repeat < 4 && !closing_; ++repeat) {
@@ -372,9 +375,47 @@ class Studio {
         lifecycle_ok &= !closing_ && window.visible;
       }
       checks[@"opening_closing_switching_windows_keeps_studio_open"] = @(lifecycle_ok);
-    } else {
+    } else if (!appearance_only) {
       checks[@"opening_closing_switching_windows_keeps_studio_open"] = @NO;
     }
+    // Exercise the actual delegate -> preferences -> production view path.
+    // Interaction-check processes never persist settings into the user's app.
+    NSDictionary* saved_layout = layout_;
+    const std::u16string saved_query(panel->input_for_testing()->GetText());
+    panel->input_for_testing()->SetText(u"");
+    panel->ContentsChanged(panel->input_for_testing(), u"");
+    auto apply = [this](NSDictionary* value) {
+      [delegate_ settingChangedWithKey:@"command_panel_layout" value:value];
+      // Example publications and preference observers run synchronously.
+      // Finish only the reveal animation to measure the resulting shape.
+      root_->panel()->scope_animation_for_testing()->Reset(
+          root_->panel()->scopes_focused_for_testing() ? 1 : 0);
+      widget_->GetRootView()->DeprecatedLayoutImmediately();
+    };
+    NSMutableDictionary* trial = [layout_ mutableCopy];
+    trial[@"scope_reveal"] = @0;
+    trial[@"result_count"] = @1;
+    apply(trial);
+    checks[@"live_result_limit_one"] = @(panel->row_count_for_testing() == 1);
+    const int tabs_height = panel->scope_button_for_testing(0)->height();
+    trial[@"result_count"] = @20;
+    apply(trial);
+    checks[@"live_result_limit_twenty"] = @(panel->row_count_for_testing() == 20);
+    panel->input_for_testing()->SetText(u"Design");
+    panel->ContentsChanged(panel->input_for_testing(), u"Design");
+    panel->FocusInput();
+    panel->HandleKeyEvent(nullptr, ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RIGHT, 0));
+    const bool entered_scope = panel->scopes_focused_for_testing();
+    const auto saved_scope = panel->scope_for_testing();
+    trial[@"scope_reveal"] = @5;
+    apply(trial);
+    checks[@"reveal_edit_leaves_scope_interaction"] = @(entered_scope && !panel->scopes_focused_for_testing());
+    checks[@"live_reveal_changes_geometry"] = @(tabs_height == 42 && panel->scope_button_for_testing(0)->height() == 2);
+    checks[@"reveal_edit_preserves_scope"] = @(panel->scope_for_testing() == saved_scope);
+    checks[@"reveal_edit_preserves_query"] = @(panel->input_for_testing()->GetText() == u"Design");
+    apply(saved_layout);
+    panel->input_for_testing()->SetText(saved_query);
+    panel->ContentsChanged(panel->input_for_testing(), saved_query);
     auto close_mode = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII("interaction-close");
     if (close_mode == "window") {
       [widget_->GetNativeWindow().GetNativeNSWindow() close];
@@ -400,11 +441,21 @@ class Studio {
     if (![key isEqualToString:@"command_panel_layout"]) return;
     auto accepted = arcium_settings::CommandPanelLayoutFromNSObject(value);
     if (!accepted) return;
+    const bool reveal_changed =
+        [layout_[@"scope_reveal"] intValue] != *accepted->FindInt("scope_reveal");
     NSMutableDictionary* normalized = [value mutableCopy];
     normalized[@"scope_width"] = @(*accepted->FindInt("scope_width"));
     layout_ = [normalized copy];
-    [NSUserDefaults.standardUserDefaults setObject:layout_ forKey:@"configuration"];
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch("interaction-check-report"))
+      [NSUserDefaults.standardUserDefaults setObject:layout_ forKey:@"configuration"];
     prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
+    if (reveal_changed) {
+      // Reveal presets describe the resting row. Leave transient browsing when
+      // editing one, without resetting the example query or selected scope.
+      auto* panel = root_->panel();
+      const std::u16string query(panel->input_for_testing()->GetText());
+      panel->ContentsChanged(panel->input_for_testing(), query);
+    }
     // Never echo a snapshot while a SwiftUI binding transaction is active.
     if (snapshot_pending_) return; snapshot_pending_ = true;
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
