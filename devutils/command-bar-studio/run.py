@@ -94,14 +94,15 @@ def package():
     return app
 
 
-def launch(app):
+def launch(app, extra_args=(), before_replace=None, writer_lease=None):
     state = BUILD / 'running.json'
     executable = app / 'Contents/MacOS/ArciumCommandBarStudio'
     old = json.loads(state.read_text()) if state.exists() else None
     ready = BUILD / 'launch-ready.json'
     ready.unlink(missing_ok=True)
+    startup_started = time.monotonic()
     with (BUILD / 'application.log').open('ab') as log:
-        process = subprocess.Popen([str(executable), '--ready-file', str(ready)], stdin=subprocess.DEVNULL, stdout=log,
+        process = subprocess.Popen([str(executable), '--ready-file', str(ready), *map(str, extra_args)], stdin=subprocess.DEVNULL, stdout=log,
                                    stderr=log, start_new_session=True)
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
@@ -114,12 +115,25 @@ def launch(app):
     else:
         command([executable, '--quit-owned', str(process.pid), str(executable)])
         raise RuntimeError('New Studio did not become ready; previous app was left open.')
+    try:
+        if before_replace: before_replace()
+    except BaseException:
+        command([executable, '--quit-owned', str(process.pid), str(executable)])
+        raise
     if old:
         try:
+            if before_replace: before_replace()
             command([executable, '--quit-owned', str(old['pid']), old['executable']])
         except subprocess.CalledProcessError:
             command([executable, '--quit-owned', str(process.pid), str(executable)])
             raise RuntimeError('Previous Studio could not quit normally; replacement was closed.')
+        except BaseException:
+            command([executable, '--quit-owned', str(process.pid), str(executable)])
+            raise
+    (BUILD / 'last-launch-timing.json').write_text(json.dumps({'ready_seconds': time.monotonic() - startup_started, 'readiness': 'native compositor presentation callback for native host'}))
+    if writer_lease:
+        pending = Path(str(writer_lease) + '.pending')
+        pending.write_text(str(process.pid)); pending.replace(writer_lease)
     state.write_text(json.dumps({'pid': process.pid, 'executable': str(executable)}, indent=2) + '\n')
     print(f'Command Bar Studio PID {process.pid}\n{app}')
 

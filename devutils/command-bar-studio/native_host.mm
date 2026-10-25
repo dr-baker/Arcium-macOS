@@ -5,17 +5,26 @@
 #import <Carbon/Carbon.h>
 #import <objc/message.h>
 #include <dlfcn.h>
+#include <sys/stat.h>
+#include <cerrno>
 
 #include <algorithm>
 #include <memory>
 #include <vector>
 
 #include "base/at_exit.h"
+#include "base/auto_reset.h"
+#include "components/viz/common/frame_timing_details.h"
 #include "base/no_destructor.h"
 #include "base/memory_coordinator/test_memory_consumer_registry.h"
 #include "base/apple/bundle_locations.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/files/file_util.h"
+#include "base/json/json_writer.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/test/arcium_command_workshop_support.h"
+#include "chrome/browser/ui/helium/helium_space.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
@@ -36,6 +45,7 @@
 #include "chrome/browser/ui/views/helium/surface_style.h"
 #include "chrome/browser/ui/views/omnibox/arcium_command_bar_material.h"
 #include "chrome/browser/ui/views/omnibox/arcium_command_panel.h"
+#include "chrome/browser/ui/views/omnibox/arcium_command_panel_presentation.h"
 #include "components/prefs/pref_registry_simple.h"
 #import "components/remote_cocoa/app_shim/native_window_background_view.h"
 #include "components/prefs/testing_pref_service.h"
@@ -86,6 +96,7 @@ class Studio;
 @interface ArciumNativeStudioDelegate : NSObject <ArciumSettingsUIDelegate, NSApplicationDelegate>
 @property(nonatomic, assign) Studio* studio;
 - (void)toggleStudioAppearance:(id)sender;
+- (void)showStudioPopup:(id)sender;
 - (void)resetStudio:(id)sender;
 - (void)copyStudio:(id)sender;
 - (void)quitStudio:(id)sender;
@@ -99,41 +110,10 @@ NSDictionary* DefaultLayout() {
            @"glow_strength": @0.75, @"activity_dots": @YES, @"result_count": @8};
 }
 
-std::vector<arcium::CommandScopeDescriptor> ExampleScopes() {
-  using namespace arcium;
-  std::vector<CommandScopeDescriptor> scopes;
-  const struct { const char* id; const char16_t* label; SkColor color; const char* symbol; } fixtures[] = {
-      {"omni", u"Omni", SkColorSetRGB(174, 112, 245), "sparkles"},
-      {"web", u"Web", SkColorSetRGB(100, 159, 255), "globe"},
-      {"saved", u"Saved", SkColorSetRGB(205, 182, 112), "pin.fill"},
-      {"youtube", u"YouTube", SkColorSetRGB(240, 75, 70), "play.rectangle.fill"},
-      {"x", u"X", SkColorSetRGB(210, 215, 220), "xmark"},
-      {"chatgpt", u"ChatGPT", SkColorSetRGB(89, 206, 157), "bubble.left.and.text.bubble.right.fill"}};
-  for (const auto& fixture : fixtures) {
-    CommandScopeDescriptor scope;
-    scope.id = fixture.id; scope.label = fixture.label; scope.tint = fixture.color;
-    NSImage* icon = [NSImage imageWithSystemSymbolName:[NSString stringWithUTF8String:fixture.symbol]
-                             accessibilityDescription:nil];
-    NSColor* tint = [NSColor colorWithSRGBRed:SkColorGetR(fixture.color) / 255.0
-                                      green:SkColorGetG(fixture.color) / 255.0
-                                       blue:SkColorGetB(fixture.color) / 255.0 alpha:1];
-    icon = [icon imageWithSymbolConfiguration:
-        [NSImageSymbolConfiguration configurationWithPaletteColors:@[tint]]];
-    scope.icon = gfx::ImageSkiaFromNSImage(icon);
-    scope.provider_id = (scope.id == "omni" || scope.id == "web") ? "native" : "arcium";
-    scope.placeholder = u"Search " + scope.label;
-    scope.search_verb = u"Search " + scope.label;
-    scope.accessibility_description = scope.placeholder;
-    if (scope.id == "omni") {
-      scope.placeholder = u"Search tabs, Pins, Favorites and the web";
-      scope.accessibility_description = u"Search all browser results";
-    } else if (scope.id == "saved") {
-      scope.placeholder = u"Search Pins, Favorites and folders";
-      scope.accessibility_description = u"Search saved Pins, Favorites and folders";
-    }
-    scopes.push_back(std::move(scope));
-  }
-  return scopes;
+NSDictionary* FoundationDictionary(const base::DictValue& value) {
+  std::string json; base::JSONWriter::Write(value, &json);
+  return [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json.data() length:json.size()]
+                                         options:0 error:nil];
 }
 
 // Host composition follows the production CommandSettingsPreviewView. All
@@ -148,6 +128,18 @@ class StudioRoot : public views::View {
   }
   views::NativeViewHost* controls() { return controls_; }
   arcium::CommandPanelView* panel() { return panel_; }
+  gfx::Rect PreviewAnchorBounds() const {
+    auto bounds = GetBoundsInScreen();
+    const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
+    bounds.Inset(gfx::Insets::TLBR(0, controls_width, 0, 0));
+    return bounds;
+  }
+  void SetWorkshopMode() { workshop_ = true; controls_->SetVisible(false); }
+  void ReplacePanel(std::unique_ptr<arcium::CommandPanelView> panel) {
+    RemoveChildViewT(panel_); panel_ = AddChildView(std::move(panel));
+    panel_->SetEmbedded(true); preview_height_ = panel_->GetPreferredSize().height();
+    InvalidateLayout();
+  }
   void SetRefresh(base::RepeatingClosure refresh) { refresh_ = std::move(refresh); }
   int Resize(std::optional<int> height) {
     if (height) {
@@ -159,7 +151,7 @@ class StudioRoot : public views::View {
   }
  protected:
   void Layout(PassKey) override {
-    const int controls_width = std::min(520, std::max(0, width() - 320));
+    const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
     controls_->SetBounds(0, 0, controls_width, height());
     panel_->SetBounds(controls_width + 16, 16,
         std::max(1, width() - controls_width - 32),
@@ -169,12 +161,14 @@ class StudioRoot : public views::View {
  private:
   raw_ptr<views::NativeViewHost> controls_;
   raw_ptr<arcium::CommandPanelView> panel_;
+  bool workshop_ = false;
   int preview_height_ = 1;
   base::RepeatingClosure refresh_;
 };
 
 class StudioWidget : public views::Widget {
  public:
+  void SetPalette(ui::ArciumPalette palette) { palette_ = palette; ThemeChanged(); }
   void SetDark(bool dark) {
     dark_ = dark;
     GetNativeWindow().GetNativeNSWindow().appearance =
@@ -186,7 +180,7 @@ class StudioWidget : public views::Widget {
  protected:
   ui::ColorProviderKey GetColorProviderKey() const override {
     auto key = views::Widget::GetColorProviderKey();
-    ui::ArciumPalette palette;
+    const auto& palette = palette_;
     key.color_mode = dark_ ? ui::ColorProviderKey::ColorMode::kDark
                           : ui::ColorProviderKey::ColorMode::kLight;
     key.user_color = palette.seed;
@@ -196,6 +190,7 @@ class StudioWidget : public views::Widget {
     return key;
   }
  private:
+  ui::ArciumPalette palette_;
   bool dark_ = true;
 };
 
@@ -231,12 +226,12 @@ class Studio {
         NSSelectorFromString(@"makeCommandBarEditorWithPreviewAvailable:"), YES);
     CHECK(controls_);
     auto panel = std::make_unique<arcium::CommandPanelView>(
-        std::make_unique<arcium::CommandExampleSession>(ExampleScopes()),
+        arcium::workshop::CreateSession(scenario_),
         base::DoNothing(), base::DoNothing());
     auto root = std::make_unique<StudioRoot>(std::move(panel)); root_ = root.get();
     widget_delegate_ = std::make_unique<views::WidgetDelegate>();
     widget_delegate_->SetCanActivate(true);
-    widget_delegate_->SetTitle(u"Command Bar Studio · Native renderer");
+    widget_delegate_->SetTitle(u"Command Bar Studio · Embedded editor · ⌘P Browser preview");
     widget_delegate_->SetContentsView(std::move(root));
     widget_delegate_->RegisterWindowClosingCallback(base::BindOnce(&Studio::RequestClose, base::Unretained(this)));
     widget_ = std::make_unique<StudioWidget>();
@@ -253,7 +248,7 @@ class Studio {
         [](Studio* owner, std::optional<int> height, base::TimeDelta) {
           return owner->root_->Resize(height);
         }, base::Unretained(this)));
-    root_->panel()->BindPreferences(&prefs_, base::BindRepeating([] { return 1.f; }),
+    root_->panel()->BindPreferences(&prefs_, base::BindRepeating([](Studio* owner) { return owner->scale_; }, base::Unretained(this)),
         base::BindRepeating([](Studio* owner) { return std::max(280, owner->root_->panel()->width()); },
                             base::Unretained(this)));
     material_ = std::make_unique<arcium::CommandBarMaterial>(widget_.get(), &prefs_,
@@ -281,31 +276,242 @@ class Studio {
     window.opaque = NO;
     window.movableByWindowBackground = YES;
     InstallMenu(); widget_->SetDark(dark_); [NSApp finishLaunching];
+    scenario_path_ = base::CommandLine::ForCurrentProcess()->GetSwitchValuePath("scenario-file");
+    writer_lease_ = base::CommandLine::ForCurrentProcess()->GetSwitchValuePath("writer-lease");
+    if (!scenario_path_.empty()) PollScenario();
     widget_->GetRootView()->DeprecatedLayoutImmediately(); RefreshMaterial();
     widget_->Show(); widget_->Activate(); root_->panel()->FocusInput();
     [NSApp activateIgnoringOtherApps:YES];
     NSArray<NSString*>* arguments = NSProcessInfo.processInfo.arguments;
     NSUInteger ready_index = [arguments indexOfObject:@"--ready-file"];
     if (ready_index != NSNotFound && ready_index + 1 < arguments.count) {
-      base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
-          base::BindOnce([](std::string path) {
+      widget_->GetCompositor()->RequestSuccessfulPresentationTimeForNextFrame(base::BindOnce(
+          [](std::string path, base::TimeTicks started, const viz::FrameTimingDetails& details) {
             @autoreleasepool {
-              NSDictionary* signal = @{@"pid": @(NSProcessInfo.processInfo.processIdentifier),
-                                       @"bundle": NSBundle.mainBundle.bundlePath};
+              NSDictionary* signal = @{ @"pid": @(NSProcessInfo.processInfo.processIdentifier), @"bundle": NSBundle.mainBundle.bundlePath };
               NSData* data = [NSJSONSerialization dataWithJSONObject:signal options:0 error:nil];
               [data writeToFile:[NSString stringWithUTF8String:path.c_str()] atomically:YES];
+              NSDictionary* timing = @{ @"first_presentation_ms": @((details.presentation_feedback.timestamp - started).InMillisecondsF()),
+                                        @"feedback_timestamp_valid": @(!details.presentation_feedback.timestamp.is_null()) };
+              NSData* times = [NSJSONSerialization dataWithJSONObject:timing options:0 error:nil];
+              [times writeToFile:[[NSString stringWithUTF8String:path.c_str()] stringByAppendingString:@".presentation.json"] atomically:YES];
             }
-          }, std::string([arguments[ready_index + 1] UTF8String])), base::Milliseconds(500));
+          }, std::string([arguments[ready_index + 1] UTF8String]), base::TimeTicks::Now()));
+      widget_->GetCompositor()->ScheduleFullRedraw();
     }
   }
   ~Studio() {
     closing_ = true; delegate_.studio = nullptr; NSApp.delegate = nil;
     [lifecycle_fixture_ close]; lifecycle_fixture_ = nil;
+    if (root_) {
+      if (auto* popup = arcium::CommandPanelPresentation::Get(root_)) popup->Destroy(true);
+    }
     material_.reset();
     if (widget_) {
       root_->controls()->Detach(); widget_->CloseNow(); widget_.reset();
     }
     widget_delegate_.reset(); controls_ = nil; controller_ = nil;
+  }
+  void ShowFaithfulPreview() {
+    auto* presentation = arcium::CommandPanelPresentation::Get(root_);
+    if (presentation && presentation->panel()) CaptureCurrentState(presentation->panel());
+    else CaptureCurrentState(root_->panel());
+    if (!presentation) {
+      arcium::CommandPanelPresentation::Options options;
+      options.parent = widget_.get();
+      options.prefs = &prefs_;
+      options.scale = base::BindRepeating([](base::WeakPtr<Studio> owner) { return owner ? owner->scale_ : 1.f; }, weak_factory_.GetWeakPtr());
+      options.anchor_bounds = base::BindRepeating([](base::WeakPtr<Studio> owner) {
+        return owner ? owner->root_->PreviewAnchorBounds() : gfx::Rect();
+      }, weak_factory_.GetWeakPtr());
+      options.create_session = base::BindRepeating([](base::WeakPtr<Studio> owner) -> std::unique_ptr<arcium::CommandSession> {
+        return owner ? arcium::workshop::CreateSession(owner->scenario_) : nullptr;
+      }, weak_factory_.GetWeakPtr());
+      options.opened = base::BindRepeating([](base::WeakPtr<Studio> owner,
+                                             views::Widget*, base::TimeTicks) {
+        if (owner) {
+          owner->root_->panel()->SetVisible(false);
+          auto* popup = arcium::CommandPanelPresentation::Get(owner->root_);
+          if (popup) arcium::workshop::ApplyState(popup->panel(), owner->scenario_);
+        }
+      }, weak_factory_.GetWeakPtr());
+      options.will_close = base::BindRepeating([](base::WeakPtr<Studio> owner, arcium::CommandPanelView* panel) {
+        if (owner && !owner->applying_scenario_) owner->CaptureCurrentState(panel);
+      }, weak_factory_.GetWeakPtr());
+      options.closed = base::BindRepeating([](base::WeakPtr<Studio> owner, bool, bool reopening) {
+        if (owner && !reopening && !owner->closing_ && !owner->applying_scenario_) {
+          arcium::workshop::ApplyState(owner->root_->panel(), owner->scenario_);
+          owner->root_->panel()->SetVisible(true);
+          owner->PersistScenario();
+        }
+      }, weak_factory_.GetWeakPtr());
+      presentation = arcium::CommandPanelPresentation::Install(root_, std::move(options));
+    }
+    presentation->Show(true);
+  }
+  bool ApplyScenario(base::DictValue document) {
+    auto accepted = document.FindDict("layout")
+        ? arcium_settings::CommandPanelLayoutFromNSObject(FoundationDictionary(*document.FindDict("layout")))
+        : arcium_settings::CommandPanelLayoutFromNSObject(layout_);
+    if (!accepted) { fprintf(stderr, "Studio: invalid design layout; previous scenario retained\n"); return false; }
+    const base::AutoReset<bool> applying(&applying_scenario_, true);
+    if (auto* popup = arcium::CommandPanelPresentation::Get(root_)) popup->Destroy(true);
+    arcium::workshop::ApplyAccessibilityContext(document);
+    scenario_ = std::move(document); scale_ = arcium::workshop::ContextScale(scenario_);
+    const auto* context = scenario_.FindDict("context");
+    const auto* mode = context ? context->FindString("mode") : nullptr;
+    dark_ = !mode || *mode == "dark";
+    for (const auto [name, value] : arcium::workshop::ContextPreferences(scenario_)) prefs_.Set(name, value);
+    layout_ = FoundationDictionary(*accepted); prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
+    widget_->SetPalette(arcium::workshop::ContextPalette(scenario_)); widget_->SetDark(dark_);
+    auto panel = std::make_unique<arcium::CommandPanelView>(arcium::workshop::CreateSession(scenario_),
+        base::DoNothing(), base::DoNothing());
+    root_->ReplacePanel(std::move(panel));
+    root_->panel()->BindPreferences(&prefs_, base::BindRepeating([](Studio* owner) { return owner->scale_; }, base::Unretained(this)),
+        base::BindRepeating([](Studio* owner) { return std::max(280, owner->root_->panel()->width()); }, base::Unretained(this)));
+    root_->panel()->SetHeightResizeCallback(base::BindRepeating([](Studio* owner, std::optional<int> height, base::TimeDelta) {
+      return owner->root_->Resize(height);
+    }, base::Unretained(this)));
+    root_->panel()->SetGeometryChangedCallback(base::BindRepeating(&Studio::RefreshMaterial, base::Unretained(this)));
+    widget_->GetRootView()->DeprecatedLayoutImmediately(); RefreshMaterial(); UpdateSnapshot();
+    arcium::workshop::ApplyState(root_->panel(), scenario_);
+    return true;
+  }
+  void CaptureCurrentState(arcium::CommandPanelView* panel) {
+    arcium::workshop::SaveState(panel, scenario_);
+    if (auto layout = arcium_settings::CommandPanelLayoutFromNSObject(layout_)) scenario_.Set("layout", std::move(*layout));
+    scenario_.EnsureDict("context")->Set("mode", dark_ ? "dark" : "light");
+  }
+  bool OwnsScenarioWriter() const {
+    if (writer_lease_.empty()) return true;
+    std::string writer;
+    return base::ReadFileToStringWithMaxSize(writer_lease_, &writer, 32) && writer == std::to_string(getpid());
+  }
+  void PersistScenario() {
+    if (scenario_path_.empty() || !OwnsScenarioWriter()) return;
+    std::string current;
+    struct stat info;
+    if (lstat(scenario_path_.value().c_str(), &info) == 0) {
+      if (!base::ReadFileToStringWithMaxSize(scenario_path_, &current, 1024 * 1024) || current != scenario_bytes_) return;
+    } else if (errno != ENOENT) return;
+    std::string json; base::JSONWriter::WriteWithOptions(scenario_, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
+    if (json == scenario_bytes_ && base::PathExists(scenario_path_)) return;
+    NSData* bytes = [NSData dataWithBytes:json.data() length:json.size()];
+    if ([bytes writeToFile:[NSString stringWithUTF8String:scenario_path_.value().c_str()] atomically:YES]) scenario_bytes_ = std::move(json);
+  }
+  void PollScenario() {
+    if (closing_) return;
+    std::string data;
+    const bool loaded = base::ReadFileToStringWithMaxSize(scenario_path_, &data, 1024 * 1024);
+    if (loaded && data != scenario_bytes_) {
+      std::string error;
+      if (auto document = arcium::workshop::ParseScenario(data, &error)) {
+        if (ApplyScenario(std::move(*document))) scenario_bytes_ = data;
+      } else fprintf(stderr, "Studio scenario: %s\n", error.c_str());
+    } else if ((loaded || !base::PathExists(scenario_path_)) && OwnsScenarioWriter()) {
+      auto* popup = arcium::CommandPanelPresentation::Get(root_);
+      CaptureCurrentState(popup && popup->is_open() ? popup->panel() : root_->panel()); PersistScenario();
+    }
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+        base::BindOnce(&Studio::PollScenario, weak_factory_.GetWeakPtr()), base::Milliseconds(200));
+  }
+  void RunWorkshopChecks(base::FilePath directory) {
+    check_dir_ = std::move(directory); base::CreateDirectory(check_dir_);
+    visual_cases_ = arcium::workshop::VisualCases(); root_->SetWorkshopMode(); NextWorkshopCase();
+  }
+  void NextWorkshopCase() {
+    if (visual_index_ == visual_cases_.size()) { StartContractChecks(); return; }
+    ApplyScenario(visual_cases_[visual_index_].Clone());
+    const auto& context = *scenario_.FindDict("context");
+    widget_->SetBounds(gfx::Rect(100, 100, *context.FindInt("viewport_width"), *context.FindInt("viewport_height")));
+    widget_->GetRootView()->DeprecatedLayoutImmediately();
+    arcium::workshop::InstallBackdrop(widget_.get()); ShowFaithfulPreview();
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+        base::BindOnce(&Studio::CaptureWorkshopCase, weak_factory_.GetWeakPtr(), false), base::Milliseconds(650));
+  }
+  void CaptureWorkshopCase(bool repeat) {
+    auto* popup = arcium::CommandPanelPresentation::Get(root_);
+    const std::string name = *scenario_.FindString("name");
+    const bool captured = popup && arcium::workshop::CapturePopup(popup->widget(), check_dir_.AppendASCII(name + (repeat ? "-repeat.png" : ".png")));
+    workshop_passed_ &= captured;
+    if (!repeat) {
+      auto metadata = arcium::workshop::DescribePanel(popup ? popup->widget() : nullptr, popup ? popup->panel() : nullptr);
+      workshop_passed_ &= metadata.FindString("material_backend") &&
+          *metadata.FindString("material_backend") == *scenario_.FindString("expected_backend");
+      metadata.Set("name", name); metadata.Set("captured", captured); visual_results_.Append(std::move(metadata));
+      base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+          base::BindOnce(&Studio::CaptureWorkshopCase, weak_factory_.GetWeakPtr(), true), base::Milliseconds(90));
+    } else { ++visual_index_; NextWorkshopCase(); }
+  }
+  void StartContractChecks() {
+    auto* popup = arcium::CommandPanelPresentation::Get(root_);
+    if (contract_stage_ == 0) {
+      auto document = visual_cases_.front().Clone(); ApplyScenario(std::move(document)); ShowFaithfulPreview();
+      popup = arcium::CommandPanelPresentation::Get(root_);
+      popup->panel()->input_for_testing()->SetText(u"Design");
+      popup->panel()->ContentsChanged(popup->panel()->input_for_testing(), u"Design");
+      widget_->Activate();  // Clicking the real inspector deactivates the child.
+    } else if (contract_stage_ == 1) {
+      contract_results_.Set("deactivation_dismisses", !popup->is_open());
+      contract_results_.Set("popup_state_reaches_embedded", root_->panel()->input_for_testing()->GetText() == u"Design");
+      root_->panel()->input_for_testing()->SetText(u"fresh");
+      root_->panel()->ContentsChanged(root_->panel()->input_for_testing(), u"fresh");
+      ShowFaithfulPreview();
+      contract_results_.Set("immediate_open_captures_embedded", popup->panel()->input_for_testing()->GetText() == u"fresh");
+      auto bounds = widget_->GetWindowBoundsInScreen(); bounds.Offset(8, 0); widget_->SetBounds(bounds);
+    } else if (contract_stage_ == 2) {
+      contract_results_.Set("parent_move_dismisses", !popup->is_open()); ShowFaithfulPreview();
+      auto bounds = widget_->GetWindowBoundsInScreen(); bounds.set_width(bounds.width() + 12); widget_->SetBounds(bounds);
+    } else if (contract_stage_ == 3) {
+      contract_results_.Set("parent_resize_dismisses", !popup->is_open()); ShowFaithfulPreview();
+      popup->panel()->HandleKeyEvent(nullptr, ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_ESCAPE, 0));
+    } else if (contract_stage_ == 4) {
+      contract_results_.Set("escape_dismisses_popup", !popup->is_open()); ShowFaithfulPreview();
+      ui::MouseEvent margin(ui::EventType::kMousePressed, gfx::PointF(), gfx::PointF(), base::TimeTicks::Now(), ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON);
+      static_cast<ui::EventHandler*>(popup->panel())->OnMouseEvent(&margin);
+    } else if (contract_stage_ == 5) {
+      contract_results_.Set("margin_dismisses_popup", !popup->is_open());
+      auto fixture_delegate = std::make_unique<views::WidgetDelegate>();
+      fixture_delegate->SetCanActivate(true);
+      auto view = std::make_unique<views::View>(); auto* owner = view.get(); fixture_delegate->SetContentsView(std::move(view));
+      auto fixture = std::make_unique<views::Widget>();
+      views::Widget::InitParams params(views::Widget::InitParams::CLIENT_OWNS_WIDGET, views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+      params.delegate = fixture_delegate.get(); params.bounds = gfx::Rect(120,120,700,600); fixture->Init(std::move(params));
+      arcium::CommandPanelPresentation::Options options; options.parent = fixture.get(); options.prefs = &prefs_;
+      options.scale = base::BindRepeating([] { return 1.f; });
+      options.create_session = base::BindRepeating([] { return arcium::workshop::CreateSession(arcium::workshop::DefaultScenario("streaming")); });
+      auto* transient = arcium::CommandPanelPresentation::Install(owner, std::move(options)); fixture->Show(); transient->Show(true);
+      fixture->CloseNow(); fixture.reset(); fixture_delegate.reset();
+    } else {
+      contract_results_.Set("parent_destroyed_with_pending_publication", true);
+      for (const auto [name, value] : contract_results_) workshop_passed_ &= value.GetBool();
+      ShowFaithfulPreview(); StartPopupCycles(); return;
+    }
+    ++contract_stage_;
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+        base::BindOnce(&Studio::StartContractChecks, weak_factory_.GetWeakPtr()), base::Milliseconds(contract_stage_ == 6 ? 350 : 100));
+  }
+  void StartPopupCycles() {
+    auto* popup = arcium::CommandPanelPresentation::Get(root_);
+    if (popup_cycles_ == 20) {
+      base::DictValue report; report.Set("passed", workshop_passed_); report.Set("cycles", popup_cycles_);
+      report.Set("cases", std::move(visual_results_)); report.Set("contracts", std::move(contract_results_));
+      std::string json; base::JSONWriter::WriteWithOptions(report, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
+      base::WriteFile(check_dir_.AppendASCII("report.json"), json);
+      auto streaming = visual_cases_.front().Clone(); streaming.Set("fixture", "streaming");
+      ApplyScenario(std::move(streaming)); ShowFaithfulPreview();
+      arcium::workshop::RecordHeightTrace(base::BindRepeating([](base::WeakPtr<Studio> owner) {
+        return owner ? arcium::CommandPanelPresentation::Get(owner->root_) : nullptr;
+      }, weak_factory_.GetWeakPtr()), check_dir_.AppendASCII("height-trace.json"),
+      base::BindOnce(&Studio::RequestClose, weak_factory_.GetWeakPtr())); return;
+    }
+    popup->Close(false); popup->Show(popup_cycles_ % 2); ++popup_cycles_;
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+        base::BindOnce([](base::WeakPtr<Studio> owner) {
+          if (!owner) return;
+          auto* popup = arcium::CommandPanelPresentation::Get(owner->root_);
+          owner->workshop_passed_ &= popup && popup->is_open(); owner->StartPopupCycles();
+        }, weak_factory_.GetWeakPtr()), base::Milliseconds(80));
   }
   void RefreshMaterial() {
     if (material_) material_->Refresh();
@@ -423,6 +629,17 @@ class Studio {
     apply(saved_layout);
     panel->input_for_testing()->SetText(saved_query);
     panel->ContentsChanged(panel->input_for_testing(), saved_query);
+    if (!scenario_path_.empty()) {
+      const std::string external(1024 * 1024 + 1, 'x');
+      const bool written = base::WriteFile(scenario_path_, external);
+      CaptureCurrentState(panel); PersistScenario();
+      std::string observed;
+      checks[@"oversized_external_scenario_preserved"] = @(written && base::ReadFileToString(scenario_path_, &observed) && observed == external);
+      const std::string unreadable = "externally owned unreadable scenario";
+      const bool protected_file = base::WriteFile(scenario_path_, unreadable) && chmod(scenario_path_.value().c_str(), 0) == 0;
+      PersistScenario(); chmod(scenario_path_.value().c_str(), 0600);
+      checks[@"unreadable_external_scenario_preserved"] = @(protected_file && base::ReadFileToString(scenario_path_, &observed) && observed == unreadable);
+    }
     auto close_mode = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII("interaction-close");
     if (close_mode == "window") {
       [widget_->GetNativeWindow().GetNativeNSWindow() close];
@@ -440,7 +657,10 @@ class Studio {
     return passed;
   }
   void RequestClose() {
-    if (closing_) return; closing_ = true;
+    if (closing_) return;
+    auto* popup = root_ ? arcium::CommandPanelPresentation::Get(root_) : nullptr;
+    if (root_) CaptureCurrentState(popup && popup->is_open() ? popup->panel() : root_->panel());
+    PersistScenario(); closing_ = true;
     fprintf(stderr, "Studio: explicit application close requested\n");
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE, quit_);
   }
@@ -492,6 +712,7 @@ class Studio {
     NSMenuItem* app_item = [[NSMenuItem alloc] init]; [bar addItem:app_item];
     NSMenu* menu = [[NSMenu alloc] initWithTitle:@"Studio"]; app_item.submenu = menu;
     const struct { NSString* title; SEL action; NSString* key; } items[] = {
+      {@"Browser preview", @selector(showStudioPopup:), @"p"},
       {@"Light / Dark", @selector(toggleStudioAppearance:), @"d"},
       {@"Reset examples and settings", @selector(resetStudio:), @"r"},
       {@"Copy configuration", @selector(copyStudio:), @""},
@@ -510,6 +731,16 @@ class Studio {
     }
     NSApp.mainMenu = bar;
   }
+  base::DictValue scenario_ = arcium::workshop::DefaultScenario();
+  base::FilePath scenario_path_, writer_lease_, check_dir_;
+  std::string scenario_bytes_;
+  std::vector<base::DictValue> visual_cases_;
+  base::ListValue visual_results_;
+  size_t visual_index_ = 0;
+  int popup_cycles_ = 0, contract_stage_ = 0;
+  base::DictValue contract_results_;
+  bool workshop_passed_ = true, applying_scenario_ = false;
+  float scale_ = 1;
   TestingPrefServiceSimple prefs_;
   NSDictionary* layout_;
   ArciumNativeStudioDelegate* delegate_;
@@ -532,11 +763,13 @@ class Studio {
 }  // namespace
 
 @implementation ArciumNativeStudioDelegate
+@synthesize studio = _studio;
 - (void)settingChangedWithKey:(NSString*)key value:(id)value { if (_studio) _studio->Change(key, value); }
 - (void)actionInvokedWithName:(NSString*)name payload:(NSDictionary*)payload {
   if ([name isEqualToString:@"close_command_bar_editor"] && _studio)
     _studio->EditorCloseRequested(payload);
 }
+- (void)showStudioPopup:(id)sender { if (self.studio) self.studio->ShowFaithfulPreview(); }
 - (void)toggleStudioAppearance:(id)sender { if (_studio) _studio->ToggleAppearance(); }
 - (void)resetStudio:(id)sender { if (_studio) _studio->Reset(); }
 - (void)copyStudio:(id)sender { if (_studio) _studio->Copy(); }
@@ -554,7 +787,7 @@ int main(int argc, const char** argv) {
       if (!running) return 0;
       NSURL* expected = [[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[3]]]
                           URLByResolvingSymlinksInPath];
-      if (![running.bundleIdentifier isEqualToString:@"org.arcium.CommandBarStudioNative"] ||
+      if (![running.bundleIdentifier isEqualToString:NSBundle.mainBundle.bundleIdentifier] ||
           ![[running.executableURL URLByResolvingSymlinksInPath] isEqual:expected]) return 2;
       if (![running terminate]) return 2;
       NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:5];
@@ -580,7 +813,7 @@ int main(int argc, const char** argv) {
     base::TestDiscardableMemoryAllocator allocator;
     base::DiscardableMemoryAllocator::SetInstance(&allocator); gfx::InitializeFonts();
     base::test::TaskEnvironment tasks(base::test::TaskEnvironment::MainThreadType::UI);
-    ui::TestContextFactories factories(false, /*output_to_window=*/true);
+    ui::TestContextFactories factories(true, /*output_to_window=*/true);
     NSURL* pak = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"ui_test.pak"];
     ui::ResourceBundle::InitSharedInstanceWithPakPath(base::FilePath(pak.fileSystemRepresentation));
     ui::ColorProviderManager::Get().AppendColorProviderInitializer(base::BindRepeating(
@@ -597,6 +830,12 @@ int main(int argc, const char** argv) {
       base::test::ScopedDisableRunLoopTimeout no_timeout;
       {
         Studio studio(run_loop.QuitClosure());
+        if (command->HasSwitch("workshop-check-dir")) {
+          base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+              base::BindOnce([](base::WeakPtr<Studio> owner, base::FilePath path) {
+                if (owner) owner->RunWorkshopChecks(std::move(path));
+              }, studio.GetWeakPtr(), command->GetSwitchValuePath("workshop-check-dir")), base::Milliseconds(800));
+        }
         if (command->HasSwitch("interaction-check-report")) {
           base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
               base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, base::CommandLine* flags) {

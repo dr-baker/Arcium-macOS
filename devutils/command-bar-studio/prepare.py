@@ -24,6 +24,14 @@ def path_name(raw: str) -> str:
     return raw
 
 
+def header_path(line: str) -> str:
+    """A partial editor save is a recoverable parse error, not an IndexError."""
+    values = shlex.split(line[4:].split('\t')[0])
+    if not values or not values[0]:
+        raise ValueError('Incomplete patch header path')
+    return values[0]
+
+
 def selected(path: str) -> bool:
     return path.startswith(PREFIX) or path in (PANEL, EXAMPLES)
 
@@ -37,8 +45,8 @@ def apply_patch(files: dict[str, list[str]], text: str, owner: str) -> set[str]:
                 and lines[index + 1].startswith('+++ ')):
             index += 1
             continue
-        old_path = shlex.split(lines[index][4:].split('\t')[0])[0]
-        new_path = shlex.split(lines[index + 1][4:].split('\t')[0])[0]
+        old_path = header_path(lines[index])
+        new_path = header_path(lines[index + 1])
         path = path_name(new_path if new_path != '/dev/null' else old_path)
         index += 2
         wanted = selected(path)
@@ -190,7 +198,9 @@ if __name__ == '__main__':
     try:
         parser = argparse.ArgumentParser(description=__doc__)
         parser.add_argument('--settings-only', action='store_true', help='Extract the real controls without the approximate renderer contract')
+        parser.add_argument('--source-root', type=Path, help='Immutable production input generation')
         args = parser.parse_args()
+        if args.source_root: ROOT = args.source_root.resolve(strict=True)
         manifest = materialize(preview_contract=not args.settings_only)
         print(f'Production settings: {len(manifest["files"])} files from {len(manifest["owners"])} patches; no Chromium checkout')
     except (ValueError, KeyError, FileNotFoundError) as error:

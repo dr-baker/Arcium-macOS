@@ -1,124 +1,159 @@
 # Command Bar Studio
 
-A standalone macOS host for the **production** command bar. It instantiates
-`CommandPanelView`, `CommandBarMaterial`, the production Swift settings editor,
-and `CommandExampleSession`. Views/Skia draw the panel and handle its input and
-animations. Example data replaces the browser backend; there is no Browser,
-Profile, network search, or browser preference store.
+Studio builds the production command bar and Swift settings editor without
+rebuilding Chromium. It uses the same `CommandPanelView`,
+`CommandPanelPresentation`, `CommandBarMaterial`, palette generation, input
+handlers and AppKit glass bridge as Arcium. An inert scripted `CommandSession`
+replaces browser search and navigation.
 
-Requires macOS 26, the matching Xcode SDK, Python 3, and a Swift 6.2 toolchain.
+Edit the owning production patch, then rebuild Studio. That edit is already the
+browser implementation; there is no second renderer to port. This is the first
+component in the UI workshop. Other components need an explicit source group,
+host adapter, fake data boundary and browser comparison before joining it.
 
-## One-time capture
+Requires macOS 26, the matching Xcode SDK, Python 3 and Swift 6.2.
 
-A matching completed Chromium UI build supplies the frozen libraries and headers.
-Claim the shared build lane first, preserve your selected worktree when sourcing
-canonical `dev.sh`, then run:
+## Daily design work
+
+```sh
+devutils/command-bar-studio/studio run --jobs 4
+devutils/command-bar-studio/studio watch --jobs 4
+devutils/command-bar-studio/studio build --jobs 4   # No launch.
+devutils/command-bar-studio/studio test --jobs 4
+```
+
+These commands use an independent copied UI SDK. They do not request the shared
+build lane, run GN or touch Chromium output. `watch` uses its own app identity
+and preferences. `test` uses a separate validation identity. `--instance NAME`
+selects another independent identity; replacement normally quits only a
+verified process belonging to that identity, after its replacement is ready.
+
+The embedded editor keeps the inspector and preview usable together. Choose
+**Studio > Browser preview**, or press **⌘P**, for the real child popup. It
+shares browser positioning, active material, focus, resize and close behavior.
+Clicking the inspector deactivates and dismisses that popup, as it does in the
+browser. Reopen it to check the updated design. The window title identifies the
+embedded editor so it cannot be mistaken for the faithful popup.
+
+Both modes use the production settings controls. **Import design…** and
+**Export design…** use the same normalized design format in Studio and browser
+Settings. The versioned design file contains browser layout only. A workshop
+scenario can additionally contain context and example state; importing it into
+browser Settings applies only its `layout` member.
+
+## Scenarios without compiling
+
+```sh
+devutils/command-bar-studio/studio scenario --instance watch --fixture streaming
+devutils/command-bar-studio/studio scenario --instance watch --fixture empty
+devutils/command-bar-studio/studio scenario --instance watch --scenario-file /tmp/design.json
+```
+
+The running instance reloads its scenario file. `mixed`, `empty`, `long` and
+`streaming` fixtures cover destination icons, activity states, actions,
+truncation, result growth, contraction and reordering. Query, scope, selected
+row and layout persist in that instance's scenario file across replacement.
+Search publications have fresh revisions and query epochs. Cancelled queries
+cannot publish into a later search. Actions remain inert.
+
+A scenario uses this envelope. `layout` accepts the production eight or nine
+fields. `context` can supply UI scale, light or dark mode, palette colors,
+command material, surface set and the production chrome appearance dictionary.
+
+```json
+{
+  "schema": "arcium-ui-workshop",
+  "version": 1,
+  "component": "command-bar",
+  "fixture": "streaming",
+  "query": "design",
+  "scope": "omni",
+  "context": {"scale": 1.1, "mode": "dark", "command_material": 2}
+}
+```
+
+## Safe iteration
+
+Each iteration locks the private build, snapshots one immutable source
+generation, and compiles C++ and Swift from it. Compiler inputs also use immutable
+paths. A failed build, failed readiness check or superseded source generation
+leaves the previous running app and published package in place. The next watch
+iteration picks up the latest source. Signed packages contain source hashes and
+`UIWorkshopBuild.json` provenance.
+
+A capture freezes generated headers, component libraries, archive objects,
+compiler flags, resources, build definitions and transitive Apple SDK headers.
+Normal iterations reject changes to frozen dependencies. New headers, source
+files, GN changes, resource changes or cached implementation changes require a
+matching completed target build and SDK refresh. Refusing a stale ABI is part
+of the fast path's contract.
+
+For an experiment, edit an existing captured `.cc` or `.mm` under
+`.build/native-sdk/src`, then use `studio run --keep-edits`. These packages are
+marked experimental. Move a successful experiment into its owning production
+patch before refreshing. Ordinary production-patch edits need no port.
+
+## One-time capture or dependency refresh
+
+Stop private watch processes before refreshing. Preserve the previous SDK by
+moving `.build/native-sdk` aside; capture refuses to overwrite it. Claim the
+shared build lane, preserve `HELIUM_DEV_WORKTREE` when sourcing canonical
+`dev.sh`, then run:
 
 ```sh
 devutils/command-bar-studio/studio bootstrap
 ```
 
-This runs `he agent build --daily arcium_command_bar_studio`, then packages the
-app and captures its private UI SDK through `he agent lane exec`. Keep ownership
-until that capture finishes. The SDK and app are independent copies, with no
-links into shared source or output. Only the installed Xcode SDK remains external.
-Capture is intentionally refused if `.build/native-sdk` already exists: preserve
-experiments and move that directory aside before refreshing it.
+This builds the focused `arcium_command_bar_studio` target, then captures and
+packages its dependencies under the same reservation. Keep the reservation
+through copying and evidence collection. Once captured, normal Studio work is
+independent of the build lane and browser output.
 
-## Iterate without Chromium
+## Browser comparison
 
-```sh
-devutils/command-bar-studio/studio          # Sync production patches, build, sign, launch.
-devutils/command-bar-studio/studio build    # Build and sign without launching.
-devutils/command-bar-studio/studio controls # Rebuild renderer and Swift inspector, then launch.
-devutils/command-bar-studio/studio launch   # Launch the last packaged app.
-devutils/command-bar-studio/studio test     # Native cancellation and window-lifecycle checks.
-```
+The test-only workshop provider and native backdrop are shared by Studio and
+`ArciumCommandWorkshopBrowserTest.ProductionPopupScenariosAndReinvocation` in
+`arcium_feature_settings_browser_tests`. The browser test invokes the ordinary
+`BrowserView::ShowArciumCommandBar` path, with a test-owned session override.
+There is no production command-line switch that replaces real browser data.
 
-Every run/build/controls/test iteration synchronizes the production renderer and
-Swift inspector before packaging them together. Both builds are incremental. A
-failure in either build leaves the running app and latest package untouched.
-
-Inspector edits update the actual renderer immediately. Click into the preview,
-type a query, navigate scopes and results, and compare activity and destination
-indicators. Result actions are inert. Escape and clicks in the preview margin
-keep Studio open. Done, window close, and Quit retain their explicit
-application-close behavior.
-
-The app stores only its own configuration under `org.arcium.CommandBarStudioNative`; Copy Configuration exports the browser
-schema. It never writes browser preferences.
-
-The captured SDK is already sufficient for everyday run, build, controls, and
-test commands. Those commands neither request a build-lane turn nor touch shared
-Chromium output. Bootstrap is only for an explicit dependency refresh.
-
-For host changes, edit `native_host.mm`; its tracked source is synchronized into
-the private SDK automatically. The bootstrap patch carries a matching snapshot.
-For renderer changes, edit the owning production patch and run Studio again.
-The private Ninja graph contains eleven production translation units and one
-link step. It uses captured compiler flags, generated headers, component
-libraries, archive member objects, and the matching compiler. It does not load
-GN, Siso, or Chromium's scheduling graph. Six jobs is the default; `--jobs N`
-accepts 1 through 13.
-
-For a temporary experiment, edit a `.cc` or `.mm` file beneath
-`.build/native-sdk/src`, then use `studio --keep-edits`. Normal synchronization
-refuses to overwrite those edits. Port a successful experiment to its owning
-patch before refreshing the SDK. Frozen headers, libraries and toolchain inputs
-are checked even with `--keep-edits`. ABI or dependency changes require a new
-matching capture rather than linking against stale components.
-
-The host uses the real compositor, active native window and glass bridge. Fake
-scope icons and search data are the intentional differences. This app cannot
-measure browser backend search performance or command-bar opening latency in a
-running browser.
-
-Immutable signed apps live in `.build/native/apps/`. Relaunching verifies and
-normally quits only the recorded native Studio PID after its replacement is
-ready. Failed builds leave the existing app alone. Runtime libraries and Swift
-resources are copied into each app. Diagnostics and timings are under
-`.build/native/`; compiler-only timings are under `.build/native-sdk/`.
-
-The native test command checks production Escape and margin-click handlers,
-inspector cancellation, opening/closing/switching temporary AppKit windows, and
-normal shutdown through Done, native window close, and application Quit. Its
-temporary processes leave an already running Studio alone.
-
-## Parity status
-
-Production source sharing is verified; complete browser presentation parity is
-not yet accepted. The six reveal presets were checked in the live native app.
-Native regressions also cover result limits, scope/query preservation, focus
-changes, and normal window teardown. Reveal preset edits now leave scope
-browsing in the production renderer, so browser Settings shares the behavior.
-
-Remaining acceptance work:
-
-- Match browser popup width, UI scale, and native height spring. The current
-  embedded Settings composition resizes immediately and stretches to its column.
-- Supply representative Space palettes and surface/glass preferences. Current
-  fixtures use the default palette, default glass configuration and a gradient.
-- Verify a saved configuration round trip into browser Settings. Clipboard
-  export currently supplies the browser's nine-field layout dictionary.
-- Compare active/inactive, light/dark and reduced-motion rendering in the browser
-  and Studio under the same conditions.
-
-Renderer and Swift changes should be made in their owning production patches;
-normal iteration consumes those patches directly. Direct SDK experiments remain
-local until explicitly transferred to an owning patch.
-
-## Validation and earlier prototype
+Capture Studio with `--workshop-check-dir=/tmp/studio-captures` on its executable
+and run the browser fixture through `browser_check.py` while owning the build
+lane and a GUI window. The flat browser-test executable needs the packaged
+production Swift material library at its own bundle-relative Frameworks path.
+The runner checks its exports, stages an identical copy, records hashes and
+removes only its own unchanged copy. The tests assert the actual material
+backend, so a missing Liquid Glass bridge cannot silently pass as fallback blur.
 
 ```sh
-python3 -m unittest discover -s devutils/command-bar-studio/python-tests
+he agent lane exec -- python3 devutils/command-bar-studio/browser_check.py \
+  --output "$HELIUM_BUILD_DIR/src/out/Default" \
+  --browser-app "$HELIUM_BUILD_DIR/src/out/Default/Helium.app" --evidence /tmp/browser-check
 ```
 
-`studio approx` retains the earlier Swift/AppKit approximation for comparison.
-Its renderer and recorded timings are separate from the native host. It uses a
-different bundle identity and cannot replace the native app or a browser.
+The runner uses a 120-second per-test timeout; the 36-case capture intentionally
+takes longer than Chromium's default 45 seconds. Compare captures and geometry:
 
-Measured on October 24, 2026 with a warm captured SDK: recompiling the production
-panel `.cc` and linking took 4.9 seconds; including signed app packaging took
-5.6 seconds. The first separate production Swift-inspector build and packaging
-took 21.0 seconds. Inspector setting changes apply live without rebuilding.
-These are local Studio iteration times, not browser opening-latency measurements.
+```sh
+python3 devutils/command-bar-studio/parity.py /tmp/browser-check/captures /tmp/studio-captures \
+  --output /tmp/command-bar-parity.json
+```
+
+The comparison reports geometry, cross-host pixel differences and each host's
+repeat noise separately. It applies no screenshot masks and does not silently
+raise tolerances. A nonzero systematic difference requires inspection.
+Both comparators measure exact unassociated 8-bit RGB/RGBA PNG samples, alpha
+and integer compositing against the known backdrop. They require identical PNG
+color-profile metadata. No color conversion or premultiplication discards
+transparent RGB; native and reference implementations share regression cases.
+
+Source sharing does not replace browser integration checks. Studio cannot
+measure browser backend speed, profile behavior or opening latency in a busy
+browser. WindowServer, accessibility settings, compositor configuration and
+surrounding content still affect native material. Compare those contexts before
+claiming parity for a new effect. The `studio approx` Swift implementation is
+an older sketch and is not the parity renderer.
+
+Immutable apps, per-instance scenarios, logs and timings live under
+`.build/native/`; the frozen compiler SDK and compiler timings are under
+`.build/native-sdk/`. Build artifacts are ignored by Git.

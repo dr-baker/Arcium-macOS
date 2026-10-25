@@ -47,6 +47,27 @@ class LaunchTests(unittest.TestCase):
             self.assertEqual(command.call_args_list[1].args[0][2], '456')
         self.assertEqual(json.loads((self.build / 'running.json').read_text()), self.old)
 
+    def testSupersededDuringReadinessClosesOnlyCandidateAndKeepsWriter(self):
+        lease = self.build / 'writer'; lease.write_text('123')
+        with patch.object(runner.subprocess, 'Popen', side_effect=self.ready_process), patch.object(runner, 'command') as command:
+            with self.assertRaisesRegex(RuntimeError, 'superseded'):
+                runner.launch(self.app, before_replace=Mock(side_effect=RuntimeError('superseded')), writer_lease=lease)
+            command.assert_called_once_with([self.app / 'Contents/MacOS/ArciumCommandBarStudio', '--quit-owned', '456', str(self.app / 'Contents/MacOS/ArciumCommandBarStudio')])
+        self.assertEqual(lease.read_text(), '123')
+        self.assertEqual(json.loads((self.build / 'running.json').read_text()), self.old)
+
+    def testScenarioWriterTransfersOnlyAfterPreviousAppQuit(self):
+        lease = self.build / 'writer'; lease.write_text('123')
+        def quit_owned(arguments): self.assertEqual(lease.read_text(), '123')
+        with patch.object(runner.subprocess, 'Popen', side_effect=self.ready_process), patch.object(runner, 'command', side_effect=quit_owned):
+            runner.launch(self.app, writer_lease=lease)
+        self.assertEqual(lease.read_text(), '456')
+
+    def testScenarioArgumentsBelongToNewProcess(self):
+        with patch.object(runner.subprocess, 'Popen', side_effect=self.ready_process) as popen, patch.object(runner, 'command'):
+            runner.launch(self.app, extra_args=('--scenario-file=/isolated/scenario.json',))
+            self.assertIn('--scenario-file=/isolated/scenario.json', popen.call_args.args[0])
+
     def testWatcherIncludesNativeAndResourceInputs(self):
         inputs = runner.watch_files()
         for file in [runner.LAB / 'run.py', runner.ROOT / 'resources/platform_resources.txt', runner.ROOT / 'devutils/glass-lab/Sources/GlassNative/include/GlassNative.h']:
