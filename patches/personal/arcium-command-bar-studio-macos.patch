@@ -54,7 +54,7 @@
  
 --- /dev/null
 +++ b/chrome/test/arcium_command_bar_studio_mac.mm
-@@ -0,0 +1,615 @@
+@@ -0,0 +1,622 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by the GPL-3.0 license.
 +
@@ -357,6 +357,7 @@
 +  }
 +  ~Studio() {
 +    closing_ = true; delegate_.studio = nullptr; NSApp.delegate = nil;
++    [lifecycle_fixture_ close]; lifecycle_fixture_ = nil;
 +    material_.reset();
 +    if (widget_) {
 +      root_->controls()->Detach(); widget_->CloseNow(); widget_.reset();
@@ -378,6 +379,39 @@
 +    if ([editor_close_reason_ isEqualToString:@"done"]) RequestClose();
 +  }
 +  base::WeakPtr<Studio> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
++  void RunWindowLifecycleChecks(base::OnceClosure complete) {
++    lifecycle_step_ = 0;
++    lifecycle_passed_ = true;
++    lifecycle_complete_ = std::move(complete);
++    AdvanceWindowLifecycle();
++  }
++  void AdvanceWindowLifecycle() {
++    // Use the application's normal event loop rather than nesting a Chromium
++    // loop inside AppKit focus and close notifications.
++    if (lifecycle_step_ == 8 || closing_) {
++      lifecycle_passed_ &= !closing_;
++      std::move(lifecycle_complete_).Run();
++      return;
++    }
++    NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++    if (lifecycle_step_ % 2 == 0) {
++      lifecycle_fixture_ = [[NSWindow alloc] initWithContentRect:NSMakeRect(120, 120, 260, 120)
++          styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
++          backing:NSBackingStoreBuffered defer:NO];
++      lifecycle_fixture_.releasedWhenClosed = NO;
++      lifecycle_fixture_.title = @"Studio lifecycle check";
++      [lifecycle_fixture_ makeKeyAndOrderFront:nil];
++    } else {
++      [window makeKeyAndOrderFront:nil];
++      [lifecycle_fixture_ close];
++      lifecycle_fixture_ = nil;
++      lifecycle_passed_ &= window.visible;
++    }
++    ++lifecycle_step_;
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
++        base::BindOnce(&Studio::AdvanceWindowLifecycle, weak_factory_.GetWeakPtr()),
++        base::Milliseconds(75));
++  }
 +  bool RunInteractionChecks(const std::string& report_path) {
 +    auto* panel = root_->panel();
 +    NSMutableDictionary* checks = [NSMutableDictionary dictionary];
@@ -407,34 +441,7 @@
 +      checks[@"example_execution_keeps_studio_open"] = @NO;
 +      checks[@"native_content_accepts_hits"] = @NO;
 +    }
-+    const bool appearance_only = base::CommandLine::ForCurrentProcess()->HasSwitch("appearance-only");
-+    if (!closing_ && !appearance_only) {
-+      NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
-+      bool lifecycle_ok = true;
-+      for (int repeat = 0; repeat < 4 && !closing_; ++repeat) {
-+        NSWindow* fixture = [[NSWindow alloc] initWithContentRect:NSMakeRect(120, 120, 260, 120)
-+            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
-+            backing:NSBackingStoreBuffered defer:NO];
-+        fixture.releasedWhenClosed = NO;
-+        fixture.title = @"Studio lifecycle check";
-+        [fixture makeKeyAndOrderFront:nil];
-+        base::RunLoop settle(base::RunLoop::Type::kNestableTasksAllowed);
-+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-+            FROM_HERE, settle.QuitClosure(), base::Milliseconds(75));
-+        settle.Run();
-+        lifecycle_ok &= !closing_;
-+        [window makeKeyAndOrderFront:nil];
-+        [fixture close];
-+        base::RunLoop finish(base::RunLoop::Type::kNestableTasksAllowed);
-+        base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-+            FROM_HERE, finish.QuitClosure(), base::Milliseconds(75));
-+        finish.Run();
-+        lifecycle_ok &= !closing_ && window.visible;
-+      }
-+      checks[@"opening_closing_switching_windows_keeps_studio_open"] = @(lifecycle_ok);
-+    } else if (!appearance_only) {
-+      checks[@"opening_closing_switching_windows_keeps_studio_open"] = @NO;
-+    }
++    checks[@"opening_closing_switching_windows_keeps_studio_open"] = @(lifecycle_passed_);
 +    // Exercise the actual delegate -> preferences -> production view path.
 +    // Interaction-check processes never persist settings into the user's app.
 +    NSDictionary* saved_layout = layout_;
@@ -498,21 +505,12 @@
 +    if (![key isEqualToString:@"command_panel_layout"]) return;
 +    auto accepted = arcium_settings::CommandPanelLayoutFromNSObject(value);
 +    if (!accepted) return;
-+    const bool reveal_changed =
-+        [layout_[@"scope_reveal"] intValue] != *accepted->FindInt("scope_reveal");
 +    NSMutableDictionary* normalized = [value mutableCopy];
 +    normalized[@"scope_width"] = @(*accepted->FindInt("scope_width"));
 +    layout_ = [normalized copy];
 +    if (!base::CommandLine::ForCurrentProcess()->HasSwitch("interaction-check-report"))
 +      [NSUserDefaults.standardUserDefaults setObject:layout_ forKey:@"configuration"];
 +    prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
-+    if (reveal_changed) {
-+      // Reveal presets describe the resting row. Leave transient browsing when
-+      // editing one, without resetting the example query or selected scope.
-+      auto* panel = root_->panel();
-+      const std::u16string query(panel->input_for_testing()->GetText());
-+      panel->ContentsChanged(panel->input_for_testing(), query);
-+    }
 +    // Never echo a snapshot while a SwiftUI binding transaction is active.
 +    if (snapshot_pending_) return; snapshot_pending_ = true;
 +    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
@@ -581,6 +579,10 @@
 +  std::unique_ptr<StudioWidget> widget_;
 +  std::unique_ptr<arcium::CommandBarMaterial> material_;
 +  base::RepeatingClosure quit_;
++  base::OnceClosure lifecycle_complete_;
++  NSWindow* lifecycle_fixture_ = nil;
++  int lifecycle_step_ = 0;
++  bool lifecycle_passed_ = false;
 +  bool dark_ = true, closing_ = false, snapshot_pending_ = false;
 +  base::WeakPtrFactory<Studio> weak_factory_{this};
 +};
@@ -656,8 +658,13 @@
 +          base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
 +              base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, base::CommandLine* flags) {
 +                if (!owner) return;
-+                *passed = owner->RunInteractionChecks(flags->GetSwitchValueASCII("interaction-check-report"));
-+                owner->RequestClose();
++                owner->RunWindowLifecycleChecks(base::BindOnce(
++                    [](base::WeakPtr<Studio> live, bool* result, base::CommandLine* command) {
++                      if (!live) return;
++                      *result = live->RunInteractionChecks(
++                          command->GetSwitchValueASCII("interaction-check-report"));
++                      live->RequestClose();
++                    }, owner, passed, base::Unretained(flags)));
 +              }, studio.GetWeakPtr(), &interaction_checks_passed, base::Unretained(command)), base::Milliseconds(800));
 +        }
 +        run_loop.Run();

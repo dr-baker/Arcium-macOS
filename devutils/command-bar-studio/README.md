@@ -84,6 +84,29 @@ inspector cancellation, opening/closing/switching temporary AppKit windows, and
 normal shutdown through Done, native window close, and application Quit. Its
 temporary processes leave an already running Studio alone.
 
+## Parity status
+
+Production source sharing is verified; complete browser presentation parity is
+not yet accepted. The six reveal presets were checked in the live native app.
+Native regressions also cover result limits, scope/query preservation, focus
+changes, and normal window teardown. Reveal preset edits now leave scope
+browsing in the production renderer, so browser Settings shares the behavior.
+
+Remaining acceptance work:
+
+- Match browser popup width, UI scale, and native height spring. The current
+  embedded Settings composition resizes immediately and stretches to its column.
+- Supply representative Space palettes and surface/glass preferences. Current
+  fixtures use the default palette, default glass configuration and a gradient.
+- Verify a saved configuration round trip into browser Settings. Clipboard
+  export currently supplies the browser's nine-field layout dictionary.
+- Compare active/inactive, light/dark and reduced-motion rendering in the browser
+  and Studio under the same conditions.
+
+Renderer and Swift changes should be made in their owning production patches;
+normal iteration consumes those patches directly. Direct SDK experiments remain
+local until explicitly transferred to an owning patch.
+
 ## Validation and earlier prototype
 
 ```sh
