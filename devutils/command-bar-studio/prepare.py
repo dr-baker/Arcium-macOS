@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Materialize the production settings package without a Chromium checkout."""
 from __future__ import annotations
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -97,7 +98,7 @@ def write_changed(path: Path, data: bytes) -> None:
     path.write_bytes(data)
 
 
-def materialize() -> dict:
+def materialize(preview_contract: bool = True) -> dict:
     files: dict[str, list[str]] = {}
     owners = []
     for repo in (ROOT / 'helium-chromium', ROOT):
@@ -147,37 +148,38 @@ def materialize() -> dict:
     examples = '\n'.join(files[EXAMPLES]) + '\n'
     write_changed(LAB / '.build/production-command-panel.cc', panel.encode())
     write_changed(LAB / '.build/production-examples.h', examples.encode())
-    rows = re.findall(r'return \{([\d., false tru-]+)\};', panel.split('ScopeGeometry GeometryForReveal', 1)[1].split('NOTREACHED()', 1)[0])
-    if len(rows) != 6:
-        raise ValueError('Reveal geometry changed: update the standalone renderer contract')
-    geometry = []
-    for row in rows:
-        values = [v.strip() for v in row.split(',')]
-        geometry.append(f'ScopeGeometry(restingRise: {values[0]}, revealedRise: {values[1]}, restingHeight: {values[2]}, padding: {values[3]}, hiddenIcons: {values[4]}, detent: {values[5]})')
-    # Reject a changed light law rather than silently showing an old approximation.
-    compact = re.sub(r'\s+', '', panel)
-    expressions = ('radius_x=source.width()/2+softness', 'radius_y=source.height()+softness',
-                   'power=source.width()*source.height()', '.48f*strength*power/(radius_x*radius_y)',
-                   'matrix.postTranslate(center_x,source.y())',
-                   'row_focus=.66f+.34f*scope_focus_animation_.GetCurrentValue()',
-                   'selected=1.f+.30f*ScopeWeight(index)')
-    missing = [e for e in expressions if e not in compact]
-    if missing:
-        raise ValueError(f'Production light law changed: update the standalone renderer contract ({missing})')
-    constants = {name: int(value) for name, value in re.findall(r'constexpr int (k\w+) = (\d+);', panel)}
-    titles = re.findall(r'\{u"([^"]+)", u"([^"]+)", u"([^"]+)", CommandPrimaryIcon::k(\w+), CommandActivity::k(\w+)\}', examples)
-    if len(titles) != 8:
-        raise ValueError('Production example data changed: update the standalone fixture contract')
-    swift_string = lambda value: json.dumps(value, ensure_ascii=False)
-    swift = '// Generated from production patches. Do not edit.\nimport Foundation\nenum ProductionContract {\n'
-    swift += '    static let geometry: [ScopeGeometry] = [\n        ' + ',\n        '.join(geometry) + '\n    ]\n'
-    for key in ('kSearchHeight', 'kRowHeight', 'kFooterHeight', 'kEmptyHeight', 'kRailReserve'):
-        swift += f'    static let {key[1].lower() + key[2:]}: CGFloat = {constants[key]}\n'
-    swift += '    static let examples: [ExampleRow] = [\n'
-    for title, detail, category, icon, activity in titles:
-        swift += f'        ExampleRow(title: {swift_string(title)}, detail: {swift_string(detail)}, category: {swift_string(category)}, destination: .{dict(Go='go', Switch='switchTab', Action='action')[icon]}, activity: .{activity[0].lower()+activity[1:]}),\n'
-    swift += '    ]\n}\n'
-    write_changed(LAB / 'Sources/ArciumCommandBarStudio/ProductionContract.swift', swift.encode())
+    if preview_contract:
+        rows = re.findall(r'return \{([\d., false tru-]+)\};', panel.split('ScopeGeometry GeometryForReveal', 1)[1].split('NOTREACHED()', 1)[0])
+        if len(rows) != 6:
+            raise ValueError('Reveal geometry changed: update the standalone renderer contract')
+        geometry = []
+        for row in rows:
+            values = [v.strip() for v in row.split(',')]
+            geometry.append(f'ScopeGeometry(restingRise: {values[0]}, revealedRise: {values[1]}, restingHeight: {values[2]}, padding: {values[3]}, hiddenIcons: {values[4]}, detent: {values[5]})')
+        # Reject a changed light law rather than silently showing an old approximation.
+        compact = re.sub(r'\s+', '', panel)
+        expressions = ('radius_x=source.width()/2+softness', 'radius_y=source.height()+softness',
+                       'power=source.width()*source.height()', '.48f*strength*power/(radius_x*radius_y)',
+                       'matrix.postTranslate(center_x,source.y())',
+                       'row_focus=.66f+.34f*scope_focus_animation_.GetCurrentValue()',
+                       'selected=1.f+.30f*ScopeWeight(index)')
+        missing = [e for e in expressions if e not in compact]
+        if missing:
+            raise ValueError(f'Production light law changed: update the standalone renderer contract ({missing})')
+        constants = {name: int(value) for name, value in re.findall(r'constexpr int (k\w+) = (\d+);', panel)}
+        titles = re.findall(r'\{u"([^"]+)", u"([^"]+)", u"([^"]+)", CommandPrimaryIcon::k(\w+), CommandActivity::k(\w+)\}', examples)
+        if len(titles) != 8:
+            raise ValueError('Production example data changed: update the standalone fixture contract')
+        swift_string = lambda value: json.dumps(value, ensure_ascii=False)
+        swift = '// Generated from production patches. Do not edit.\nimport Foundation\nenum ProductionContract {\n'
+        swift += '    static let geometry: [ScopeGeometry] = [\n        ' + ',\n        '.join(geometry) + '\n    ]\n'
+        for key in ('kSearchHeight', 'kRowHeight', 'kFooterHeight', 'kEmptyHeight', 'kRailReserve'):
+            swift += f'    static let {key[1].lower() + key[2:]}: CGFloat = {constants[key]}\n'
+        swift += '    static let examples: [ExampleRow] = [\n'
+        for title, detail, category, icon, activity in titles:
+            swift += f'        ExampleRow(title: {swift_string(title)}, detail: {swift_string(detail)}, category: {swift_string(category)}, destination: .{dict(Go='go', Switch='switchTab', Action='action')[icon]}, activity: .{activity[0].lower()+activity[1:]}),\n'
+        swift += '    ]\n}\n'
+        write_changed(LAB / 'Sources/ArciumCommandBarStudio/ProductionContract.swift', swift.encode())
     manifest = {'owners': owners, 'files': {p: hashlib.sha256(data).hexdigest() for p, data in outputs.items()},
                 'panel_sha256': hashlib.sha256(panel.encode()).hexdigest(), 'examples_sha256': hashlib.sha256(examples.encode()).hexdigest()}
     write_changed(manifest_path, (json.dumps(manifest, indent=2) + '\n').encode())
@@ -186,7 +188,10 @@ def materialize() -> dict:
 
 if __name__ == '__main__':
     try:
-        manifest = materialize()
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument('--settings-only', action='store_true', help='Extract the real controls without the approximate renderer contract')
+        args = parser.parse_args()
+        manifest = materialize(preview_contract=not args.settings_only)
         print(f'Production settings: {len(manifest["files"])} files from {len(manifest["owners"])} patches; no Chromium checkout')
     except (ValueError, KeyError, FileNotFoundError) as error:
         print(f'prepare: {error}', file=sys.stderr)

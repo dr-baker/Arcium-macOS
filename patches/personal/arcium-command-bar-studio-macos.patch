@@ -1,0 +1,525 @@
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -141,6 +141,51 @@ if (!is_android && toolkit_views) {
+   }
+ }
+ 
++# Interactive production command-panel host. No Browser, Profile, or backend.
++if (is_mac && toolkit_views) {
++  executable("arcium_command_bar_studio") {
++    testonly = true
++    sources = [
++      "arcium_command_bar_studio_mac.mm",
++      "../browser/ui/views/omnibox/arcium_command_panel.cc",
++      "../browser/ui/views/omnibox/arcium_command_bar_material.cc",
++      "../browser/ui/views/omnibox/arcium_command_bar_material_mac.mm",
++      "../browser/ui/views/helium/surface_style.cc",
++      "../browser/ui/views/helium/glass_surface.cc",
++      "../browser/ui/views/helium/glass_surface_configuration.cc",
++      "../browser/ui/views/helium/glass_surface_mac.mm",
++      "../browser/ui/views/helium/native_frame_materials_mac.mm",
++      "../browser/ui/color/arcium_space_color_mixer.cc",
++      "../browser/ui/color/arcium_space_palette.cc",
++    ]
++    ldflags = [ "-Wl,-headerpad_max_install_names" ]
++    frameworks = [ "AppKit.framework", "Carbon.framework", "QuartzCore.framework" ]
++    deps = [
++      "//base",
++      "//base:i18n",
++      "//base/test:test_support",
++      "//cc/paint",
++      "//components/prefs",
++      "//components/prefs:test_support",
++      "//components/viz/host",
++      "//components/viz/service",
++      "//mojo/core/embedder",
++      "//skia",
++      "//ui/accessibility:test_support",
++      "//ui/base",
++      "//ui/color:mixers",
++      "//ui/compositor",
++      "//ui/compositor:test_support",
++      "//ui/display",
++      "//ui/gfx",
++      "//ui/gl",
++      "//ui/views",
++      "//ui/views:test_support",
++    ]
++    data_deps = [ "//ui/resources:ui_test_pak" ]
++  }
++}
++
+ source_set("in_process_browser_test_mixin") {
+   testonly = true
+ 
+--- /dev/null
++++ b/chrome/test/arcium_command_bar_studio_mac.mm
+@@ -0,0 +1,468 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by the GPL-3.0 license.
++
++#import <AppKit/AppKit.h>
++#import <Carbon/Carbon.h>
++#import <objc/message.h>
++#include <dlfcn.h>
++
++#include <algorithm>
++#include <memory>
++#include <vector>
++
++#include "base/at_exit.h"
++#include "base/no_destructor.h"
++#include "base/memory_coordinator/test_memory_consumer_registry.h"
++#include "base/apple/bundle_locations.h"
++#include "base/command_line.h"
++#include "base/feature_list.h"
++#include "base/files/file_path.h"
++#include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
++#include "base/i18n/icu_util.h"
++#include "base/memory/discardable_memory_allocator.h"
++#include "base/run_loop.h"
++#include "base/test/scoped_run_loop_timeout.h"
++#include "base/test/task_environment.h"
++#include "base/test/test_discardable_memory_allocator.h"
++#include "base/test/test_timeouts.h"
++#include "base/task/single_thread_task_runner.h"
++#include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
++#include "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
++#include "chrome/browser/ui/color/arcium_space_palette_initializer.h"
++#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
++#include "chrome/browser/ui/omnibox/arcium_command_example_session.h"
++#include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
++#include "chrome/browser/ui/views/helium/surface_style.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_bar_material.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_panel.h"
++#include "components/prefs/pref_registry_simple.h"
++#import "components/remote_cocoa/app_shim/native_window_background_view.h"
++#include "components/prefs/testing_pref_service.h"
++#include "mojo/core/embedder/embedder.h"
++#include "ui/accessibility/platform/ax_platform_for_test.h"
++#include "ui/base/ime/init/input_method_initializer.h"
++#include "ui/base/resource/resource_bundle.h"
++#include "ui/base/ui_base_paths.h"
++#include "ui/color/arcium_palette.h"
++#include "ui/color/color_provider_manager.h"
++#include "ui/compositor/test/test_context_factories.h"
++#include "ui/display/screen.h"
++#include "ui/gfx/font_util.h"
++#include "ui/gfx/image/image_skia_util_mac.h"
++#include "ui/compositor/compositor.h"
++#include "ui/gl/init/gl_factory.h"
++#include "ui/views/controls/native/native_view_host.h"
++#include "ui/views/test/desktop_test_views_delegate.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/widget/widget_delegate.h"
++
++@interface ArciumStudioBackdrop : NSView <NativeWindowBackgroundView>
++@end
++@implementation ArciumStudioBackdrop
++- (BOOL)isOpaque { return YES; }
++- (NSView*)hitTest:(NSPoint)point { return nil; }
++- (void)drawRect:(NSRect)dirtyRect {
++  BOOL dark = [[self.effectiveAppearance bestMatchFromAppearancesWithNames:
++      @[NSAppearanceNameDarkAqua, NSAppearanceNameAqua]] isEqual:NSAppearanceNameDarkAqua];
++  NSColor* start = dark ? [NSColor colorWithSRGBRed:0.17 green:0.20 blue:0.27 alpha:1]
++                        : [NSColor colorWithSRGBRed:0.86 green:0.90 blue:0.97 alpha:1];
++  NSColor* end = dark ? [NSColor colorWithSRGBRed:0.31 green:0.20 blue:0.19 alpha:1]
++                      : [NSColor colorWithSRGBRed:0.98 green:0.85 blue:0.78 alpha:1];
++  [[[NSGradient alloc] initWithStartingColor:start endingColor:end]
++      drawInRect:self.bounds angle:25];
++}
++@end
++
++namespace {
++class Studio;
++}
++
++@interface ArciumNativeStudioDelegate : NSObject <ArciumSettingsUIDelegate, NSApplicationDelegate>
++@property(nonatomic, assign) Studio* studio;
++- (void)toggleStudioAppearance:(id)sender;
++- (void)resetStudio:(id)sender;
++- (void)copyStudio:(id)sender;
++- (void)quitStudio:(id)sender;
++@end
++
++namespace {
++
++NSDictionary* DefaultLayout() {
++  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @5,
++           @"connected": @YES, @"scope_width": @0, @"scope_tints": @YES,
++           @"glow_strength": @0.75, @"activity_dots": @YES, @"result_count": @8};
++}
++
++std::vector<arcium::CommandScopeDescriptor> ExampleScopes() {
++  using namespace arcium;
++  std::vector<CommandScopeDescriptor> scopes;
++  const struct { const char* id; const char16_t* label; SkColor color; const char* symbol; } fixtures[] = {
++      {"omni", u"Omni", SkColorSetRGB(174, 112, 245), "sparkles"},
++      {"web", u"Web", SkColorSetRGB(100, 159, 255), "globe"},
++      {"saved", u"Saved", SkColorSetRGB(205, 182, 112), "pin.fill"},
++      {"youtube", u"YouTube", SkColorSetRGB(240, 75, 70), "play.rectangle.fill"},
++      {"x", u"X", SkColorSetRGB(210, 215, 220), "xmark"},
++      {"chatgpt", u"ChatGPT", SkColorSetRGB(89, 206, 157), "bubble.left.and.text.bubble.right.fill"}};
++  for (const auto& fixture : fixtures) {
++    CommandScopeDescriptor scope;
++    scope.id = fixture.id; scope.label = fixture.label; scope.tint = fixture.color;
++    NSImage* icon = [NSImage imageWithSystemSymbolName:[NSString stringWithUTF8String:fixture.symbol]
++                             accessibilityDescription:nil];
++    NSColor* tint = [NSColor colorWithSRGBRed:SkColorGetR(fixture.color) / 255.0
++                                      green:SkColorGetG(fixture.color) / 255.0
++                                       blue:SkColorGetB(fixture.color) / 255.0 alpha:1];
++    icon = [icon imageWithSymbolConfiguration:
++        [NSImageSymbolConfiguration configurationWithPaletteColors:@[tint]]];
++    scope.icon = gfx::ImageSkiaFromNSImage(icon);
++    scope.provider_id = (scope.id == "omni" || scope.id == "web") ? "native" : "arcium";
++    scope.placeholder = u"Search " + scope.label;
++    scope.search_verb = u"Search " + scope.label;
++    scope.accessibility_description = scope.placeholder;
++    if (scope.id == "omni") {
++      scope.placeholder = u"Search tabs, Pins, Favorites and the web";
++      scope.accessibility_description = u"Search all browser results";
++    } else if (scope.id == "saved") {
++      scope.placeholder = u"Search Pins, Favorites and folders";
++      scope.accessibility_description = u"Search saved Pins, Favorites and folders";
++    }
++    scopes.push_back(std::move(scope));
++  }
++  return scopes;
++}
++
++// Host composition follows the production CommandSettingsPreviewView. All
++// command content, input handling, layout, paint and motion stay in the real view.
++class StudioRoot : public views::View {
++ public:
++  explicit StudioRoot(std::unique_ptr<arcium::CommandPanelView> panel) {
++    controls_ = AddChildView(std::make_unique<views::NativeViewHost>());
++    panel_ = AddChildView(std::move(panel));
++    panel_->SetEmbedded(true);
++    preview_height_ = panel_->GetPreferredSize().height();
++  }
++  views::NativeViewHost* controls() { return controls_; }
++  arcium::CommandPanelView* panel() { return panel_; }
++  void SetRefresh(base::RepeatingClosure refresh) { refresh_ = std::move(refresh); }
++  int Resize(std::optional<int> height) {
++    if (height) {
++      preview_height_ = *height;
++      InvalidateLayout();
++      if (GetWidget()) GetWidget()->GetRootView()->DeprecatedLayoutImmediately();
++    }
++    return panel_->height();
++  }
++ protected:
++  void Layout(PassKey) override {
++    const int controls_width = std::min(520, std::max(0, width() - 320));
++    controls_->SetBounds(0, 0, controls_width, height());
++    panel_->SetBounds(controls_width + 16, 16,
++        std::max(1, width() - controls_width - 32),
++        std::clamp(preview_height_, 1, std::max(1, height() - 32)));
++    if (refresh_) refresh_.Run();
++  }
++ private:
++  raw_ptr<views::NativeViewHost> controls_;
++  raw_ptr<arcium::CommandPanelView> panel_;
++  int preview_height_ = 1;
++  base::RepeatingClosure refresh_;
++};
++
++class StudioWidget : public views::Widget {
++ public:
++  void SetDark(bool dark) {
++    dark_ = dark;
++    GetNativeWindow().GetNativeNSWindow().appearance =
++        [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
++    for (NSView* view in GetNativeWindow().GetNativeNSWindow().contentView.subviews)
++      if ([view isKindOfClass:ArciumStudioBackdrop.class]) view.needsDisplay = YES;
++    ThemeChanged();
++  }
++ protected:
++  ui::ColorProviderKey GetColorProviderKey() const override {
++    auto key = views::Widget::GetColorProviderKey();
++    ui::ArciumPalette palette;
++    key.color_mode = dark_ ? ui::ColorProviderKey::ColorMode::kDark
++                          : ui::ColorProviderKey::ColorMode::kLight;
++    key.user_color = palette.seed;
++    key.user_color_source = ui::ColorProviderKey::UserColorSource::kAccent;
++    key.custom_theme = nullptr;
++    key.app_controller = arcium::GetSpacePaletteInitializer(palette);
++    return key;
++  }
++ private:
++  bool dark_ = true;
++};
++
++class Studio {
++ public:
++  explicit Studio(base::RepeatingClosure quit) : quit_(std::move(quit)) {
++    auto* registry = prefs_.registry();
++    registry->RegisterDictionaryPref(arcium::kCommandPanelLayoutPref);
++    registry->RegisterIntegerPref(arcium::kCommandBarAppearancePref,
++                                  arcium::kCommandBarAppearanceAutomatic);
++    registry->RegisterStringPref(helium::kArciumSurfaceSetPref, helium::kSurfaceSetGlass);
++    registry->RegisterDictionaryPref(helium::kArciumSurfaceTuningPref);
++    registry->RegisterDictionaryPref(helium::kArciumChromeAppearancePref,
++        helium::SerializeGlassSurfaceConfiguration(helium::DefaultGlassSurfaceConfiguration()));
++    layout_ = [NSUserDefaults.standardUserDefaults dictionaryForKey:@"configuration"] ?: DefaultLayout();
++    if (!arcium_settings::CommandPanelLayoutFromNSObject(layout_)) layout_ = DefaultLayout();
++    prefs_.SetDict(arcium::kCommandPanelLayoutPref,
++                  std::move(*arcium_settings::CommandPanelLayoutFromNSObject(layout_)));
++    dark_ = [NSUserDefaults.standardUserDefaults objectForKey:@"dark"]
++                ? [NSUserDefaults.standardUserDefaults boolForKey:@"dark"] : true;
++    delegate_ = [[ArciumNativeStudioDelegate alloc] init];
++    delegate_.studio = this; NSApp.delegate = delegate_;
++    const auto library = [NSBundle.mainBundle.privateFrameworksURL
++                          URLByAppendingPathComponent:@"libArciumSettingsUI.dylib"];
++    CHECK(dlopen(library.fileSystemRepresentation, RTLD_NOW | RTLD_LOCAL)) << dlerror();
++    Class controller_class = NSClassFromString(@"ArciumSettingsUIController");
++    CHECK(controller_class);
++    using Initialize = id (*)(id, SEL, NSDictionary*, id);
++    controller_ = reinterpret_cast<Initialize>(objc_msgSend)(
++        [controller_class alloc], NSSelectorFromString(@"initWithSnapshot:delegate:"), Snapshot(), delegate_);
++    using Editor = NSViewController* (*)(id, SEL, BOOL);
++    controls_ = reinterpret_cast<Editor>(objc_msgSend)(controller_,
++        NSSelectorFromString(@"makeCommandBarEditorWithPreviewAvailable:"), YES);
++    CHECK(controls_);
++    auto panel = std::make_unique<arcium::CommandPanelView>(
++        std::make_unique<arcium::CommandExampleSession>(ExampleScopes()),
++        base::BindRepeating(&Studio::RequestClose, base::Unretained(this)), base::DoNothing());
++    auto root = std::make_unique<StudioRoot>(std::move(panel)); root_ = root.get();
++    widget_delegate_ = std::make_unique<views::WidgetDelegate>();
++    widget_delegate_->SetCanActivate(true);
++    widget_delegate_->SetTitle(u"Command Bar Studio · Native renderer");
++    widget_delegate_->SetContentsView(std::move(root));
++    widget_delegate_->RegisterWindowClosingCallback(base::BindOnce(&Studio::RequestClose, base::Unretained(this)));
++    widget_ = std::make_unique<StudioWidget>();
++    views::Widget::InitParams params(views::Widget::InitParams::CLIENT_OWNS_WIDGET,
++                                     views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
++    params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
++    NSRect visible = NSScreen.mainScreen.visibleFrame;
++    params.bounds = gfx::Rect(100, 100, std::min(1380, static_cast<int>(visible.size.width) - 48),
++                             std::min(760, static_cast<int>(visible.size.height) - 64));
++    params.delegate = widget_delegate_.get(); widget_->Init(std::move(params));
++    widget_->GetCompositor()->SetBackgroundColor(SK_ColorTRANSPARENT);
++    root_->controls()->Attach(gfx::NativeView(controls_.view));
++    root_->panel()->SetHeightResizeCallback(base::BindRepeating(
++        [](Studio* owner, std::optional<int> height, base::TimeDelta) {
++          return owner->root_->Resize(height);
++        }, base::Unretained(this)));
++    root_->panel()->BindPreferences(&prefs_, base::BindRepeating([] { return 1.f; }),
++        base::BindRepeating([](Studio* owner) { return std::max(280, owner->root_->panel()->width()); },
++                            base::Unretained(this)));
++    material_ = std::make_unique<arcium::CommandBarMaterial>(widget_.get(), &prefs_,
++        base::BindRepeating([](Studio* owner) {
++          arcium::CommandBarMaterial::Clip clip;
++          auto bounds = owner->root_->panel()->bounds();
++          clip.insets = gfx::Insets::TLBR(bounds.y(), bounds.x(),
++              owner->root_->height() - bounds.bottom(), owner->root_->width() - bounds.right());
++          clip.contour = owner->root_->panel()->GetContourPath().makeOffset(bounds.x(), bounds.y());
++          return clip;
++        }, base::Unretained(this)),
++        base::BindRepeating([](Studio* owner, bool enabled) {
++          owner->root_->panel()->SetNativeMaterial(enabled);
++          owner->RestoreBackdropOrder();
++        }, base::Unretained(this)));
++    auto refresh = base::BindRepeating([](Studio* owner) {
++      owner->RefreshMaterial();
++    }, base::Unretained(this));
++    root_->SetRefresh(refresh); root_->panel()->SetGeometryChangedCallback(refresh);
++    NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
++    backdrop_ = [[ArciumStudioBackdrop alloc] initWithFrame:window.contentView.bounds];
++    backdrop_.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++    [window.contentView addSubview:backdrop_ positioned:NSWindowBelow relativeTo:nil];
++    window.backgroundColor = [NSColor.windowBackgroundColor colorWithAlphaComponent:0.001];
++    window.opaque = NO;
++    window.movableByWindowBackground = YES;
++    InstallMenu(); widget_->SetDark(dark_); [NSApp finishLaunching];
++    widget_->GetRootView()->DeprecatedLayoutImmediately(); RefreshMaterial();
++    widget_->Show(); widget_->Activate(); root_->panel()->FocusInput();
++    [NSApp activateIgnoringOtherApps:YES];
++    NSArray<NSString*>* arguments = NSProcessInfo.processInfo.arguments;
++    NSUInteger ready_index = [arguments indexOfObject:@"--ready-file"];
++    if (ready_index != NSNotFound && ready_index + 1 < arguments.count) {
++      base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
++          base::BindOnce([](std::string path) {
++            @autoreleasepool {
++              NSDictionary* signal = @{@"pid": @(NSProcessInfo.processInfo.processIdentifier),
++                                       @"bundle": NSBundle.mainBundle.bundlePath};
++              NSData* data = [NSJSONSerialization dataWithJSONObject:signal options:0 error:nil];
++              [data writeToFile:[NSString stringWithUTF8String:path.c_str()] atomically:YES];
++            }
++          }, std::string([arguments[ready_index + 1] UTF8String])), base::Milliseconds(500));
++    }
++  }
++  ~Studio() {
++    closing_ = true; delegate_.studio = nullptr; NSApp.delegate = nil;
++    material_.reset();
++    if (widget_) {
++      root_->controls()->Detach(); widget_->CloseNow(); widget_.reset();
++    }
++    widget_delegate_.reset(); controls_ = nil; controller_ = nil;
++  }
++  void RefreshMaterial() {
++    if (material_) material_->Refresh();
++    // Material can reinsert its native view at the bottom. Keep the fixture
++    // behind it, including after remote_cocoa reorders hosted child views.
++    RestoreBackdropOrder();
++  }
++  void RestoreBackdropOrder() {
++    if (backdrop_ && backdrop_.superview.subviews.firstObject != backdrop_)
++      [backdrop_.superview addSubview:backdrop_ positioned:NSWindowBelow relativeTo:nil];
++  }
++  void RequestClose() {
++    if (closing_) return; closing_ = true;
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE, quit_);
++  }
++  void Change(NSString* key, id value) {
++    if (![key isEqualToString:@"command_panel_layout"]) return;
++    auto accepted = arcium_settings::CommandPanelLayoutFromNSObject(value);
++    if (!accepted) return;
++    NSMutableDictionary* normalized = [value mutableCopy];
++    normalized[@"scope_width"] = @(*accepted->FindInt("scope_width"));
++    layout_ = [normalized copy];
++    [NSUserDefaults.standardUserDefaults setObject:layout_ forKey:@"configuration"];
++    prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
++    // Never echo a snapshot while a SwiftUI binding transaction is active.
++    if (snapshot_pending_) return; snapshot_pending_ = true;
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(FROM_HERE,
++        base::BindOnce([](base::WeakPtr<Studio> owner) {
++          if (!owner) return; owner->snapshot_pending_ = false; owner->UpdateSnapshot();
++        }, weak_factory_.GetWeakPtr()));
++  }
++  void ToggleAppearance() {
++    dark_ = !dark_; [NSUserDefaults.standardUserDefaults setBool:dark_ forKey:@"dark"];
++    widget_->SetDark(dark_); UpdateSnapshot();
++  }
++  void Reset() {
++    Change(@"command_panel_layout", DefaultLayout()); root_->panel()->SetInvocation(true);
++    root_->panel()->FocusInput();
++  }
++  void Copy() {
++    NSData* data = [NSJSONSerialization dataWithJSONObject:layout_ options:NSJSONWritingPrettyPrinted error:nil];
++    [NSPasteboard.generalPasteboard clearContents];
++    [NSPasteboard.generalPasteboard setString:[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] forType:NSPasteboardTypeString];
++  }
++ private:
++  NSDictionary* Snapshot() const {
++    NSString* mode = dark_ ? @"dark" : @"light";
++    return @{@"available": @YES, @"appearance": @{
++      @"mode": mode, @"systemMode": mode, @"webMode": mode,
++      @"webModeAvailable": @YES, @"webModeManaged": @NO,
++      @"commandPanelLayoutAvailable": @YES, @"commandPanelLayoutManaged": @NO,
++      @"commandPanelLayout": layout_, @"spacePalette": @{@"available": @NO}}};
++  }
++  void UpdateSnapshot() {
++    using Update = void (*)(id, SEL, NSDictionary*);
++    reinterpret_cast<Update>(objc_msgSend)(controller_, NSSelectorFromString(@"updateSnapshot:"), Snapshot());
++  }
++  void InstallMenu() {
++    NSMenu* bar = [[NSMenu alloc] init];
++    NSMenuItem* app_item = [[NSMenuItem alloc] init]; [bar addItem:app_item];
++    NSMenu* menu = [[NSMenu alloc] initWithTitle:@"Studio"]; app_item.submenu = menu;
++    const struct { NSString* title; SEL action; NSString* key; } items[] = {
++      {@"Light / Dark", @selector(toggleStudioAppearance:), @"d"},
++      {@"Reset examples and settings", @selector(resetStudio:), @"r"},
++      {@"Copy configuration", @selector(copyStudio:), @""},
++      {@"Quit Command Bar Studio", @selector(quitStudio:), @"q"}};
++    for (const auto& item : items) {
++      NSMenuItem* entry = [[NSMenuItem alloc] initWithTitle:item.title action:item.action keyEquivalent:item.key];
++      entry.target = delegate_; [menu addItem:entry];
++    }
++    NSMenuItem* edit_item = [[NSMenuItem alloc] initWithTitle:@"Edit" action:nil keyEquivalent:@""];
++    [bar addItem:edit_item]; NSMenu* edit = [[NSMenu alloc] initWithTitle:@"Edit"]; edit_item.submenu = edit;
++    for (const auto& item : std::vector<std::pair<NSString*, SEL>>{
++             {@"Cut", @selector(cut:)}, {@"Copy", @selector(copy:)},
++             {@"Paste", @selector(paste:)}, {@"Select All", @selector(selectAll:)}}) {
++      NSString* key = [item.first isEqualToString:@"Cut"] ? @"x" : [item.first isEqualToString:@"Copy"] ? @"c" : [item.first isEqualToString:@"Paste"] ? @"v" : @"a";
++      [edit addItemWithTitle:item.first action:item.second keyEquivalent:key];
++    }
++    NSApp.mainMenu = bar;
++  }
++  TestingPrefServiceSimple prefs_;
++  NSDictionary* layout_;
++  ArciumNativeStudioDelegate* delegate_;
++  NSViewController* controller_;
++  NSViewController* controls_;
++  ArciumStudioBackdrop* backdrop_ = nil;
++  raw_ptr<StudioRoot> root_ = nullptr;
++  std::unique_ptr<views::WidgetDelegate> widget_delegate_;
++  std::unique_ptr<StudioWidget> widget_;
++  std::unique_ptr<arcium::CommandBarMaterial> material_;
++  base::RepeatingClosure quit_;
++  bool dark_ = true, closing_ = false, snapshot_pending_ = false;
++  base::WeakPtrFactory<Studio> weak_factory_{this};
++};
++}  // namespace
++
++@implementation ArciumNativeStudioDelegate
++- (void)settingChangedWithKey:(NSString*)key value:(id)value { if (_studio) _studio->Change(key, value); }
++- (void)actionInvokedWithName:(NSString*)name payload:(NSDictionary*)payload {
++  if ([name isEqualToString:@"close_command_bar_editor"] && _studio) _studio->RequestClose();
++}
++- (void)toggleStudioAppearance:(id)sender { if (_studio) _studio->ToggleAppearance(); }
++- (void)resetStudio:(id)sender { if (_studio) _studio->Reset(); }
++- (void)copyStudio:(id)sender { if (_studio) _studio->Copy(); }
++- (void)quitStudio:(id)sender { if (_studio) _studio->RequestClose(); }
++- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
++  if (_studio) _studio->RequestClose(); return NSTerminateCancel;
++}
++@end
++
++int main(int argc, const char** argv) {
++  @autoreleasepool {
++    if (argc == 4 && std::string_view(argv[1]) == "--quit-owned") {
++      pid_t pid = static_cast<pid_t>(strtol(argv[2], nullptr, 10));
++      NSRunningApplication* running = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
++      if (!running) return 0;
++      NSURL* expected = [[NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[3]]]
++                          URLByResolvingSymlinksInPath];
++      if (![running.bundleIdentifier isEqualToString:@"org.arcium.CommandBarStudioNative"] ||
++          ![[running.executableURL URLByResolvingSymlinksInPath] isEqual:expected]) return 2;
++      if (![running terminate]) return 2;
++      NSDate* deadline = [NSDate dateWithTimeIntervalSinceNow:5];
++      while (!running.terminated && deadline.timeIntervalSinceNow > 0)
++        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
++      return running.terminated ? 0 : 2;
++    }
++    base::AtExitManager at_exit;
++    base::CommandLine::Init(argc, argv); TestTimeouts::Initialize();
++    ProcessSerialNumber psn = {0, kCurrentProcess};
++    TransformProcessType(&psn, kProcessTransformToForegroundApplication);
++    [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
++    ui::AXPlatformForTest accessibility;
++    auto* command = base::CommandLine::ForCurrentProcess();
++    base::FeatureList::InitInstance(command->GetSwitchValueASCII("enable-features"),
++                                    command->GetSwitchValueASCII("disable-features"));
++    NSURL* runtime = [NSBundle.mainBundle.privateFrameworksURL
++        URLByAppendingPathComponent:@"ArciumStudioRuntime.framework"];
++    base::apple::SetOverrideFrameworkBundlePath(base::FilePath(runtime.fileSystemRepresentation));
++    base::NoDestructor<base::TestMemoryConsumerRegistry> memory_consumers;
++    mojo::core::Init(); gl::init::InitializeGLOneOff(gl::GpuPreference::kDefault);
++    CHECK(base::i18n::InitializeICU()); ui::RegisterPathProvider();
++    base::TestDiscardableMemoryAllocator allocator;
++    base::DiscardableMemoryAllocator::SetInstance(&allocator); gfx::InitializeFonts();
++    base::test::TaskEnvironment tasks(base::test::TaskEnvironment::MainThreadType::UI);
++    ui::TestContextFactories factories(false, /*output_to_window=*/true);
++    NSURL* pak = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"ui_test.pak"];
++    ui::ResourceBundle::InitSharedInstanceWithPakPath(base::FilePath(pak.fileSystemRepresentation));
++    ui::ColorProviderManager::Get().AppendColorProviderInitializer(base::BindRepeating(
++        [](ui::ColorProvider* provider, const ui::ColorProviderKey& key) {
++          if (key.app_controller) key.app_controller->AddColorMixers(provider, key);
++        }));
++    ui::InitializeInputMethodForTesting();
++    {
++      views::DesktopTestViewsDelegate views_delegate;
++      views_delegate.set_context_factory(factories.GetContextFactory());
++      display::ScopedNativeScreen screen;
++      base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
++      base::test::ScopedDisableRunLoopTimeout no_timeout;
++      { Studio studio(run_loop.QuitClosure()); run_loop.Run(); }
++      base::RunLoop().RunUntilIdle();
++    }
++    ui::ResourceBundle::CleanupSharedInstance();
++    ui::ShutdownInputMethodForTesting();
++    return 0;
++  }
++}
