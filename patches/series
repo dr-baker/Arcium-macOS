@@ -66,3 +66,4 @@ personal/arcium-command-editor-close-reason-macos.patch
 personal/arcium-ui-workshop-macos.patch
 personal/arcium-command-design-presets-macos.patch
 personal/arcium-command-bar-styles-macos.patch
+personal/arcium-command-design-tokens-macos.patch

@@ -41,6 +41,9 @@ def inputs(root):
         result.update(path for path in (repo / 'resources').rglob('*')
                       if path.is_file() and 'generated' not in path.relative_to(repo / 'resources').parts)
     lab = root / 'devutils/command-bar-studio'
+    for name in ('helium-chromium/devutils/command_design.py',
+                 'helium-chromium/devutils/ui/command_bar_design.json'):
+        if (root / name).is_file(): result.add(root / name)
     result.update(lab.glob('*.py'))
     result.add(lab / 'native_host.mm')
     for directory in ('assets',):

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -266,6 +267,54 @@ def controls(launch_app=True, jobs=6):
     return iterate(jobs, launch_app=launch_app)
 
 
+def verify_design_inputs(source_root):
+    # A long-lived watcher must execute the captured generator, not a cached
+    # import from the live checkout or a previous generation.
+    path = source_root / 'devutils/command-bar-studio/design_tokens.py'
+    spec = importlib.util.spec_from_file_location('frozen_design_tokens', path)
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    generator.verify(source_root)
+
+
+def edit_design(state, edits, reset=False):
+    path = state / 'scenario.json'
+    if not path.exists(): raise RuntimeError('Start this Studio instance before editing its design')
+    if path.stat().st_size > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
+    original = path.read_bytes()
+    document = json.loads(original)
+    if (document.get('schema') != 'arcium-ui-workshop' or document.get('version') != 1
+            or document.get('component') != 'command-bar' or not isinstance(document.get('layout'), dict)):
+        raise RuntimeError('This instance has no supported production layout')
+    schema = json.loads((ROOT / 'helium-chromium/devutils/ui/command_bar_design.json').read_text())
+    tokens = {token['key']: token for token in schema['tokens']}
+    values = {} if reset else dict(document['layout'].get('design', {}))
+    for edit in edits:
+        key, separator, raw = edit.partition('=')
+        if not separator or key not in tokens: raise ValueError(f'Unknown design parameter: {key}')
+        token = tokens[key]
+        if token['type'] == 'color':
+            if raw and not re.fullmatch('#[0-9a-fA-F]{6}', raw): raise ValueError(f'Invalid color: {key}')
+            value = raw.upper()
+        else:
+            value = json.loads(raw)
+            if (type(value) not in (int, float) or not math.isfinite(value)
+                    or not token['min'] <= value <= token['max']
+                    or token['type'] == 'int' and int(value) != value):
+                raise ValueError(f'Out-of-range design parameter: {key}')
+        if value == token['default']: values.pop(key, None)
+        else: values[key] = value
+    if values: document['layout']['design'] = values
+    else: document['layout'].pop('design', None)
+    data = json.dumps(document, indent=2) + '\n'
+    if len(data.encode()) > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
+    if path.read_bytes() != original: raise RuntimeError('Scenario changed during edit; retry with current values')
+    temporary = state / 'scenario.pending.json'
+    temporary.write_text(data)
+    temporary.replace(path)
+    return path
+
+
 def iterate(jobs, keep_edits=False, launch_app=True):
     import sdk
     import iteration
@@ -273,6 +322,7 @@ def iterate(jobs, keep_edits=False, launch_app=True):
         start = time.monotonic()
         extra = sdk.experiment_inputs() if keep_edits else None
         generation = iteration.capture(ROOT, STATE_ROOT / 'inputs', extra_files=extra) if extra else iteration.capture(ROOT, STATE_ROOT / 'inputs')
+        verify_design_inputs(generation.root)
         options = {}
         if extra:
             options['experiments'] = {name.removeprefix('.sdk-experiments/'): (generation.root / name, generation.files[name])
@@ -322,12 +372,14 @@ def watch(jobs, keep_edits, interval):
 def main():
     global STATE, INSTANCE
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['run', 'build', 'bootstrap', 'capture', 'package', 'controls', 'launch', 'test', 'watch', 'scenario'], nargs='?', default='run')
+    parser.add_argument('action', choices=['run', 'build', 'bootstrap', 'capture', 'package', 'controls', 'launch', 'test', 'watch', 'scenario', 'design'], nargs='?', default='run')
     parser.add_argument('--build-dir', type=Path, default=Path(os.environ['HELIUM_BUILD_DIR']) if os.environ.get('HELIUM_BUILD_DIR') else None)
     parser.add_argument('--jobs', type=int, default=6)
     parser.add_argument('--fixture', choices=['mixed', 'empty', 'long', 'streaming'], default='mixed')
     parser.add_argument('--scenario-file', type=Path, help='Load a tooling scenario without compiling')
     parser.add_argument('--keep-edits', action='store_true')
+    parser.add_argument('--set', dest='design_edits', action='append', default=[], metavar='KEY=VALUE')
+    parser.add_argument('--reset-design', action='store_true')
     parser.add_argument('--no-launch', action='store_true', help='Package controls without replacing the running app')
     parser.add_argument('--instance', help='Independent app/configuration identity; watch and test use separate defaults')
     parser.add_argument('--poll-interval', type=float, default=0.25)
@@ -337,6 +389,10 @@ def main():
     INSTANCE = args.instance or {'watch': 'watch', 'test': 'validation'}.get(args.action, 'user')
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,31}', INSTANCE): parser.error('Invalid instance name')
     STATE = STATE_ROOT if INSTANCE == 'user' else STATE_ROOT / 'instances' / INSTANCE
+    if args.action == 'design':
+        if not args.design_edits and not args.reset_design: parser.error('design needs --set or --reset-design')
+        print(edit_design(STATE, args.design_edits, args.reset_design))
+        return
     if args.action == 'scenario':
         STATE.mkdir(parents=True, exist_ok=True)
         document = {'schema': 'arcium-ui-workshop', 'version': 1, 'component': 'command-bar',
@@ -378,6 +434,7 @@ def main():
         import sdk, iteration
         with iteration.build_lock(STATE_ROOT):
             generation = iteration.capture(ROOT, STATE_ROOT / 'inputs')
+            verify_design_inputs(generation.root)
             sdk.export(args.build_dir / 'src')
             generation.require_current()
             executable = sdk.build(args.jobs, source_root=generation.root)

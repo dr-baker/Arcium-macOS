@@ -46,6 +46,50 @@ Choose **Minimal**, **Subtle**, **Stacked** or **Peek** for scope geometry.
 Style changes preserve result count, labels, icons and lighting. A geometry
 combination outside the four styles is shown as Custom.
 
+## Live design parameters
+
+Open the **Design** disclosure groups beside the preview. Geometry, typography,
+lighting, motion and color values update the production renderer without a
+build or restart. Reset design values restores compiled defaults and preserves
+the selected style and other command-bar settings. A color's Theme button
+removes its override. Import and export include nondefault design values.
+
+The browser reads the same optional `layout.design` dictionary from its existing
+profile preference. Values are validated on preference changes and cached as
+typed fields on the panel. Paint, layout, typing and animation callbacks do not
+parse dictionaries or read files. Paint-only edits preserve result views and
+provider state; geometry edits retain query, selection and result identities.
+The browser has no design-file watcher. Studio's existing scenario polling is
+independent development tooling.
+
+For scripted iteration on an already-running instance:
+
+```sh
+studio=devutils/command-bar-studio/studio
+$studio design --instance workshop --set row_height=48 --set glow_softness=12
+$studio design --instance workshop --set 'selection_color=#C7B47A'
+$studio design --instance workshop --reset-design
+```
+
+The CLI validates all edits before atomically replacing the isolated scenario.
+The running instance observes file edits on its 200 ms polling interval; changes
+from the controls use the preference callback directly.
+
+The canonical defaults, ranges and editor descriptors are in core
+`devutils/ui/command_bar_design.json`. To change the defaults for future profiles,
+edit that schema and run:
+
+```sh
+python3 devutils/command-bar-studio/design_tokens.py
+python3 devutils/command-bar-studio/design_tokens.py --check
+```
+
+This generates the owning production C++ header and Swift descriptors in their
+patches. Native iterations verify the captured generators and both outputs
+before compiling. Compiled-default changes require a browser build and matching
+SDK refresh; ordinary live values do not. New layout algorithms, drawing
+techniques and interactions remain source changes.
+
 ## Scenarios without compiling
 
 ```sh
@@ -62,7 +106,7 @@ Search publications have fresh revisions and query epochs. Cancelled queries
 cannot publish into a later search. Actions remain inert.
 
 A scenario uses this envelope. `layout` accepts the production eight or nine
-fields. `context` can supply UI scale, light or dark mode, palette colors,
+fields and an optional sparse `design` dictionary. `context` can supply UI scale, light or dark mode, palette colors,
 command material, surface set and the production chrome appearance dictionary.
 
 ```json

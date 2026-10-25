@@ -19,6 +19,9 @@
 #include "base/memory_coordinator/test_memory_consumer_registry.h"
 #include "base/apple/bundle_locations.h"
 #include "base/command_line.h"
+#include "ui/compositor/canvas_painter.h"
+#include "ui/views/paint_info.h"
+#include "ui/views/controls/scroll_view.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
 #include "base/json/json_writer.h"
@@ -153,8 +156,10 @@ class StudioRoot : public views::View {
   void Layout(PassKey) override {
     const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
     controls_->SetBounds(0, 0, controls_width, height());
-    panel_->SetBounds(controls_width + 16, 16,
-        std::max(1, width() - controls_width - 32),
+    const int available = std::max(1, width() - controls_width - 32);
+    const int panel_width = std::min(available, panel_->GetPreferredSize().width());
+    panel_->SetBounds(controls_width + 16 + (available - panel_width) / 2, 16,
+        panel_width,
         std::clamp(preview_height_, 1, std::max(1, height() - 32)));
     if (refresh_) refresh_.Run();
   }
@@ -354,6 +359,15 @@ class Studio {
         ? arcium_settings::CommandPanelLayoutFromNSObject(FoundationDictionary(*document.FindDict("layout")))
         : arcium_settings::CommandPanelLayoutFromNSObject(layout_);
     if (!accepted) { fprintf(stderr, "Studio: invalid design layout; previous scenario retained\n"); return false; }
+    auto previous_context = scenario_.Clone(); previous_context.Remove("layout");
+    auto next_context = document.Clone(); next_context.Remove("layout");
+    if (!scenario_bytes_.empty() && previous_context == next_context) {
+      scenario_ = std::move(document);
+      layout_ = FoundationDictionary(*accepted);
+      prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
+      UpdateSnapshot();
+      return true;
+    }
     const base::AutoReset<bool> applying(&applying_scenario_, true);
     if (auto* popup = arcium::CommandPanelPresentation::Get(root_)) popup->Destroy(true);
     arcium::workshop::ApplyAccessibilityContext(document);
@@ -561,6 +575,50 @@ class Studio {
         base::BindOnce(&Studio::AdvanceWindowLifecycle, weak_factory_.GetWeakPtr()),
         base::Milliseconds(75));
   }
+  bool RunRenderBenchmark(const std::string& report_path) {
+    root_->SetWorkshopMode();
+    widget_->SetBounds(gfx::Rect(120, 120, 1100, 760));
+    widget_->GetRootView()->DeprecatedLayoutImmediately();
+    auto* panel = root_->panel();
+    panel->input_for_testing()->SetText(u"");
+    panel->ContentsChanged(panel->input_for_testing(), u"");
+    NSMutableDictionary* result = [NSMutableDictionary dictionary];
+    for (NSString* phase in @[@"paint", @"typing", @"scopes"]) {
+      panel->input_for_testing()->SetText(u"");
+      panel->ContentsChanged(panel->input_for_testing(), u"");
+      std::vector<double> timings;
+      SkBitmap bitmap;
+      for (int i = 0; i < 280; ++i) {
+        const auto started = base::TimeTicks::Now();
+        if ([phase isEqualToString:@"typing"]) {
+          const auto text = i % 2 ? u"Design" : u"Example";
+          panel->input_for_testing()->SetText(text);
+          panel->ContentsChanged(panel->input_for_testing(), text);
+        } else if ([phase isEqualToString:@"scopes"]) {
+          panel->HandleKeyEvent(nullptr,
+              ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RIGHT, 0));
+        }
+        widget_->GetRootView()->DeprecatedLayoutImmediately();
+        {
+          auto* root = widget_->GetRootView();
+          ui::CanvasPainter painter(&bitmap, root->size(), 1.f, SK_ColorTRANSPARENT, false);
+          root->Paint(views::PaintInfo::CreateRootPaintInfo(painter.context(), root->size()));
+        }
+        const double elapsed = (base::TimeTicks::Now() - started).InMicrosecondsF();
+        if (i >= 40) timings.push_back(elapsed);
+      }
+      std::sort(timings.begin(), timings.end());
+      uint64_t checksum = 1469598103934665603ULL;
+      const auto* bytes = static_cast<const uint8_t*>(bitmap.getPixels());
+      for (size_t i = 0; i < bitmap.computeByteSize(); ++i) checksum = (checksum ^ bytes[i]) * 1099511628211ULL;
+      result[phase] = @{@"samples": @(timings.size()), @"median_us": @(timings[120]),
+          @"p95_us": @(timings[228]), @"maximum_us": @(timings.back()),
+          @"last_bitmap_checksum": [NSString stringWithFormat:@"%llu", static_cast<unsigned long long>(checksum)]};
+    }
+    result[@"measurement"] = @"Synchronous CPU layout/record/raster with fake data; excludes native glass, GPU presentation and browser backend";
+    NSData* data = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
+    return [data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES];
+  }
   bool RunInteractionChecks(const std::string& report_path) {
     auto* panel = root_->panel();
     NSMutableDictionary* checks = [NSMutableDictionary dictionary];
@@ -626,6 +684,45 @@ class Studio {
     checks[@"live_reveal_changes_geometry"] = @(tabs_height == 42 && panel->scope_button_for_testing(0)->height() == 2);
     checks[@"reveal_edit_preserves_scope"] = @(panel->scope_for_testing() == saved_scope);
     checks[@"reveal_edit_preserves_query"] = @(panel->input_for_testing()->GetText() == u"Design");
+    // Bounded CPU update measurement, not a display-latency claim. Exercise the
+    // actual Objective-C validation -> PrefService observer -> typed view path.
+    auto* original_row = panel->scroll_for_testing()->contents()->children().empty()
+        ? nullptr : panel->scroll_for_testing()->contents()->children()[0].get();
+    const auto query = panel->input_for_testing()->GetText();
+    const auto selection_key = panel->CaptureSelectionKey();
+    const int row_count = panel->row_count_for_testing();
+    int design_geometry_notifications = 0;
+    panel->SetGeometryChangedCallback(base::BindRepeating([](int* count) { ++*count; },
+        base::Unretained(&design_geometry_notifications)));
+    std::vector<double> update_microseconds;
+    for (int i = 0; i < 500; ++i) {
+      trial[@"design"] = @{@"glow_softness": @(10 + i % 2), @"row_radius": @(i % 10)};
+      const auto started = base::TimeTicks::Now();
+      Change(@"command_panel_layout", trial);
+      update_microseconds.push_back((base::TimeTicks::Now() - started).InMicrosecondsF());
+    }
+    checks[@"design_paint_edits_skip_geometry"] = @(design_geometry_notifications == 0);
+    checks[@"design_paint_edits_retain_rows"] = @(panel->row_count_for_testing() == row_count &&
+        original_row && original_row == panel->scroll_for_testing()->contents()->children()[0].get());
+    checks[@"design_paint_edits_retain_input_selection"] = @(query == panel->input_for_testing()->GetText() &&
+        selection_key == panel->CaptureSelectionKey());
+    std::sort(update_microseconds.begin(), update_microseconds.end());
+    NSDictionary* design_metrics = @{@"samples": @500, @"median_update_us": @(update_microseconds[250]),
+        @"p95_update_us": @(update_microseconds[475]), @"maximum_update_us": @(update_microseconds.back()),
+        @"geometry_notifications": @(design_geometry_notifications),
+        @"cached_design_bytes": @(sizeof(arcium::CommandPanelDesign)),
+        @"measurement": @"CPU preference update only; no compositor presentation wait"};
+    panel->SetGeometryChangedCallback(base::BindRepeating(&Studio::RefreshMaterial, base::Unretained(this)));
+    trial[@"design"] = @{@"row_height": @56, @"panel_width": @500, @"search_height": @72,
+        @"input_font_size": @20, @"selection_ms": @35, @"text_color": @"#FF0000"};
+    apply(trial);
+    checks[@"design_geometry_updates_existing_panel"] = @(panel == root_->panel() &&
+        panel->scroll_for_testing()->contents()->children()[0]->height() == 56 &&
+        panel->GetPreferredSize().width() == 564);
+    checks[@"design_motion_updates_existing_animation"] = @(
+        panel->selection_animation_for_testing()->GetSlideDuration() == base::Milliseconds(35));
+    checks[@"design_geometry_retains_input_selection"] = @(query == panel->input_for_testing()->GetText() &&
+        selection_key == panel->CaptureSelectionKey());
     apply(saved_layout);
     panel->input_for_testing()->SetText(saved_query);
     panel->ContentsChanged(panel->input_for_testing(), saved_query);
@@ -651,7 +748,7 @@ class Studio {
     checks[@"explicit_close_requests_normal_shutdown"] = @(closing_);
     bool passed = true;
     for (NSNumber* value in checks.allValues) passed &= value.boolValue;
-    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks};
+    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks, @"design_metrics": design_metrics};
     NSData* data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
     if (![data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES]) return false;
     return passed;
@@ -821,7 +918,8 @@ int main(int argc, const char** argv) {
           if (key.app_controller) key.app_controller->AddColorMixers(provider, key);
         }));
     ui::InitializeInputMethodForTesting();
-    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report");
+    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report") &&
+        !command->HasSwitch("render-benchmark-report");
     {
       views::DesktopTestViewsDelegate views_delegate;
       views_delegate.set_context_factory(factories.GetContextFactory());
@@ -835,6 +933,14 @@ int main(int argc, const char** argv) {
               base::BindOnce([](base::WeakPtr<Studio> owner, base::FilePath path) {
                 if (owner) owner->RunWorkshopChecks(std::move(path));
               }, studio.GetWeakPtr(), command->GetSwitchValuePath("workshop-check-dir")), base::Milliseconds(800));
+        }
+        if (command->HasSwitch("render-benchmark-report")) {
+          base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+              base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, std::string path) {
+                if (!owner) return;
+                *passed = owner->RunRenderBenchmark(path); owner->RequestClose();
+              }, studio.GetWeakPtr(), &interaction_checks_passed,
+                 command->GetSwitchValueASCII("render-benchmark-report")), base::Milliseconds(800));
         }
         if (command->HasSwitch("interaction-check-report")) {
           base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,

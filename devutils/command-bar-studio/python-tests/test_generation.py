@@ -68,6 +68,20 @@ class GenerationTests(unittest.TestCase):
         self.assertEqual(first.root, second.root)
         self.assertEqual(first.identity, second.identity)
 
+    def test_design_schema_and_generator_are_frozen_and_supersede_candidates(self):
+        generator = self.root / 'helium-chromium/devutils/command_design.py'
+        schema = self.root / 'helium-chromium/devutils/ui/command_bar_design.json'
+        schema.parent.mkdir(parents=True)
+        schema.write_text('{"version":1}')
+        generator.write_text('original generator')
+        generation = iteration.capture(self.root, self.cache)
+        self.assertEqual((generation.root / schema.relative_to(self.root)).read_text(), '{"version":1}')
+        generator.write_text('new generator')
+        with self.assertRaises(iteration.SupersededIteration): generation.require_current()
+        next_generation = iteration.capture(self.root, self.cache)
+        schema.write_text('{"version":2}')
+        with self.assertRaises(iteration.SupersededIteration): next_generation.require_current()
+
     def test_modified_cached_generation_is_rejected(self):
         generation = iteration.capture(self.root, self.cache)
         cached = generation.root / 'patches/fixture.patch'
