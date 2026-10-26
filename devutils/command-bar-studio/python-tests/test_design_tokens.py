@@ -25,9 +25,16 @@ class DesignTokenTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 native.edit_design(state, ['row_height=50', 'glow_softness=true'])
             self.assertEqual(path.read_bytes(), original)
-            native.edit_design(state, ['row_height=50', 'text_color=#abcdef'])
+            native.edit_design(state, ['row_height=50', 'text_color=#abcdef',
+                                       'glow_width=1.5', 'glow_height=0.5', 'glow_softness=30'])
             updated = json.loads(path.read_text())
-            self.assertEqual(updated['layout']['design'], {'row_height': 50, 'text_color': '#ABCDEF'})
+            self.assertEqual(updated['layout']['design'], {'row_height': 50, 'text_color': '#ABCDEF',
+                'glow_width': 1.5, 'glow_height': 0.5, 'glow_softness': 30})
+            before_invalid = path.read_bytes()
+            for edits in (['glow_width=0.24'], ['glow_height=3.01'], ['glow_width=true'],
+                          ['glow_width=1.25', 'glow_height=0']):
+                with self.assertRaises(ValueError): native.edit_design(state, edits)
+                self.assertEqual(path.read_bytes(), before_invalid)
             for key in ('query', 'scope', 'selected_key'):
                 self.assertEqual(updated[key], document[key])
             native.edit_design(state, [], reset=True)

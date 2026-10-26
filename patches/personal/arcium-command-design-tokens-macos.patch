@@ -96,7 +96,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandDesign.swift
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,90 @@
 +// Generated from core devutils/ui/command_bar_design.json. Do not edit.
 +import Foundation
 +import CoreFoundation
@@ -127,7 +127,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        .init(id: "scope_radius", label: "Scope radius", group: "Geometry", initial: 13, range: 4...20, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "input_font_size", label: "Search text size", group: "Typography", initial: 18, range: 14...24, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "title_font_size", label: "Result text size", group: "Typography", initial: 14, range: 12...18, step: 1, integer: true, color: false, initialColor: ""),
-+        .init(id: "glow_softness", label: "Glow softness", group: "Lighting", initial: 20.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 1.0, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_height", label: "Glow height", group: "Lighting", initial: 1.0, range: 0.25...3.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_softness", label: "Glow blur", group: "Lighting", initial: 20.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_radiance", label: "Light output", group: "Lighting", initial: 0.48, range: 0.1...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
 +        .init(id: "inactive_scope_strength", label: "Unfocused scopes", group: "Lighting", initial: 0.66, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
 +        .init(id: "selected_scope_boost", label: "Selected scope boost", group: "Lighting", initial: 0.3, range: 0.0...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
@@ -235,8 +237,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -1693,6 +1693,9 @@ private struct ArciumCommandBarControls:
+@@ -1691,8 +1691,16 @@ private struct ArciumCommandBarControls:
+                         format: { "\(Int(($0 * 100).rounded()))%" },
+                         help: SHelp(description: "Adjust the glow behind command-bar scopes. 75% is the default strength."))
                      .accessibilityIdentifier("omnibox-scope-glow-strength")
++                    ForEach(ArciumCommandDesign.tokens.filter {
++                        ArciumCommandDesignSlider.glowShapeKeys.contains($0.id)
++                    }) { token in
++                        ArciumCommandDesignSlider(store: store, token: token)
++                    }
                  }
              }
 +            Section("Design") {
@@ -245,13 +254,34 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          }
          .disabled(!editable)
          .sheet(isPresented: $showingAdvanced) {
-@@ -1715,6 +1718,66 @@ private struct ArciumCommandBarControls:
-         }
+@@ -1716,6 +1724,82 @@ private struct ArciumCommandBarControls:
      }
  }
-+
+ 
 +// These controls edit the same profile dictionary consumed by CommandPanelView.
 +// The shared schema generates the descriptors and C++ defaults together.
++private struct ArciumCommandDesignSlider: View {
++    @ObservedObject var store: ArciumSettingsStore
++    let token: ArciumCommandDesign.Token
++    static let glowShapeKeys: Set<String> = ["glow_width", "glow_height", "glow_softness"]
++    private var value: Binding<Double> {
++        Binding(get: { store.snapshot.appearance.commandPanelLayout.design.number(token) },
++                set: { value in
++                    var layout = store.snapshot.appearance.commandPanelLayout
++                    layout.design.setNumber(value, for: token)
++                    store.setCommandPanelLayout(layout)
++                })
++    }
++    var body: some View {
++        SSlider(token.label, value: value, range: token.range, step: token.step,
++                format: { value in
++                    token.id.hasSuffix("_ms") ? "\(Int(value.rounded())) ms" :
++                    (token.integer || token.id == "glow_softness" ? "\(Int(value.rounded())) pt" : "\(Int((value * 100).rounded()))%")
++                })
++            .accessibilityIdentifier("command-design-" + token.id)
++    }
++}
++
 +private struct ArciumCommandDesignControls: View {
 +    @ObservedObject var store: ArciumSettingsStore
 +    private static let groups = ["Geometry", "Typography", "Lighting", "Motion", "Colors"]
@@ -260,9 +290,6 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        var layout = store.snapshot.appearance.commandPanelLayout
 +        edit(&layout.design)
 +        store.setCommandPanelLayout(layout)
-+    }
-+    private func numeric(_ token: ArciumCommandDesign.Token) -> Binding<Double> {
-+        Binding(get: { design.number(token) }, set: { value in change { $0.setNumber(value, for: token) } })
 +    }
 +    private func color(_ token: ArciumCommandDesign.Token) -> Binding<Color> {
 +        Binding(get: {
@@ -282,7 +309,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            ForEach(Self.groups, id: \.self) { group in
 +                DisclosureGroup(group) {
 +                    VStack(spacing: 12) {
-+                        ForEach(ArciumCommandDesign.tokens.filter { $0.group == group }) { token in
++                        ForEach(ArciumCommandDesign.tokens.filter {
++                            $0.group == group && !ArciumCommandDesignSlider.glowShapeKeys.contains($0.id)
++                        }) { token in
 +                            if token.color {
 +                                HStack {
 +                                    ColorPicker(token.label, selection: color(token), supportsOpacity: false)
@@ -292,12 +321,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                                        .accessibilityIdentifier("command-design-reset-" + token.id)
 +                                }
 +                            } else {
-+                                SSlider(token.label, value: numeric(token), range: token.range, step: token.step,
-+                                        format: { value in
-+                                            token.id.hasSuffix("_ms") ? "\(Int(value.rounded())) ms" :
-+                                            (token.integer || token.id == "glow_softness" ? "\(Int(value.rounded())) pt" : "\(Int((value * 100).rounded()))%")
-+                                        })
-+                                    .accessibilityIdentifier("command-design-" + token.id)
++                                ArciumCommandDesignSlider(store: store, token: token)
 +                            }
 +                        }
 +                    }.padding(.top, 8)
@@ -309,9 +333,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        }
 +    }
 +}
- 
++
  // A small style-selection diagram; the adjacent live preview uses production UI.
  private struct ArciumCommandStyleThumbnail: View {
+     let style: ArciumCommandPanelLayout.Style
+@@ -1827,4 +1911,3 @@ struct ArciumCommandBarEditorView: View
+         }
+     }
+ }
+-
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
