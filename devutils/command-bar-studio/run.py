@@ -101,41 +101,42 @@ def launch(app, extra_args=(), before_replace=None, writer_lease=None):
     ready = BUILD / 'launch-ready.json'
     ready.unlink(missing_ok=True)
     startup_started = time.monotonic()
-    with (BUILD / 'application.log').open('ab') as log:
-        process = subprocess.Popen([str(executable), '--ready-file', str(ready), *map(str, extra_args)], stdin=subprocess.DEVNULL, stdout=log,
-                                   stderr=log, start_new_session=True)
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f'New Studio exited with {process.returncode}; previous app was left open. See {BUILD / "application.log"}')
-        if ready.exists():
-            signal = json.loads(ready.read_text())
-            if signal == {'pid': process.pid, 'bundle': str(app)}: break
-        time.sleep(.1)
-    else:
-        command([executable, '--quit-owned', str(process.pid), str(executable)])
-        raise RuntimeError('New Studio did not become ready; previous app was left open.')
+    process = None
+    committed = False
     try:
+        with (BUILD / 'application.log').open('ab') as log:
+            process = subprocess.Popen([str(executable), '--ready-file', str(ready), *map(str, extra_args)], stdin=subprocess.DEVNULL, stdout=log,
+                                       stderr=log, start_new_session=True)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(f'New Studio exited with {process.returncode}; previous app was left open. See {BUILD / "application.log"}')
+            if ready.exists():
+                readiness = json.loads(ready.read_text())
+                if readiness == {'pid': process.pid, 'bundle': str(app)}: break
+            time.sleep(.1)
+        else:
+            raise RuntimeError('New Studio did not become ready; previous app was left open.')
         if before_replace: before_replace()
-    except BaseException:
-        command([executable, '--quit-owned', str(process.pid), str(executable)])
-        raise
-    if old:
-        try:
+        if old:
             if before_replace: before_replace()
-            command([executable, '--quit-owned', str(old['pid']), old['executable']])
-        except subprocess.CalledProcessError:
+            try:
+                command([executable, '--quit-owned', str(old['pid']), old['executable']])
+            except subprocess.CalledProcessError:
+                raise RuntimeError('Previous Studio could not quit normally; replacement was closed.')
+        (BUILD / 'last-launch-timing.json').write_text(json.dumps({'ready_seconds': time.monotonic() - startup_started, 'readiness': 'native compositor presentation callback for native host'}))
+        if writer_lease:
+            pending = Path(str(writer_lease) + '.pending')
+            pending.write_text(str(process.pid)); pending.replace(writer_lease)
+        state.write_text(json.dumps({'pid': process.pid, 'executable': str(executable)}, indent=2) + '\n')
+        committed = True
+        print(f'Command Bar Studio PID {process.pid}\n{app}')
+    finally:
+        # A new session does not receive the launcher's Ctrl-C. Retain ownership
+        # through readiness and publication, then normally close any candidate
+        # whose handoff did not finish. Never quit the previous app here.
+        if process is not None and not committed and process.poll() is None:
             command([executable, '--quit-owned', str(process.pid), str(executable)])
-            raise RuntimeError('Previous Studio could not quit normally; replacement was closed.')
-        except BaseException:
-            command([executable, '--quit-owned', str(process.pid), str(executable)])
-            raise
-    (BUILD / 'last-launch-timing.json').write_text(json.dumps({'ready_seconds': time.monotonic() - startup_started, 'readiness': 'native compositor presentation callback for native host'}))
-    if writer_lease:
-        pending = Path(str(writer_lease) + '.pending')
-        pending.write_text(str(process.pid)); pending.replace(writer_lease)
-    state.write_text(json.dumps({'pid': process.pid, 'executable': str(executable)}, indent=2) + '\n')
-    print(f'Command Bar Studio PID {process.pid}\n{app}')
 
 
 def build(jobs):
