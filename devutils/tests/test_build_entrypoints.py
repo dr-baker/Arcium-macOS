@@ -57,6 +57,10 @@ class EntrypointsTest(unittest.TestCase):
         self.assertTrue(checker.violations('devutils/he/resources.py',
                                           'def another():\n return ["ninja","chrome"]'))
         self.assertFalse(checker.violations('devutils/tests/fixture.py', 'subprocess.run(["ninja"])'))
+        self.assertFalse(checker.violations('devutils/command-bar-studio/sdk.py',
+                                           'def build():\n return ["ninja","-f","private.ninja"]'))
+        self.assertTrue(checker.violations('devutils/command-bar-studio/sdk.py',
+                                          'def another():\n return ["ninja","chrome"]'))
 
     def test_yaml_and_executable_documentation(self):
         self.assertTrue(checker.violations('new.yml', '  run: "ninja -C out chrome"'))

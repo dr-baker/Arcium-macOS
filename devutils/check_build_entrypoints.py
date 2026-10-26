@@ -16,7 +16,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 # Exact functions only. Changes to this list require architecture review.
 APPROVED = {('devutils/he/resources.py', 'build_command'),
-            ('devutils/cloud_build/smoke.py', 'main')}
+            ('devutils/cloud_build/smoke.py', 'main'),
+            ('devutils/command-bar-studio/sdk.py', 'build')}
 READ_ONLY = {'commands', 'query', 'targets', 'graph', 'deps', 'inputs', 'compdb', 'list', 'rules'}
 TOOLS = re.compile(r'^(?:ninja(?:-build)?|ninja\.py|autoninja(?:\.py)?|siso)(?:\.exe|\.bat)?$')
 LAUNCH = {'run', 'Popen', 'call', 'check_call', 'check_output', 'execv', 'execve', 'execvp',

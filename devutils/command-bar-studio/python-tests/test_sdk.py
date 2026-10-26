@@ -34,6 +34,12 @@ class FrozenSDKTests(unittest.TestCase):
         self.provenance = patch.object(sdk, 'dependency_provenance', return_value={})
         self.provenance.start(); self.addCleanup(self.provenance.stop)
 
+    def test_public_build_rejects_unbounded_jobs_before_compilation(self):
+        with patch.object(sdk, 'run') as run:
+            for jobs in (0, 14, True, 2.5):
+                with self.assertRaisesRegex(ValueError, '1...13'): sdk.build(jobs)
+            run.assert_not_called()
+
     def test_same_bytes_with_new_timestamp_are_allowed(self):
         sdk.validate()
         self.header.write_text('original declaration\n')

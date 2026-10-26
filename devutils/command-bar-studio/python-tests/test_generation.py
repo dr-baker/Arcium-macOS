@@ -31,6 +31,21 @@ class GenerationTests(unittest.TestCase):
         (lab / 'native_host.mm').write_text('host')
         self.patch = self.root / 'patches/fixture.patch'
 
+    def test_nested_sdk_lock_remains_exclusive_for_other_threads(self):
+        import threading
+        entered = threading.Event()
+        def contender():
+            with iteration.build_lock(self.cache): entered.set()
+        with iteration.build_lock(self.cache):
+            with iteration.build_lock(self.cache):
+                worker = threading.Thread(target=contender)
+                worker.start()
+                self.assertFalse(entered.wait(.05))
+            self.assertFalse(entered.is_set())
+        worker.join(timeout=2)
+        self.assertTrue(entered.is_set())
+        self.assertFalse(worker.is_alive())
+
     def test_source_edit_cannot_change_captured_generation(self):
         generation = iteration.capture(self.root, self.cache)
         self.patch.write_text('new patch\n')

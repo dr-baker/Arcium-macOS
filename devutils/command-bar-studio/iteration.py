@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 
 
 class SupersededIteration(RuntimeError):
@@ -131,12 +132,27 @@ def capture(root, cache, extra_files=None):
         raise
 
 
+_BUILD_LOCKS = {}
+
+
 @contextmanager
 def build_lock(cache):
+    cache = cache.resolve()
     cache.mkdir(parents=True, exist_ok=True)
-    with (cache / 'iteration.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        yield
+    guard, owner = _BUILD_LOCKS.setdefault(cache, (threading.RLock(), {}))
+    with guard:
+        # The native iteration holds this lock through packaging. sdk.build also
+        # takes it for direct callers, so same-thread nesting must reuse it.
+        if owner.get('pid') == os.getpid():
+            yield
+            return
+        with (cache / 'iteration.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            owner['pid'] = os.getpid()
+            try:
+                yield
+            finally:
+                owner.clear()
 
 
 def publish_latest(state, app, generation):
