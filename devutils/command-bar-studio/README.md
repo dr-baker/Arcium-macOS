@@ -74,10 +74,14 @@ feathers its edge without changing either axis or adding a GPU blur pass.
 The **Light / Dark** switch above the preview, also available with **⌘D**,
 changes the native appearance in place while retaining content and settings.
 Scope colors use cached appearance-specific tones: deeper, more saturated
-tints on light glass and luminous tones on dark glass. Both use the same glow
-geometry and strength multipliers. Hover and press add 45 percentage points to
-the base strength before the row and selection multipliers, replacing the
-filled hover highlight. Zero strength continues to disable lighting.
+tints on light glass and luminous tones on dark glass. Neutral accents become
+black shading on light glass and white light on dark glass. Each tint receives
+a cached gain that matches its composited OKLab contrast to the red accent,
+bounded to 50–200%. Light mode adds 50 percentage points to the base strength;
+hover and press add another 45 points. The row and selection multipliers apply
+after those additions. Zero strength continues to disable lighting. Built-in X
+icons use black on light and white on dark; Saved keeps a contrasting gold.
+Favicons and multicolor artwork retain their original pixels.
 
 For scripted iteration on an already-running instance:
 
