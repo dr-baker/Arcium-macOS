@@ -99,6 +99,7 @@ class Studio;
 @interface ArciumNativeStudioDelegate : NSObject <ArciumSettingsUIDelegate, NSApplicationDelegate>
 @property(nonatomic, assign) Studio* studio;
 - (void)toggleStudioAppearance:(id)sender;
+- (void)selectStudioAppearance:(NSSegmentedControl*)sender;
 - (void)showStudioPopup:(id)sender;
 - (void)resetStudio:(id)sender;
 - (void)copyStudio:(id)sender;
@@ -125,11 +126,13 @@ class StudioRoot : public views::View {
  public:
   explicit StudioRoot(std::unique_ptr<arcium::CommandPanelView> panel) {
     controls_ = AddChildView(std::make_unique<views::NativeViewHost>());
+    appearance_ = AddChildView(std::make_unique<views::NativeViewHost>());
     panel_ = AddChildView(std::move(panel));
     panel_->SetEmbedded(true);
     preview_height_ = panel_->GetPreferredSize().height();
   }
   views::NativeViewHost* controls() { return controls_; }
+  views::NativeViewHost* appearance() { return appearance_; }
   arcium::CommandPanelView* panel() { return panel_; }
   gfx::Rect PreviewAnchorBounds() const {
     auto bounds = GetBoundsInScreen();
@@ -137,7 +140,10 @@ class StudioRoot : public views::View {
     bounds.Inset(gfx::Insets::TLBR(0, controls_width, 0, 0));
     return bounds;
   }
-  void SetWorkshopMode() { workshop_ = true; controls_->SetVisible(false); }
+  void SetWorkshopMode() {
+    workshop_ = true; controls_->SetVisible(false); appearance_->SetVisible(false);
+    InvalidateLayout();
+  }
   void ReplacePanel(std::unique_ptr<arcium::CommandPanelView> panel) {
     RemoveChildViewT(panel_); panel_ = AddChildView(std::move(panel));
     panel_->SetEmbedded(true); preview_height_ = panel_->GetPreferredSize().height();
@@ -157,14 +163,19 @@ class StudioRoot : public views::View {
     const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
     controls_->SetBounds(0, 0, controls_width, height());
     const int available = std::max(1, width() - controls_width - 32);
+    const int switch_width = std::min(180, available);
+    appearance_->SetBounds(controls_width + 16 + (available - switch_width) / 2,
+                            8, switch_width, 28);
+    const int preview_y = workshop_ ? 16 : 48;
     const int panel_width = std::min(available, panel_->GetPreferredSize().width());
-    panel_->SetBounds(controls_width + 16 + (available - panel_width) / 2, 16,
+    panel_->SetBounds(controls_width + 16 + (available - panel_width) / 2, preview_y,
         panel_width,
-        std::clamp(preview_height_, 1, std::max(1, height() - 32)));
+        std::clamp(preview_height_, 1, std::max(1, height() - preview_y - 16)));
     if (refresh_) refresh_.Run();
   }
  private:
   raw_ptr<views::NativeViewHost> controls_;
+  raw_ptr<views::NativeViewHost> appearance_;
   raw_ptr<arcium::CommandPanelView> panel_;
   bool workshop_ = false;
   int preview_height_ = 1;
@@ -249,6 +260,14 @@ class Studio {
     params.delegate = widget_delegate_.get(); widget_->Init(std::move(params));
     widget_->GetCompositor()->SetBackgroundColor(SK_ColorTRANSPARENT);
     root_->controls()->Attach(gfx::NativeView(controls_.view));
+    appearance_switch_ = [NSSegmentedControl segmentedControlWithLabels:@[@"Light", @"Dark"]
+        trackingMode:NSSegmentSwitchTrackingSelectOne target:delegate_
+        action:@selector(selectStudioAppearance:)];
+    appearance_switch_.selectedSegment = dark_ ? 1 : 0;
+    appearance_switch_.accessibilityLabel = @"Preview appearance";
+    appearance_switch_.accessibilityIdentifier = @"studio-preview-appearance";
+    appearance_switch_.toolTip = @"Compare the same design in Light and Dark. ⌘D switches appearance.";
+    root_->appearance()->Attach(gfx::NativeView(appearance_switch_));
     root_->panel()->SetHeightResizeCallback(base::BindRepeating(
         [](Studio* owner, std::optional<int> height, base::TimeDelta) {
           return owner->root_->Resize(height);
@@ -313,7 +332,8 @@ class Studio {
     }
     material_.reset();
     if (widget_) {
-      root_->controls()->Detach(); widget_->CloseNow(); widget_.reset();
+      root_->controls()->Detach(); root_->appearance()->Detach();
+      widget_->CloseNow(); widget_.reset();
     }
     widget_delegate_.reset(); controls_ = nil; controller_ = nil;
   }
@@ -778,10 +798,15 @@ class Studio {
           if (!owner) return; owner->snapshot_pending_ = false; owner->UpdateSnapshot();
         }, weak_factory_.GetWeakPtr()));
   }
-  void ToggleAppearance() {
-    dark_ = !dark_; [NSUserDefaults.standardUserDefaults setBool:dark_ forKey:@"dark"];
+  void SetAppearance(bool dark) {
+    if (dark_ == dark) return;
+    dark_ = dark; [NSUserDefaults.standardUserDefaults setBool:dark_ forKey:@"dark"];
     widget_->SetDark(dark_); UpdateSnapshot();
+    auto* popup = arcium::CommandPanelPresentation::Get(root_);
+    CaptureCurrentState(popup && popup->is_open() ? popup->panel() : root_->panel());
+    PersistScenario();
   }
+  void ToggleAppearance() { SetAppearance(!dark_); }
   void Reset() {
     Change(@"command_panel_layout", DefaultLayout()); root_->panel()->SetInvocation(true);
     root_->panel()->FocusInput();
@@ -801,6 +826,7 @@ class Studio {
       @"commandPanelLayout": layout_, @"spacePalette": @{@"available": @NO}}};
   }
   void UpdateSnapshot() {
+    appearance_switch_.selectedSegment = dark_ ? 1 : 0;
     using Update = void (*)(id, SEL, NSDictionary*);
     reinterpret_cast<Update>(objc_msgSend)(controller_, NSSelectorFromString(@"updateSnapshot:"), Snapshot());
   }
@@ -843,6 +869,7 @@ class Studio {
   ArciumNativeStudioDelegate* delegate_;
   NSViewController* controller_;
   NSViewController* controls_;
+  NSSegmentedControl* appearance_switch_ = nil;
   NSString* editor_close_reason_ = nil;
   ArciumStudioBackdrop* backdrop_ = nil;
   raw_ptr<StudioRoot> root_ = nullptr;
@@ -868,6 +895,9 @@ class Studio {
 }
 - (void)showStudioPopup:(id)sender { if (self.studio) self.studio->ShowFaithfulPreview(); }
 - (void)toggleStudioAppearance:(id)sender { if (_studio) _studio->ToggleAppearance(); }
+- (void)selectStudioAppearance:(NSSegmentedControl*)sender {
+  if (_studio) _studio->SetAppearance(sender.selectedSegment == 1);
+}
 - (void)resetStudio:(id)sender { if (_studio) _studio->Reset(); }
 - (void)copyStudio:(id)sender { if (_studio) _studio->Copy(); }
 - (void)quitStudio:(id)sender { if (_studio) _studio->RequestClose(); }

@@ -62,6 +62,12 @@ provider state; geometry edits retain query, selection and result identities.
 The browser has no design-file watcher. Studio's existing scenario polling is
 independent development tooling.
 
+The main **Lighting** section has live **Glow width**, **Glow height** and
+**Glow blur** sliders. Width and height scale the oval independently. Blur
+feathers its edge without changing either axis or adding a GPU blur pass.
+The **Light / Dark** switch above the preview, also available with **⌘D**,
+changes the native appearance in place while retaining content and settings.
+
 For scripted iteration on an already-running instance:
 
 ```sh
