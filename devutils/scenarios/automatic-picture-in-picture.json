@@ -14,9 +14,7 @@
         "ArciumAutomaticPictureInPictureBrowserTest.*",
         "BrowserInitiatedAutoPictureInPictureBrowserTest.*",
         "AutoPictureInPictureWithVideoPlaybackBrowserTest.PromptResultRecorded_VideoPlaybackAllowOnce",
-        "AutoPictureInPictureWithVideoPlaybackBrowserTest.DoesNotAutopipIfNotRegistered",
-        "AutoPictureInPictureTabHelperBrowserTest.RespectsAutoPictureInPictureContentSetting",
-        "AutoPictureInPictureTabHelperBrowserTest.ContentSettingAskIsBlockForIncognito"
+        "AutoPictureInPictureWithVideoPlaybackBrowserTest.DoesNotAutopipIfNotRegistered"
       ]
     },
     {
@@ -28,7 +26,7 @@
     {
       "target": "//chrome/test:arcium_feature_settings_unit_tests",
       "filters": [
-        "VideoOverlayWindowViewsTest.*"
+        "VideoOverlayWindowViewsTest.*-VideoOverlayWindowViewsTest.LiveCaption*"
       ]
     },
     {
@@ -48,7 +46,8 @@
     "Mute the Mac's physical audio outputs and verify mute before starting playback.",
     "Use an isolated Dev profile and record the exact commits, app bundle, profile, and launch flags.",
     "Launch without enabling experimental web platform features or overriding BrowserInitiatedAutomaticPictureInPicture.",
-    "Use public video and background pages so screenshot and video evidence can be shared."
+    "Use public video and background pages so screenshot and video evidence can be shared.",
+    "Exclude LiveCaption* from the overlay suite: the core deliberately removes Live Caption support and its PiP controls."
   ],
   "steps": [
     "Open https://www.youtube.com/watch?v=aqz-KE-bpKQ and start playback through the player.",
