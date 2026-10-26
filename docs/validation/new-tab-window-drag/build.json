@@ -1,0 +1,57 @@
+{
+  "app": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930/.arcium/standalone/new-tab-window-drag/runtime/Helium Dev - new-tab-window-drag.app",
+  "build_mode": "daily",
+  "diagnostics": false,
+  "log": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930/.arcium/standalone/new-tab-window-drag/browser.log",
+  "output_dir": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930/src/out/Default",
+  "pid": 21565,
+  "profile": "/Users/daniel/Library/Application Support/Helium Development/profiles/isolated/new-tab-window-drag",
+  "source_app": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930/src/out/Default/Helium Dev - new-tab-window-drag.app",
+  "flags": [
+    "--user-data-dir=/Users/daniel/Library/Application Support/Helium Development/profiles/isolated/new-tab-window-drag",
+    "--profile-directory=Default",
+    "--enable-ui-devtools",
+    "--use-mock-keychain",
+    "--no-first-run",
+    "--disable-session-crashed-bubble",
+    "--enable-features=HeliumFavoritesAndPins",
+    "--disable-features=DialMediaRouteProvider",
+    "--enable-automation"
+  ],
+  "copy_method": "apfs-clone",
+  "component_libraries": 540,
+  "core_revision": "a50c6e58d58d81731bf6f73853e084d73f0fb114",
+  "source_revision": "c5cd3f3ca97ae0d712d33eacedc98368f231a5c7",
+  "source_executable_sha256": "d360a4e7bcc7b9d18c5fb2ef47c02af0e89847aa17fb4152880a9246b9cf3b3f",
+  "executable_sha256": "d360a4e7bcc7b9d18c5fb2ef47c02af0e89847aa17fb4152880a9246b9cf3b3f",
+  "build_evidence_id": "8c0e68e4b7d9419193d8091a82d5377c",
+  "build_targets": [
+    "chrome",
+    "arcium_omnibox_unit_tests",
+    "arcium_feature_settings_unit_tests"
+  ],
+  "build_result": "success",
+  "build_telemetry_note": "Console output failed when the system disk filled; raw build-phase stdout/stderr and successful exit record remain on the build volume.",
+  "tests": {
+    "command_bar": {
+      "passed": 255,
+      "retries": 0
+    },
+    "browser_chrome_and_settings": {
+      "passed": 20,
+      "retries": 0
+    }
+  },
+  "replay": {
+    "combined": {
+      "applied": 530,
+      "fuzz": 0
+    },
+    "standalone_drag": {
+      "applied": 521,
+      "fuzz": 0,
+      "core_revision": "7b375496"
+    }
+  },
+  "astra_review": "GO; popup destination ownership, ChatGPT fixture, independent patch context, and infobar fixture corrected and rechecked."
+}
