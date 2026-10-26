@@ -73,6 +73,11 @@ flat Minimal scopes still emit from the command bar's top edge. Blur
 feathers its edge without changing either axis or adding a GPU blur pass.
 The **Light / Dark** switch above the preview, also available with **⌘D**,
 changes the native appearance in place while retaining content and settings.
+Scope colors use cached appearance-specific tones: deeper, more saturated
+tints on light glass and luminous tones on dark glass. Both use the same glow
+geometry and strength multipliers. Hover and press add 45 percentage points to
+the base strength before the row and selection multipliers, replacing the
+filled hover highlight. Zero strength continues to disable lighting.
 
 For scripted iteration on an already-running instance:
 
