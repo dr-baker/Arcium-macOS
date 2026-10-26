@@ -24,6 +24,24 @@ LOW_MEMORY = resources.Sample(40, 10, 0)
 
 
 class ResourcePolicyTest(unittest.TestCase):
+    def test_sampled_self_cpu_uses_timebase_and_retains_exited_identities(self):
+        child=mock.Mock(pid=123)
+        owned=resources.OwnedPolicy(child)
+        identity=resources.Process(123,1,os.getuid(),'birth')
+        owned.known={123:identity}
+        def taskinfo(pid, flavor, arg, buffer, size):
+            values=ctypes.cast(buffer,ctypes.POINTER(ctypes.c_uint64))
+            values[1]=4096;values[2]=12000000;values[3]=12000000
+            return size
+        with mock.patch('he.resources.sys.platform','darwin'), \
+             mock.patch('he.resources.processes',return_value={123:identity}), \
+             mock.patch('he.resources._libproc',return_value=mock.Mock(proc_pidinfo=taskinfo)), \
+             mock.patch('he.resources._mach_tick_seconds',return_value=125/3/1e9):
+            self.assertAlmostEqual(resources.owned_rss(owned)['observed_process_cpu_seconds'],1)
+            self.assertAlmostEqual(resources.owned_rss(owned)['observed_process_cpu_seconds'],1)
+            owned.known={}
+            self.assertAlmostEqual(resources.owned_rss(owned)['observed_process_cpu_seconds'],1)
+
     def test_sustained_cpu_pressure_and_slow_recovery(self):
         policy = resources.Policy()
         self.assertTrue(policy.update(HEALTHY, 0))
@@ -229,6 +247,34 @@ class ResourceRunnerTest(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), "1")
         self.assertEqual(resources.status(self.paths.state)["policy"], "background")
 
+    def test_overflow_admits_sustained_cpu_pressure_in_background(self):
+        self.sensors.sample.return_value = BUSY
+        result = self.run_script("import sys,time;time.sleep(.04);print(sys.argv[1])", admit_busy_cpu=True)
+        self.assertEqual(result.returncode,0)
+        self.assertEqual(result.stdout.strip(),'1')
+        state=resources.status(self.paths.state)
+        self.assertTrue(state['cpu_pressure_admitted'])
+        self.assertEqual(state['policy'],'background')
+
+    def test_overflow_never_bypasses_memory_or_swap_pressure(self):
+        for sample in (resources.Sample(95,5,0),resources.Sample(95,60,20)):
+            samples=iter([HEALTHY,sample,HEALTHY])
+            self.sensors.sample.side_effect=lambda:next(samples,HEALTHY)
+            self.run_script("pass",admit_busy_cpu=True)
+            self.assertFalse(resources.status(self.paths.state)['cpu_pressure_admitted'])
+        records=[json.loads(line) for line in (self.paths.state/'build-resources.jsonl').read_text().splitlines()]
+        self.assertTrue(any(r['state']=='waiting' and r['reason']==LOW_MEMORY.reason for r in records))
+        self.assertTrue(any(r['state']=='waiting' and r['reason']=='swap growth above 16 MiB/s' for r in records))
+
+    def test_local_cpu_pressure_still_delays_admission(self):
+        samples=iter([HEALTHY,BUSY,HEALTHY])
+        self.sensors.sample.side_effect=lambda:next(samples,HEALTHY)
+        result=self.run_script("import sys;print(sys.argv[1])")
+        self.assertEqual(result.stdout.strip(),'2')
+        records=[json.loads(line) for line in (self.paths.state/'build-resources.jsonl').read_text().splitlines()]
+        self.assertEqual(records[0]['state'],'waiting')
+        self.assertFalse(records[-1]['cpu_pressure_admitted'])
+
     def test_explicit_ceiling_applies_to_planning_despite_invalid_environment(self):
         runner = self.paths.src / "third_party/depot_tools/autoninja.py"
         runner.parent.mkdir(parents=True)
@@ -238,6 +284,51 @@ class ResourceRunnerTest(unittest.TestCase):
                 mock.patch.dict(os.environ, {"HELIUM_BUILD_JOBS": "invalid", "SISO_LIMITS": ""}):
             self.assertEqual(agent.guard_build(self.paths, ["chrome"], budget=1, approved=False,
                                                problems=[], jobs=1), 1)
+
+    def test_remote_ceiling_survives_local_limits_and_unavailable_sensors(self):
+        self.paths.out.mkdir(parents=True)
+        (self.paths.out / "args.gn").write_text("use_siso = true\nuse_remoteexec = true\n")
+        runner = self.paths.src / "third_party/depot_tools/autoninja.py"
+        runner.parent.mkdir(parents=True)
+        runner.write_text("import os,sys\n"
+                          "if '-n' in sys.argv:\n"
+                          " assert '--offline' in sys.argv\n"
+                          " assert '-local_jobs='+os.environ['EXPECTED_LOCAL'] in sys.argv\n"
+                          " assert '-j' not in sys.argv\n"
+                          " assert '-remote_jobs=64' not in sys.argv\n"
+                          "else:\n"
+                          " assert '--offline' not in sys.argv\n"
+                          " assert '-j' not in sys.argv\n"
+                          " assert '-remote_jobs=64' in sys.argv\n"
+                          " assert '-local_jobs='+os.environ['EXPECTED_LOCAL'] in sys.argv\n"
+                          "assert os.environ['SISO_LIMITS']=='local='+os.environ['EXPECTED_LOCAL']\n"
+                          "print('[1/1] compile')\n")
+        for sample, limit, expected in ((HEALTHY, "", "8"), (HEALTHY, "local=2", "2"),
+                                        (resources.Sample(None, None), "", "1")):
+            with self.subTest(limit=limit, expected=expected), \
+                    mock.patch.object(resources, "Sensors", return_value=self.sensors), \
+                    mock.patch.dict(os.environ, {"SISO_LIMITS": limit, "EXPECTED_LOCAL": expected}):
+                self.sensors.sample.return_value = sample
+                self.assertEqual(agent.guard_build(self.paths, ["chrome"], budget=1, approved=False,
+                                                   problems=[], jobs=8, remote_jobs=64), 1)
+                command = resources.build_command(self.paths, ["chrome"], remote_jobs=64, offline=False)
+                result = resources.run(self.paths, command, jobs=8, sensors=self.sensors,
+                                       interval=.01, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_remote_ceiling_requires_supported_configuration_and_positive_integer(self):
+        self.paths.out.mkdir(parents=True)
+        for content in ("", "use_siso = true\n", "use_siso = false\nuse_remoteexec = true\n",
+                        "use_siso = true\nuse_remoteexec = true\nuse_reclient = true\n"):
+            (self.paths.out / "args.gn").write_text(content)
+            with self.subTest(config=content), self.assertRaises(HeError):
+                resources.build_command(self.paths, ["chrome"], remote_jobs=64)
+        (self.paths.out / "args.gn").write_text("use_siso = true\nuse_remoteexec = true\n")
+        for value in (0, -1, "64"):
+            with self.subTest(value=value), self.assertRaises(HeError):
+                resources.build_command(self.paths, ["chrome"], remote_jobs=value)
+        with self.assertRaises(HeError):
+            resources.build_command(self.paths, ["-local_jobs=64"], remote_jobs=64)
 
     def test_nonzero_and_invalid_utf8_survive_capture(self):
         result = self.run_script("import sys;sys.stderr.buffer.write(b'bad \\xff');sys.exit(7)")
@@ -372,8 +463,8 @@ ___helium_build "$@"
     def test_selected_ceiling_is_forwarded_to_both_build_phases(self):
         result, calls = self.invoke(["--jobs", "1", "chrome"], agent_mode=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("agent-guard --jobs 1 chrome", calls)
-        self.assertIn("build-run --jobs 1 -- chrome", calls)
+        self.assertNotIn("agent-guard", calls)
+        self.assertIn("build-run --guarded --jobs 1 -- chrome", calls)
 
 
 if __name__ == "__main__":
