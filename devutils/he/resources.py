@@ -24,6 +24,7 @@ import tempfile
 import time
 
 from .common import HeError, Paths, read_json, write_json
+from . import evidence
 
 DEFAULT_JOBS = max(1, min(13, (os.cpu_count() or 2) - 1))
 INTERVAL = 2.0
@@ -205,6 +206,7 @@ class OwnedPolicy:
         self.child = child
         self.known: dict[int, Process] = {}
         self.applied: dict[int, bool] = {}
+        self.cpu_observed = {}
 
     def discover(self):
         current = processes()
@@ -271,6 +273,44 @@ def jobs_ceiling(value: int | None = None) -> int:
     except (TypeError, ValueError):
         raise HeError("HELIUM_BUILD_JOBS / --jobs must be a positive integer") from None
     return jobs
+
+
+def build_command(paths: Paths, targets: list[str], *, remote_jobs: int | None = None,
+                  planning: bool = False, offline: bool = True, failure_limit: int = 0) -> list[str]:
+    """Keep the remote worker ceiling independent of desktop admission/backoff."""
+    if any(target.startswith("-") for target in targets):
+        raise HeError("build targets cannot contain scheduler options; use --jobs / --remote-jobs")
+    if type(failure_limit) is not int or failure_limit < 0:
+        raise HeError("failure limit must be a nonnegative integer")
+    concurrency = ["-j", "{HELIUM_BUILD_JOBS}"]
+    args_file = paths.out / "args.gn"
+    text = args_file.read_text() if args_file.is_file() else ""
+    flags = dict(re.findall(r"^\s*(use_siso|use_remoteexec|use_reclient)\s*=\s*(true|false)\s*(?:#.*)?$",
+                            text, re.MULTILINE))
+    ci_ninja = getattr(paths, 'kind', None) == 'ci'
+    siso = not ci_ninja and flags.get("use_siso") == "true"
+    if offline and siso:
+        # With remote-ready GN, autoninja turns -j into remote_jobs even when
+        # --offline is present. Explicit local_jobs preserves offline builds.
+        concurrency = ["-local_jobs={HELIUM_BUILD_JOBS}"]
+    if remote_jobs is not None:
+        if ci_ninja:
+            raise HeError('resumable CI uses local Ninja; remote jobs are unsupported')
+        if not isinstance(remote_jobs, int) or remote_jobs < 1:
+            raise HeError("--remote-jobs must be a positive integer")
+        if flags.get("use_siso") != "true" or flags.get("use_remoteexec") != "true" or flags.get("use_reclient") == "true":
+            raise HeError("--remote-jobs requires Siso remote execution without Reclient; configure the endpoint first")
+        # autoninja passes these through to Siso. A -j argument would instead
+        # become the remote ceiling after local resource admission reduces it.
+        concurrency = ["-local_jobs={HELIUM_BUILD_JOBS}", f"-remote_jobs={remote_jobs}"]
+    # Resumed CI archives retain Ninja's dependency state. Keep that executor
+    # explicit while sharing supervision, logging and lifecycle with Siso.
+    launcher = ['ninja'] if ci_ninja else [sys.executable, str(paths.src / "third_party/depot_tools/autoninja.py")]
+    return [*launcher,
+            *concurrency, *(["--offline"] if offline and not ci_ninja else []),
+            *(["-project="] if offline and siso else []),
+            "-C", str(paths.out),
+            *(["-n"] if planning else ["-k", str(failure_limit)]), *targets]
 
 
 def siso_limits(jobs: int, limits: str) -> tuple[int, str]:
@@ -353,35 +393,112 @@ def status(state: Path) -> dict | None:
     return None
 
 
+@lru_cache(maxsize=1)
+def _mach_tick_seconds():
+    class Timebase(ctypes.Structure):
+        _fields_ = [('numer', ctypes.c_uint32), ('denom', ctypes.c_uint32)]
+    library = ctypes.CDLL('/usr/lib/libSystem.B.dylib')
+    library.mach_timebase_info.argtypes = [ctypes.POINTER(Timebase)]
+    library.mach_timebase_info.restype = ctypes.c_int
+    value = Timebase()
+    if library.mach_timebase_info(ctypes.byref(value)) or not value.denom:
+        raise OSError('Mach timebase unavailable')
+    return value.numer / value.denom / 1e9
+
+
+def owned_rss(owned: OwnedPolicy) -> dict:
+    """Observed sum of live RSS; never a sum/subtraction of per-PID peaks."""
+    total, sampled = 0, 0
+    for identity in list(owned.known.values()):
+        try:
+            if not same_process(processes(identity.pid).get(identity.pid), identity):
+                continue
+            if sys.platform == 'darwin':
+                info = ctypes.create_string_buffer(96)  # SDK struct proc_taskinfo
+                if _libproc().proc_pidinfo(identity.pid, 4, 0, info, len(info)) != len(info):
+                    continue
+                resident = ctypes.cast(info, ctypes.POINTER(ctypes.c_uint64))[1]
+                counters = ctypes.cast(info, ctypes.POINTER(ctypes.c_uint64))
+                cpu = (counters[2] + counters[3]) * _mach_tick_seconds()
+            else:
+                resident = int(Path(f'/proc/{identity.pid}/statm').read_text().split()[1]) * os.sysconf('SC_PAGE_SIZE')
+                cpu = None
+            if not same_process(processes(identity.pid).get(identity.pid), identity):
+                continue
+            total += resident
+            sampled += 1
+            if cpu is not None:
+                key = (identity.pid, identity.uid, identity.birth)
+                owned.cpu_observed[key] = max(owned.cpu_observed.get(key, 0), cpu)
+        except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+            continue
+    return dict(sampled_tree_rss_bytes=total if sampled else None,
+                observed_process_cpu_seconds=sum(owned.cpu_observed.values()) if owned.cpu_observed else None,
+                cpu_process_identities_observed=len(owned.cpu_observed),
+                cpu_note='Lower bound: sampled owned process self CPU, Mach ticks converted with timebase; short-lived processes and final unsampled work can be missed. Excludes supervisor, separate SSH/IAP tunnel processes and cloud worker. Never add to native action CPU.',
+                rss_processes_sampled=sampled, rss_processes_known=len(owned.known),
+                rss_coverage_complete=bool(sampled and sampled == len(owned.known)))
+
+
+@evidence.resource_phase
 def run(paths: Paths, command: list[str], *, jobs: int, sensors=None,
         interval: float = INTERVAL, capture_output: bool = False,
-        phase: str = "build", environment: dict | None = None) -> subprocess.CompletedProcess:
+        phase: str = "build", environment: dict | None = None,
+        admit_busy_cpu: bool = False) -> subprocess.CompletedProcess:
     """Called inside the existing lane command; never claim/release the lane."""
     sensors = sensors or Sensors()
     environment = dict(os.environ if environment is None else environment)
+    environment["SISO_PATH"] = str(paths.src / "third_party/siso/cipd/siso")
     cache_mode = cache_environment(paths, environment)
     policy = Policy()
     record = {"supervisor": os.getpid(), "nonce": os.environ.get("HELIUM_LOCK_NONCE"),
               "requested_jobs": jobs, "state": "waiting", "policy": "background",
               "policy_supported": TASKPOLICY.is_file(), "phase": phase,
+              'resource_sample_interval_seconds': interval,
+              'admit_busy_cpu': admit_busy_cpu, 'cpu_pressure_admitted': False,
               "cache_mode": cache_mode,
               "progress": {"available": False, "reason": "resource samples are not completed-action telemetry"}}
     record_path = paths.state / "build-resources.json"
     log_path = paths.state / "build-resources.jsonl"
     previous_event = None
+    trace = evidence.current()
 
     def report(sample, *, event=False, **values):
         nonlocal previous_event
-        record.update(values, updated=time.time(), sample=asdict(sample), reason=policy.reason)
-        write_json(record_path, record)
+        record.update(values, updated=time.time(), sample=asdict(sample), reason=policy.reason,
+                      resource_sample_fresh=values.pop('resource_sample_fresh',True))
+        try:
+            write_json(record_path, record)
+        except OSError:
+            if trace:
+                trace.incomplete('cannot persist latest resource status')
+            else:
+                raise
+        if trace:
+            if trace.stack and record.get('resource_sample_fresh', True):
+                attrs = trace.stack[-1]['attributes']
+                rss = record.get('sampled_tree_rss_bytes')
+                if rss is not None:
+                    attrs['observed_tree_rss_peak_bytes'] = max(attrs.get('observed_tree_rss_peak_bytes', 0), rss)
+                cpu = record.get('observed_process_cpu_seconds')
+                if cpu is not None:
+                    attrs['observed_process_cpu_seconds'] = cpu
+                    attrs['cpu_observation_note'] = record['cpu_note']
+            trace.sample(record)
         signature = (record["state"], record["policy"], record["reason"], record.get("policy_error"))
         if event or signature != previous_event:
-            with log_path.open("a") as handle:
-                handle.write(json.dumps(record, sort_keys=True) + "\n")
+            try:
+                with log_path.open("a") as handle:
+                    handle.write(json.dumps(record, sort_keys=True) + "\n")
+            except OSError:
+                if trace:
+                    trace.incomplete('cannot persist resource transitions')
+                else:
+                    raise
             error = f"; policy update failed: {record['policy_error']}" if record.get("policy_error") else ""
             jobs_label = record.get("effective_jobs", record["requested_jobs"])
-            print(f"he build: {record['state']}, {record['policy']}, {jobs_label} local jobs: "
-                  f"{record['reason']}{error}", file=sys.stderr, flush=True)
+            evidence.message(f"he build: {record['state']}, {record['policy']}, {jobs_label} local jobs: "
+                             f"{record['reason']}{error}")
             previous_event = signature
 
     child = None
@@ -389,6 +506,9 @@ def run(paths: Paths, command: list[str], *, jobs: int, sensors=None,
     interrupted = None
     completed = False
     output = ExitStack()
+    capture = None
+    capture_finished = False
+    plan_paths = None
 
     def interrupt(signum, _frame):
         nonlocal interrupted
@@ -410,6 +530,11 @@ def run(paths: Paths, command: list[str], *, jobs: int, sensors=None,
             policy.update(sample, time.monotonic())
             if sample.reason not in (None, "resource sensor unavailable"):
                 policy.reason = sample.reason
+                if admit_busy_cpu and sample.reason == 'CPU busy at least 90%':
+                    policy.background = True
+                    policy.reason = 'CPU busy; remote client admitted in background'
+                    record['cpu_pressure_admitted'] = True
+                    break
                 report(sample)
                 time.sleep(interval)
                 continue
@@ -422,14 +547,30 @@ def run(paths: Paths, command: list[str], *, jobs: int, sensors=None,
         effective, limits = siso_limits(min(jobs, 1) if sample.reason else jobs,
                                         environment.get("SISO_LIMITS", ""))
         record["effective_jobs"] = effective
+        record['siso_limits'] = limits
         command = [a.replace("{HELIUM_BUILD_JOBS}", str(effective)) for a in command]
         if TASKPOLICY.is_file():
             command = [str(TASKPOLICY), "-c", "utility", *(["-b"] if policy.background else []), *command]
-        stdout = output.enter_context(tempfile.TemporaryFile()) if capture_output else None
-        stderr = output.enter_context(tempfile.TemporaryFile()) if capture_output else None
+        if trace and capture_output and phase == 'plan':
+            directory = Path(trace.stack[-1]['attributes']['artifact_directory'])
+            plan_paths = [directory/(name+'.txt') for name in ('stdout','stderr')]
+            stdout, stderr = [output.enter_context(path.open('w+b')) for path in plan_paths]
+        elif trace:
+            stdout = stderr = subprocess.PIPE
+        else:
+            stdout = output.enter_context(tempfile.TemporaryFile()) if capture_output else None
+            stderr = output.enter_context(tempfile.TemporaryFile()) if capture_output else None
         child = subprocess.Popen(command, cwd=paths.src, env={**environment, "SISO_LIMITS": limits},
                                  stdout=stdout, stderr=stderr)
         owned = OwnedPolicy(child)
+        if trace:
+            trace.child_started(command, child, effective)
+            directory = Path(trace.stack[-1]['attributes']['artifact_directory'])
+            if plan_paths is None:
+                capture = evidence.Capture(trace, directory, live=not capture_output)
+                capture.attach(child)
+            else:
+                trace.stack[-1]['attributes']['output_capture'] = 'lossless disk spool; bounded in-memory excerpt'
         record["child"] = child.pid
         while True:
             if interrupted:
@@ -443,21 +584,38 @@ def run(paths: Paths, command: list[str], *, jobs: int, sensors=None,
             except (OSError, subprocess.TimeoutExpired, ValueError) as error:
                 errors = type(error).__name__
             report(sample, state="running", policy="background" if policy.background else "utility",
-                   policy_error=errors, owned_processes=len(owned.known))
+                   policy_error=errors, owned_processes=len(owned.known),
+                   **(owned_rss(owned) if trace else {}))
             try:
                 child.wait(timeout=interval)
             except subprocess.TimeoutExpired:
                 sample = sensors.sample()
         result = 128 + interrupted if interrupted else (child.returncode if child.returncode >= 0 else 128 - child.returncode)
-        captured = []
-        for handle in (stdout, stderr):
-            if handle is not None:
-                handle.seek(0)
-                captured.append(handle.read().decode("utf-8", errors="replace"))
-            else:
-                captured.append(None)
+        if trace:
+            attrs = trace.stack[-1]['attributes']
+            attrs['child_wall_seconds'] = (time.monotonic_ns()-trace.started-attrs['child_started_offset_nanos'])/1e9
+            trace.event('child_exit', returncode=result, child_wall_seconds=attrs['child_wall_seconds'])
+        if capture:
+            with evidence.phase('output_drain'):
+                captured = capture.finish(capture_output)
+            capture_finished = True
+        else:
+            captured = []
+            for handle in (stdout, stderr):
+                if handle is not None:
+                    handle.seek(0)
+                    data = handle.read(1024*1024) if plan_paths else handle.read()
+                    if plan_paths and handle.read(1):
+                        handle.seek(-min(1024*1024,handle.seek(0,2)),2)
+                        data += b'\n[Output excerpt; full plan retained on disk]\n' + handle.read()
+                    captured.append(data.decode("utf-8", errors="replace"))
+                else:
+                    captured.append(None)
         completed = result == 0
-        return subprocess.CompletedProcess(command, result, *captured)
+        response = subprocess.CompletedProcess(command, result, *captured)
+        if plan_paths:
+            response.stdout_path, response.stderr_path = plan_paths
+        return response
     finally:
         # On monitor failure retain ordinary lane exclusion while the direct
         # child drains. Never certify a failed/interrupted attempt as complete.
@@ -481,7 +639,10 @@ def run(paths: Paths, command: list[str], *, jobs: int, sensors=None,
                 pass
         for signum, handler in old_handlers.items():
             signal.signal(signum, handler)
+        if capture and not capture_finished:
+            capture.finish()
         output.close()
         report(sample, event=True, state="finished" if completed and not interrupted else "failed",
+               resource_sample_fresh=False,
                returncode=128 + interrupted if interrupted else (child.returncode if child is not None else None),
                launcher_returncode=child.returncode if child is not None else None)

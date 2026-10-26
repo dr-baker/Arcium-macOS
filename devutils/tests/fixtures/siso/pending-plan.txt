@@ -1,0 +1,22 @@
+ninja: Entering directory `out/Smoke'
+
+
+
+loading build.ninja... done 22.028208ms
+load siso config done 474.042µs
+schedule pending:1+ready:0 (node:4 edge:1)
+build start: Ready 1 Pending 0
+../../third_party/llvm-build/Release+Asserts_linux/bin/clang --target=arm64-apple-macos14 -c ../../smoke.cc -o smoke-pending.o
+build finished
+
+
+local:0 remote:0 cache:0 cache-write:0(err:0) fallback:0 retry:0 skip:0
+fs: ops: 2(err:1) / r:1(err:0) 228B / w:0(err:0) 0B
+
+
+shutdown cloud logging/monitoring done 2.875µs
+offline mode
+disable fast local for non-interactive: fastlocal=1->0
+ use `--fast_local` to enable fast local with non-interactive mode
+
+ 0.08s Build Succeeded: 1 steps - 13.06/s

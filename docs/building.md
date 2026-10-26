@@ -362,10 +362,15 @@ he setup --full-source
 
 ### Remote builds
 
-Set `SISO_REAPI_ADDRESS` (and optionally `SISO_REAPI_INSTANCE`, default `main`)
-to build through a NativeLink endpoint, then run `he configure
---refresh-defaults`. TLS stays on unless you set `RBE_service_no_security=true`.
-Unset the address and refresh the defaults again to return to local builds.
+Local builds are the default and require no Google account. Optional
+[Google Cloud setup and build-lane instructions](../devutils/cloud_build/README.md)
+cover account access, quota, configuration, worker ownership, and storage costs.
+Enrollment defaults to manual remote use. Automatic cloud routing requires a
+measured crossover threshold and recent console activity; idle or away builds
+favor the Mac. Use `--execution local|auto|remote` to override one
+build. `--jobs` bounds local work and `--remote-jobs` separately bounds cloud
+actions. Diagnostics, daily, and both official release architectures use the
+same compile routing, with their own existing configuration and packaging.
 
 ### Updating for a new Chromium release
 
