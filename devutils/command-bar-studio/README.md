@@ -66,7 +66,10 @@ The main **Lighting** section groups base strength, the inactive-row multiplier,
 the selected-scope multiplier, and live **Glow width**, **Glow height** and
 **Glow blur** sliders. Strength uses the base value while scopes are active,
 multiplied by 66% while inactive and 130% for the selected scope by default.
-Width and height scale the oval independently. Attached scopes add 50% height. Blur
+Width and height scale the oval independently. Attached scopes add 50% height.
+**Collapsed glow height** defaults to 25% and smoothly returns to 100% as
+scopes expand. It scales the light profile without increasing peak brightness;
+flat Minimal scopes still emit from the command bar's top edge. Blur
 feathers its edge without changing either axis or adding a GPU blur pass.
 The **Light / Dark** switch above the preview, also available with **⌘D**,
 changes the native appearance in place while retaining content and settings.

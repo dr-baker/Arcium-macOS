@@ -26,15 +26,23 @@ class DesignTokenTests(unittest.TestCase):
                 native.edit_design(state, ['row_height=50', 'glow_softness=true'])
             self.assertEqual(path.read_bytes(), original)
             native.edit_design(state, ['row_height=50', 'text_color=#abcdef',
-                                       'glow_width=1.5', 'glow_height=0.5', 'glow_softness=30'])
+                                       'glow_width=1.5', 'glow_height=0.5', 'glow_softness=30',
+                                       'collapsed_glow_height=0'])
             updated = json.loads(path.read_text())
             self.assertEqual(updated['layout']['design'], {'row_height': 50, 'text_color': '#ABCDEF',
-                'glow_width': 1.5, 'glow_height': 0.5, 'glow_softness': 30})
+                'glow_width': 1.5, 'glow_height': 0.5, 'glow_softness': 30,
+                'collapsed_glow_height': 0})
             before_invalid = path.read_bytes()
             for edits in (['glow_width=0.24'], ['glow_height=3.01'], ['glow_width=true'],
-                          ['glow_width=1.25', 'glow_height=0']):
+                          ['glow_width=1.25', 'glow_height=0'],
+                          ['collapsed_glow_height=-0.01'], ['collapsed_glow_height=1.01'],
+                          ['collapsed_glow_height=true']):
                 with self.assertRaises(ValueError): native.edit_design(state, edits)
                 self.assertEqual(path.read_bytes(), before_invalid)
+            native.edit_design(state, ['collapsed_glow_height=1'])
+            self.assertEqual(json.loads(path.read_text())['layout']['design']['collapsed_glow_height'], 1)
+            native.edit_design(state, ['collapsed_glow_height=0.25'])
+            self.assertNotIn('collapsed_glow_height', json.loads(path.read_text())['layout']['design'])
             for key in ('query', 'scope', 'selected_key'):
                 self.assertEqual(updated[key], document[key])
             native.edit_design(state, [], reset=True)

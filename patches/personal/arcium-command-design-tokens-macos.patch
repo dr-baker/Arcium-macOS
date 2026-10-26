@@ -96,7 +96,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandDesign.swift
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,91 @@
 +// Generated from core devutils/ui/command_bar_design.json. Do not edit.
 +import Foundation
 +import CoreFoundation
@@ -129,6 +129,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        .init(id: "title_font_size", label: "Result text size", group: "Typography", initial: 14, range: 12...18, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 1.75, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_height", label: "Glow height", group: "Lighting", initial: 0.8, range: 0.25...3.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "collapsed_glow_height", label: "Collapsed glow height", group: "Lighting", initial: 0.25, range: 0.0...1.0, step: 0.05, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_softness", label: "Glow blur", group: "Lighting", initial: 40.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_radiance", label: "Light calibration", group: "Internal", initial: 0.48, range: 0.1...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
 +        .init(id: "inactive_scope_strength", label: "Inactive row multiplier", group: "Lighting", initial: 0.66, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
