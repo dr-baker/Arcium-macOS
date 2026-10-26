@@ -15,6 +15,14 @@ jobs:
     - uses: ./.github/actions/prepare-environment
     - name: Run sanity check
       run: ./sanity-check.sh
+    - name: Upload supervised smoke evidence
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: sanity-build-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+        path: build/.arcium/build-evidence/
+        include-hidden-files: true
+        if-no-files-found: warn
   substitution:
     runs-on: macos-latest
     steps:
