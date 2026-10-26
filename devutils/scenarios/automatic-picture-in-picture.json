@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "id": "automatic-picture-in-picture",
+  "description": "Arc-style automatic video Picture-in-Picture on tab departure and return.",
+  "profile": {
+    "policy": "isolated",
+    "name": "automatic-picture-in-picture"
+  },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_browser_tests",
+      "filters": ["ArciumAutomaticPictureInPictureBrowserTest.*", "BrowserInitiatedAutoPictureInPictureBrowserTest.*"]
+    },
+    {
+      "target": "//content/test:arcium_media_session_impl_unittests",
+      "filters": ["MediaSessionImplTest.*BrowserInitiatedAutoPip*"]
+    }
+  ],
+  "preconditions": [
+    "Mute the Mac's physical audio outputs and verify mute before starting playback.",
+    "Use an isolated Dev profile and record the exact commits, app bundle, profile, and launch flags.",
+    "Launch without enabling experimental web platform features or overriding BrowserInitiatedAutomaticPictureInPicture.",
+    "Use public video and background pages so screenshot and video evidence can be shared."
+  ],
+  "steps": [
+    "Open https://www.youtube.com/watch?v=aqz-KE-bpKQ and start playback through the player.",
+    "Switch to a public background tab. Confirm a floating PiP window appears without a permission overlay, and playback continues.",
+    "Return to YouTube. Confirm automatic PiP closes and the same video continues in the page.",
+    "Repeat departure and return with the video muted. Confirm automatic PiP still appears and the mute state remains unchanged.",
+    "Pause the video, switch away, and confirm automatic PiP does not appear.",
+    "Open automatic PiP again. Verify hover controls, pause and resume, seeking, return to tab, window dragging, resizing, and rounded clipping.",
+    "Disable automatic PiP in native Settings. Confirm an already-open PiP window remains open, then close it and verify subsequent departures do not open automatic PiP.",
+    "With the preference disabled, enter PiP manually and confirm it remains available when switching away and returning.",
+    "Re-enable automatic PiP and verify entry resumes. Quit normally, relaunch the same profile, and verify the preference persists.",
+    "Capture a public-only screenshot and a short video showing playback, departure, PiP, and return. Close test media normally and inspect fresh crash reports."
+  ],
+  "observables": [
+    "Automatic PiP works on YouTube in the default configuration, including muted playback.",
+    "Returning to the source tab restores inline playback without pausing or restarting the video.",
+    "Paused videos do not open automatic PiP.",
+    "The preference controls automatic entry while preserving manual PiP and existing windows.",
+    "Explicit site blocks remain effective.",
+    "The floating window clips video and hover controls to rounded corners and preserves its aspect ratio while resizing.",
+    "Normal close and quit finish without a new crash."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}
