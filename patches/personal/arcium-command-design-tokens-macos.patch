@@ -1,0 +1,611 @@
+Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
++++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
+@@ -11,6 +11,7 @@
+ #include <optional>
+ 
+ #include "base/values.h"
++#include "chrome/browser/ui/omnibox/arcium_command_design.h"
+ 
+ namespace arcium_settings {
+ 
+@@ -18,7 +19,8 @@ namespace arcium_settings {
+ // values and booleans have a different schema and must retain their types.
+ inline std::optional<base::DictValue> CommandPanelLayoutFromNSObject(id value) {
+   if (![value isKindOfClass:[NSDictionary class]] ||
+-      ([value count] != 8 && [value count] != 9)) {
++      ([value count] - ([value objectForKey:@"design"] ? 1 : 0) != 8 &&
++       [value count] - ([value objectForKey:@"design"] ? 1 : 0) != 9)) {
+     return std::nullopt;
+   }
+   NSDictionary* layout = value;
+@@ -66,10 +68,30 @@ inline std::optional<base::DictValue> Co
+     const double number = [count doubleValue];
+     if (!std::isfinite(number) || std::trunc(number) != number || number < 1 || number > 20) return std::nullopt;
+     result.Set("result_count", static_cast<int>(number));
+-  } else if ([layout count] != 8) {
++  } else if ([layout count] - (layout[@"design"] ? 1 : 0) != 8) {
+     return std::nullopt;
+   }
+   if (!*result.FindBool("connected") && *result.FindInt("scope_width") == 0) result.Set("scope_width", 2);
++  if (id raw = layout[@"design"]) {
++    if (![raw isKindOfClass:[NSDictionary class]] || [raw count] > arcium::kCommandDesignTokenCount) return std::nullopt;
++    base::DictValue design;
++    for (id key in raw) {
++      if (![key isKindOfClass:[NSString class]]) return std::nullopt;
++      id token_value = raw[key];
++      if ([token_value isKindOfClass:[NSString class]]) {
++        design.Set([key UTF8String], [token_value UTF8String]);
++      } else if ([token_value isKindOfClass:[NSNumber class]] &&
++                 CFGetTypeID((__bridge CFTypeRef)token_value) != CFBooleanGetTypeID()) {
++        const double token_number = [token_value doubleValue];
++        if (!std::isfinite(token_number)) return std::nullopt;
++        design.Set([key UTF8String], token_number);
++      } else {
++        return std::nullopt;
++      }
++    }
++    if (!arcium::ParseCommandPanelDesign(design)) return std::nullopt;
++    result.Set("design", std::move(design));
++  }
+   return result;
+ }
+ 
+Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
++++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
+@@ -140,3 +140,52 @@ TEST_F(CommandPanelLayoutModelTest, Brid
+   EXPECT_FALSE(model.SetCommandPanelLayout(malformed));
+ }
+ }  // namespace arcium_settings
++
++namespace arcium_settings {
++TEST(CommandPanelLayoutMacTest, ValidatesAndPreservesLiveDesignOverrides) {
++  auto layout = Layout();
++  layout[@"design"] = @{@"row_height": @52, @"glow_softness": @12.5, @"text_color": @"#aBcDeF"};
++  auto converted = CommandPanelLayoutFromNSObject(layout);
++  ASSERT_TRUE(converted);
++  ASSERT_TRUE(converted->FindDict("design"));
++  EXPECT_EQ(52, converted->FindDict("design")->FindDouble("row_height"));
++  EXPECT_EQ("#aBcDeF", *converted->FindDict("design")->FindString("text_color"));
++  for (id invalid in @[@YES, @[], @{@"row_height": @YES}, @{@"row_height": @1000},
++                       @{@"row_height": @43.5}, @{@"text_color": @"#0xFFFF"},
++                       @{@"unknown": @3}, @{@"selection_ms": @(INFINITY)},
++                       @{@"selection_ms": @(-INFINITY)}, @{@"selection_ms": @(NAN)}]) {
++    layout[@"design"] = invalid;
++    EXPECT_FALSE(CommandPanelLayoutFromNSObject(layout));
++  }
++}
++
++TEST_F(CommandPanelLayoutModelTest, LiveDesignSavesThroughProfileOwner) {
++  ArciumSettingsModel model(browser()->profile(), base::DoNothing(),
++                           base::DoNothing());
++  auto layout = Layout();
++  layout[@"result_count"] = @12;
++  layout[@"design"] = @{@"row_height": @52, @"glow_softness": @12.5,
++                        @"text_color": @"#aBcDeF", @"selection_ms": @120};
++  auto converted = CommandPanelLayoutFromNSObject(layout);
++  ASSERT_TRUE(converted);
++  ASSERT_TRUE(model.SetCommandPanelLayout(*converted));
++  EXPECT_EQ(*converted, model.GetCommandPanelLayout());
++  EXPECT_EQ(*converted, browser()->profile()->GetPrefs()->GetDict(
++                            arcium::kCommandPanelLayoutPref));
++  auto legacy = converted->Clone();
++  legacy.Remove("result_count");
++  ASSERT_TRUE(model.SetCommandPanelLayout(legacy));
++  EXPECT_EQ(legacy, model.GetCommandPanelLayout());
++  auto invalid = legacy.Clone();
++  invalid.Set("design", true);
++  EXPECT_FALSE(model.SetCommandPanelLayout(invalid));
++  invalid = legacy.Clone();
++  invalid.Set("design", base::DictValue().Set("row_height", 10000));
++  EXPECT_FALSE(model.SetCommandPanelLayout(invalid));
++  invalid = legacy.Clone();
++  invalid.Set("design", base::DictValue().Set("unknown", 1));
++  EXPECT_FALSE(model.SetCommandPanelLayout(invalid));
++  EXPECT_EQ(legacy, model.GetCommandPanelLayout());
++}
++
++}  // namespace arcium_settings
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+@@ -37,6 +37,7 @@ action("build") {
+   inputs = arcium_settings_ui_vendor_inputs + [
+     "Package.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsModels.swift",
++    "Sources/ArciumSettingsUI/ArciumCommandDesign.swift",
+     "Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsViews.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsUIController.swift",
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandDesign.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandDesign.swift
+@@ -0,0 +1,91 @@
++// Generated from core devutils/ui/command_bar_design.json. Do not edit.
++import Foundation
++import CoreFoundation
++
++nonisolated struct ArciumCommandDesign: Equatable, Sendable {
++    struct Token: Identifiable, Sendable {
++        let id: String
++        let label: String
++        let group: String
++        let initial: Double
++        let range: ClosedRange<Double>
++        let step: Double
++        let integer: Bool
++        let color: Bool
++        let initialColor: String
++    }
++    static let tokens: [Token] = [
++        .init(id: "panel_width", label: "Panel width", group: "Geometry", initial: 760, range: 480...1000, step: 8, integer: true, color: false, initialColor: ""),
++        .init(id: "search_height", label: "Search height", group: "Geometry", initial: 62, range: 48...88, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "row_height", label: "Row height", group: "Geometry", initial: 43, range: 40...64, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "row_gap", label: "Row spacing", group: "Geometry", initial: 0, range: 0...12, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "joined_row_gap", label: "Joined row spacing", group: "Geometry", initial: 5, range: 0...12, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "results_inset", label: "Results inset", group: "Geometry", initial: 8, range: 4...24, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "panel_radius", label: "Panel radius", group: "Geometry", initial: 13, range: 4...24, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "row_radius", label: "Row radius", group: "Geometry", initial: 6, range: 0...16, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_inset", label: "Scope inset", group: "Geometry", initial: 24, range: 0...48, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_gap", label: "Scope spacing", group: "Geometry", initial: 8, range: 0...16, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_radius", label: "Scope radius", group: "Geometry", initial: 13, range: 4...20, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "input_font_size", label: "Search text size", group: "Typography", initial: 18, range: 14...24, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "title_font_size", label: "Result text size", group: "Typography", initial: 14, range: 12...18, step: 1, integer: true, color: false, initialColor: ""),
++        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 1.75, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_height", label: "Glow height", group: "Lighting", initial: 0.8, range: 0.25...3.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "collapsed_glow_height", label: "Collapsed glow height", group: "Lighting", initial: 0.25, range: 0.0...1.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_softness", label: "Glow blur", group: "Lighting", initial: 40.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_radiance", label: "Light calibration", group: "Internal", initial: 0.48, range: 0.1...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "inactive_scope_strength", label: "Inactive row multiplier", group: "Lighting", initial: 0.66, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "selected_scope_boost", label: "Selected scope multiplier", group: "Lighting", initial: 0.3, range: 0.0...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "selection_ms", label: "Selection", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_reveal_ms", label: "Scope reveal", group: "Motion", initial: 140, range: 0...300, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_label_ms", label: "Scope label", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_icon_ms", label: "Scope icon", group: "Motion", initial: 110, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "content_ms", label: "Result transition", group: "Motion", initial: 160, range: 0...300, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_focus_ms", label: "Scope focus", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "height_debounce_ms", label: "Height debounce", group: "Motion", initial: 40, range: 0...120, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "height_shrink_ms", label: "Height spring", group: "Motion", initial: 60, range: 0...180, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "scope_hide_ms", label: "Scope hide delay", group: "Motion", initial: 100, range: 0...300, step: 5, integer: true, color: false, initialColor: ""),
++        .init(id: "text_color", label: "Text", group: "Colors", initial: 0, range: 0...1, step: 1, integer: false, color: true, initialColor: ""),
++        .init(id: "muted_color", label: "Secondary text", group: "Colors", initial: 0, range: 0...1, step: 1, integer: false, color: true, initialColor: ""),
++        .init(id: "accent_color", label: "Accent", group: "Colors", initial: 0, range: 0...1, step: 1, integer: false, color: true, initialColor: ""),
++        .init(id: "selection_color", label: "Selection", group: "Colors", initial: 0, range: 0...1, step: 1, integer: false, color: true, initialColor: ""),
++    ]
++    private var numbers: [String: Double] = [:]
++    private var colors: [String: String] = [:]
++    init() {}
++    init?(dictionary: [String: Any]) {
++        for (key, raw) in dictionary {
++            guard let token = Self.tokens.first(where: { $0.id == key }) else { return nil }
++            if token.color {
++                guard let value = raw as? String,
++                      value.isEmpty || (value.count == 7 && value.first == "#" &&
++                          value.dropFirst().allSatisfy({ $0.isASCII && $0.isHexDigit })) else { return nil }
++                if value.uppercased() != token.initialColor.uppercased() { colors[key] = value.uppercased() }
++            } else {
++                guard let value = raw as? NSNumber,
++                      CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
++                let number = value.doubleValue
++                guard number.isFinite, token.range.contains(number),
++                      !token.integer || number.rounded(.towardZero) == number else { return nil }
++                if number != token.initial { numbers[key] = number }
++            }
++        }
++    }
++    func number(_ token: Token) -> Double { numbers[token.id] ?? token.initial }
++    func color(_ token: Token) -> String { colors[token.id] ?? token.initialColor }
++    mutating func setNumber(_ value: Double, for token: Token) {
++        guard !token.color, value.isFinite else { return }
++        let bounded = min(token.range.upperBound, max(token.range.lowerBound, value))
++        let normalized = token.integer ? bounded.rounded() : bounded
++        numbers[token.id] = normalized == token.initial ? nil : normalized
++    }
++    mutating func setColor(_ value: String, for token: Token) {
++        guard token.color, let parsed = Self(dictionary: [token.id: value]) else { return }
++        colors[token.id] = parsed.colors[token.id]
++    }
++    var dictionary: [String: Any] {
++        var result: [String: Any] = numbers
++        for (key, value) in colors { result[key] = value }
++        return result
++    }
++    var isDefault: Bool { numbers.isEmpty && colors.isEmpty }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -390,6 +390,7 @@ nonisolated struct ArciumCommandPanelLay
+     var glowStrength = 0.75
+     var activityDots = true
+     var resultCount = 8
++    var design = ArciumCommandDesign()
+     var style: Style? {
+         Style.allCases.first { reveal == $0.scopeHeight && connected == $0.attached && width == $0.width }
+     }
+@@ -413,6 +414,7 @@ nonisolated struct ArciumCommandPanelLay
+         if let value = exactIntegerOptional(dictionary["scope_reveal"]), (0...5).contains(value) {
+             reveal = value
+         }
++        if let raw = dictionary["design"] as? [String: Any], let parsed = ArciumCommandDesign(dictionary: raw) { design = parsed }
+         connected = strictBoolean(dictionary["connected"]) ?? true
+         if dictionary["scope_width"] != nil {
+             if let value = exactIntegerOptional(dictionary["scope_width"]), let parsed = Width(rawValue: value) {
+@@ -436,10 +438,12 @@ nonisolated struct ArciumCommandPanelLay
+     var dictionary: [String: Any] {
+         var value = self
+         value.normalize()
+-        return ["labels": labels, "icons": icons, "scope_reveal": reveal,
++        var result: [String: Any] = ["labels": labels, "icons": icons, "scope_reveal": reveal,
+          "connected": connected, "scope_width": value.width.rawValue,
+          "scope_tints": scopeTints, "glow_strength": glowStrength, "activity_dots": activityDots,
+          "result_count": value.resultCount]
++        if !design.isDefault { result["design"] = design.dictionary }
++        return result
+     }
+ }
+ 
+@@ -469,7 +473,10 @@ nonisolated enum ArciumCommandBarPreset
+         let required: Set<String> = ["labels", "icons", "scope_reveal", "connected", "scope_width",
+                                      "scope_tints", "glow_strength", "activity_dots"]
+         let keys = Set(layout.keys)
+-        guard keys == required || keys == required.union(["result_count"]) else { throw Failure.invalid }
++        guard required.isSubset(of: keys), keys.isSubset(of: required.union(["result_count", "design"])) else { throw Failure.invalid }
++        if let raw = layout["design"] {
++            guard let dictionary = raw as? [String: Any], ArciumCommandDesign(dictionary: dictionary) != nil else { throw Failure.invalid }
++        }
+         for (key, upper) in [("labels", 2), ("icons", 3), ("scope_reveal", 5), ("scope_width", 2)] {
+             guard let value = exactIntegerOptional(layout[key]), (0...upper).contains(value) else { throw Failure.invalid }
+         }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -1686,13 +1686,19 @@ private struct ArciumCommandBarControls:
+             Section("Lighting") {
+                 SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+                 if store.snapshot.appearance.commandPanelLayout.scopeTints {
+-                    SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
++                    SSlider("Base strength", value: commandLayoutBinding(\.glowStrength),
+                         range: 0...2, step: 0.05,
+                         format: { "\(Int(($0 * 100).rounded()))%" },
+-                        help: SHelp(description: "Adjust the glow behind command-bar scopes. 75% is the default strength."))
++                        help: SHelp(description: "Strength while the scope row is active. The inactive row and selected scope multipliers apply to this value."))
+                     .accessibilityIdentifier("omnibox-scope-glow-strength")
++                    ForEach(ArciumCommandDesign.tokens.filter { $0.group == "Lighting" }) { token in
++                        ArciumCommandDesignSlider(store: store, token: token)
++                    }
+                 }
+             }
++            Section("Design") {
++                ArciumCommandDesignControls(store: store)
++            }
+         }
+         .disabled(!editable)
+         .sheet(isPresented: $showingAdvanced) {
+@@ -1716,6 +1722,83 @@ private struct ArciumCommandBarControls:
+     }
+ }
+ 
++// These controls edit the same profile dictionary consumed by CommandPanelView.
++// The shared schema generates the descriptors and C++ defaults together.
++private struct ArciumCommandDesignSlider: View {
++    @ObservedObject var store: ArciumSettingsStore
++    let token: ArciumCommandDesign.Token
++    // Preserve the existing serialized boost while presenting its full factor.
++    private var displayOffset: Double { token.id == "selected_scope_boost" ? 1 : 0 }
++    private var value: Binding<Double> {
++        Binding(get: { store.snapshot.appearance.commandPanelLayout.design.number(token) + displayOffset },
++                set: { value in
++                    var layout = store.snapshot.appearance.commandPanelLayout
++                    layout.design.setNumber(value - displayOffset, for: token)
++                    store.setCommandPanelLayout(layout)
++                })
++    }
++    var body: some View {
++        SSlider(token.label, value: value,
++                range: (token.range.lowerBound + displayOffset)...(token.range.upperBound + displayOffset),
++                step: token.step,
++                format: { value in
++                    token.id.hasSuffix("_ms") ? "\(Int(value.rounded())) ms" :
++                    (token.integer || token.id == "glow_softness" ? "\(Int(value.rounded())) pt" : "\(Int((value * 100).rounded()))%")
++                })
++            .accessibilityIdentifier("command-design-" + token.id)
++    }
++}
++
++private struct ArciumCommandDesignControls: View {
++    @ObservedObject var store: ArciumSettingsStore
++    private static let groups = ["Geometry", "Typography", "Motion", "Colors"]
++    private var design: ArciumCommandDesign { store.snapshot.appearance.commandPanelLayout.design }
++    private func change(_ edit: (inout ArciumCommandDesign) -> Void) {
++        var layout = store.snapshot.appearance.commandPanelLayout
++        edit(&layout.design)
++        store.setCommandPanelLayout(layout)
++    }
++    private func color(_ token: ArciumCommandDesign.Token) -> Binding<Color> {
++        Binding(get: {
++            let hex = design.color(token)
++            let value = UInt32(hex.dropFirst(), radix: 16) ?? 0xF2F2F0
++            return Color(.sRGB, red: Double((value >> 16) & 255) / 255,
++                         green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
++        }, set: { color in
++            guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
++            func byte(_ value: CGFloat) -> Int { Int((min(1, max(0, value)) * 255).rounded()) }
++            let hex = String(format: "#%02X%02X%02X", byte(rgb.redComponent), byte(rgb.greenComponent), byte(rgb.blueComponent))
++            change { $0.setColor(hex, for: token) }
++        })
++    }
++    var body: some View {
++        VStack(alignment: .leading, spacing: 12) {
++            ForEach(Self.groups, id: \.self) { group in
++                DisclosureGroup(group) {
++                    VStack(spacing: 12) {
++                        ForEach(ArciumCommandDesign.tokens.filter { $0.group == group }) { token in
++                            if token.color {
++                                HStack {
++                                    ColorPicker(token.label, selection: color(token), supportsOpacity: false)
++                                        .accessibilityIdentifier("command-design-" + token.id)
++                                    Button("Theme") { change { $0.setColor("", for: token) } }
++                                        .disabled(design.color(token).isEmpty)
++                                        .accessibilityIdentifier("command-design-reset-" + token.id)
++                                }
++                            } else {
++                                ArciumCommandDesignSlider(store: store, token: token)
++                            }
++                        }
++                    }.padding(.top, 8)
++                }
++            }
++            Button("Reset design values") { change { $0 = ArciumCommandDesign() } }
++                .disabled(design.isDefault)
++                .accessibilityIdentifier("command-design-reset")
++        }
++    }
++}
++
+ // A small style-selection diagram; the adjacent live preview uses production UI.
+ private struct ArciumCommandStyleThumbnail: View {
+     let style: ArciumCommandPanelLayout.Style
+@@ -1827,4 +1910,3 @@ struct ArciumCommandBarEditorView: View
+         }
+     }
+ }
+-
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
+@@ -30,6 +30,35 @@ final class ArciumCommandBarPresetTests:
+         layout.applyStyle(.stacked); layout.connected = true
+         XCTAssertNil(layout.style)
+     }
++    func testLiveDesignRoundTripAndStylePreservation() throws {
++        var layout = ArciumCommandPanelLayout()
++        for token in ArciumCommandDesign.tokens {
++            if token.color { layout.design.setColor("#bFaA80", for: token) }
++            else { layout.design.setNumber(token.range.upperBound, for: token) }
++        }
++        let design = layout.design
++        for style in ArciumCommandPanelLayout.Style.allCases {
++            layout.applyStyle(style)
++            XCTAssertEqual(layout.design, design)
++            XCTAssertEqual(try ArciumCommandBarPreset.decode(ArciumCommandBarPreset.encode(layout)), layout)
++        }
++    }
++    func testLiveDesignRejectsInvalidFieldsAndPreservesLegacyDefaults() throws {
++        XCTAssertTrue(ArciumCommandPanelLayout().design.isDefault)
++        XCTAssertNil(ArciumCommandPanelLayout().dictionary["design"])
++        for invalid: [String: Any] in [
++            ["row_height": true], ["row_height": 31], ["row_height": 65], ["row_height": 43.5],
++            ["glow_softness": Double.infinity], ["text_color": "#FFFF"], ["text_color": "#GGGGGG"],
++            ["selection_color": 3], ["unknown": 1]] {
++            XCTAssertNil(ArciumCommandDesign(dictionary: invalid))
++            var raw = ArciumCommandPanelLayout().dictionary; raw["design"] = invalid
++            if JSONSerialization.isValidJSONObject(raw) {
++                XCTAssertThrowsError(try ArciumCommandBarPreset.decode(JSONSerialization.data(withJSONObject: raw)))
++            }
++        }
++        let defaults = Dictionary(uniqueKeysWithValues: ArciumCommandDesign.tokens.filter { !$0.color }.map { ($0.id, $0.initial) })
++        XCTAssertTrue(try XCTUnwrap(ArciumCommandDesign(dictionary: defaults)).isDefault)
++    }
+     func testEveryRevealAndWidthRoundTrips() throws {
+         for reveal in 0...5 { for width in ArciumCommandPanelLayout.Width.allCases {
+             var layout = ArciumCommandPanelLayout()
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -575,8 +575,10 @@ class CommandSettingsPreviewView : publi
+   void Layout(PassKey) override {
+     const int controls_width = std::min(520, std::max(0, width() - 320));
+     controls_->SetBounds(0, 0, controls_width, height());
+-    panel_->SetBounds(controls_width + 16, 16,
+-                      std::max(1, width() - controls_width - 32),
++    const int available = std::max(1, width() - controls_width - 32);
++    const int panel_width = std::min(available, panel_->GetPreferredSize().width());
++    panel_->SetBounds(controls_width + 16 + (available - panel_width) / 2, 16,
++                      panel_width,
+                       std::clamp(preview_height_, 1, std::max(1, height() - 32)));
+     if (geometry_changed_) {
+       geometry_changed_.Run();
+Index: src/chrome/test/arcium_command_bar_studio_mac.mm
+===================================================================
+--- src.orig/chrome/test/arcium_command_bar_studio_mac.mm
++++ src/chrome/test/arcium_command_bar_studio_mac.mm
+@@ -19,6 +19,9 @@
+ #include "base/memory_coordinator/test_memory_consumer_registry.h"
+ #include "base/apple/bundle_locations.h"
+ #include "base/command_line.h"
++#include "ui/compositor/canvas_painter.h"
++#include "ui/views/paint_info.h"
++#include "ui/views/controls/scroll_view.h"
+ #include "base/feature_list.h"
+ #include "base/files/file_util.h"
+ #include "base/json/json_writer.h"
+@@ -153,8 +156,10 @@ class StudioRoot : public views::View {
+   void Layout(PassKey) override {
+     const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
+     controls_->SetBounds(0, 0, controls_width, height());
+-    panel_->SetBounds(controls_width + 16, 16,
+-        std::max(1, width() - controls_width - 32),
++    const int available = std::max(1, width() - controls_width - 32);
++    const int panel_width = std::min(available, panel_->GetPreferredSize().width());
++    panel_->SetBounds(controls_width + 16 + (available - panel_width) / 2, 16,
++        panel_width,
+         std::clamp(preview_height_, 1, std::max(1, height() - 32)));
+     if (refresh_) refresh_.Run();
+   }
+@@ -354,6 +359,15 @@ class Studio {
+         ? arcium_settings::CommandPanelLayoutFromNSObject(FoundationDictionary(*document.FindDict("layout")))
+         : arcium_settings::CommandPanelLayoutFromNSObject(layout_);
+     if (!accepted) { fprintf(stderr, "Studio: invalid design layout; previous scenario retained\n"); return false; }
++    auto previous_context = scenario_.Clone(); previous_context.Remove("layout");
++    auto next_context = document.Clone(); next_context.Remove("layout");
++    if (!scenario_bytes_.empty() && previous_context == next_context) {
++      scenario_ = std::move(document);
++      layout_ = FoundationDictionary(*accepted);
++      prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
++      UpdateSnapshot();
++      return true;
++    }
+     const base::AutoReset<bool> applying(&applying_scenario_, true);
+     if (auto* popup = arcium::CommandPanelPresentation::Get(root_)) popup->Destroy(true);
+     arcium::workshop::ApplyAccessibilityContext(document);
+@@ -561,6 +575,50 @@ class Studio {
+         base::BindOnce(&Studio::AdvanceWindowLifecycle, weak_factory_.GetWeakPtr()),
+         base::Milliseconds(75));
+   }
++  bool RunRenderBenchmark(const std::string& report_path) {
++    root_->SetWorkshopMode();
++    widget_->SetBounds(gfx::Rect(120, 120, 1100, 760));
++    widget_->GetRootView()->DeprecatedLayoutImmediately();
++    auto* panel = root_->panel();
++    panel->input_for_testing()->SetText(u"");
++    panel->ContentsChanged(panel->input_for_testing(), u"");
++    NSMutableDictionary* result = [NSMutableDictionary dictionary];
++    for (NSString* phase in @[@"paint", @"typing", @"scopes"]) {
++      panel->input_for_testing()->SetText(u"");
++      panel->ContentsChanged(panel->input_for_testing(), u"");
++      std::vector<double> timings;
++      SkBitmap bitmap;
++      for (int i = 0; i < 280; ++i) {
++        const auto started = base::TimeTicks::Now();
++        if ([phase isEqualToString:@"typing"]) {
++          const auto text = i % 2 ? u"Design" : u"Example";
++          panel->input_for_testing()->SetText(text);
++          panel->ContentsChanged(panel->input_for_testing(), text);
++        } else if ([phase isEqualToString:@"scopes"]) {
++          panel->HandleKeyEvent(nullptr,
++              ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RIGHT, 0));
++        }
++        widget_->GetRootView()->DeprecatedLayoutImmediately();
++        {
++          auto* root = widget_->GetRootView();
++          ui::CanvasPainter painter(&bitmap, root->size(), 1.f, SK_ColorTRANSPARENT, false);
++          root->Paint(views::PaintInfo::CreateRootPaintInfo(painter.context(), root->size()));
++        }
++        const double elapsed = (base::TimeTicks::Now() - started).InMicrosecondsF();
++        if (i >= 40) timings.push_back(elapsed);
++      }
++      std::sort(timings.begin(), timings.end());
++      uint64_t checksum = 1469598103934665603ULL;
++      const auto* bytes = static_cast<const uint8_t*>(bitmap.getPixels());
++      for (size_t i = 0; i < bitmap.computeByteSize(); ++i) checksum = (checksum ^ bytes[i]) * 1099511628211ULL;
++      result[phase] = @{@"samples": @(timings.size()), @"median_us": @(timings[120]),
++          @"p95_us": @(timings[228]), @"maximum_us": @(timings.back()),
++          @"last_bitmap_checksum": [NSString stringWithFormat:@"%llu", static_cast<unsigned long long>(checksum)]};
++    }
++    result[@"measurement"] = @"Synchronous CPU layout/record/raster with fake data; excludes native glass, GPU presentation and browser backend";
++    NSData* data = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
++    return [data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES];
++  }
+   bool RunInteractionChecks(const std::string& report_path) {
+     auto* panel = root_->panel();
+     NSMutableDictionary* checks = [NSMutableDictionary dictionary];
+@@ -626,6 +684,45 @@ class Studio {
+     checks[@"live_reveal_changes_geometry"] = @(tabs_height == 42 && panel->scope_button_for_testing(0)->height() == 2);
+     checks[@"reveal_edit_preserves_scope"] = @(panel->scope_for_testing() == saved_scope);
+     checks[@"reveal_edit_preserves_query"] = @(panel->input_for_testing()->GetText() == u"Design");
++    // Bounded CPU update measurement, not a display-latency claim. Exercise the
++    // actual Objective-C validation -> PrefService observer -> typed view path.
++    auto* original_row = panel->scroll_for_testing()->contents()->children().empty()
++        ? nullptr : panel->scroll_for_testing()->contents()->children()[0].get();
++    const auto query = panel->input_for_testing()->GetText();
++    const auto selection_key = panel->CaptureSelectionKey();
++    const int row_count = panel->row_count_for_testing();
++    int design_geometry_notifications = 0;
++    panel->SetGeometryChangedCallback(base::BindRepeating([](int* count) { ++*count; },
++        base::Unretained(&design_geometry_notifications)));
++    std::vector<double> update_microseconds;
++    for (int i = 0; i < 500; ++i) {
++      trial[@"design"] = @{@"glow_softness": @(10 + i % 2), @"row_radius": @(i % 10)};
++      const auto started = base::TimeTicks::Now();
++      Change(@"command_panel_layout", trial);
++      update_microseconds.push_back((base::TimeTicks::Now() - started).InMicrosecondsF());
++    }
++    checks[@"design_paint_edits_skip_geometry"] = @(design_geometry_notifications == 0);
++    checks[@"design_paint_edits_retain_rows"] = @(panel->row_count_for_testing() == row_count &&
++        original_row && original_row == panel->scroll_for_testing()->contents()->children()[0].get());
++    checks[@"design_paint_edits_retain_input_selection"] = @(query == panel->input_for_testing()->GetText() &&
++        selection_key == panel->CaptureSelectionKey());
++    std::sort(update_microseconds.begin(), update_microseconds.end());
++    NSDictionary* design_metrics = @{@"samples": @500, @"median_update_us": @(update_microseconds[250]),
++        @"p95_update_us": @(update_microseconds[475]), @"maximum_update_us": @(update_microseconds.back()),
++        @"geometry_notifications": @(design_geometry_notifications),
++        @"cached_design_bytes": @(sizeof(arcium::CommandPanelDesign)),
++        @"measurement": @"CPU preference update only; no compositor presentation wait"};
++    panel->SetGeometryChangedCallback(base::BindRepeating(&Studio::RefreshMaterial, base::Unretained(this)));
++    trial[@"design"] = @{@"row_height": @56, @"panel_width": @500, @"search_height": @72,
++        @"input_font_size": @20, @"selection_ms": @35, @"text_color": @"#FF0000"};
++    apply(trial);
++    checks[@"design_geometry_updates_existing_panel"] = @(panel == root_->panel() &&
++        panel->scroll_for_testing()->contents()->children()[0]->height() == 56 &&
++        panel->GetPreferredSize().width() == 564);
++    checks[@"design_motion_updates_existing_animation"] = @(
++        panel->selection_animation_for_testing()->GetSlideDuration() == base::Milliseconds(35));
++    checks[@"design_geometry_retains_input_selection"] = @(query == panel->input_for_testing()->GetText() &&
++        selection_key == panel->CaptureSelectionKey());
+     apply(saved_layout);
+     panel->input_for_testing()->SetText(saved_query);
+     panel->ContentsChanged(panel->input_for_testing(), saved_query);
+@@ -651,7 +748,7 @@ class Studio {
+     checks[@"explicit_close_requests_normal_shutdown"] = @(closing_);
+     bool passed = true;
+     for (NSNumber* value in checks.allValues) passed &= value.boolValue;
+-    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks};
++    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks, @"design_metrics": design_metrics};
+     NSData* data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
+     if (![data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES]) return false;
+     return passed;
+@@ -821,7 +918,8 @@ int main(int argc, const char** argv) {
+           if (key.app_controller) key.app_controller->AddColorMixers(provider, key);
+         }));
+     ui::InitializeInputMethodForTesting();
+-    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report");
++    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report") &&
++        !command->HasSwitch("render-benchmark-report");
+     {
+       views::DesktopTestViewsDelegate views_delegate;
+       views_delegate.set_context_factory(factories.GetContextFactory());
+@@ -836,6 +934,14 @@ int main(int argc, const char** argv) {
+                 if (owner) owner->RunWorkshopChecks(std::move(path));
+               }, studio.GetWeakPtr(), command->GetSwitchValuePath("workshop-check-dir")), base::Milliseconds(800));
+         }
++        if (command->HasSwitch("render-benchmark-report")) {
++          base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
++              base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, std::string path) {
++                if (!owner) return;
++                *passed = owner->RunRenderBenchmark(path); owner->RequestClose();
++              }, studio.GetWeakPtr(), &interaction_checks_passed,
++                 command->GetSwitchValueASCII("render-benchmark-report")), base::Milliseconds(800));
++        }
+         if (command->HasSwitch("interaction-check-report")) {
+           base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+               base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, base::CommandLine* flags) {

@@ -1,0 +1,4 @@
+.build/
+.swiftpm/
+Sources/ArciumCommandBarStudio/ProductionContract.swift
+__pycache__/

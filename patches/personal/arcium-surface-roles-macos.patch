@@ -869,8 +869,8 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
  CGMutablePathRef ContourToCGPath(const SkPath& contour,
                                   const gfx::Rect& bounds,
                                   CGFloat height,
-@@ -95,6 +379,10 @@ class CommandBarNativeBackgroundMac : pu
-     [background_view_ removeFromSuperview];
+@@ -139,6 +423,10 @@ class CommandBarNativeBackgroundMac : pu
+     return base::ClampRound(NSHeight(window.frame));
    }
  
 +  void SetPanelStyle(const helium::SurfaceStyle& style) override {
@@ -880,7 +880,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
    void SetContour(const SkPath& contour) override {
      if (contour_ == contour) {
        return;
-@@ -116,11 +404,17 @@ class CommandBarNativeBackgroundMac : pu
+@@ -160,11 +448,17 @@ class CommandBarNativeBackgroundMac : pu
              configuration, helium::GetRequestedGlassBackend(),
              availability.native_liquid_glass, availability.native_material,
              availability.reduce_transparency);
@@ -900,7 +900,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
        return false;
      }
  
-@@ -141,7 +435,7 @@ class CommandBarNativeBackgroundMac : pu
+@@ -185,7 +479,7 @@ class CommandBarNativeBackgroundMac : pu
          last_configuration_ == configuration &&
          last_active_material_ == resolution.active && last_bounds_ == bounds &&
          last_corner_radii_ == corner_radii && last_color_mode_ == color_mode &&
@@ -909,7 +909,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
          !(contour_changed_ && contour_.isEmpty())) {
        if (contour_changed_ && !contour_.isEmpty()) {
          CGMutablePathRef path =
-@@ -157,21 +451,37 @@ class CommandBarNativeBackgroundMac : pu
+@@ -201,21 +495,37 @@ class CommandBarNativeBackgroundMac : pu
        return true;
      }
      if (!background_view_) {
@@ -958,7 +958,7 @@ Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
      background_view_.wantsLayer = YES;
      // The results top edge is square below the search-bar cutout. Preserve
      // each painted corner rather than imposing a second rounded silhouette.
-@@ -229,12 +539,15 @@ class CommandBarNativeBackgroundMac : pu
+@@ -273,12 +583,15 @@ class CommandBarNativeBackgroundMac : pu
      last_corner_radii_ = corner_radii;
      last_color_mode_ = color_mode;
      last_theme_color_ = theme_color;

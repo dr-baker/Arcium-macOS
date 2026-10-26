@@ -397,7 +397,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              }
              .onDisappear {
                  if surfacePreview {
-@@ -722,102 +760,17 @@ private struct AppearanceSettingsPage: V
+@@ -722,104 +760,15 @@ private struct AppearanceSettingsPage: V
                  }
              }
  
@@ -426,7 +426,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                    }
 -                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 -                }
- 
+-
 -                SSectionCard(title: "Containers") {
 -                    Group {
 -                        Text("Tab switcher and Peek").foregroundStyle(.secondary)
@@ -454,7 +454,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                    }
 -                    .disabled(!store.snapshot.appearance.canEditSurfaceTuning)
 -                }
- 
+-
 -                SSectionCard(title: "Peek backdrop") {
 -                    Group {
 -                        SSlider("Blur", value: surfaceTuningBinding(\.scrimBlur),
@@ -478,9 +478,11 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 -                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
 -                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
 -                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
--                        (value: 4, label: "Flush"), (value: 5, label: "Divot")])
+-                        (value: 4, label: "Flat"), (value: 5, label: "Divot")])
 -                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
--                    SToggle("Full width scopes", isOn: commandLayoutBinding(\.fullWidth))
+-                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options: [
+-                        (value: .flush, label: "Flush"), (value: .iconWidth, label: "Icon-width"),
+-                        (value: .offset, label: "Offset")])
 -                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
 -                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
 -                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
@@ -506,7 +508,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  SPicker("Browser layout", selection: Binding(
                      get: { store.snapshot.tabs.layout },
                      set: { store.setLayout($0) }
-@@ -879,7 +832,7 @@ private struct AppearanceSettingsPage: V
+@@ -881,7 +830,7 @@ private struct AppearanceSettingsPage: V
                  }, description: "Choose an icon rail or fully hide the sidebar.")
                  .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
                      || store.snapshot.appearance.collapsedSidebarStyleManaged)
@@ -515,7 +517,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  SSlider("Border width", value: Binding(
                      get: { store.displayedChromeFrameBorderWidth },
                      set: { store.setDisplayedChromeFrameBorderWidth($0) }
-@@ -895,17 +848,17 @@ private struct AppearanceSettingsPage: V
+@@ -897,17 +846,17 @@ private struct AppearanceSettingsPage: V
                      || !store.snapshot.appearance.roundedFrame)
                  BooleanSetting(
                      title: "Centered address bar",
@@ -536,7 +538,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  BooleanSetting(
                      title: "Zen mode",
                      description: "Hide optional browser chrome for a focused workspace.",
-@@ -930,7 +883,7 @@ private struct AppearanceSettingsPage: V
+@@ -932,7 +881,7 @@ private struct AppearanceSettingsPage: V
                  )
              }
  
@@ -545,7 +547,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  Text(store.snapshot.appearance.sidebarNavigationConfigured
                      ? "Choose what appears in your sidebar navigation."
                      : "Choose what appears in your browser toolbar.")
-@@ -943,7 +896,7 @@ private struct AppearanceSettingsPage: V
+@@ -945,7 +894,7 @@ private struct AppearanceSettingsPage: V
                  }
              }
  
@@ -554,7 +556,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                  BooleanSetting(
                      title: "Show sidebar collapse button",
                      description: "Show the toolbar button for collapsing the sidebar. Available with Vertical tabs.",
-@@ -965,6 +918,136 @@ private struct AppearanceSettingsPage: V
+@@ -967,6 +916,138 @@ private struct AppearanceSettingsPage: V
              }
          }
          .id(store.snapshot.appearance.spacePalette.id)
@@ -671,9 +673,11 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
 +                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
 +                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
-+                        (value: 4, label: "Flush"), (value: 5, label: "Divot")])
++                        (value: 4, label: "Flat"), (value: 5, label: "Divot")])
 +                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
-+                    SToggle("Full width scopes", isOn: commandLayoutBinding(\.fullWidth))
++                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options: [
++                        (value: .flush, label: "Flush"), (value: .iconWidth, label: "Icon-width"),
++                        (value: .offset, label: "Offset")])
 +                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
 +                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
 +                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
@@ -691,7 +695,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      }
  
      @ViewBuilder
-@@ -990,16 +1073,18 @@ private struct AppearanceSettingsPage: V
+@@ -992,16 +1073,18 @@ private struct AppearanceSettingsPage: V
                  if !backgroundEffectsAvailable,
                     store.snapshot.appearance.chrome.canEdit,
                     store.snapshot.appearance.chrome.effectsAvailable {
@@ -719,7 +723,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      }
                  }
              } else {
-@@ -1015,11 +1100,13 @@ private struct AppearanceSettingsPage: V
+@@ -1017,11 +1100,13 @@ private struct AppearanceSettingsPage: V
                  )
              }
          } else if store.snapshot.appearance.chrome.isAvailable {

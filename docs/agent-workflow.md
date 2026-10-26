@@ -108,8 +108,13 @@ changes. Builds and dry-run plans must enter through the shared router.
 Read-only Ninja inspection such as `-t commands` is allowed; mutating subtools
 such as `-t clean` are not. Use the supported cleanup commands instead.
 
-The only production exceptions are the central command builder and the
-isolated cloud compiler smoke function. There is no inline lint suppression.
+The production Chromium exceptions are the central command builder and the
+isolated cloud compiler smoke function. The independent command-bar Studio SDK
+also has one reviewed exception in `sdk.py:build`: it compiles its private graph
+under the iteration lock, validates frozen ABI inputs and limits jobs to 1–13.
+It cannot mutate shared Chromium output. Its fixed job cap does not provide
+`he` desktop resource backoff and can compete with a concurrent browser build.
+There is no inline lint suppression.
 Changing that function allowlist requires architecture review. The checker
 recognizes literal commands and simple assignments; it cannot prevent an
 agent from constructing an arbitrary command or bypassing the CLI manually.
