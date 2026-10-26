@@ -73,15 +73,18 @@ flat Minimal scopes still emit from the command bar's top edge. Blur
 feathers its edge without changing either axis or adding a GPU blur pass.
 The **Light / Dark** switch above the preview, also available with **⌘D**,
 changes the native appearance in place while retaining content and settings.
-Scope colors use cached appearance-specific tones: deeper, more saturated
-tints on light glass and luminous tones on dark glass. Neutral accents become
-black shading on light glass and white light on dark glass. Each tint receives
-a cached gain that matches its composited OKLab contrast to the red accent,
-bounded to 50–200%. Light mode adds 50 percentage points to the base strength;
-hover and press add another 45 points. The row and selection multipliers apply
-after those additions. Zero strength continues to disable lighting. Built-in X
-icons use black on light and white on dark; Saved keeps a contrasting gold.
-Favicons and multicolor artwork retain their original pixels.
+Scope colors retain their original RGB. Only white switches to black shading
+on light glass, and built-in X icons use black on light and white on dark.
+Saved, favicons and multicolor artwork retain their original pixels.
+A cached 33-sample opacity curve matches composited OKLab contrast along the
+whole glow falloff, using the original red accent as reference. The six gradient
+stops retain the same RGB through the zero-alpha endpoint, avoiding dark fringes.
+Curves are shared in a bounded per-thread cache across panel openings. Paint
+only interpolates cached samples; it adds no color solving or drawing passes.
+Pale colors saturate at full opacity if the reference contrast is unreachable.
+Light mode adds 50 percentage points to the base strength; hover and press add
+another 45 points. The row and selection multipliers apply after those
+additions. Zero strength continues to disable lighting.
 
 For scripted iteration on an already-running instance:
 
