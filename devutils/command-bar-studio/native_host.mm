@@ -24,6 +24,7 @@
 #include "ui/views/controls/scroll_view.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
+#include "base/files/file.h"
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/arcium_command_workshop_support.h"
@@ -423,6 +424,13 @@ class Studio {
   }
   void PersistScenario() {
     if (scenario_path_.empty() || !OwnsScenarioWriter()) return;
+    base::File lock(base::FilePath(scenario_path_.value() + ".lock"),
+                    base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_READ |
+                        base::File::FLAG_WRITE);
+    // File::Lock uses a nonblocking POSIX record lock, matching Python lockf.
+    // A busy editor must never block the UI; the next poll retries.
+    if (!lock.IsValid() ||
+        lock.Lock(base::File::LockMode::kExclusive) != base::File::FILE_OK) return;
     std::string current;
     struct stat info;
     if (lstat(scenario_path_.value().c_str(), &info) == 0) {

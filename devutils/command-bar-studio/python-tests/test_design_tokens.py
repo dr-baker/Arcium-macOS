@@ -4,6 +4,10 @@ from pathlib import Path
 import tempfile
 import unittest
 import json
+import subprocess
+import sys
+import fcntl
+import time
 
 spec = importlib.util.spec_from_file_location(
     'studio_design_types', Path(__file__).resolve().parents[1] / 'design_tokens.py')
@@ -47,6 +51,39 @@ class DesignTokenTests(unittest.TestCase):
                 self.assertEqual(updated[key], document[key])
             native.edit_design(state, [], reset=True)
             self.assertEqual(json.loads(path.read_text()), document)
+
+    def test_concurrent_cli_edits_share_one_transaction(self):
+        native_spec = importlib.util.spec_from_file_location('native_design_race', design.ROOT / 'devutils/command-bar-studio/native.py')
+        native = importlib.util.module_from_spec(native_spec); native_spec.loader.exec_module(native)
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary); path = state / 'scenario.json'
+            path.write_text(json.dumps({'schema': 'arcium-ui-workshop', 'version': 1,
+                'component': 'command-bar', 'query': 'retained', 'layout': {}}))
+            code = "import sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);import native;print('ready',flush=True);native.edit_design(Path(sys.argv[2]),[sys.argv[3]])"
+            edits = ['row_height=50', 'search_height=70', 'glow_width=2', 'selection_ms=120']
+            children = []
+            try:
+                with native.scenario_transaction(path):
+                    for edit in edits:
+                        child = subprocess.Popen([sys.executable, '-c', code, str(design.ROOT / 'devutils/command-bar-studio'), str(state), edit],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        children.append(child)
+                    for child in children:
+                        self.assertEqual(child.stdout.readline().strip(), 'ready')
+                    time.sleep(.05)
+                    self.assertTrue(all(child.poll() is None for child in children))
+                for child in children:
+                    _, error = child.communicate(timeout=10)
+                    self.assertEqual(child.returncode, 0, error)
+                document = json.loads(path.read_text())
+                self.assertEqual(document['query'], 'retained')
+                self.assertEqual(document['layout']['design'], {'row_height': 50, 'search_height': 70,
+                    'glow_width': 2, 'selection_ms': 120})
+                self.assertEqual(list(state.glob('.scenario-*')), [])
+            finally:
+                for child in children:
+                    if child.poll() is None: child.terminate()
+                    child.communicate(timeout=10)
 
     def test_each_generation_executes_its_own_swift_generator(self):
         native_spec = importlib.util.spec_from_file_location('native_design_verifier', design.ROOT / 'devutils/command-bar-studio/native.py')

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build/package the real Views renderer, or launch its independent Studio app."""
 import argparse
+from contextlib import contextmanager
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -14,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 
 LAB = Path(__file__).resolve().parent
 ROOT = LAB.parents[1]
@@ -277,42 +280,64 @@ def verify_design_inputs(source_root):
     generator.verify(source_root)
 
 
+_SCENARIO_LOCKS = {}
+
+
+@contextmanager
+def scenario_transaction(path):
+    # Shared with Studio::PersistScenario. Keep this inode for the instance's
+    # lifetime so independent CLI writers and the native host serialize.
+    with _SCENARIO_LOCKS.setdefault(path.resolve(), threading.Lock()):
+        with path.with_name(path.name + '.lock').open('a') as lock:
+            fcntl.lockf(lock, fcntl.LOCK_EX)
+            yield
+
+
+def write_scenario(path, data):
+    descriptor, temporary = tempfile.mkstemp(prefix='.scenario-', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'w') as output:
+            output.write(data)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
 def edit_design(state, edits, reset=False):
     path = state / 'scenario.json'
-    if not path.exists(): raise RuntimeError('Start this Studio instance before editing its design')
-    if path.stat().st_size > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
-    original = path.read_bytes()
-    document = json.loads(original)
-    if (document.get('schema') != 'arcium-ui-workshop' or document.get('version') != 1
-            or document.get('component') != 'command-bar' or not isinstance(document.get('layout'), dict)):
-        raise RuntimeError('This instance has no supported production layout')
-    schema = json.loads((ROOT / 'helium-chromium/devutils/ui/command_bar_design.json').read_text())
-    tokens = {token['key']: token for token in schema['tokens']}
-    values = {} if reset else dict(document['layout'].get('design', {}))
-    for edit in edits:
-        key, separator, raw = edit.partition('=')
-        if not separator or key not in tokens: raise ValueError(f'Unknown design parameter: {key}')
-        token = tokens[key]
-        if token['type'] == 'color':
-            if raw and not re.fullmatch('#[0-9a-fA-F]{6}', raw): raise ValueError(f'Invalid color: {key}')
-            value = raw.upper()
-        else:
-            value = json.loads(raw)
-            if (type(value) not in (int, float) or not math.isfinite(value)
-                    or not token['min'] <= value <= token['max']
-                    or token['type'] == 'int' and int(value) != value):
-                raise ValueError(f'Out-of-range design parameter: {key}')
-        if value == token['default']: values.pop(key, None)
-        else: values[key] = value
-    if values: document['layout']['design'] = values
-    else: document['layout'].pop('design', None)
-    data = json.dumps(document, indent=2) + '\n'
-    if len(data.encode()) > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
-    if path.read_bytes() != original: raise RuntimeError('Scenario changed during edit; retry with current values')
-    temporary = state / 'scenario.pending.json'
-    temporary.write_text(data)
-    temporary.replace(path)
-    return path
+    with scenario_transaction(path):
+        if not path.exists(): raise RuntimeError('Start this Studio instance before editing its design')
+        if path.stat().st_size > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
+        original = path.read_bytes()
+        document = json.loads(original)
+        if (document.get('schema') != 'arcium-ui-workshop' or document.get('version') != 1
+                or document.get('component') != 'command-bar' or not isinstance(document.get('layout'), dict)):
+            raise RuntimeError('This instance has no supported production layout')
+        schema = json.loads((ROOT / 'helium-chromium/devutils/ui/command_bar_design.json').read_text())
+        tokens = {token['key']: token for token in schema['tokens']}
+        values = {} if reset else dict(document['layout'].get('design', {}))
+        for edit in edits:
+            key, separator, raw = edit.partition('=')
+            if not separator or key not in tokens: raise ValueError(f'Unknown design parameter: {key}')
+            token = tokens[key]
+            if token['type'] == 'color':
+                if raw and not re.fullmatch('#[0-9a-fA-F]{6}', raw): raise ValueError(f'Invalid color: {key}')
+                value = raw.upper()
+            else:
+                value = json.loads(raw)
+                if (type(value) not in (int, float) or not math.isfinite(value)
+                        or not token['min'] <= value <= token['max']
+                        or token['type'] == 'int' and int(value) != value):
+                    raise ValueError(f'Out-of-range design parameter: {key}')
+            if value == token['default']: values.pop(key, None)
+            else: values[key] = value
+        if values: document['layout']['design'] = values
+        else: document['layout'].pop('design', None)
+        data = json.dumps(document, indent=2) + '\n'
+        if len(data.encode()) > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
+        if path.read_bytes() != original: raise RuntimeError('Scenario changed during edit; retry with current values')
+        write_scenario(path, data)
+        return path
 
 
 def iterate(jobs, keep_edits=False, launch_app=True):
@@ -395,19 +420,18 @@ def main():
         return
     if args.action == 'scenario':
         STATE.mkdir(parents=True, exist_ok=True)
-        document = {'schema': 'arcium-ui-workshop', 'version': 1, 'component': 'command-bar',
-                    'fixture': args.fixture, 'query': '', 'scope': 'omni'}
-        existing = STATE / 'scenario.json'
-        if not args.scenario_file and existing.exists():
-            document = json.loads(existing.read_text()); document['fixture'] = args.fixture
-        if args.scenario_file:
-            if args.scenario_file.stat().st_size > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
-            document = json.loads(args.scenario_file.read_text())
-            if document.get('schema') != 'arcium-ui-workshop' or document.get('version') != 1:
-                raise RuntimeError('Unsupported scenario document')
-        temporary = STATE / 'scenario.pending.json'
-        temporary.write_text(json.dumps(document, indent=2) + '\n')
-        temporary.replace(STATE / 'scenario.json')
+        with scenario_transaction(STATE / 'scenario.json'):
+            document = {'schema': 'arcium-ui-workshop', 'version': 1, 'component': 'command-bar',
+                        'fixture': args.fixture, 'query': '', 'scope': 'omni'}
+            existing = STATE / 'scenario.json'
+            if not args.scenario_file and existing.exists():
+                document = json.loads(existing.read_text()); document['fixture'] = args.fixture
+            if args.scenario_file:
+                if args.scenario_file.stat().st_size > 1024 * 1024: raise RuntimeError('Scenario exceeds 1 MiB')
+                document = json.loads(args.scenario_file.read_text())
+                if document.get('schema') != 'arcium-ui-workshop' or document.get('version') != 1:
+                    raise RuntimeError('Unsupported scenario document')
+            write_scenario(STATE / 'scenario.json', json.dumps(document, indent=2) + '\n')
         print(STATE / 'scenario.json')
         return
     if args.action == 'watch':
