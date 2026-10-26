@@ -50,6 +50,8 @@ echo "target_cpu = \"$_gn_target_cpu\"" >> "$_root_dir/flags.macos.gn"
 cp "$_main_repo/flags.gn" "$_src_dir/out/Default/args.gn"
 cat "$_root_dir/flags.macos.gn" >> "$_src_dir/out/Default/args.gn"
 echo 'cc_wrapper="sccache"' >> "$_src_dir/out/Default/args.gn"
+# Resume partitions retain Ninja's dependency state, never Siso state.
+echo 'use_siso=false' >> "$_src_dir/out/Default/args.gn"
 
 if [[ -n "$_sparkle_public_key" ]]; then
   echo 'enable_sparkle=true' >> "$_src_dir/out/Default/args.gn"
