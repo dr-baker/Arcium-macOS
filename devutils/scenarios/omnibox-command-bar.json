@@ -57,6 +57,7 @@
     "Type quickly in Omni and browser search. Keep the last list and selection background visible through pending and empty unfinished updates, reuse row views as text/icons change, and verify Enter/actions cannot activate results from an older query. Verify final empty results, scope changes, and a new invocation clear the old list",
     "Change Scope width among Flush, Icon-width and Offset. For each width, change all reveal styles at rest, during reveal and fully open: horizontal bounds must stay independent. Scroll up and rapidly switch scopes; expansion borrows from adjacent tabs before farther ones, remains bounded, and reverses without a jump. Verify inactive glows are 66% of the selected strength with connected and detached scopes and Reduce Motion.",
     "Press Command-T and inspect the New tab bar before typing; press Escape",
+    "While the bar is open, press Command-T again; verify exactly one additional tab appears and the input is empty and focused. Escape retains both tabs. Selecting an existing saved tab switches to it and retains the newly created blank tab.",
     "Press Command-L, type a test URL, press Return, and inspect the original tab",
     "Press Command-T, type a second test URL, press Return, and inspect both tabs",
     "Open the bar, type a query and select a command row, then press Command-T; verify the old query and selection clear before Escape",
@@ -69,13 +70,13 @@
     "Quit normally, restart the same profile, inspect saved-item identity, usage, and the recorded appearance preference, then restore the original appearance and remove only acceptance-owned items"
   ],
   "observables": [
-    "Every explicit new-tab button and keyboard entry opens the command bar; cancellation creates no tab",
+    "Every explicit new-tab button and Command-T creates one active ordinary tab before opening the command bar; cancellation retains that tab",
     "The browser retains its local corpus across openings and defers dirty refresh until the panel is active",
-    "Command-T and Escape leave tab count and current tab unchanged",
+    "Command-T increases tab count immediately by one; Escape retains the created active tab",
     "Result-driven height changes keep the top edge fixed; both directions debounce height changes for 40 ms, growth snaps, and contraction uses a 60 ms perceptual critically damped macOS spring. Reduce Motion skips the spring; typing and selection never wait for resizing",
     "Typing and icon refresh do not blank and rebuild the list. Retained rows are presentation only until the current query publishes matching results; stale callbacks, Enter, mouse activation, and action menus cannot execute the previous query",
     "Scope reveal changes only vertical visibility. Scope width independently chooses Flush, Icon-width or Offset; legacy layouts migrate without changing width when reveal is subsequently edited. Selected labels take space from nearby tabs before farther ones, and inactive glow strength is 66% of selected strength.",
-    "Command-L changes the current tab; Command-T Return creates one new ordinary tab",
+    "Command-L changes the captured current tab; Command-T Return navigates the already-created tab without creating a second one",
     "Arrow keys select rows; saved-result Return activates or restores exactly one qualified item",
     "Active-Space Pins rank before Favorites, which rank before other-Space Pins; quality then frecency order each tier",
     "Rows expose title, action, type, live state, Space, and root-to-leaf folder breadcrumb; saved results offer no Remove Suggestion",
@@ -83,7 +84,7 @@
     "Commands have distinct semantic icons and clear targets; typing a query does not make a destructive command the default Return action",
     "Mouse entry into a standalone results popup and navigation completion after bar dismissal produce no crash",
     "Text surfaces material, tint and neutral opacity update search and results consistently without losing query, selection, keyboard focus or dimensions. Containers remain independent.",
-    "Cancellation creates no tab or navigation and restores usable focus",
+    "Cancellation performs no navigation and restores usable focus; a tab created by New Tab remains open",
     "Normal restart preserves durable items, usage, and command-bar appearance; close and quit produce no new crash"
   ],
   "verify_persistence": true,
