@@ -110,7 +110,7 @@ class Studio;
 namespace {
 
 NSDictionary* DefaultLayout() {
-  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @5,
+  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @4,
            @"connected": @YES, @"scope_width": @0, @"scope_tints": @YES,
            @"glow_strength": @0.75, @"activity_dots": @YES, @"result_count": @8};
 }
@@ -238,9 +238,9 @@ class Studio {
     using Initialize = id (*)(id, SEL, NSDictionary*, id);
     controller_ = reinterpret_cast<Initialize>(objc_msgSend)(
         [controller_class alloc], NSSelectorFromString(@"initWithSnapshot:delegate:"), Snapshot(), delegate_);
-    using Editor = NSViewController* (*)(id, SEL, BOOL);
+    using Editor = NSViewController* (*)(id, SEL);
     controls_ = reinterpret_cast<Editor>(objc_msgSend)(controller_,
-        NSSelectorFromString(@"makeCommandBarEditorWithPreviewAvailable:"), YES);
+        NSSelectorFromString(@"makeCommandBarStudioEditor"));
     CHECK(controls_);
     auto panel = std::make_unique<arcium::CommandPanelView>(
         arcium::workshop::CreateSession(scenario_),
