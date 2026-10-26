@@ -10,11 +10,38 @@
   "tests": [
     {
       "target": "//chrome/test:arcium_feature_settings_browser_tests",
-      "filters": ["ArciumAutomaticPictureInPictureBrowserTest.*", "BrowserInitiatedAutoPictureInPictureBrowserTest.*"]
+      "filters": [
+        "ArciumAutomaticPictureInPictureBrowserTest.*",
+        "BrowserInitiatedAutoPictureInPictureBrowserTest.*",
+        "AutoPictureInPictureWithVideoPlaybackBrowserTest.PromptResultRecorded_VideoPlaybackAllowOnce",
+        "AutoPictureInPictureWithVideoPlaybackBrowserTest.DoesNotAutopipIfNotRegistered",
+        "AutoPictureInPictureTabHelperBrowserTest.RespectsAutoPictureInPictureContentSetting",
+        "AutoPictureInPictureTabHelperBrowserTest.ContentSettingAskIsBlockForIncognito"
+      ]
     },
     {
       "target": "//content/test:arcium_media_session_impl_unittests",
-      "filters": ["MediaSessionImplTest.*BrowserInitiatedAutoPip*"]
+      "filters": [
+        "MediaSessionImplTest.*BrowserInitiatedAutoPip*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "VideoOverlayWindowViewsTest.*"
+      ]
+    },
+    {
+      "target": "//content/test:arcium_media_session_impl_unittests",
+      "filters": [
+        "*MediaSessionController*.*"
+      ]
+    },
+    {
+      "target": "//third_party/blink/renderer/controller:arcium_web_media_player_unittests",
+      "filters": [
+        "WebMediaPlayerImplAutomaticPipTest.*"
+      ]
     }
   ],
   "preconditions": [
