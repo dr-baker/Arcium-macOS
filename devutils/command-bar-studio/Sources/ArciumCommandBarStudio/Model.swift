@@ -16,7 +16,7 @@ struct ExampleRow: Equatable {
 }
 
 struct Configuration: Equatable {
-    var labels = 1, icons = 2, scopeReveal = 5, scopeWidth = 0, resultCount = 8
+    var labels = 1, icons = 2, scopeReveal = 4, scopeWidth = 0, resultCount = 8
     var connected = true, scopeTints = true, activityDots = true
     var glowStrength = 0.75
 
@@ -30,7 +30,7 @@ struct Configuration: Equatable {
         }
         labels = integer("labels", 1, 0...2)
         icons = integer("icons", 2, 0...3)
-        scopeReveal = integer("scope_reveal", 5, 0...5)
+        scopeReveal = integer("scope_reveal", 4, 0...5)
         scopeWidth = integer("scope_width", 0, 0...2)
         resultCount = integer("result_count", 8, 1...20)
         connected = dictionary["connected"] as? Bool ?? true
@@ -74,7 +74,7 @@ enum Fixture {
 enum Lighting {
     static func radiance(width: CGFloat, height: CGFloat, strength: Double, focus: CGFloat, selected: CGFloat) -> CGFloat {
         guard width > 0, height > 0 else { return 0 }
-        return 0.48 * CGFloat(strength) * (0.66 + 0.34 * focus) * (1 + 0.30 * selected)
+        return 0.48 * CGFloat(strength) * (0.61 + 0.39 * focus) * (1 + 0.51 * selected)
             * width * height / ((width / 2 + 20) * (height + 20))
     }
 }

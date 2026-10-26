@@ -156,13 +156,13 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        .init(id: "scope_radius", label: "Scope radius", group: "Geometry", initial: 13, range: 4...20, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "input_font_size", label: "Search text size", group: "Typography", initial: 18, range: 14...24, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "title_font_size", label: "Result text size", group: "Typography", initial: 14, range: 12...18, step: 1, integer: true, color: false, initialColor: ""),
-+        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 1.75, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 2.0, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_height", label: "Glow height", group: "Lighting", initial: 0.8, range: 0.25...3.0, step: 0.05, integer: false, color: false, initialColor: ""),
-+        .init(id: "collapsed_glow_height", label: "Collapsed glow height", group: "Lighting", initial: 0.25, range: 0.0...1.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "collapsed_glow_height", label: "Collapsed glow height", group: "Lighting", initial: 0.55, range: 0.0...1.0, step: 0.05, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_softness", label: "Glow blur", group: "Lighting", initial: 40.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
 +        .init(id: "glow_radiance", label: "Light calibration", group: "Internal", initial: 0.48, range: 0.1...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
-+        .init(id: "inactive_scope_strength", label: "Inactive row multiplier", group: "Lighting", initial: 0.66, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
-+        .init(id: "selected_scope_boost", label: "Selected scope multiplier", group: "Lighting", initial: 0.3, range: 0.0...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "inactive_scope_strength", label: "Inactive row multiplier", group: "Lighting", initial: 0.61, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "selected_scope_boost", label: "Selected scope multiplier", group: "Lighting", initial: 0.51, range: 0.0...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
 +        .init(id: "selection_ms", label: "Selection", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
 +        .init(id: "scope_reveal_ms", label: "Scope reveal", group: "Motion", initial: 140, range: 0...300, step: 5, integer: true, color: false, initialColor: ""),
 +        .init(id: "scope_label_ms", label: "Scope label", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
@@ -221,7 +221,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -390,6 +390,7 @@ nonisolated struct ArciumCommandPanelLay
+@@ -383,13 +383,14 @@ nonisolated struct ArciumCommandPanelLay
+     }
+     var labels = 1
+     var icons = 2
+-    var reveal = 5
++    var reveal = 4
+     var connected = true
+     var width = Width.flush
+     var scopeTints = true
      var glowStrength = 0.75
      var activityDots = true
      var resultCount = 8
@@ -267,29 +275,39 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -1686,13 +1686,19 @@ private struct ArciumCommandBarControls:
+@@ -1616,6 +1616,7 @@ private func shortcutSummary(_ command:
+ 
+ private struct ArciumCommandBarControls: View {
+     @ObservedObject var store: ArciumSettingsStore
++    let designTools: Bool
+     @State private var showingAdvanced = false
+     @Environment(\.settingsTheme) private var theme
+ 
+@@ -1686,11 +1687,21 @@ private struct ArciumCommandBarControls:
              Section("Lighting") {
                  SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
                  if store.snapshot.appearance.commandPanelLayout.scopeTints {
 -                    SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
-+                    SSlider("Base strength", value: commandLayoutBinding(\.glowStrength),
++                    SSlider(designTools ? "Base strength" : "Glow strength", value: commandLayoutBinding(\.glowStrength),
                          range: 0...2, step: 0.05,
                          format: { "\(Int(($0 * 100).rounded()))%" },
 -                        help: SHelp(description: "Adjust the glow behind command-bar scopes. 75% is the default strength."))
 +                        help: SHelp(description: "Strength while the scope row is active. The inactive row and selected scope multipliers apply to this value."))
                      .accessibilityIdentifier("omnibox-scope-glow-strength")
-+                    ForEach(ArciumCommandDesign.tokens.filter { $0.group == "Lighting" }) { token in
-+                        ArciumCommandDesignSlider(store: store, token: token)
++                    if designTools {
++                        ForEach(ArciumCommandDesign.tokens.filter { $0.group == "Lighting" }) { token in
++                            ArciumCommandDesignSlider(store: store, token: token)
++                        }
 +                    }
++                }
++            }
++            if designTools {
++                Section("Design") {
++                    ArciumCommandDesignControls(store: store)
                  }
              }
-+            Section("Design") {
-+                ArciumCommandDesignControls(store: store)
-+            }
          }
-         .disabled(!editable)
-         .sheet(isPresented: $showingAdvanced) {
-@@ -1716,6 +1722,83 @@ private struct ArciumCommandBarControls:
+@@ -1716,6 +1727,83 @@ private struct ArciumCommandBarControls:
      }
  }
  
@@ -373,7 +391,39 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  // A small style-selection diagram; the adjacent live preview uses production UI.
  private struct ArciumCommandStyleThumbnail: View {
      let style: ArciumCommandPanelLayout.Style
-@@ -1827,4 +1910,3 @@ struct ArciumCommandBarEditorView: View
+@@ -1771,6 +1859,7 @@ private struct ArciumCommandBarPresetDoc
+ struct ArciumCommandBarEditorView: View {
+     @ObservedObject var store: ArciumSettingsStore
+     let previewAvailable: Bool
++    let designTools: Bool
+     @State private var importingDesign = false
+     @State private var exportingDesign = false
+     @State private var presetError: String?
+@@ -1791,14 +1880,16 @@ struct ArciumCommandBarEditorView: View
+                      ? "Select scopes or type to filter the examples. Results won't open."
+                      : "Open a browser window to preview scopes and results.")
+                     .settingsFont(\.caption).foregroundStyle(.secondary)
+-                ArciumCommandBarControls(store: store)
+-                HStack {
+-                    Button("Import design…") { importingDesign = true }
+-                        .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
+-                                  || store.snapshot.appearance.commandPanelLayoutManaged)
+-                    Button("Export design…") { exportingDesign = true }
++                ArciumCommandBarControls(store: store, designTools: designTools)
++                if designTools {
++                    HStack {
++                        Button("Import design…") { importingDesign = true }
++                            .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
++                                      || store.snapshot.appearance.commandPanelLayoutManaged)
++                        Button("Export design…") { exportingDesign = true }
++                    }
++                    .settingsFont(\.caption)
+                 }
+-                .settingsFont(\.caption)
+             }
+             .fileImporter(isPresented: $importingDesign, allowedContentTypes: [.json]) { result in
+                 do {
+@@ -1827,4 +1918,3 @@ struct ArciumCommandBarEditorView: View
          }
      }
  }
@@ -382,7 +432,34 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
-@@ -30,6 +30,35 @@ final class ArciumCommandBarPresetTests:
+@@ -20,9 +20,25 @@ final class ArciumCommandBarPresetTests:
+             XCTAssertEqual(try ArciumCommandBarPreset.decode(ArciumCommandBarPreset.encode(layout)), layout)
+         }
+     }
++    func testApprovedCommandBarDesignDefaults() {
++        let layout = ArciumCommandPanelLayout([:])
++        XCTAssertEqual(layout.style, .minimal)
++        XCTAssertTrue(layout.connected)
++        XCTAssertEqual(layout.width, .flush)
++        let defaults = ArciumCommandDesign()
++        for (key, value) in [("glow_width", 2.0), ("collapsed_glow_height", 0.55),
++                             ("inactive_scope_strength", 0.61), ("selected_scope_boost", 0.51)] {
++            guard let token = ArciumCommandDesign.tokens.first(where: { $0.id == key }) else {
++                XCTFail("Missing design token: \(key)")
++                continue
++            }
++            XCTAssertEqual(defaults.number(token), value, accuracy: 0.00001)
++        }
++    }
++
+     func testStyleSelectionFollowsGeometryAndRecognizesCustomCombinations() {
+         var layout = ArciumCommandPanelLayout()
+-        XCTAssertEqual(layout.style, .subtle)
++        XCTAssertEqual(layout.style, .minimal)
+         layout.applyStyle(.peek); layout.glowStrength = 1.5; layout.resultCount = 3
+         XCTAssertEqual(layout.style, .peek)
+         layout.width = .iconWidth
+@@ -30,6 +46,35 @@ final class ArciumCommandBarPresetTests:
          layout.applyStyle(.stacked); layout.connected = true
          XCTAssertNil(layout.style)
      }
@@ -449,6 +526,15 @@ Index: src/chrome/test/arcium_command_bar_studio_mac.mm
  #include "base/feature_list.h"
  #include "base/files/file_util.h"
  #include "base/json/json_writer.h"
+@@ -105,7 +108,7 @@ class Studio;
+ namespace {
+ 
+ NSDictionary* DefaultLayout() {
+-  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @5,
++  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @4,
+            @"connected": @YES, @"scope_width": @0, @"scope_tints": @YES,
+            @"glow_strength": @0.75, @"activity_dots": @YES, @"result_count": @8};
+ }
 @@ -153,8 +156,10 @@ class StudioRoot : public views::View {
    void Layout(PassKey) override {
      const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
@@ -462,6 +548,18 @@ Index: src/chrome/test/arcium_command_bar_studio_mac.mm
          std::clamp(preview_height_, 1, std::max(1, height() - 32)));
      if (refresh_) refresh_.Run();
    }
+@@ -221,9 +226,9 @@ class Studio {
+     using Initialize = id (*)(id, SEL, NSDictionary*, id);
+     controller_ = reinterpret_cast<Initialize>(objc_msgSend)(
+         [controller_class alloc], NSSelectorFromString(@"initWithSnapshot:delegate:"), Snapshot(), delegate_);
+-    using Editor = NSViewController* (*)(id, SEL, BOOL);
++    using Editor = NSViewController* (*)(id, SEL);
+     controls_ = reinterpret_cast<Editor>(objc_msgSend)(controller_,
+-        NSSelectorFromString(@"makeCommandBarEditorWithPreviewAvailable:"), YES);
++        NSSelectorFromString(@"makeCommandBarStudioEditor"));
+     CHECK(controls_);
+     auto panel = std::make_unique<arcium::CommandPanelView>(
+         arcium::workshop::CreateSession(scenario_),
 @@ -354,6 +359,15 @@ class Studio {
          ? arcium_settings::CommandPanelLayoutFromNSObject(FoundationDictionary(*document.FindDict("layout")))
          : arcium_settings::CommandPanelLayoutFromNSObject(layout_);
@@ -609,3 +707,60 @@ Index: src/chrome/test/arcium_command_bar_studio_mac.mm
          if (command->HasSwitch("interaction-check-report")) {
            base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
                base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, base::CommandLine* flags) {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -44,6 +44,13 @@ public final class ArciumSettingsUIContr
+         ArciumCommandBarEditorController(store: store, previewAvailable: previewAvailable)
+     }
+ 
++    // Development-only entry point. Browser Settings use the compact editor.
++    @objc(makeCommandBarStudioEditor)
++    public func makeCommandBarStudioEditor() -> NSViewController {
++        ArciumCommandBarEditorController(store: store, previewAvailable: true,
++                                        designTools: true)
++    }
++
+     // An explicit native deep link; ordinary snapshots keep navigation intact.
+     @objc(selectAppearanceCategory)
+     public func selectAppearanceCategory() -> Bool {
+@@ -55,10 +62,10 @@ public final class ArciumSettingsUIContr
+ @MainActor
+ final class ArciumCommandBarEditorController: NSHostingController<AnyView> {
+     private let store: ArciumSettingsStore
+-    init(store: ArciumSettingsStore, previewAvailable: Bool) {
++    init(store: ArciumSettingsStore, previewAvailable: Bool, designTools: Bool = false) {
+         self.store = store
+         super.init(rootView: AnyView(ArciumCommandBarEditorView(
+-            store: store, previewAvailable: previewAvailable)))
++            store: store, previewAvailable: previewAvailable, designTools: designTools)))
+     }
+     @available(*, unavailable)
+     required init?(coder: NSCoder) { fatalError("Command bar editor does not support storyboards") }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -874,7 +874,7 @@ final class ArciumSettingsUIContractTest
+         var layout = store.snapshot.appearance.commandPanelLayout
+         XCTAssertEqual(layout.labels, 1)
+         XCTAssertEqual(layout.icons, 2)
+-        XCTAssertEqual(layout.reveal, 5)
++        XCTAssertEqual(layout.reveal, 4)
+         XCTAssertTrue(layout.connected && layout.scopeTints && layout.activityDots)
+         XCTAssertEqual(layout.width, .flush)
+         XCTAssertEqual(layout.glowStrength, 0.75)
+@@ -915,9 +915,9 @@ final class ArciumSettingsUIContractTest
+             ]])
+             XCTAssertEqual(store.snapshot.appearance.commandPanelLayout.reveal, reveal)
+         }
+-        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": 6]).reveal, 5)
+-        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": true]).reveal, 5)
+-        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": 4.5]).reveal, 5)
++        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": 6]).reveal, 4)
++        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": true]).reveal, 4)
++        XCTAssertEqual(ArciumCommandPanelLayout(["scope_reveal": 4.5]).reveal, 4)
+     }
+ 
+     func testScopeWidthsMigrateOnceAndStayIndependentOfReveal() {

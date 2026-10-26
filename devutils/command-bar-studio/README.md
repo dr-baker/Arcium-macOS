@@ -62,12 +62,16 @@ provider state; geometry edits retain query, selection and result identities.
 The browser has no design-file watcher. Studio's existing scenario polling is
 independent development tooling.
 
-The main **Lighting** section groups base strength, the inactive-row multiplier,
+Studio's **Lighting** section groups base strength, the inactive-row multiplier,
 the selected-scope multiplier, and live **Glow width**, **Glow height** and
-**Glow blur** sliders. Strength uses the base value while scopes are active,
-multiplied by 66% while inactive and 130% for the selected scope by default.
+**Glow blur** sliders. Browser Settings keeps Styles, Results, Scope tints and
+one Glow strength slider; detailed design controls and design import/export
+are available only through Studio's explicit editor entry point.
+Strength uses the base value while scopes are active, multiplied by 61% while
+inactive and 151% for the selected scope by default. Minimal is the default
+style, with attached flat scopes and flush width. Glow width defaults to 200%.
 Width and height scale the oval independently. Attached scopes add 50% height.
-**Collapsed glow height** defaults to 25% and smoothly returns to 100% as
+**Collapsed glow height** defaults to 55% and smoothly returns to 100% as
 scopes expand. It scales the light profile without increasing peak brightness;
 flat Minimal scopes still emit from the command bar's top edge. Blur
 feathers its edge without changing either axis or adding a GPU blur pass.
@@ -83,8 +87,9 @@ Curves are shared in a bounded per-thread cache across panel openings. Paint
 only interpolates cached samples; it adds no color solving or drawing passes.
 Pale colors saturate at full opacity if the reference contrast is unreachable.
 Light mode adds 50 percentage points to the base strength; hover and press add
-another 45 points. The row and selection multipliers apply after those
-additions. Zero strength continues to disable lighting.
+another 45 points. Saved's yellow scope adds 20 points in dark mode; X's neutral
+scope adds 10 points in either mode. The row and selection multipliers apply
+after those additions. Zero strength continues to disable lighting.
 
 For scripted iteration on an already-running instance:
 

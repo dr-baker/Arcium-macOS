@@ -45,7 +45,7 @@ class DesignTokenTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), before_invalid)
             native.edit_design(state, ['collapsed_glow_height=1'])
             self.assertEqual(json.loads(path.read_text())['layout']['design']['collapsed_glow_height'], 1)
-            native.edit_design(state, ['collapsed_glow_height=0.25'])
+            native.edit_design(state, ['collapsed_glow_height=0.55'])
             self.assertNotIn('collapsed_glow_height', json.loads(path.read_text())['layout']['design'])
             for key in ('query', 'scope', 'selected_key'):
                 self.assertEqual(updated[key], document[key])
@@ -60,7 +60,7 @@ class DesignTokenTests(unittest.TestCase):
             path.write_text(json.dumps({'schema': 'arcium-ui-workshop', 'version': 1,
                 'component': 'command-bar', 'query': 'retained', 'layout': {}}))
             code = "import sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);import native;print('ready',flush=True);native.edit_design(Path(sys.argv[2]),[sys.argv[3]])"
-            edits = ['row_height=50', 'search_height=70', 'glow_width=2', 'selection_ms=120']
+            edits = ['row_height=50', 'search_height=70', 'glow_width=1.5', 'selection_ms=120']
             children = []
             try:
                 with native.scenario_transaction(path):
@@ -78,7 +78,7 @@ class DesignTokenTests(unittest.TestCase):
                 document = json.loads(path.read_text())
                 self.assertEqual(document['query'], 'retained')
                 self.assertEqual(document['layout']['design'], {'row_height': 50, 'search_height': 70,
-                    'glow_width': 2, 'selection_ms': 120})
+                    'glow_width': 1.5, 'selection_ms': 120})
                 self.assertEqual(list(state.glob('.scenario-*')), [])
             finally:
                 for child in children:
