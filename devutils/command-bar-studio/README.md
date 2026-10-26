@@ -62,8 +62,11 @@ provider state; geometry edits retain query, selection and result identities.
 The browser has no design-file watcher. Studio's existing scenario polling is
 independent development tooling.
 
-The main **Lighting** section has live **Glow width**, **Glow height** and
-**Glow blur** sliders. Width and height scale the oval independently. Blur
+The main **Lighting** section groups base strength, the inactive-row multiplier,
+the selected-scope multiplier, and live **Glow width**, **Glow height** and
+**Glow blur** sliders. Strength uses the base value while scopes are active,
+multiplied by 66% while inactive and 130% for the selected scope by default.
+Width and height scale the oval independently. Attached scopes add 50% height. Blur
 feathers its edge without changing either axis or adding a GPU blur pass.
 The **Light / Dark** switch above the preview, also available with **⌘D**,
 changes the native appearance in place while retaining content and settings.

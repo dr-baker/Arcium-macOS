@@ -127,12 +127,12 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +        .init(id: "scope_radius", label: "Scope radius", group: "Geometry", initial: 13, range: 4...20, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "input_font_size", label: "Search text size", group: "Typography", initial: 18, range: 14...24, step: 1, integer: true, color: false, initialColor: ""),
 +        .init(id: "title_font_size", label: "Result text size", group: "Typography", initial: 14, range: 12...18, step: 1, integer: true, color: false, initialColor: ""),
-+        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 1.0, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
-+        .init(id: "glow_height", label: "Glow height", group: "Lighting", initial: 1.0, range: 0.25...3.0, step: 0.05, integer: false, color: false, initialColor: ""),
-+        .init(id: "glow_softness", label: "Glow blur", group: "Lighting", initial: 20.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
-+        .init(id: "glow_radiance", label: "Light output", group: "Lighting", initial: 0.48, range: 0.1...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
-+        .init(id: "inactive_scope_strength", label: "Unfocused scopes", group: "Lighting", initial: 0.66, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
-+        .init(id: "selected_scope_boost", label: "Selected scope boost", group: "Lighting", initial: 0.3, range: 0.0...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_width", label: "Glow width", group: "Lighting", initial: 1.75, range: 0.25...2.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_height", label: "Glow height", group: "Lighting", initial: 0.8, range: 0.25...3.0, step: 0.05, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_softness", label: "Glow blur", group: "Lighting", initial: 40.0, range: 6.0...40.0, step: 1.0, integer: false, color: false, initialColor: ""),
++        .init(id: "glow_radiance", label: "Light calibration", group: "Internal", initial: 0.48, range: 0.1...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "inactive_scope_strength", label: "Inactive row multiplier", group: "Lighting", initial: 0.66, range: 0.0...1.0, step: 0.01, integer: false, color: false, initialColor: ""),
++        .init(id: "selected_scope_boost", label: "Selected scope multiplier", group: "Lighting", initial: 0.3, range: 0.0...0.8, step: 0.01, integer: false, color: false, initialColor: ""),
 +        .init(id: "selection_ms", label: "Selection", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
 +        .init(id: "scope_reveal_ms", label: "Scope reveal", group: "Motion", initial: 140, range: 0...300, step: 5, integer: true, color: false, initialColor: ""),
 +        .init(id: "scope_label_ms", label: "Scope label", group: "Motion", initial: 80, range: 0...240, step: 5, integer: true, color: false, initialColor: ""),
@@ -237,13 +237,18 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -1691,8 +1691,16 @@ private struct ArciumCommandBarControls:
+@@ -1686,13 +1686,19 @@ private struct ArciumCommandBarControls:
+             Section("Lighting") {
+                 SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+                 if store.snapshot.appearance.commandPanelLayout.scopeTints {
+-                    SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
++                    SSlider("Base strength", value: commandLayoutBinding(\.glowStrength),
+                         range: 0...2, step: 0.05,
                          format: { "\(Int(($0 * 100).rounded()))%" },
-                         help: SHelp(description: "Adjust the glow behind command-bar scopes. 75% is the default strength."))
+-                        help: SHelp(description: "Adjust the glow behind command-bar scopes. 75% is the default strength."))
++                        help: SHelp(description: "Strength while the scope row is active. The inactive row and selected scope multipliers apply to this value."))
                      .accessibilityIdentifier("omnibox-scope-glow-strength")
-+                    ForEach(ArciumCommandDesign.tokens.filter {
-+                        ArciumCommandDesignSlider.glowShapeKeys.contains($0.id)
-+                    }) { token in
++                    ForEach(ArciumCommandDesign.tokens.filter { $0.group == "Lighting" }) { token in
 +                        ArciumCommandDesignSlider(store: store, token: token)
 +                    }
                  }
@@ -254,7 +259,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          }
          .disabled(!editable)
          .sheet(isPresented: $showingAdvanced) {
-@@ -1716,6 +1724,82 @@ private struct ArciumCommandBarControls:
+@@ -1716,6 +1722,83 @@ private struct ArciumCommandBarControls:
      }
  }
  
@@ -263,17 +268,20 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +private struct ArciumCommandDesignSlider: View {
 +    @ObservedObject var store: ArciumSettingsStore
 +    let token: ArciumCommandDesign.Token
-+    static let glowShapeKeys: Set<String> = ["glow_width", "glow_height", "glow_softness"]
++    // Preserve the existing serialized boost while presenting its full factor.
++    private var displayOffset: Double { token.id == "selected_scope_boost" ? 1 : 0 }
 +    private var value: Binding<Double> {
-+        Binding(get: { store.snapshot.appearance.commandPanelLayout.design.number(token) },
++        Binding(get: { store.snapshot.appearance.commandPanelLayout.design.number(token) + displayOffset },
 +                set: { value in
 +                    var layout = store.snapshot.appearance.commandPanelLayout
-+                    layout.design.setNumber(value, for: token)
++                    layout.design.setNumber(value - displayOffset, for: token)
 +                    store.setCommandPanelLayout(layout)
 +                })
 +    }
 +    var body: some View {
-+        SSlider(token.label, value: value, range: token.range, step: token.step,
++        SSlider(token.label, value: value,
++                range: (token.range.lowerBound + displayOffset)...(token.range.upperBound + displayOffset),
++                step: token.step,
 +                format: { value in
 +                    token.id.hasSuffix("_ms") ? "\(Int(value.rounded())) ms" :
 +                    (token.integer || token.id == "glow_softness" ? "\(Int(value.rounded())) pt" : "\(Int((value * 100).rounded()))%")
@@ -284,7 +292,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +
 +private struct ArciumCommandDesignControls: View {
 +    @ObservedObject var store: ArciumSettingsStore
-+    private static let groups = ["Geometry", "Typography", "Lighting", "Motion", "Colors"]
++    private static let groups = ["Geometry", "Typography", "Motion", "Colors"]
 +    private var design: ArciumCommandDesign { store.snapshot.appearance.commandPanelLayout.design }
 +    private func change(_ edit: (inout ArciumCommandDesign) -> Void) {
 +        var layout = store.snapshot.appearance.commandPanelLayout
@@ -309,9 +317,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            ForEach(Self.groups, id: \.self) { group in
 +                DisclosureGroup(group) {
 +                    VStack(spacing: 12) {
-+                        ForEach(ArciumCommandDesign.tokens.filter {
-+                            $0.group == group && !ArciumCommandDesignSlider.glowShapeKeys.contains($0.id)
-+                        }) { token in
++                        ForEach(ArciumCommandDesign.tokens.filter { $0.group == group }) { token in
 +                            if token.color {
 +                                HStack {
 +                                    ColorPicker(token.label, selection: color(token), supportsOpacity: false)
@@ -337,7 +343,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  // A small style-selection diagram; the adjacent live preview uses production UI.
  private struct ArciumCommandStyleThumbnail: View {
      let style: ArciumCommandPanelLayout.Style
-@@ -1827,4 +1911,3 @@ struct ArciumCommandBarEditorView: View
+@@ -1827,4 +1910,3 @@ struct ArciumCommandBarEditorView: View
          }
      }
  }
