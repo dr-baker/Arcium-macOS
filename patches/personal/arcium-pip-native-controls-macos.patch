@@ -1,0 +1,2521 @@
+Index: src/chrome/browser/ui/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/BUILD.gn
++++ src/chrome/browser/ui/BUILD.gn
+@@ -5438,6 +5438,9 @@ static_library("ui") {
+         "views/apps/chrome_native_app_window_views_mac.h",
+         "views/apps/chrome_native_app_window_views_mac.mm",
+         "views/chrome_views_delegate_mac.cc",
++        "views/overlay/arcium_pip_geometry.h",
++        "views/overlay/arcium_pip_native_controls.h",
++        "views/overlay/arcium_pip_native_controls.mm",
+         "views/overlay/video_overlay_window_native_widget_mac.h",
+         "views/overlay/video_overlay_window_native_widget_mac.mm",
+         "views/permissions/permission_prompt_notifications_mac.cc",
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
+@@ -0,0 +1,79 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_GEOMETRY_H_
++#define CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_GEOMETRY_H_
++#include <algorithm>
++#include <cmath>
++
++namespace arcium::pip::geometry {
++struct Rect {
++  double x, y, width, height;
++};
++enum class Corner { kBottomLeft, kBottomRight, kTopLeft, kTopRight };
++enum class Side { kNone, kLeft, kRight };
++constexpr double kMargin = 12;
++constexpr double kHandleWidth = 28;
++inline Rect Normalize(Rect r) {
++  r.x = std::isfinite(r.x) ? r.x : 0;
++  r.y = std::isfinite(r.y) ? r.y : 0;
++  r.width = std::isfinite(r.width) ? std::max(0.0, r.width) : 0;
++  r.height = std::isfinite(r.height) ? std::max(0.0, r.height) : 0;
++  return r;
++}
++inline Rect Clamp(Rect r, Rect area) {
++  area = Normalize(area);
++  r = Normalize(r);
++  r.width = std::min(r.width, area.width);
++  r.height = std::min(r.height, area.height);
++  r.x = std::clamp(r.x, area.x, area.x + area.width - r.width);
++  r.y = std::clamp(r.y, area.y, area.y + area.height - r.height);
++  return r;
++}
++inline Corner NearestCorner(Rect r, Rect area) {
++  r = Normalize(r);
++  area = Normalize(area);
++  bool right = r.x + r.width / 2 > area.x + area.width / 2;
++  bool top = r.y + r.height / 2 > area.y + area.height / 2;
++  return top ? (right ? Corner::kTopRight : Corner::kTopLeft)
++             : (right ? Corner::kBottomRight : Corner::kBottomLeft);
++}
++inline Rect Anchor(Rect r, Rect area, Corner corner) {
++  area = Normalize(area);
++  r = Clamp(r, area);
++  const double mx = std::min(kMargin, (area.width - r.width) / 2);
++  const double my = std::min(kMargin, (area.height - r.height) / 2);
++  const bool right =
++      corner == Corner::kBottomRight || corner == Corner::kTopRight;
++  const bool top = corner == Corner::kTopLeft || corner == Corner::kTopRight;
++  r.x = right ? area.x + area.width - r.width - mx : area.x + mx;
++  r.y = top ? area.y + area.height - r.height - my : area.y + my;
++  return r;
++}
++inline Rect Tuck(Rect r, Rect screen, Rect work_area, Side side) {
++  screen = Normalize(screen);
++  r = Clamp(r, work_area);
++  if (side == Side::kNone) {
++    return r;
++  }
++  const double handle = std::min(kHandleWidth, screen.width);
++  r.x = side == Side::kLeft ? screen.x - r.width + handle
++                            : screen.x + screen.width - handle;
++  return r;
++}
++inline Rect Resize(Rect r, Rect area, double aspect, double width) {
++  area = Normalize(area);
++  r = Normalize(r);
++  width = std::isfinite(width) ? width : r.width;
++  aspect = std::isfinite(aspect) && aspect > 0 ? aspect : 16.0 / 9.0;
++  const double max_width = std::min(area.width, area.height * aspect);
++  const double min_width = std::min(max_width, std::max(284.0, 160.0 * aspect));
++  width = std::clamp(width, min_width, max_width);
++  const double top = r.y + r.height;
++  r.width = width;
++  r.height = width / aspect;
++  r.y = top - r.height;
++  return Clamp(r, area);
++}
++}  // namespace arcium::pip::geometry
++#endif
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
+@@ -0,0 +1,72 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++
++#ifndef CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_NATIVE_CONTROLS_H_
++#define CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_NATIVE_CONTROLS_H_
++
++#include <cstdint>
++#include <functional>
++#include <memory>
++#include <string>
++
++#ifdef __OBJC__
++@class NSWindow;
++#else
++class NSWindow;
++#endif
++
++namespace arcium::pip {
++
++enum class Action {
++  kPlayPause,
++  kBack15,
++  kForward15,
++  kSeek,
++  kReturn,
++  kClose,
++  kMute,
++  kSeekBegin,
++  kSeekEnd,
++  kInteraction,
++};
++
++struct State {
++  bool playing = false;
++  bool can_play = false;
++  bool can_seek = false;
++  bool muted = false;
++  bool can_mute = false;
++  bool blocked = false;
++  bool show_controls = false;
++  bool show_title = false;
++  double position = 0;
++  double duration = 0;
++  double playback_rate = 1;
++  uint32_t accent = 0xFFACB9CF;
++  std::u16string title;
++};
++
++// Actions are delivered asynchronously on the main queue and canceled on
++// teardown. kSeek carries a normalized fraction. SeekBegin/End carry resume
++// intent (0 or 1).
++using ActionCallback = std::function<void(Action, double)>;
++
++// Construct/update/destroy on the main thread, after native widget
++// initialization. The host keeps its contentView/compositor; this adds one
++// native sibling above it.
++class NativeControls {
++ public:
++  NativeControls(NSWindow* window, ActionCallback callback);
++  ~NativeControls();
++  NativeControls(const NativeControls&) = delete;
++  NativeControls& operator=(const NativeControls&) = delete;
++  void Update(const State& state);
++  void RestorePlacementForHide();
++
++ private:
++  struct Impl;
++  std::unique_ptr<Impl> impl_;
++};
++
++}  // namespace arcium::pip
++#endif
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
+@@ -0,0 +1,1216 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++
++#include "arcium_pip_native_controls.h"
++
++#import <AppKit/AppKit.h>
++#import <QuartzCore/QuartzCore.h>
++
++#include <algorithm>
++#include <cmath>
++#include <utility>
++
++#include "arcium_pip_geometry.h"
++
++namespace {
++using arcium::pip::Action;
++using arcium::pip::ActionCallback;
++using arcium::pip::State;
++namespace geo = arcium::pip::geometry;
++enum class GestureAxis { kPending, kHorizontal, kVertical };
++
++struct Delivery {
++  ActionCallback callback;
++};
++
++geo::Rect ToRect(NSRect r) {
++  return {r.origin.x, r.origin.y, r.size.width, r.size.height};
++}
++NSRect ToNSRect(geo::Rect r) {
++  return NSMakeRect(r.x, r.y, r.width, r.height);
++}
++NSColor* Accent(uint32_t argb) {
++  return [NSColor colorWithSRGBRed:((argb >> 16) & 255) / 255.0
++                             green:((argb >> 8) & 255) / 255.0
++                              blue:(argb & 255) / 255.0
++                             alpha:1];
++}
++bool ReduceMotion() {
++  return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
++}
++NSString* TimeLabel(double seconds) {
++  if (!std::isfinite(seconds) || seconds < 0) {
++    return @"0:00";
++  }
++  int64_t total = static_cast<int64_t>(std::min(seconds, 359999.0));
++  if (total >= 3600) {
++    return [NSString stringWithFormat:@"%lld:%02lld:%02lld", total / 3600,
++                                      (total / 60) % 60, total % 60];
++  }
++  return [NSString stringWithFormat:@"%lld:%02lld", total / 60, total % 60];
++}
++NSImage* Symbol(NSString* name, CGFloat size = 15) {
++  return [[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil]
++      imageWithSymbolConfiguration:
++          [NSImageSymbolConfiguration
++              configurationWithPointSize:size
++                                  weight:NSFontWeightMedium]];
++}
++NSView* Capsule(NSView* content, CGFloat radius) {
++  NSView* surface;
++  if (NSWorkspace.sharedWorkspace
++          .accessibilityDisplayShouldReduceTransparency) {
++    surface = [[NSView alloc] initWithFrame:NSZeroRect];
++    surface.wantsLayer = YES;
++    surface.layer.backgroundColor =
++        [NSColor colorWithWhite:0.15 alpha:1].CGColor;
++    surface.layer.cornerRadius = radius;
++    [surface addSubview:content];
++  } else if (@available(macOS 26.0, *)) {
++    NSGlassEffectView* glass =
++        [[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
++    glass.style = NSGlassEffectViewStyleClear;
++    glass.cornerRadius = radius;
++    // A plain host keeps button alignment insets from expanding the glass.
++    NSView* host = [[NSView alloc] initWithFrame:NSZeroRect];
++    host.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++    [host addSubview:content];
++    glass.contentView = host;
++    surface = glass;
++  } else {
++    NSVisualEffectView* material =
++        [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
++    material.material = NSVisualEffectMaterialHUDWindow;
++    material.blendingMode = NSVisualEffectBlendingModeWithinWindow;
++    material.state = NSVisualEffectStateActive;
++    material.wantsLayer = YES;
++    material.layer.cornerRadius = radius;
++    material.layer.masksToBounds = YES;
++    [material addSubview:content];
++    surface = material;
++  }
++  content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  return surface;
++}
++void Present(NSView* view, BOOL visible, BOOL animate) {
++  const CGFloat target = visible ? 1 : 0;
++  if ((!view.hidden && view.alphaValue == target) ||
++      (view.hidden && !visible)) {
++    return;
++  }
++  if (!animate || ReduceMotion()) {
++    view.alphaValue = target;
++    view.hidden = !visible;
++    return;
++  }
++  if (visible && view.hidden) {
++    view.alphaValue = 0;
++    view.hidden = NO;
++  }
++  [NSAnimationContext
++      runAnimationGroup:^(NSAnimationContext* context) {
++        context.duration = 0.16;
++        view.animator.alphaValue = target;
++      }
++      completionHandler:^{
++        if (!visible && view.alphaValue == 0) {
++          view.hidden = YES;
++        }
++      }];
++}
++void Place(NSView* surface, NSView* content, NSRect frame) {
++  surface.frame = frame;
++  content.frame = NSMakeRect(0, 0, frame.size.width, frame.size.height);
++}
++}  // namespace
++
++@interface ArciumPiPButton : NSButton
++@end
++@implementation ArciumPiPButton
++- (BOOL)acceptsFirstMouse:(NSEvent*)event {
++  return YES;
++}
++@end
++
++@interface ArciumPiPSliderCell : NSSliderCell
++@property(nonatomic, strong) NSColor* accent;
++@end
++@implementation ArciumPiPSliderCell
++@synthesize accent = _accent;
++- (void)drawBarInside:(NSRect)rect flipped:(BOOL)flipped {
++  NSRect track = NSMakeRect(NSMinX(rect), NSMidY(rect) - 1.5, NSWidth(rect), 3);
++  [[NSColor colorWithWhite:1 alpha:0.25] setFill];
++  [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
++  double fraction = (self.doubleValue - self.minValue) /
++                    std::max(0.001, self.maxValue - self.minValue);
++  track.size.width *= std::clamp(fraction, 0.0, 1.0);
++  [[NSColor colorWithWhite:1 alpha:0.92] setFill];
++  [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
++}
++- (void)drawKnob:(NSRect)rect {
++  NSRect knob = NSMakeRect(NSMidX(rect) - 5, NSMidY(rect) - 5, 10, 10);
++  [[NSColor colorWithWhite:0 alpha:0.28] setFill];
++  [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(knob, -0.5, -0.5)] fill];
++  [NSColor.whiteColor setFill];
++  [[NSBezierPath bezierPathWithOvalInRect:knob] fill];
++  [[self.accent colorWithAlphaComponent:0.52] setFill];
++  [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(knob, 2, 2)] fill];
++}
++@end
++
++@interface ArciumPiPSlider : NSSlider
++@property(nonatomic, copy) void (^beginDrag)(void);
++@property(nonatomic, copy) void (^endDrag)(void);
++@end
++@implementation ArciumPiPSlider
++@synthesize beginDrag = _beginDrag;
++@synthesize endDrag = _endDrag;
++- (BOOL)acceptsFirstMouse:(NSEvent*)event {
++  return YES;
++}
++- (void)mouseDown:(NSEvent*)event {
++  if (!self.enabled) {
++    return;
++  }
++  __attribute__((objc_precise_lifetime)) ArciumPiPSlider* keepAlive = self;
++  (void)keepAlive;
++  if (self.beginDrag) {
++    self.beginDrag();
++  }
++  [super mouseDown:event];
++  if (self.endDrag) {
++    self.endDrag();
++  }
++}
++@end
++
++@interface ArciumPiPResizeView : NSView
++@property(nonatomic, copy) void (^resizeEvent)(NSEvent*, NSInteger);
++@end
++@implementation ArciumPiPResizeView
++@synthesize resizeEvent = _resizeEvent;
++- (void)drawRect:(NSRect)dirtyRect {
++  [[NSColor colorWithWhite:1 alpha:0.65] setStroke];
++  for (int i = 0; i < 3; ++i) {
++    NSBezierPath* line = [NSBezierPath bezierPath];
++    [line moveToPoint:NSMakePoint(8 + i * 4, 5)];
++    [line lineToPoint:NSMakePoint(19, 16 - i * 4)];
++    line.lineWidth = 1.25;
++    [line stroke];
++  }
++}
++- (void)mouseDown:(NSEvent*)event {
++  if (self.resizeEvent) {
++    self.resizeEvent(event, 0);
++  }
++}
++- (void)mouseDragged:(NSEvent*)event {
++  if (self.resizeEvent) {
++    self.resizeEvent(event, 1);
++  }
++}
++- (void)mouseUp:(NSEvent*)event {
++  if (self.resizeEvent) {
++    self.resizeEvent(event, 2);
++  }
++}
++- (void)resetCursorRects {
++  [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor];
++}
++@end
++
++@interface ArciumPiPNativeOverlay : NSView {
++ @private
++  State _state;
++  std::shared_ptr<Delivery> _delivery;
++  __weak NSWindow* _pipWindow;
++  NSView* _glassContainer;
++  NSView* _glassContent;
++  NSButton* _returnButton;
++  NSButton* _tuckButton;
++  NSButton* _closeButton;
++  NSButton* _playButton;
++  NSButton* _backButton;
++  NSButton* _forwardButton;
++  NSButton* _muteButton;
++  NSButton* _restoreButton;
++  NSView* _returnGlass;
++  NSView* _tuckGlass;
++  NSView* _closeGlass;
++  NSView* _playGlass;
++  NSView* _backGlass;
++  NSView* _forwardGlass;
++  NSView* _muteGlass;
++  NSView* _restoreGlass;
++  ArciumPiPSlider* _slider;
++  NSTextField* _timestamp;
++  NSTextField* _title;
++  ArciumPiPResizeView* _resizeView;
++  NSTrackingArea* _tracking;
++  NSTimer* _progressTimer;
++  NSTimer* _hideTimer;
++  NSMutableArray* _observers;
++  id _eventMonitor;
++  geo::Side _tucked;
++  geo::Corner _corner;
++  NSNumber* _anchorDisplay;
++  NSNumber* _restoreDisplay;
++  NSRect _restoreFrame;
++  NSRect _gestureStartFrame;
++  NSRect _resizeStartFrame;
++  NSPoint _resizeStartMouse;
++  GestureAxis _gestureAxis;
++  CGFloat _gestureX;
++  CGFloat _gestureY;
++  double _snapshotTime;
++  double _aspect;
++  BOOL _adjusting;
++  BOOL _dragging;
++  BOOL _resizing;
++  BOOL _scrolling;
++  BOOL _consumeMomentum;
++  BOOL _seeking;
++  BOOL _resumeAfterSeek;
++  BOOL _nativeVisible;
++  BOOL _mouseInside;
++  BOOL _hasSnapshot;
++  BOOL _invalidated;
++  uint64_t _sessionGeneration;
++}
++- (instancetype)initWithWindow:(NSWindow*)window
++                      callback:(ActionCallback)callback;
++- (void)applyState:(const State&)state;
++- (void)invalidate;
++- (void)prepareForHide;
++@end
++
++@implementation ArciumPiPNativeOverlay
++- (instancetype)initWithWindow:(NSWindow*)window
++                      callback:(ActionCallback)callback {
++  self = [super initWithFrame:window.contentView.bounds];
++  if (!self) {
++    return nil;
++  }
++  _pipWindow = window;
++  _delivery = std::make_shared<Delivery>(Delivery{std::move(callback)});
++  _observers = [NSMutableArray array];
++  _aspect = NSWidth(window.frame) / std::max(1.0, NSHeight(window.frame));
++  _tucked = geo::Side::kNone;
++  self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
++  self.accessibilityElement = NO;
++  self.accessibilityLabel = @"Picture in Picture controls";
++  [self buildChrome];
++  [self refreshChrome];
++  [window.contentView addSubview:self positioned:NSWindowAbove relativeTo:nil];
++  __weak ArciumPiPNativeOverlay* weakSelf = self;
++  NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
++  for (NSNotificationName name in @[
++         NSWindowDidResizeNotification, NSWindowDidMoveNotification,
++         NSWindowDidChangeScreenNotification
++       ]) {
++    [_observers addObject:[center addObserverForName:name
++                                              object:window
++                                               queue:NSOperationQueue.mainQueue
++                                          usingBlock:^(NSNotification* note) {
++                                            [weakSelf
++                                                windowGeometryChanged:note];
++                                          }]];
++  }
++  [_observers
++      addObject:[center addObserverForName:
++                            NSApplicationDidChangeScreenParametersNotification
++                                    object:nil
++                                     queue:NSOperationQueue.mainQueue
++                                usingBlock:^(NSNotification* note) {
++                                  [weakSelf screenConfigurationChanged];
++                                }]];
++  [_observers addObject:[center addObserverForName:NSWindowWillCloseNotification
++                                            object:window
++                                             queue:NSOperationQueue.mainQueue
++                                        usingBlock:^(NSNotification* note) {
++                                          [weakSelf invalidate];
++                                        }]];
++  NSNotificationCenter* workspaceCenter =
++      NSWorkspace.sharedWorkspace.notificationCenter;
++  [_observers
++      addObject:
++          [workspaceCenter
++              addObserverForName:
++                  NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
++                          object:nil
++                           queue:NSOperationQueue.mainQueue
++                      usingBlock:^(NSNotification* note) {
++                        ArciumPiPNativeOverlay* overlay = weakSelf;
++                        if (!overlay || overlay->_invalidated) {
++                          return;
++                        }
++                        [overlay buildChrome];
++                        [overlay refreshChrome];
++                      }]];
++  _eventMonitor = [NSEvent
++      addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
++                                   handler:^NSEvent*(NSEvent* event) {
++                                     ArciumPiPNativeOverlay* overlay = weakSelf;
++                                     if (overlay &&
++                                         event.window == overlay->_pipWindow &&
++                                         [overlay consumeScroll:event]) {
++                                       return nil;
++                                     }
++                                     return event;
++                                   }];
++  [self screenConfigurationChanged];
++  return self;
++}
++
++- (void)deliver:(Action)action value:(double)value {
++  std::weak_ptr<Delivery> weak = _delivery;
++  dispatch_async(dispatch_get_main_queue(), ^{
++    auto delivery = weak.lock();
++    if (!delivery || !delivery->callback) {
++      return;
++    }
++    auto callback = delivery->callback;
++    callback(action, value);
++  });
++}
++
++- (NSButton*)button:(NSString*)symbol
++              label:(NSString*)label
++             action:(SEL)action {
++  NSButton* button = [ArciumPiPButton buttonWithImage:Symbol(symbol)
++                                               target:self
++                                               action:action];
++  button.bordered = NO;
++  button.bezelStyle = NSBezelStyleCircular;
++  button.imagePosition = NSImageOnly;
++  button.contentTintColor = NSColor.whiteColor;
++  button.toolTip = label;
++  button.accessibilityLabel = label;
++  button.focusRingType = NSFocusRingTypeExterior;
++  return button;
++}
++
++- (void)buildChrome {
++  [self endSeek];
++  _slider.beginDrag = nil;
++  _slider.endDrag = nil;
++  _resizeView.resizeEvent = nil;
++  _resizing = NO;
++  [_glassContainer removeFromSuperview];
++  [_slider removeFromSuperview];
++  [_title removeFromSuperview];
++  [_timestamp removeFromSuperview];
++  [_resizeView removeFromSuperview];
++  _glassContent = [[NSView alloc] initWithFrame:self.bounds];
++  _glassContent.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  if (@available(macOS 26.0, *)) {
++    NSGlassEffectContainerView* container =
++        [[NSGlassEffectContainerView alloc] initWithFrame:self.bounds];
++    container.spacing = 0;
++    container.contentView = _glassContent;
++    _glassContainer = container;
++  } else {
++    _glassContainer = [[NSView alloc] initWithFrame:self.bounds];
++    [_glassContainer addSubview:_glassContent];
++  }
++  _glassContainer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  [self addSubview:_glassContainer];
++  _returnButton = [self button:@"pip.exit"
++                         label:@"Return to tab"
++                        action:@selector(returnToTab:)];
++  _tuckButton = [self button:@"rectangle.righthalf.inset.filled.arrow.right"
++                       label:@"Tuck to screen edge"
++                      action:@selector(tuck:)];
++  // This symbol is available on older supported systems as well.
++  if (!_tuckButton.image) {
++    _tuckButton.image = Symbol(@"arrow.right.to.line");
++  }
++  _closeButton = [self button:@"xmark"
++                        label:@"Close Picture in Picture"
++                       action:@selector(close:)];
++  _playButton = [self button:@"play.fill"
++                       label:@"Play"
++                      action:@selector(playPause:)];
++  _backButton = [self button:@"gobackward.15"
++                       label:@"Back 15 seconds"
++                      action:@selector(back:)];
++  _forwardButton = [self button:@"goforward.15"
++                          label:@"Forward 15 seconds"
++                         action:@selector(forward:)];
++  _muteButton = [self button:@"speaker.wave.2.fill"
++                       label:@"Mute"
++                      action:@selector(mute:)];
++  _restoreButton = [self button:@"chevron.left"
++                          label:@"Restore Picture in Picture"
++                         action:@selector(restore:)];
++  _returnGlass = Capsule(_returnButton, 16);
++  _tuckGlass = Capsule(_tuckButton, 16);
++  _closeGlass = Capsule(_closeButton, 16);
++  _playGlass = Capsule(_playButton, 24);
++  _backGlass = Capsule(_backButton, 18);
++  _forwardGlass = Capsule(_forwardButton, 18);
++  _muteGlass = Capsule(_muteButton, 14);
++  _restoreGlass = Capsule(_restoreButton, 14);
++  for (NSView* surface in @[
++         _returnGlass, _tuckGlass, _closeGlass, _playGlass, _backGlass,
++         _forwardGlass, _muteGlass, _restoreGlass
++       ]) {
++    [_glassContent addSubview:surface];
++  }
++  _slider = [[ArciumPiPSlider alloc] initWithFrame:NSZeroRect];
++  ArciumPiPSliderCell* cell = [[ArciumPiPSliderCell alloc] init];
++  _slider.cell = cell;
++  _slider.minValue = 0;
++  _slider.maxValue = 1;
++  _slider.continuous = YES;
++  _slider.target = self;
++  _slider.action = @selector(seek:);
++  _slider.accessibilityLabel = @"Playback position";
++  __weak ArciumPiPNativeOverlay* weakSelf = self;
++  _slider.beginDrag = ^{
++    [weakSelf beginSeek];
++  };
++  _slider.endDrag = ^{
++    [weakSelf endSeek];
++  };
++  [self addSubview:_slider];
++  _timestamp = [NSTextField labelWithString:@""];
++  _timestamp.font = [NSFont monospacedDigitSystemFontOfSize:10
++                                                     weight:NSFontWeightMedium];
++  _timestamp.textColor = [NSColor colorWithWhite:1 alpha:0.85];
++  _timestamp.alignment = NSTextAlignmentCenter;
++  _timestamp.accessibilityElement = NO;
++  [self addSubview:_timestamp];
++  _title = [NSTextField labelWithString:@""];
++  _title.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
++  _title.textColor = NSColor.whiteColor;
++  _title.lineBreakMode = NSLineBreakByTruncatingTail;
++  _title.maximumNumberOfLines = 1;
++  _title.accessibilityElement = YES;
++  _title.wantsLayer = YES;
++  _title.layer.shadowColor = NSColor.blackColor.CGColor;
++  _title.layer.shadowOpacity = 0.8;
++  _title.layer.shadowRadius = 3;
++  [self addSubview:_title];
++  _resizeView = [[ArciumPiPResizeView alloc] initWithFrame:NSZeroRect];
++  _resizeView.accessibilityLabel = @"Resize Picture in Picture";
++  _resizeView.resizeEvent = ^(NSEvent* event, NSInteger phase) {
++    [weakSelf resizeEvent:event phase:phase];
++  };
++  [self addSubview:_resizeView];
++  [self setNeedsLayout:YES];
++}
++
++- (void)applyState:(const State&)state {
++  if (_invalidated) {
++    return;
++  }
++  if (state.blocked && _tucked != geo::Side::kNone) {
++    [self restore:nil];
++  }
++  if ((state.blocked || !state.can_seek) && _seeking) {
++    [self endSeek];
++  }
++  if (!_hasSnapshot) {
++    _nativeVisible = state.show_controls;
++  } else if (state.show_controls && !_state.show_controls && !_mouseInside) {
++    _nativeVisible = YES;
++  }
++  _state = state;
++  if (!std::isfinite(_state.position)) {
++    _state.position = 0;
++  }
++  if (!std::isfinite(_state.duration) || _state.duration <= 0) {
++    _state.can_seek = false;
++  }
++  if (!std::isfinite(_state.playback_rate)) {
++    _state.playback_rate = 0;
++  }
++  _snapshotTime = NSProcessInfo.processInfo.systemUptime;
++  _hasSnapshot = YES;
++  [self refreshChrome];
++}
++
++- (double)currentPosition {
++  double time = _state.position;
++  if (_state.playing && !_seeking) {
++    time += (NSProcessInfo.processInfo.systemUptime - _snapshotTime) *
++            _state.playback_rate;
++  }
++  return std::clamp(time, 0.0, std::max(0.0, _state.duration));
++}
++- (void)updateProgress {
++  if (_seeking) {
++    return;
++  }
++  double position = [self currentPosition];
++  _slider.doubleValue = _state.duration > 0 ? position / _state.duration : 0;
++  _timestamp.stringValue =
++      [NSString stringWithFormat:@"%@ / %@", TimeLabel(position),
++                                 TimeLabel(_state.duration)];
++  _slider.accessibilityValueDescription =
++      [NSString stringWithFormat:@"%@ of %@", TimeLabel(position),
++                                 TimeLabel(_state.duration)];
++}
++- (void)refreshChrome {
++  if (_invalidated) {
++    return;
++  }
++  const BOOL visible =
++      _nativeVisible && !_state.blocked && _tucked == geo::Side::kNone;
++  _glassContainer.hidden = _state.blocked;
++  const BOOL animate = !_state.blocked && _tucked == geo::Side::kNone;
++  for (NSView* view in @[ _returnGlass, _tuckGlass, _closeGlass ]) {
++    Present(view, visible, animate);
++  }
++  _restoreGlass.hidden = _state.blocked || _tucked == geo::Side::kNone;
++  Present(_slider, visible && _state.can_seek, animate);
++  Present(_timestamp, visible && _state.can_seek, animate);
++  Present(_title,
++          !_state.blocked && _tucked == geo::Side::kNone &&
++              (visible || _state.show_title) && !_state.title.empty(),
++          animate);
++  Present(_resizeView, visible, animate);
++  Present(_playGlass, visible && _state.can_play, animate);
++  Present(_muteGlass, visible && _state.can_mute, animate);
++  _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill", 20);
++  _playButton.accessibilityLabel = _state.playing ? @"Pause" : @"Play";
++  _playButton.toolTip = _playButton.accessibilityLabel;
++  _muteButton.image =
++      Symbol(_state.muted ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 13);
++  _muteButton.accessibilityLabel = _state.muted ? @"Unmute" : @"Mute";
++  _muteButton.toolTip = _muteButton.accessibilityLabel;
++  _title.stringValue = [[NSString alloc]
++      initWithCharacters:reinterpret_cast<const unichar*>(_state.title.data())
++                  length:_state.title.size()];
++  _slider.enabled = _state.can_seek;
++  ((ArciumPiPSliderCell*)_slider.cell).accent = Accent(_state.accent);
++  _restoreButton.image =
++      Symbol(_tucked == geo::Side::kLeft ? @"chevron.right" : @"chevron.left");
++  [self updateProgress];
++  BOOL tick = visible && _state.playing && _state.can_seek && !_seeking &&
++              self.window.visible;
++  if (!tick) {
++    [_progressTimer invalidate];
++    _progressTimer = nil;
++  } else if (!_progressTimer) {
++    __weak ArciumPiPNativeOverlay* weakSelf = self;
++    _progressTimer = [NSTimer
++        scheduledTimerWithTimeInterval:0.1
++                               repeats:YES
++                                 block:^(NSTimer* timer) {
++                                   ArciumPiPNativeOverlay* overlay = weakSelf;
++                                   if (!overlay || !overlay.window.visible) {
++                                     [timer invalidate];
++                                     if (overlay) {
++                                       overlay->_progressTimer = nil;
++                                     }
++                                     return;
++                                   }
++                                   [overlay updateProgress];
++                                 }];
++    _progressTimer.tolerance = 0.03;
++  }
++  [self setNeedsLayout:YES];
++}
++
++- (void)layout {
++  [super layout];
++  const CGFloat w = NSWidth(self.bounds), h = NSHeight(self.bounds);
++  _glassContainer.frame = self.bounds;
++  _glassContent.frame = self.bounds;
++  Place(_returnGlass, _returnButton, NSMakeRect(12, h - 44, 32, 32));
++  Place(_closeGlass, _closeButton, NSMakeRect(w - 44, h - 44, 32, 32));
++  Place(_tuckGlass, _tuckButton, NSMakeRect(w - 82, h - 44, 32, 32));
++  CGFloat centerY = std::max(88.0, h * 0.5);
++  Place(_playGlass, _playButton,
++        NSMakeRect(w * 0.5 - 24, centerY - 24, 48, 48));
++  Place(_backGlass, _backButton,
++        NSMakeRect(w * 0.5 - 80, centerY - 18, 36, 36));
++  Place(_forwardGlass, _forwardButton,
++        NSMakeRect(w * 0.5 + 44, centerY - 18, 36, 36));
++  BOOL seekButtons = w >= 320 && h >= 180 && _state.can_seek &&
++                     _nativeVisible && !_state.blocked &&
++                     _tucked == geo::Side::kNone;
++  Present(_backGlass, seekButtons,
++          !_state.blocked && _tucked == geo::Side::kNone);
++  Present(_forwardGlass, seekButtons,
++          !_state.blocked && _tucked == geo::Side::kNone);
++  Place(_muteGlass, _muteButton, NSMakeRect(12, 12, 28, 28));
++  _slider.frame = NSMakeRect(16, 40, w - 32, 24);
++  _timestamp.frame = NSMakeRect(48, 13, w - 96, 14);
++  _title.frame = NSMakeRect(52, h - 35, std::max(0.0, w - 144), 16);
++  _resizeView.frame = NSMakeRect(w - 24, 0, 24, 24);
++  CGFloat handleX = _tucked == geo::Side::kLeft ? w - geo::kHandleWidth : 0;
++  Place(_restoreGlass, _restoreButton,
++        NSMakeRect(handleX, h * 0.5 - 32, geo::kHandleWidth, 64));
++}
++
++- (NSView*)hitTest:(NSPoint)point {
++  if (_invalidated || _state.blocked) {
++    return nil;
++  }
++  NSPoint local = [self convertPoint:point fromView:self.superview];
++  if (!NSPointInRect(local, self.bounds)) {
++    return nil;
++  }
++  if (!_nativeVisible && _tucked == geo::Side::kNone) {
++    return self;
++  }
++  for (NSView* control in @[
++         _slider, _resizeView, _restoreButton, _returnButton, _tuckButton,
++         _closeButton, _playButton, _backButton, _forwardButton, _muteButton
++       ]) {
++    if (control.hiddenOrHasHiddenAncestor ||
++        control.superview.alphaValue == 0 || control.alphaValue == 0) {
++      continue;
++    }
++    NSPoint p = [control convertPoint:local fromView:self];
++    if (NSPointInRect(p, control.bounds)) {
++      return control;
++    }
++  }
++  return _tucked == geo::Side::kNone ? self : nil;
++}
++- (BOOL)acceptsFirstMouse:(NSEvent*)event {
++  return !_state.blocked;
++}
++- (void)updateTrackingAreas {
++  [super updateTrackingAreas];
++  if (_tracking) {
++    [self removeTrackingArea:_tracking];
++  }
++  _tracking = [[NSTrackingArea alloc]
++      initWithRect:NSZeroRect
++           options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
++                   NSTrackingActiveAlways | NSTrackingInVisibleRect
++             owner:self
++          userInfo:nil];
++  [self addTrackingArea:_tracking];
++}
++- (void)armHideTimer {
++  [_hideTimer invalidate];
++  if (_seeking || _state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  __weak ArciumPiPNativeOverlay* weakSelf = self;
++  _hideTimer = [NSTimer
++      scheduledTimerWithTimeInterval:3
++                             repeats:NO
++                               block:^(NSTimer* timer) {
++                                 ArciumPiPNativeOverlay* overlay = weakSelf;
++                                 if (!overlay || overlay->_invalidated ||
++                                     overlay->_seeking) {
++                                   return;
++                                 }
++                                 overlay->_nativeVisible = NO;
++                                 [overlay refreshChrome];
++                               }];
++}
++- (void)mouseEntered:(NSEvent*)event {
++  _mouseInside = YES;
++  if (_state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  _nativeVisible = YES;
++  [self refreshChrome];
++  [self armHideTimer];
++}
++- (void)mouseMoved:(NSEvent*)event {
++  _mouseInside = YES;
++  if (_state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  if (!_nativeVisible) {
++    _nativeVisible = YES;
++    [self refreshChrome];
++  }
++  [self armHideTimer];
++}
++- (void)mouseExited:(NSEvent*)event {
++  _mouseInside = NO;
++  if (!_seeking && !_dragging) {
++    _nativeVisible = NO;
++    [self refreshChrome];
++  }
++}
++- (void)mouseDown:(NSEvent*)event {
++  if (_state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  __attribute__((objc_precise_lifetime)) ArciumPiPNativeOverlay* keepAlive =
++      self;
++  (void)keepAlive;
++  [self deliver:Action::kInteraction value:0];
++  _dragging = YES;
++  _nativeVisible = NO;
++  [self refreshChrome];
++  const uint64_t session = _sessionGeneration;
++  [_pipWindow performWindowDragWithEvent:event];
++  if (_invalidated || session != _sessionGeneration) {
++    return;
++  }
++  _dragging = NO;
++  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++  NSPoint pointer = NSEvent.mouseLocation;
++  if (screen && (pointer.x <= NSMinX(screen.frame) + 8 ||
++                 pointer.x >= NSMaxX(screen.frame) - 8)) {
++    [self tuckToSide:pointer.x <= NSMinX(screen.frame) + 8 ? geo::Side::kLeft
++                                                           : geo::Side::kRight];
++    return;
++  }
++  [self snap];
++  _nativeVisible = YES;
++  [self refreshChrome];
++  [self armHideTimer];
++}
++
++- (NSScreen*)anchorScreen {
++  for (NSScreen* screen in NSScreen.screens) {
++    if ([screen.deviceDescription[@"NSScreenNumber"] isEqual:_anchorDisplay]) {
++      return screen;
++    }
++  }
++  return _pipWindow.screen ?: NSScreen.mainScreen ?: NSScreen.screens.firstObject;
++}
++- (void)rememberScreen:(NSScreen*)screen {
++  _anchorDisplay = screen.deviceDescription[@"NSScreenNumber"];
++}
++- (void)setWindowFrame:(NSRect)frame animate:(BOOL)animate {
++  if (!_pipWindow) {
++    return;
++  }
++  _adjusting = YES;
++  [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
++  _adjusting = NO;
++}
++- (void)snap {
++  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++  if (!screen) {
++    return;
++  }
++  [self rememberScreen:screen];
++  _corner =
++      geo::NearestCorner(ToRect(_pipWindow.frame), ToRect(screen.visibleFrame));
++  NSRect frame = ToNSRect(geo::Anchor(ToRect(_pipWindow.frame),
++                                      ToRect(screen.visibleFrame), _corner));
++  [self setWindowFrame:frame animate:YES];
++  _restoreFrame = frame;
++}
++- (void)tuckToSide:(geo::Side)side {
++  if (_state.blocked || !_pipWindow) {
++    return;
++  }
++  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++  if (!screen) {
++    return;
++  }
++  _restoreDisplay = screen.deviceDescription[@"NSScreenNumber"];
++  _restoreFrame = ToNSRect(
++      geo::Clamp(ToRect(_pipWindow.frame), ToRect(screen.visibleFrame)));
++  _corner =
++      geo::NearestCorner(ToRect(_restoreFrame), ToRect(screen.visibleFrame));
++  // At an interior display seam the window would remain visible on a neighbor.
++  // Find the exterior desktop edge at this vertical band before stashing.
++  for (NSScreen* candidate in NSScreen.screens) {
++    if (NSMaxY(candidate.frame) <= NSMinY(_restoreFrame) ||
++        NSMinY(candidate.frame) >= NSMaxY(_restoreFrame)) {
++      continue;
++    }
++    if ((side == geo::Side::kLeft &&
++         NSMinX(candidate.frame) < NSMinX(screen.frame)) ||
++        (side == geo::Side::kRight &&
++         NSMaxX(candidate.frame) > NSMaxX(screen.frame))) {
++      screen = candidate;
++    }
++  }
++  [self rememberScreen:screen];
++  _tucked = side;
++  _nativeVisible = NO;
++  [self refreshChrome];
++  [self setWindowFrame:ToNSRect(geo::Tuck(ToRect(_restoreFrame),
++                                          ToRect(screen.frame),
++                                          ToRect(screen.visibleFrame), side))
++               animate:YES];
++}
++- (void)restore:(id)sender {
++  if (_state.blocked || _tucked == geo::Side::kNone) {
++    return;
++  }
++  NSScreen* screen = [self anchorScreen];
++  for (NSScreen* candidate in NSScreen.screens) {
++    if ([candidate.deviceDescription[@"NSScreenNumber"]
++            isEqual:_restoreDisplay]) {
++      screen = candidate;
++    }
++  }
++  [self rememberScreen:screen];
++  _tucked = geo::Side::kNone;
++  if (screen) {
++    [self setWindowFrame:ToNSRect(geo::Clamp(ToRect(_restoreFrame),
++                                             ToRect(screen.visibleFrame)))
++                 animate:YES];
++  }
++  _nativeVisible = YES;
++  [self refreshChrome];
++  [self armHideTimer];
++}
++- (void)tuck:(id)sender {
++  if (_state.blocked) {
++    return;
++  }
++  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++  if (!screen) {
++    return;
++  }
++  [self tuckToSide:NSMidX(_pipWindow.frame) < NSMidX(screen.frame)
++                       ? geo::Side::kLeft
++                       : geo::Side::kRight];
++}
++- (void)windowGeometryChanged:(NSNotification*)note {
++  if (_invalidated) {
++    return;
++  }
++  [self setNeedsLayout:YES];
++  if (_adjusting || _dragging || _scrolling || _resizing) {
++    return;
++  }
++  _aspect =
++      NSWidth(_pipWindow.frame) / std::max(1.0, NSHeight(_pipWindow.frame));
++  if (_tucked != geo::Side::kNone) {
++    _restoreFrame.size = _pipWindow.frame.size;
++    [self screenConfigurationChanged];
++    return;
++  }
++  if (_pipWindow.screen) {
++    [self rememberScreen:_pipWindow.screen];
++  }
++}
++- (void)screenConfigurationChanged {
++  if (_invalidated || !_pipWindow) {
++    return;
++  }
++  NSScreen* screen = [self anchorScreen];
++  if (!screen) {
++    return;
++  }
++  [self rememberScreen:screen];
++  if (_tucked == geo::Side::kNone) {
++    _corner = geo::NearestCorner(ToRect(_pipWindow.frame),
++                                 ToRect(screen.visibleFrame));
++    [self setWindowFrame:ToNSRect(geo::Anchor(ToRect(_pipWindow.frame),
++                                              ToRect(screen.visibleFrame),
++                                              _corner))
++                 animate:NO];
++  } else {
++    NSScreen* restoreScreen = screen;
++    for (NSScreen* candidate in NSScreen.screens) {
++      if ([candidate.deviceDescription[@"NSScreenNumber"]
++              isEqual:_restoreDisplay]) {
++        restoreScreen = candidate;
++      }
++    }
++    _restoreFrame = ToNSRect(geo::Anchor(
++        ToRect(_restoreFrame), ToRect(restoreScreen.visibleFrame), _corner));
++    [self setWindowFrame:ToNSRect(geo::Tuck(
++                             ToRect(_restoreFrame), ToRect(screen.frame),
++                             ToRect(screen.visibleFrame), _tucked))
++                 animate:NO];
++  }
++}
++
++- (BOOL)consumeScroll:(NSEvent*)event {
++  if (_invalidated || _state.blocked || _seeking ||
++      !event.hasPreciseScrollingDeltas) {
++    return NO;
++  }
++  if (event.momentumPhase != NSEventPhaseNone) {
++    BOOL consume = _consumeMomentum;
++    if (event.momentumPhase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
++      _consumeMomentum = NO;
++    }
++    return consume;
++  }
++  if (event.phase == NSEventPhaseNone) {
++    return NO;
++  }
++  if (_tucked != geo::Side::kNone) {
++    if (event.phase & NSEventPhaseBegan) {
++      _gestureX = 0;
++      _consumeMomentum = YES;
++    }
++    _gestureX += event.scrollingDeltaX;
++    if ((event.phase & NSEventPhaseEnded) &&
++        ((_tucked == geo::Side::kLeft && _gestureX > 30) ||
++         (_tucked == geo::Side::kRight && _gestureX < -30))) {
++      [self restore:nil];
++    }
++    return YES;
++  }
++  if (event.phase & NSEventPhaseBegan) {
++    NSPoint point = [self.superview convertPoint:event.locationInWindow
++                                        fromView:nil];
++    if ([self hitTest:point] != self) {
++      return NO;
++    }
++    [self deliver:Action::kInteraction value:0];
++    _scrolling = YES;
++    _gestureAxis = GestureAxis::kPending;
++    _consumeMomentum = YES;
++    [self rememberScreen:_pipWindow.screen ?: [self anchorScreen]];
++    _gestureStartFrame = _pipWindow.frame;
++    _gestureX = _gestureY = 0;
++    _nativeVisible = NO;
++    [self refreshChrome];
++  }
++  if (!_scrolling) {
++    return NO;
++  }
++  _gestureX += event.scrollingDeltaX;
++  _gestureY += event.scrollingDeltaY;
++  if (_gestureAxis == GestureAxis::kPending &&
++      std::max(std::abs(_gestureX), std::abs(_gestureY)) >= 8) {
++    _gestureAxis = std::abs(_gestureX) >= std::abs(_gestureY)
++                       ? GestureAxis::kHorizontal
++                       : GestureAxis::kVertical;
++  }
++  if (event.phase & NSEventPhaseChanged) {
++    NSRect frame =
++        NSOffsetRect(_gestureStartFrame,
++                     _gestureAxis == GestureAxis::kHorizontal ? _gestureX : 0,
++                     _gestureAxis == GestureAxis::kVertical ? _gestureY : 0);
++    [self setWindowFrame:frame animate:NO];
++  }
++  if (event.phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
++    _scrolling = NO;
++    if (event.phase & NSEventPhaseCancelled) {
++      [self setWindowFrame:_gestureStartFrame animate:YES];
++      _nativeVisible = YES;
++      [self refreshChrome];
++      [self armHideTimer];
++      return YES;
++    }
++    if (!(event.phase & NSEventPhaseCancelled)) {
++      if (_gestureAxis == GestureAxis::kVertical && _gestureY < -90 &&
++          std::abs(_gestureY) > std::abs(_gestureX) * 1.4) {
++        [self deliver:Action::kClose value:0];
++        return YES;
++      }
++      NSScreen* screen = [self anchorScreen];
++      BOOL leftHalf = NSMidX(_gestureStartFrame) < NSMidX(screen.frame);
++      BOOL outward =
++          (leftHalf && _gestureX < -70) || (!leftHalf && _gestureX > 70);
++      if (_gestureAxis == GestureAxis::kHorizontal && outward &&
++          std::abs(_gestureX) > std::abs(_gestureY) * 1.3) {
++        [self setWindowFrame:_gestureStartFrame animate:NO];
++        [self tuckToSide:_gestureX < 0 ? geo::Side::kLeft : geo::Side::kRight];
++        return YES;
++      }
++    }
++    [self snap];
++    _nativeVisible = YES;
++    [self refreshChrome];
++    [self armHideTimer];
++  }
++  return YES;
++}
++- (void)resizeEvent:(NSEvent*)event phase:(NSInteger)phase {
++  if (_state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  if (phase == 0) {
++    _resizing = YES;
++    _resizeStartFrame = _pipWindow.frame;
++    _resizeStartMouse = NSEvent.mouseLocation;
++  } else if (phase == 1 && _resizing) {
++    NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++    if (!screen) {
++      return;
++    }
++    NSPoint mouse = NSEvent.mouseLocation;
++    double dx = mouse.x - _resizeStartMouse.x;
++    double dy = _resizeStartMouse.y - mouse.y;
++    double width = NSWidth(_resizeStartFrame) + (dx + dy * _aspect) * 0.5;
++    [self setWindowFrame:ToNSRect(geo::Resize(ToRect(_resizeStartFrame),
++                                              ToRect(screen.visibleFrame),
++                                              _aspect, width))
++                 animate:NO];
++  } else if (phase == 2 && _resizing) {
++    _resizing = NO;
++    [self snap];
++  }
++}
++- (void)magnifyWithEvent:(NSEvent*)event {
++  if (_state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++  if (!screen) {
++    return;
++  }
++  [self
++      setWindowFrame:ToNSRect(geo::Resize(
++                         ToRect(_pipWindow.frame), ToRect(screen.visibleFrame),
++                         _aspect,
++                         NSWidth(_pipWindow.frame) * (1 + event.magnification)))
++             animate:NO];
++  if (event.phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
++    [self snap];
++  }
++}
++
++- (void)beginSeek {
++  if (_state.blocked || !_state.can_seek) {
++    return;
++  }
++  _seeking = YES;
++  _resumeAfterSeek = _state.playing;
++  [_hideTimer invalidate];
++  [self refreshChrome];
++  [self deliver:Action::kSeekBegin value:_resumeAfterSeek ? 1 : 0];
++}
++- (void)endSeek {
++  if (!_seeking) {
++    return;
++  }
++  _seeking = NO;
++  [self deliver:Action::kSeekEnd value:_resumeAfterSeek ? 1 : 0];
++  [self refreshChrome];
++  [self armHideTimer];
++}
++- (void)seek:(id)sender {
++  if (sender != _slider || _state.blocked || !_state.can_seek) {
++    return;
++  }
++  double fraction = std::clamp(_slider.doubleValue, 0.0, 1.0);
++  [self deliver:Action::kSeek value:fraction];
++  _timestamp.stringValue = [NSString
++      stringWithFormat:@"%@ / %@", TimeLabel(fraction * _state.duration),
++                       TimeLabel(_state.duration)];
++  [self armHideTimer];
++}
++- (void)playPause:(id)sender {
++  if (!_state.blocked && _state.can_play) {
++    [self deliver:Action::kPlayPause value:0];
++  }
++}
++- (void)back:(id)sender {
++  if (!_state.blocked && _state.can_seek) {
++    [self deliver:Action::kBack15 value:0];
++  }
++}
++- (void)forward:(id)sender {
++  if (!_state.blocked && _state.can_seek) {
++    [self deliver:Action::kForward15 value:0];
++  }
++}
++- (void)returnToTab:(id)sender {
++  if (!_state.blocked) {
++    [self deliver:Action::kReturn value:0];
++  }
++}
++- (void)close:(id)sender {
++  if (!_state.blocked) {
++    [self deliver:Action::kClose value:0];
++  }
++}
++- (void)mute:(id)sender {
++  if (!_state.blocked && _state.can_mute) {
++    [self deliver:Action::kMute value:_state.muted ? 0 : 1];
++  }
++}
++
++- (void)prepareForHide {
++  if (_invalidated) {
++    return;
++  }
++  ++_sessionGeneration;
++  // A media session can reuse this hidden window. Drop queued input from the
++  // previous session without changing playback or destroying the native host.
++  ActionCallback callback = _delivery ? _delivery->callback : ActionCallback{};
++  _delivery = std::make_shared<Delivery>(Delivery{std::move(callback)});
++  const BOOL wasTucked = _tucked != geo::Side::kNone;
++  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
++  if (wasTucked) {
++    for (NSScreen* candidate in NSScreen.screens) {
++      if ([candidate.deviceDescription[@"NSScreenNumber"]
++              isEqual:_restoreDisplay]) {
++        screen = candidate;
++      }
++    }
++  }
++  NSRect frame = wasTucked ? _restoreFrame : _pipWindow.frame;
++  _tucked = geo::Side::kNone;
++  _nativeVisible = NO;
++  _hasSnapshot = NO;
++  _mouseInside = NO;
++  _dragging = _resizing = _scrolling = _seeking = _resumeAfterSeek = NO;
++  _consumeMomentum = NO;
++  _gestureAxis = GestureAxis::kPending;
++  [_hideTimer invalidate];
++  _hideTimer = nil;
++  [_progressTimer invalidate];
++  _progressTimer = nil;
++  if (screen) {
++    [self rememberScreen:screen];
++    [self setWindowFrame:ToNSRect(geo::Clamp(ToRect(frame),
++                                             ToRect(screen.visibleFrame)))
++                 animate:NO];
++  }
++  [self refreshChrome];
++}
++
++- (void)invalidate {
++  if (_invalidated) {
++    return;
++  }
++  _invalidated = YES;
++  if (_delivery) {
++    _delivery->callback = nullptr;
++  }
++  _delivery.reset();
++  [_progressTimer invalidate];
++  _progressTimer = nil;
++  [_hideTimer invalidate];
++  _hideTimer = nil;
++  if (_eventMonitor) {
++    [NSEvent removeMonitor:_eventMonitor];
++    _eventMonitor = nil;
++  }
++  for (id observer in _observers) {
++    [NSNotificationCenter.defaultCenter removeObserver:observer];
++    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:observer];
++  }
++  [_observers removeAllObjects];
++  _slider.beginDrag = nil;
++  _slider.endDrag = nil;
++  _resizeView.resizeEvent = nil;
++  [self removeFromSuperview];
++}
++@end
++
++namespace arcium::pip {
++struct NativeControls::Impl {
++  __strong ArciumPiPNativeOverlay* view;
++};
++NativeControls::NativeControls(NSWindow* window, ActionCallback callback)
++    : impl_(std::make_unique<Impl>()) {
++  NSCAssert(NSThread.isMainThread,
++            @"PiP controls must be created on the main thread");
++  impl_->view =
++      [[ArciumPiPNativeOverlay alloc] initWithWindow:window
++                                            callback:std::move(callback)];
++}
++NativeControls::~NativeControls() {
++  NSCAssert(NSThread.isMainThread,
++            @"PiP controls must be destroyed on the main thread");
++  [impl_->view invalidate];
++}
++void NativeControls::Update(const State& state) {
++  [impl_->view applyState:state];
++}
++void NativeControls::RestorePlacementForHide() {
++  [impl_->view prepareForHide];
++}
++}  // namespace arcium::pip
+Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
+===================================================================
+--- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
++++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
+@@ -1,31 +1,47 @@
+-// Copyright 2025 The Chromium Authors
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
+-
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
+ #ifndef CHROME_BROWSER_UI_VIEWS_OVERLAY_VIDEO_OVERLAY_WINDOW_NATIVE_WIDGET_MAC_H_
+ #define CHROME_BROWSER_UI_VIEWS_OVERLAY_VIDEO_OVERLAY_WINDOW_NATIVE_WIDGET_MAC_H_
+ 
++#include <memory>
++
++#include "base/memory/weak_ptr.h"
+ #include "ui/views/widget/native_widget_mac.h"
+ 
++namespace arcium::pip {
++class NativeControls;
++enum class Action;
++}  // namespace arcium::pip
+ class VideoOverlayWindowViews;
+ 
+-// This NativeWidget allows VideoOverlayWindowViews to have default Mac window
+-// styling despite removing the standard frame.
+ class VideoOverlayWindowNativeWidgetMac : public views::NativeWidgetMac {
+  public:
+-  VideoOverlayWindowNativeWidgetMac(VideoOverlayWindowViews* widget);
++  explicit VideoOverlayWindowNativeWidgetMac(VideoOverlayWindowViews* widget);
+   VideoOverlayWindowNativeWidgetMac(const VideoOverlayWindowNativeWidgetMac&) =
+       delete;
+   VideoOverlayWindowNativeWidgetMac& operator=(
+       const VideoOverlayWindowNativeWidgetMac&) = delete;
+-
+   ~VideoOverlayWindowNativeWidgetMac() override;
+ 
++  void InitNativeWidget(views::Widget::InitParams params) override;
++  void Show(ui::mojom::WindowShowState state,
++            const gfx::Rect& restore_bounds) override;
++  bool RefreshNativeControls();
++  void RestorePlacementForHide();
++  void UseLegacyControlsForTesting();
++
+  protected:
+-  // NativeWidgetMac:
+   void PopulateCreateWindowParams(
+       const views::Widget::InitParams& widget_params,
+       remote_cocoa::mojom::CreateWindowParams* params) override;
+-};
++  void OnWindowDestroying(gfx::NativeWindow window) override;
+ 
+-#endif  // CHROME_BROWSER_UI_VIEWS_OVERLAY_VIDEO_OVERLAY_WINDOW_NATIVE_WIDGET_MAC_H_
++ private:
++  void ApplyWindowPolicy();
++  void OnNativeAction(arcium::pip::Action action, double value);
++  base::WeakPtr<VideoOverlayWindowViews> video_;
++  std::unique_ptr<arcium::pip::NativeControls> controls_;
++  bool seek_was_playing_ = false;
++  base::WeakPtrFactory<VideoOverlayWindowNativeWidgetMac> weak_factory_{this};
++};
++#endif
+Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
++++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
+@@ -1,17 +1,28 @@
+-// Copyright 2025 The Chromium Authors
+-// Use of this source code is governed by a BSD-style license that can be
+-// found in the LICENSE file.
+-
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
+ #include "chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h"
+ 
+ #import <Cocoa/Cocoa.h>
+ 
++#include <algorithm>
++#include <cmath>
++#include <utility>
++
++#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
++#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
+ #include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
++#include "components/global_media_controls/public/views/media_progress_view.h"
++#include "components/remote_cocoa/app_shim/native_widget_mac_nswindow.h"
+ #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
++#include "content/public/browser/video_picture_in_picture_window_controller.h"
++#include "ui/color/color_id.h"
++#include "ui/color/color_provider.h"
++#include "ui/views/controls/label.h"
++#include "ui/views/view.h"
+ 
+ VideoOverlayWindowNativeWidgetMac::VideoOverlayWindowNativeWidgetMac(
+     VideoOverlayWindowViews* widget)
+-    : NativeWidgetMac(widget) {}
++    : NativeWidgetMac(widget), video_(widget->weak_factory_.GetWeakPtr()) {}
+ 
+ VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
+     default;
+@@ -22,3 +33,185 @@ void VideoOverlayWindowNativeWidgetMac::
+   params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
+   params->style_mask = NSWindowStyleMaskFullSizeContentView;
+ }
++
++void VideoOverlayWindowNativeWidgetMac::InitNativeWidget(
++    views::Widget::InitParams params) {
++  NativeWidgetMac::InitNativeWidget(std::move(params));
++  NSWindow* window = GetNativeWindow().GetNativeNSWindow();
++  if (!window || !GetInProcessNSWindowBridge()) {
++    return;
++  }
++  ApplyWindowPolicy();
++  controls_ = std::make_unique<arcium::pip::NativeControls>(
++      window, [weak = weak_factory_.GetWeakPtr()](arcium::pip::Action action,
++                                                  double value) {
++        if (weak) {
++          weak->OnNativeAction(action, value);
++        }
++      });
++}
++
++void VideoOverlayWindowNativeWidgetMac::ApplyWindowPolicy() {
++  auto* window = static_cast<NativeWidgetMacNSWindow*>(
++      GetNativeWindow().GetNativeNSWindow());
++  if (!window) {
++    return;
++  }
++  [window setActivationIndependence:YES];
++  window.hidesOnDeactivate = NO;
++  auto behavior = window.collectionBehavior;
++  behavior &= ~(NSWindowCollectionBehaviorMoveToActiveSpace |
++                NSWindowCollectionBehaviorFullScreenPrimary |
++                NSWindowCollectionBehaviorFullScreenNone |
++                NSWindowCollectionBehaviorPrimary |
++                NSWindowCollectionBehaviorAuxiliary);
++  behavior |= NSWindowCollectionBehaviorCanJoinAllSpaces |
++              NSWindowCollectionBehaviorFullScreenAuxiliary;
++  if (@available(macOS 13.0, *)) {
++    behavior |= NSWindowCollectionBehaviorCanJoinAllApplications;
++  }
++  window.collectionBehavior = behavior;
++}
++
++void VideoOverlayWindowNativeWidgetMac::Show(ui::mojom::WindowShowState state,
++                                             const gfx::Rect& restore_bounds) {
++  NativeWidgetMac::Show(state, restore_bounds);
++  ApplyWindowPolicy();
++  if (video_) {
++    video_->RefreshNativeControls();
++  }
++}
++
++void VideoOverlayWindowNativeWidgetMac::OnWindowDestroying(
++    gfx::NativeWindow window) {
++  weak_factory_.InvalidateWeakPtrs();
++  if (video_) {
++    video_->native_controls_widget_ = nullptr;
++  }
++  controls_.reset();
++  NativeWidgetMac::OnWindowDestroying(window);
++}
++
++bool VideoOverlayWindowNativeWidgetMac::RefreshNativeControls() {
++  if (!controls_ || !video_ || !video_->GetRootView()) {
++    return false;
++  }
++  auto* video = video_.get();
++  arcium::pip::State state;
++  state.playing = video->playback_state_for_testing_ ==
++                  content::VideoOverlayWindow::kPlaying;
++  state.can_play =
++      video->show_play_pause_button_ && video->show_playback_controls_;
++  state.duration = video->position_.duration().InSecondsF();
++  state.position = video->position_.GetPosition().InSecondsF();
++  state.playback_rate = video->position_.playback_rate();
++  state.can_seek = !video->is_live_ && video->show_playback_controls_ &&
++                   video->position_.duration() != base::TimeDelta::Max() &&
++                   std::isfinite(state.duration) && state.duration > 0;
++  state.can_mute = video->toggle_mute_button_ != nullptr;
++  state.muted = state.can_mute && video->controller_->GetMuteStatus();
++  // Specialty media actions retain their complete Chromium controls surface.
++  state.blocked =
++      video->IsOverlayViewShown() || video->show_toggle_microphone_button_ ||
++      video->show_toggle_camera_button_ || video->show_hang_up_button_ ||
++      video->show_skip_ad_button_ || video->show_next_track_button_ ||
++      video->show_previous_track_button_ ||
++      video->show_previous_slide_button_ || video->show_next_slide_button_;
++  state.show_controls = video->native_controls_visible_;
++  state.show_title = video->force_title_and_scrim_visible_.value_or(
++      video->initial_title_hide_timer_.IsRunning() ||
++      (!video->IsTrustedForMediaPlayback() && !video->meets_user_interaction_));
++  state.title = video->origin_->GetText();
++  state.accent = video->GetColorProvider()->GetColor(ui::kColorSysPrimary);
++  controls_->Update(state);
++  return !state.blocked;
++}
++
++void VideoOverlayWindowNativeWidgetMac::RestorePlacementForHide() {
++  seek_was_playing_ = false;
++  if (controls_) {
++    controls_->RestorePlacementForHide();
++  }
++}
++
++void VideoOverlayWindowNativeWidgetMac::UseLegacyControlsForTesting() {
++  controls_.reset();
++  if (video_) {
++    video_->RefreshNativeControls();
++  }
++}
++
++void VideoOverlayWindowNativeWidgetMac::OnNativeAction(
++    arcium::pip::Action action,
++    double value) {
++  if (!video_ || video_->IsOverlayViewShown()) {
++    return;
++  }
++  auto* video = video_.get();
++  using Action = arcium::pip::Action;
++  if (!video->meets_user_interaction_) {
++    if (video->initial_title_hide_timer_.IsRunning()) {
++      video->user_interacted_before_timer_fired_ = true;
++    } else {
++      video->meets_user_interaction_ = true;
++      video->UpdateControlsVisibility(video->native_controls_visible_, false);
++    }
++  }
++  switch (action) {
++    case Action::kInteraction:
++      break;
++    case Action::kReturn:
++      PictureInPictureWindowManager::GetInstance()
++          ->ExitPictureInPictureViaWindowUi(
++              PictureInPictureWindowManager::UiBehavior::
++                  kCloseWindowAndFocusOpener);
++      return;
++    case Action::kClose:
++      video->CloseAndPauseIfAvailable();
++      return;
++    case Action::kPlayPause:
++      if (video->show_play_pause_button_) {
++        video->TogglePlayPause();
++      }
++      break;
++    case Action::kBack15:
++      if (!video->is_live_) {
++        video->Replay15Seconds();
++      }
++      break;
++    case Action::kForward15:
++      if (!video->is_live_) {
++        video->Forward15Seconds();
++      }
++      break;
++    case Action::kMute:
++      video->controller_->RequestMute(!video->controller_->GetMuteStatus());
++      break;
++    case Action::kSeekBegin:
++      seek_was_playing_ = video->show_play_pause_button_ &&
++                          video->playback_state_for_testing_ ==
++                              content::VideoOverlayWindow::kPlaying;
++      if (seek_was_playing_) {
++        video->controller_->Pause();
++        video->SetPlaybackState(content::VideoOverlayWindow::kPaused);
++      }
++      break;
++    case Action::kSeek:
++      if (std::isfinite(value) && !video->is_live_ &&
++          video->position_.duration() > base::TimeDelta() &&
++          video->position_.duration() != base::TimeDelta::Max()) {
++        video->controller_->SeekTo(video->position_.duration() *
++                                   std::clamp(value, 0.0, 1.0));
++      }
++      break;
++    case Action::kSeekEnd:
++      if (std::exchange(seek_was_playing_, false)) {
++        video->controller_->Play();
++        video->SetPlaybackState(content::VideoOverlayWindow::kPlaying);
++      }
++      break;
++  }
++  if (video_) {
++    video_->RefreshNativeControls();
++  }
++}
+Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
+===================================================================
+--- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
++++ src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
+@@ -10,6 +10,7 @@
+ #include "base/check.h"
+ #include "base/feature_list.h"
+ #include "base/functional/bind.h"
++#include "base/functional/callback_helpers.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/notreached.h"
+@@ -392,8 +393,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+   // On Mac, we override the default native widget with our own subclass, which
+   // allows us to get the default window styling (e.g. corner radius) even
+   // though we're using `views::Widget::InitParams::remove_standard_frame`.
+-  params.native_widget =
++  overlay_window->native_controls_widget_ =
+       new VideoOverlayWindowNativeWidgetMac(overlay_window.get());
++  params.native_widget = overlay_window->native_controls_widget_;
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+@@ -638,6 +640,15 @@ void VideoOverlayWindowViews::OnNativeWi
+ }
+ 
+ void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
++  const bool native_seek_available =
++#if BUILDFLAG(IS_MAC)
++      native_controls_active_ && !is_live_ &&
++      show_playback_controls_ && position_.duration() > base::TimeDelta() &&
++      position_.duration() != base::TimeDelta::Max();
++#else
++      false;
++#endif
++
+   // Every time a user uses a keyboard to interact on the window, restart the
+   // timer to automatically hide the controls.
+   hide_controls_timer_.Reset();
+@@ -669,11 +680,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+       TogglePlayPause();
+       event->SetHandled();
+     } else if (event->key_code() == ui::VKEY_LEFT &&
+-               replay_15_seconds_button_->IsDrawn()) {
++               (native_seek_available || replay_15_seconds_button_->IsDrawn())) {
+       Replay15Seconds();
+       event->SetHandled();
+     } else if (event->key_code() == ui::VKEY_RIGHT &&
+-               forward_15_seconds_button_->IsDrawn()) {
++               (native_seek_available || forward_15_seconds_button_->IsDrawn())) {
+       Forward15Seconds();
+       event->SetHandled();
+     }
+@@ -801,6 +812,11 @@ void VideoOverlayWindowViews::FireEnable
+ }
+ 
+ bool VideoOverlayWindowViews::AreControlsVisible() const {
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_active_)
++    return native_controls_visible_;
++#endif
++
+   // If we're animating to a visibility state, then we'll act as if we're in
+   // that state.
+   if (fade_animation_) {
+@@ -862,6 +878,14 @@ void VideoOverlayWindowViews::UpdateCont
+           : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
+                 !can_hide_title_and_scrim;
+ 
++#if BUILDFLAG(IS_MAC)
++  native_controls_visible_ = wanted_visibility;
++  native_title_visible_ = title_is_visible;
++  RefreshNativeControls();
++  if (native_controls_active_)
++    return;
++#endif
++
+   if (should_animate) {
+     // Animate the title and top scrim.
+     if (title_is_visible != AreTitleAndScrimVisible()) {
+@@ -959,6 +983,9 @@ void VideoOverlayWindowViews::OnViewVisi
+ 
+   // The visibility of `overlay_view_` affects our minimum size.
+   OnSizeConstraintsChanged();
++#if BUILDFLAG(IS_MAC)
++  RefreshNativeControls();
++#endif
+ }
+ 
+ void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
+@@ -974,6 +1001,34 @@ void VideoOverlayWindowViews::SetForcedT
+ }
+ 
+ #if BUILDFLAG(IS_MAC)
++void VideoOverlayWindowViews::UseLegacyControlsForTesting() {
++  if (native_controls_widget_) native_controls_widget_->UseLegacyControlsForTesting();
++}
++
++void VideoOverlayWindowViews::RefreshNativeControls() {
++  if (!native_controls_widget_)
++    return;
++  const bool was_active = native_controls_active_;
++  native_controls_active_ = native_controls_widget_->RefreshNativeControls();
++  if (!native_controls_active_ && !was_active)
++    return;
++  fade_animation_.reset();
++  title_and_top_scrim_fade_animation_.reset();
++  controls_container_view_->SetVisible(!native_controls_active_ && native_controls_visible_);
++  title_view_->SetVisible(!native_controls_active_ && native_title_visible_);
++  const float controls_opacity =
++      !native_controls_active_ && native_controls_visible_ ? 1.0f : 0.0f;
++  const float title_opacity =
++      !native_controls_active_ && native_title_visible_ ? 1.0f : 0.0f;
++  for (views::View* view : {controls_container_view_.get(),
++                           controls_scrim_view_.get(),
++                           controls_bottom_scrim_view_.get()}) {
++    view->layer()->SetOpacity(controls_opacity);
++  }
++  title_view_->layer()->SetOpacity(title_opacity);
++  controls_top_scrim_view_->layer()->SetOpacity(title_opacity);
++}
++
+ void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
+   MoveToActiveFullscreenSpace();
+ }
+@@ -1517,6 +1572,12 @@ void VideoOverlayWindowViews::UpdateLaye
+ }
+ 
+ void VideoOverlayWindowViews::OnUpdateControlsBounds() {
++#if BUILDFLAG(IS_MAC)
++  base::ScopedClosureRunner native_refresh(base::BindOnce(
++      &VideoOverlayWindowViews::RefreshNativeControls,
++      weak_factory_.GetWeakPtr()));
++#endif
++
+   controls_container_view_->SetSize(GetBounds().size());
+ 
+   // Adding an extra pixel to width/height makes sure the scrim covers the
+@@ -1766,6 +1827,11 @@ bool VideoOverlayWindowViews::IsActive()
+ }
+ 
+ void VideoOverlayWindowViews::Close() {
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_widget_)
++    native_controls_widget_->RestorePlacementForHide();
++#endif
++
+   views::Widget::Close();
+   MaybeUnregisterFrameSinkHierarchy();
+   if (fade_animator_) {
+@@ -1847,6 +1913,11 @@ void VideoOverlayWindowViews::ShowInacti
+ }
+ 
+ void VideoOverlayWindowViews::Hide() {
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_widget_)
++    native_controls_widget_->RestorePlacementForHide();
++#endif
++
+   // If there is an existing overlay view, remove it now.
+   RemoveOverlayViewIfExists();
+   views::Widget::Hide();
+@@ -1888,6 +1959,9 @@ void VideoOverlayWindowViews::UpdateNatu
+ void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
+   playback_state_for_testing_ = playback_state;
+   play_pause_controls_view_->SetPlaybackState(playback_state);
++#if BUILDFLAG(IS_MAC)
++  RefreshNativeControls();
++#endif
+ }
+ 
+ void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
+@@ -1958,6 +2032,9 @@ void VideoOverlayWindowViews::SetMediaMu
+   if (toggle_mute_button_) {
+     toggle_mute_button_->SetMutedState(muted);
+   }
++#if BUILDFLAG(IS_MAC)
++  RefreshNativeControls();
++#endif
+ }
+ 
+ void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
+@@ -1993,11 +2070,17 @@ void VideoOverlayWindowViews::SetMediaPo
+   position_ = position;
+   progress_view_->UpdateProgress(position);
+   UpdateTimestampLabel(position_.GetPosition(), position_.duration());
++#if BUILDFLAG(IS_MAC)
++  RefreshNativeControls();
++#endif
+ }
+ 
+ void VideoOverlayWindowViews::SetSourceTitle(
+     const std::u16string& source_title) {
+   origin_->SetText(source_title);
++#if BUILDFLAG(IS_MAC)
++  RefreshNativeControls();
++#endif
+ }
+ 
+ void VideoOverlayWindowViews::SetFaviconImages(
+@@ -2230,7 +2313,7 @@ void VideoOverlayWindowViews::TogglePlay
+   // TogglePlayPause() since the IPC message may not have been propagated
+   // the media player yet.
+   bool is_active = controller_->TogglePlayPause();
+-  play_pause_controls_view_->SetPlaybackState(is_active ? kPlaying : kPaused);
++  SetPlaybackState(is_active ? kPlaying : kPaused);
+ }
+ 
+ void VideoOverlayWindowViews::Replay15Seconds() {
+@@ -2408,6 +2491,9 @@ void VideoOverlayWindowViews::RemoveOver
+     GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
+     OnSizeConstraintsChanged();
+   }
++#if BUILDFLAG(IS_MAC)
++  RefreshNativeControls();
++#endif
+ }
+ 
+ void VideoOverlayWindowViews::OnProgressDragStateChanged(
+@@ -2513,6 +2599,11 @@ void VideoOverlayWindowViews::OnInitialT
+ }
+ 
+ bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_active_)
++    return native_title_visible_;
++#endif
++
+   if (title_and_top_scrim_fade_animation_) {
+     return (title_and_top_scrim_fade_animation_->type() ==
+             OverlayControlsFadeAnimation::Type::kToShown);
+Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
+===================================================================
+--- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.h
++++ src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
+@@ -36,6 +36,7 @@ namespace viz {
+ class FrameSinkId;
+ }  // namespace viz
+ 
++class VideoOverlayWindowNativeWidgetMac;
+ class BackToTabLabelButton;
+ class CloseImageButton;
+ class HangUpButton;
+@@ -273,6 +274,11 @@ class VideoOverlayWindowViews : public c
+     meets_user_interaction_ = meets_user_interaction;
+   }
+ 
++#if BUILDFLAG(IS_MAC)
++  // Portable Views tests exercise the retained fallback presentation.
++  void UseLegacyControlsForTesting();
++#endif
++
+   void FinishTuckAnimationForTesting();
+ 
+   bool AreTitleAndScrimVisibleForTesting() const;
+@@ -590,6 +596,15 @@ class VideoOverlayWindowViews : public c
+   // True if the playback controls should be visible.
+   bool show_playback_controls_ = true;
+ 
++#if BUILDFLAG(IS_MAC)
++  friend class VideoOverlayWindowNativeWidgetMac;
++  void RefreshNativeControls();
++  raw_ptr<VideoOverlayWindowNativeWidgetMac> native_controls_widget_ = nullptr;
++  bool native_controls_active_ = false;
++  bool native_controls_visible_ = false;
++  bool native_title_visible_ = false;
++#endif
++
+   base::WeakPtrFactory<VideoOverlayWindowViews> weak_factory_{this};
+ };
+ 
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
+@@ -0,0 +1,65 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
++
++#include <cmath>
++
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace arcium::pip::geometry {
++namespace {
++bool Inside(Rect frame, Rect area) {
++  return frame.x >= area.x && frame.y >= area.y &&
++         frame.x + frame.width <= area.x + area.width + 1e-6 &&
++         frame.y + frame.height <= area.y + area.height + 1e-6;
++}
++
++TEST(ArciumPiPGeometryTest, FourCornersStayInNegativeOriginWorkArea) {
++  const Rect area{-1920, -76, 1920, 1032};
++  for (Corner corner : {Corner::kBottomLeft, Corner::kBottomRight,
++                        Corner::kTopLeft, Corner::kTopRight}) {
++    Rect frame = Anchor({-500, 200, 400, 225}, area, corner);
++    EXPECT_TRUE(Inside(frame, area));
++    EXPECT_EQ(NearestCorner(frame, area), corner);
++  }
++}
++
++TEST(ArciumPiPGeometryTest, TuckKeepsRestoreHandleOnEitherEdge) {
++  const Rect screen{-1920, -100, 1920, 1080};
++  const Rect work{-1920, -76, 1920, 1032};
++  Rect left = Tuck({-500, 200, 400, 225}, screen, work, Side::kLeft);
++  Rect right = Tuck({-500, 200, 400, 225}, screen, work, Side::kRight);
++  EXPECT_DOUBLE_EQ(left.x + left.width - screen.x, kHandleWidth);
++  EXPECT_DOUBLE_EQ(screen.x + screen.width - right.x, kHandleWidth);
++  EXPECT_DOUBLE_EQ(left.width, 400);
++  EXPECT_DOUBLE_EQ(right.height, 225);
++}
++
++TEST(ArciumPiPGeometryTest, ResizeKeepsAspectAndReachableBounds) {
++  const Rect area{-1920, -76, 1920, 1032};
++  for (double aspect : {0.5625, 1.0, 16.0 / 9.0, 2.4}) {
++    for (double width : {1.0, 284.0, 400.0, 1200.0, 9999.0}) {
++      Rect frame = Resize({-500, 200, 400, 225}, area, aspect, width);
++      EXPECT_TRUE(Inside(frame, area));
++      EXPECT_NEAR(frame.width / frame.height, aspect, 1e-6);
++      EXPECT_GE(frame.width, 284);
++      EXPECT_GE(frame.height, 160);
++    }
++  }
++}
++
++TEST(ArciumPiPGeometryTest, TinyAndInvalidScreensStayFinite) {
++  Rect tiny = Resize({0, 0, 400, 225}, {0, 0, 240, 120}, 16.0 / 9.0, 500);
++  EXPECT_TRUE(Inside(tiny, {0, 0, 240, 120}));
++  EXPECT_NEAR(tiny.width / tiny.height, 16.0 / 9.0, 1e-6);
++  for (Rect area :
++       {Rect{0, 0, 0, 0}, Rect{5, -1, -8, -4}, Rect{NAN, NAN, INFINITY, NAN}}) {
++    Rect frame = Resize({0, 0, 400, 225}, area, NAN, NAN);
++    EXPECT_TRUE(std::isfinite(frame.x));
++    EXPECT_TRUE(std::isfinite(frame.y));
++    EXPECT_DOUBLE_EQ(frame.width, 0);
++    EXPECT_DOUBLE_EQ(frame.height, 0);
++  }
++}
++}  // namespace
++}  // namespace arcium::pip::geometry
+Index: src/chrome/test/BUILD.gn
+===================================================================
+--- src.orig/chrome/test/BUILD.gn
++++ src/chrome/test/BUILD.gn
+@@ -11558,6 +11558,11 @@ if (!is_android && toolkit_views) {
+ 
+     if (is_mac) {
+       sources += [
++        "../browser/ui/views/overlay/arcium_pip_geometry_unittest.cc",
++        "../browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm",
++      ]
++      deps += [ "//ui/base:test_support" ]
++      sources += [
+         "../browser/ui/browser_shortcuts/arcium_shortcut_presets_unittest.cc",
+         "../browser/ui/browser_shortcuts/browser_shortcut_platform_mac_unittest.mm",
+       ]
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
+@@ -0,0 +1,460 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++
++#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
++
++#import <AppKit/AppKit.h>
++
++#include <algorithm>
++#include <cmath>
++#include <memory>
++#include <vector>
++
++#include "testing/gtest/include/gtest/gtest.h"
++#include "ui/base/test/cocoa_helper.h"
++#include "ui/events/test/cocoa_test_event_utils.h"
++
++// These selectors inject input at the native overlay boundary. Expectations
++// below inspect control presentation, emitted actions, and native window
++// frames.
++@interface NSView (ArciumPiPNativeControlsTestInput)
++- (void)beginSeek;
++- (void)buildChrome;
++- (void)seek:(id)sender;
++- (void)endSeek;
++- (BOOL)consumeScroll:(NSEvent*)event;
++@end
++
++namespace arcium::pip {
++namespace {
++
++struct EmittedAction {
++  Action action;
++  double value;
++};
++
++NSView* FindAccessibleView(NSView* root, NSString* label) {
++  if ([root.accessibilityLabel isEqualToString:label]) {
++    return root;
++  }
++  for (NSView* child in root.subviews) {
++    if (NSView* found = FindAccessibleView(child, label)) {
++      return found;
++    }
++  }
++  return nil;
++}
++
++bool IsPresented(NSView* view) {
++  if (!view || view.hiddenOrHasHiddenAncestor) {
++    return false;
++  }
++  for (NSView* ancestor = view; ancestor; ancestor = ancestor.superview) {
++    if (ancestor.alphaValue == 0) {
++      return false;
++    }
++  }
++  return true;
++}
++
++void ExpectSameFrame(NSRect actual, NSRect expected) {
++  EXPECT_NEAR(NSMinX(actual), NSMinX(expected), 0.5);
++  EXPECT_NEAR(NSMinY(actual), NSMinY(expected), 0.5);
++  EXPECT_NEAR(NSWidth(actual), NSWidth(expected), 0.5);
++  EXPECT_NEAR(NSHeight(actual), NSHeight(expected), 0.5);
++}
++
++class ArciumPiPNativeControlsTest : public ui::CocoaTest {
++ public:
++  void SetUp() override {
++    ui::CocoaTest::SetUp();
++    ASSERT_TRUE(NSThread.isMainThread);
++    if (NSScreen.screens.count == 0) {
++      GTEST_SKIP() << "Requires a native display";
++    }
++    NSScreen* screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
++    NSRect area = screen.visibleFrame;
++    window_ = [[NSWindow alloc]
++        initWithContentRect:NSMakeRect(NSMidX(area) - 200, NSMidY(area) - 112.5,
++                                       400, 225)
++                  styleMask:NSWindowStyleMaskBorderless
++                    backing:NSBackingStoreBuffered
++                      defer:YES];
++    window_.releasedWhenClosed = NO;
++    // The production surface is mounted into this window, which stays hidden
++    // for the complete test. No orderFront, key-window, or app activation
++    // calls.
++    controls_ = std::make_unique<NativeControls>(
++        window_, [this](Action action, double value) {
++          actions_.push_back({action, value});
++        });
++    state_.can_play = true;
++    state_.can_seek = true;
++    state_.can_mute = true;
++    state_.show_controls = true;
++    state_.show_title = true;
++    state_.position = 42;
++    state_.duration = 100;
++    state_.playback_rate = 0;
++    state_.title = u"Native PiP test";
++    Update();
++    ASSERT_FALSE(window_.visible);
++    ASSERT_TRUE(Overlay());
++  }
++
++  void TearDown() override {
++    controls_.reset();
++    if (window_) {
++      EXPECT_FALSE(window_.visible);
++      [window_ close];
++      window_ = nil;
++    }
++    Pump();
++    ui::CocoaTest::TearDown();
++  }
++
++ protected:
++  NSView* Overlay() {
++    return FindAccessibleView(window_.contentView,
++                              @"Picture in Picture controls");
++  }
++  NSButton* Button(NSString* label) {
++    NSView* view = FindAccessibleView(window_.contentView, label);
++    return [view isKindOfClass:NSButton.class] ? static_cast<NSButton*>(view)
++                                               : nil;
++  }
++  NSSlider* Slider() {
++    NSView* view =
++        FindAccessibleView(window_.contentView, @"Playback position");
++    return [view isKindOfClass:NSSlider.class] ? static_cast<NSSlider*>(view)
++                                               : nil;
++  }
++  void Pump() {
++    // NativeControls posts onto the main dispatch queue. CocoaTest initializes
++    // AppKit; its native run loop delivers these blocks without displaying UI.
++    [window_.contentView layoutSubtreeIfNeeded];
++    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    [window_.contentView layoutSubtreeIfNeeded];
++  }
++  void Update() {
++    controls_->Update(state_);
++    [window_.contentView layoutSubtreeIfNeeded];
++    Pump();
++  }
++  void Resize(NSSize size) {
++    [window_ setContentSize:size];
++    [window_.contentView layoutSubtreeIfNeeded];
++    Pump();
++  }
++  size_t Count(Action action) const {
++    return std::count_if(actions_.begin(), actions_.end(),
++                         [action](const EmittedAction& emitted) {
++                           return emitted.action == action;
++                         });
++  }
++  bool Scroll(NSEventPhase phase, CGFloat dx = 0, CGFloat dy = 0) {
++    NSPoint background =
++        NSMakePoint(20, NSHeight(window_.contentView.bounds) * 0.5);
++    NSButton* restore = Button(@"Restore Picture in Picture");
++    if (IsPresented(restore)) {
++      background = [restore convertPoint:NSMakePoint(NSMidX(restore.bounds),
++                                                     NSMidY(restore.bounds))
++                                  toView:nil];
++    }
++    NSEvent* event = cocoa_test_event_utils::TestScrollEvent(
++        background, window_, dx, dy, true, phase, NSEventPhaseNone);
++    EXPECT_EQ(event.phase, phase);
++    EXPECT_TRUE(event.hasPreciseScrollingDeltas);
++    return [Overlay() consumeScroll:event];
++  }
++  void ExpectPresentedWithinOverlay(NSView* control) {
++    ASSERT_TRUE(IsPresented(control));
++    NSRect bounds = [control convertRect:control.bounds toView:Overlay()];
++    EXPECT_TRUE(NSContainsRect(Overlay().bounds, bounds))
++        << "overlay=" << NSStringFromRect(Overlay().bounds).UTF8String
++        << " control=" << NSStringFromRect(bounds).UTF8String;
++  }
++
++  NSWindow* __strong window_ = nil;
++  std::unique_ptr<NativeControls> controls_;
++  State state_;
++  std::vector<EmittedAction> actions_;
++};
++
++TEST_F(ArciumPiPNativeControlsTest,
++       AppearanceRebuildEndsScrubAndRejectsDetachedSlider) {
++  state_.playing = true;
++  state_.playback_rate = 1;
++  Update();
++  NSView* overlay = Overlay();
++  NSSlider* detached = Slider();
++  [overlay beginSeek];
++  [overlay buildChrome];
++  Update();
++  detached.doubleValue = 0.9;
++  [overlay seek:detached];
++  Pump();
++  EXPECT_EQ(Count(Action::kSeekBegin), 1u);
++  EXPECT_EQ(Count(Action::kSeekEnd), 1u);
++  EXPECT_EQ(Count(Action::kSeek), 0u);
++  Slider().doubleValue = 0.7;
++  [Slider() sendAction:Slider().action to:Slider().target];
++  Pump();
++  EXPECT_EQ(Count(Action::kSeek), 1u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PausedScrubNeverRequestsResume) {
++  ASSERT_TRUE(Slider());
++  ASSERT_FALSE(state_.playing);
++  [Overlay() beginSeek];
++  Slider().doubleValue = 0.7;
++  [Slider() sendAction:Slider().action to:Slider().target];
++  [Overlay() endSeek];
++  Pump();
++
++  ASSERT_EQ(actions_.size(), 3u);
++  EXPECT_EQ(actions_[0].action, Action::kSeekBegin);
++  EXPECT_DOUBLE_EQ(actions_[0].value, 0);
++  EXPECT_EQ(actions_[1].action, Action::kSeek);
++  EXPECT_DOUBLE_EQ(actions_[1].value, 0.7);
++  EXPECT_EQ(actions_[2].action, Action::kSeekEnd);
++  EXPECT_DOUBLE_EQ(actions_[2].value, 0);
++  EXPECT_EQ(Count(Action::kPlayPause), 0u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PlaybackUpdatesChangeAccessibleAction) {
++  NSButton* play = Button(@"Play");
++  ASSERT_TRUE(play);
++  ExpectPresentedWithinOverlay(play);
++  [play performClick:nil];
++  Pump();
++  ASSERT_EQ(Count(Action::kPlayPause), 1u);
++
++  state_.playing = true;
++  state_.playback_rate = 1;
++  Update();
++  NSButton* pause = Button(@"Pause");
++  ASSERT_TRUE(pause);
++  ExpectPresentedWithinOverlay(pause);
++  EXPECT_FALSE(Button(@"Play"));
++  [pause performClick:nil];
++  Pump();
++  EXPECT_EQ(Count(Action::kPlayPause), 2u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest,
++       AdaptiveSeekControlsSurviveCompactRoundTrip) {
++  ExpectPresentedWithinOverlay(Button(@"Back 15 seconds"));
++  ExpectPresentedWithinOverlay(Button(@"Forward 15 seconds"));
++  Resize(NSMakeSize(284, 160));
++  EXPECT_FALSE(IsPresented(Button(@"Back 15 seconds")));
++  EXPECT_FALSE(IsPresented(Button(@"Forward 15 seconds")));
++  ExpectPresentedWithinOverlay(Button(@"Play"));
++  ExpectPresentedWithinOverlay(Slider());
++
++  Resize(NSMakeSize(400, 225));
++  ExpectPresentedWithinOverlay(Button(@"Back 15 seconds"));
++  ExpectPresentedWithinOverlay(Button(@"Forward 15 seconds"));
++  [Button(@"Back 15 seconds") performClick:nil];
++  [Button(@"Forward 15 seconds") performClick:nil];
++  Pump();
++  EXPECT_EQ(Count(Action::kBack15), 1u);
++  EXPECT_EQ(Count(Action::kForward15), 1u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest,
++       PermissionBlockingYieldsInputAndSuppressesActions) {
++  state_.blocked = true;
++  Update();
++  NSView* overlay = Overlay();
++  NSPoint center =
++      [overlay convertPoint:NSMakePoint(20, NSHeight(overlay.bounds) / 2)
++                     toView:overlay.superview];
++  EXPECT_EQ([overlay hitTest:center], nil);
++  EXPECT_FALSE(Scroll(NSEventPhaseBegan));
++  [Button(@"Play") performClick:nil];
++  [Button(@"Return to tab") performClick:nil];
++  [Button(@"Close Picture in Picture") performClick:nil];
++  [Overlay() beginSeek];
++  Slider().doubleValue = 0.9;
++  [Slider() sendAction:Slider().action to:Slider().target];
++  [Overlay() endSeek];
++  Pump();
++  EXPECT_TRUE(actions_.empty());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, DestructionCancelsAlreadyQueuedActions) {
++  ASSERT_TRUE(Button(@"Play"));
++  NSButton* play = Button(@"Play");
++  [play sendAction:play.action to:play.target];
++  controls_.reset();
++  Pump();
++  EXPECT_TRUE(actions_.empty());
++  EXPECT_FALSE(Overlay());
++}
++
++TEST_F(ArciumPiPNativeControlsTest,
++       TuckLeavesOnlyHandleAndRestoreReturnsOriginalFrame) {
++  NSRect original = window_.frame;
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  NSButton* restore = Button(@"Restore Picture in Picture");
++  ExpectPresentedWithinOverlay(restore);
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  bool found_handle = false;
++  for (NSScreen* screen in NSScreen.screens) {
++    NSRect visible = NSIntersectionRect(window_.frame, screen.frame);
++    if (NSIsEmptyRect(visible)) {
++      continue;
++    }
++    EXPECT_LE(NSWidth(visible), 28.5);
++    if (std::abs(NSWidth(visible) - 28) <= 0.5) {
++      found_handle = true;
++    }
++  }
++  EXPECT_TRUE(found_handle);
++  EXPECT_TRUE(actions_.empty());
++  [restore performClick:nil];
++  Pump();
++  ExpectSameFrame(window_.frame, original);
++  ExpectPresentedWithinOverlay(Button(@"Play"));
++  EXPECT_FALSE(IsPresented(restore));
++}
++
++TEST_F(ArciumPiPNativeControlsTest,
++       SyntheticCancelledScrollRestoresStartingFrame) {
++  NSRect original = window_.frame;
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged, 35, 0));
++  EXPECT_NE(NSMinX(window_.frame), NSMinX(original));
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++  Pump();
++  ExpectSameFrame(window_.frame, original);
++  EXPECT_EQ(Count(Action::kClose), 0u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, SyntheticInwardSwipeRestoresTuckedWindow) {
++  NSRect original = window_.frame;
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  ASSERT_TRUE(IsPresented(Button(@"Restore Picture in Picture")));
++  // Determine the reachable edge from the native handle rather than reading
++  // any private tuck state. A left-edge handle is on the window's right side.
++  NSButton* handle = Button(@"Restore Picture in Picture");
++  NSRect handle_frame = [handle convertRect:handle.bounds toView:Overlay()];
++  CGFloat inward_dx =
++      NSMidX(handle_frame) > NSMidX(Overlay().bounds) ? 45 : -45;
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged, inward_dx, 0));
++  ASSERT_TRUE(Scroll(NSEventPhaseEnded));
++  Pump();
++  ExpectSameFrame(window_.frame, original);
++  EXPECT_FALSE(IsPresented(handle));
++  EXPECT_EQ(Count(Action::kClose), 0u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, SyntheticDownwardSwipeEmitsCloseAction) {
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged, 0, -110));
++  ASSERT_TRUE(Scroll(NSEventPhaseEnded));
++  Pump();
++  EXPECT_EQ(Count(Action::kClose), 1u);
++  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PlayingScrubPreservesResumeIntent) {
++  state_.playing = true;
++  state_.playback_rate = 1;
++  Update();
++  [Overlay() beginSeek];
++  Slider().doubleValue = 0.3;
++  [Slider() sendAction:Slider().action to:Slider().target];
++  [Overlay() endSeek];
++  Pump();
++  ASSERT_EQ(actions_.size(), 3u);
++  EXPECT_EQ(actions_[0].action, Action::kSeekBegin);
++  EXPECT_DOUBLE_EQ(actions_[0].value, 1);
++  EXPECT_EQ(actions_[1].action, Action::kSeek);
++  EXPECT_DOUBLE_EQ(actions_[1].value, 0.3);
++  EXPECT_EQ(actions_[2].action, Action::kSeekEnd);
++  EXPECT_DOUBLE_EQ(actions_[2].value, 1);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, CloseCallbackCanDestroyNativeControls) {
++  controls_.reset();
++  controls_ = std::make_unique<NativeControls>(
++      window_, [this](Action action, double value) {
++        actions_.push_back({action, value});
++        if (action == Action::kClose) {
++          controls_.reset();
++        }
++      });
++  Update();
++  NSButton* close = Button(@"Close Picture in Picture");
++  ASSERT_TRUE(close);
++  [close sendAction:close.action to:close.target];
++  Pump();
++  EXPECT_EQ(Count(Action::kClose), 1u);
++  EXPECT_FALSE(controls_);
++  EXPECT_FALSE(Overlay());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PermissionBlockingRestoresTuckedWindow) {
++  NSRect original = window_.frame;
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  ASSERT_TRUE(IsPresented(Button(@"Restore Picture in Picture")));
++  state_.blocked = true;
++  Update();
++  ExpectSameFrame(window_.frame, original);
++  NSPoint point = [Overlay() convertPoint:NSMakePoint(20, 80)
++                                   toView:Overlay().superview];
++  EXPECT_EQ([Overlay() hitTest:point], nil);
++  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, HideCancelsInputFromPreviousSession) {
++  [Button(@"Play") performClick:nil];
++  controls_->RestorePlacementForHide();
++  Pump();
++  EXPECT_TRUE(actions_.empty());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, HideRestoresTuckBeforeWindowReuse) {
++  NSRect original = window_.frame;
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  controls_->RestorePlacementForHide();
++  Pump();
++  ExpectSameFrame(window_.frame, original);
++  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++  Update();
++  ExpectPresentedWithinOverlay(Button(@"Play"));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, NaturalSizeChangesSurviveTuckAndRestore) {
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  [window_ setContentSize:NSMakeSize(320, 240)];
++  Pump();
++  EXPECT_NEAR(NSWidth(window_.frame), 320, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 240, 0.5);
++  [Button(@"Restore Picture in Picture") performClick:nil];
++  Pump();
++  EXPECT_NEAR(NSWidth(window_.frame), 320, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 240, 0.5);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, SeekCanRemainAvailableWithoutPlayPause) {
++  state_.can_play = false;
++  Update();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  ExpectPresentedWithinOverlay(Button(@"Back 15 seconds"));
++  [Button(@"Back 15 seconds") performClick:nil];
++  Pump();
++  EXPECT_EQ(Count(Action::kBack15), 1u);
++  EXPECT_EQ(Count(Action::kPlayPause), 0u);
++}
++
++}  // namespace
++}  // namespace arcium::pip
+Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
+===================================================================
+--- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
++++ src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
+@@ -206,6 +206,11 @@ class VideoOverlayWindowViewsTest : publ
+     SetDisplayWorkArea({0, 0, 1000, 1000});
+ 
+     overlay_window_ = VideoOverlayWindowViews::Create(&pip_window_controller_);
++#if BUILDFLAG(IS_MAC)
++    // The native AppKit presentation has its own behavioral suite. This suite
++    // continues to exercise Views, including its specialty-control fallback.
++    overlay_window_->UseLegacyControlsForTesting();
++#endif
+     overlay_window_->set_overlay_view_cb_for_testing(
+         base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
+                             base::Unretained(this)));

@@ -57,3 +57,4 @@ personal/arcium-arc-import-settings-macos.patch
 personal/arcium-system-appearance-macos.patch
 personal/arcium-onboarding-appearance-macos.patch
 personal/arcium-dmg-first-run-defaults-macos.patch
+personal/arcium-pip-native-controls-macos.patch
