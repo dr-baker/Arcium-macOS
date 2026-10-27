@@ -6,7 +6,7 @@ Unreleased changes are in source, not the current download. [Roadmap](README.md#
 
 ### Highlights
 
-- Keep watching YouTube when switching tabs. Video opens automatically in a rounded Picture-in-Picture window and returns to the page when you switch back, with 15-second seek controls and support for muted playback.
+- Keep watching YouTube when switching tabs. Video opens automatically in a rounded Picture-in-Picture window and returns to the page when you switch back, with clear glass controls, responsive 15-second seeking, themed progress, and working pause for muted playback.
 - Migrate from Arc in one click on first launch. Bring over available Spaces, Pins, folders, and Favorites, or choose specific Spaces.
 - Recognize both pages in a split Pin. Each page gets its own site icon and title, with a small divider between them.
 

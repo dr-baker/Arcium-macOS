@@ -20,7 +20,9 @@
     {
       "target": "//content/test:arcium_media_session_impl_unittests",
       "filters": [
-        "MediaSessionImplTest.*BrowserInitiatedAutoPip*"
+        "MediaSessionImplTest.*BrowserInitiatedAutoPip*",
+        "MediaSessionImplTest.Suspend*",
+        "MediaSessionImplTest.Resume*"
       ]
     },
     {
@@ -47,15 +49,18 @@
     "Use an isolated Dev profile and record the exact commits, app bundle, profile, and launch flags.",
     "Launch without enabling experimental web platform features or overriding BrowserInitiatedAutomaticPictureInPicture.",
     "Use public video and background pages so screenshot and video evidence can be shared.",
-    "Exclude LiveCaption* from the overlay suite: the core deliberately removes Live Caption support and its PiP controls."
+    "Exclude LiveCaption* from the overlay suite: the core deliberately removes Live Caption support and its PiP controls.",
+    "If remote debugging is needed, use a fixed nonzero localhost port. Port zero advertises navigator.webdriver and is not a faithful manual browser configuration."
   ],
   "steps": [
     "Open https://www.youtube.com/watch?v=aqz-KE-bpKQ and start playback through the player.",
     "Switch to a public background tab. Confirm a floating PiP window appears without a permission overlay, and playback continues.",
     "Return to YouTube. Confirm automatic PiP closes and the same video continues in the page.",
     "Repeat departure and return with the video muted. Confirm automatic PiP still appears and the mute state remains unchanged.",
+    "Start fresh muted playback, switch away, click the native PiP pause control, and verify the actual video stops. Resume and confirm time advances while it remains muted.",
     "Pause the video, switch away, and confirm automatic PiP does not appear.",
     "Open automatic PiP again. Verify hover controls, pause and resume, seeking, return to tab, window dragging, resizing, and rounded clipping.",
+    "Resize between compact 284\u00d7160 and roomy 400\u00d7240. Keep play/pause available; show quick seek only in the roomy window and verify it returns after shrinking and enlarging. Confirm glass button readability and that paused progress retains the opener theme color.",
     "Disable automatic PiP in native Settings. Confirm an already-open PiP window remains open, then close it and verify subsequent departures do not open automatic PiP.",
     "With the preference disabled, enter PiP manually and confirm it remains available when switching away and returning.",
     "Re-enable automatic PiP and verify entry resumes. Quit normally, relaunch the same profile, and verify the preference persists.",
