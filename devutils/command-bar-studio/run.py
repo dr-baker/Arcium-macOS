@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build and launch only the standalone Command Bar Studio."""
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -18,6 +19,22 @@ BUILD = LAB / '.build'
 
 def command(args, **kwargs):
     return subprocess.run([str(a) for a in args], check=True, **kwargs)
+
+
+def process_executable(pid):
+    """Read the kernel's executable path, retaining unknown identity on errors."""
+    if not isinstance(pid, int) or isinstance(pid, bool) or not 0 < pid < 2**31:
+        return None
+    try:
+        proc_pidpath = ctypes.CDLL('/usr/lib/libproc.dylib').proc_pidpath
+        proc_pidpath.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+        proc_pidpath.restype = ctypes.c_int
+        buffer = ctypes.create_string_buffer(4096)
+        if proc_pidpath(pid, buffer, ctypes.sizeof(buffer)) <= 0:
+            return None
+        return Path(os.fsdecode(buffer.value)).resolve()
+    except (OSError, ValueError):
+        return None
 
 
 def swift(action, jobs):
@@ -120,7 +137,8 @@ def launch(app, extra_args=(), before_replace=None, writer_lease=None):
     except BaseException:
         command([executable, '--quit-owned', str(process.pid), str(executable)])
         raise
-    if old:
+    old_path = process_executable(old['pid']) if old else None
+    if old and (old_path is None or old_path == Path(old['executable']).resolve()):
         try:
             if before_replace: before_replace()
             command([executable, '--quit-owned', str(old['pid']), old['executable']])
