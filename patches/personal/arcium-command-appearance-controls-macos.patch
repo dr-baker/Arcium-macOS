@@ -1,0 +1,260 @@
+Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
++++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h
+@@ -17,7 +17,8 @@ namespace arcium_settings {
+ // The shared palette bridge intentionally uses doubles. Command-bar enum
+ // values and booleans have a different schema and must retain their types.
+ inline std::optional<base::DictValue> CommandPanelLayoutFromNSObject(id value) {
+-  if (![value isKindOfClass:[NSDictionary class]] || [value count] != 8) {
++  if (![value isKindOfClass:[NSDictionary class]] ||
++      ([value count] != 8 && [value count] != 9)) {
+     return std::nullopt;
+   }
+   NSDictionary* layout = value;
+@@ -58,6 +59,17 @@ inline std::optional<base::DictValue> Co
+     return std::nullopt;
+   }
+   result.Set("glow_strength", number);
++  id count = layout[@"result_count"];
++  if (count) {
++    if (![count isKindOfClass:[NSNumber class]] ||
++        CFGetTypeID((__bridge CFTypeRef)count) == CFBooleanGetTypeID()) return std::nullopt;
++    const double number = [count doubleValue];
++    if (!std::isfinite(number) || std::trunc(number) != number || number < 1 || number > 20) return std::nullopt;
++    result.Set("result_count", static_cast<int>(number));
++  } else if ([layout count] != 8) {
++    return std::nullopt;
++  }
++  if (!*result.FindBool("connected") && *result.FindInt("scope_width") == 0) result.Set("scope_width", 2);
+   return result;
+ }
+ 
+Index: src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
++++ src/chrome/browser/ui/cocoa/arcium_command_panel_layout_mac_unittest.mm
+@@ -33,6 +33,19 @@ TEST(CommandPanelLayoutMacTest, Preserve
+   EXPECT_EQ(false, converted->FindBool("connected"));
+   EXPECT_EQ(true, converted->FindBool("activity_dots"));
+ }
++TEST(CommandPanelLayoutMacTest, NormalizesDetachedFlushAndValidatesResultCount) {
++  auto layout = Layout();
++  layout[@"connected"] = @NO;
++  layout[@"result_count"] = @20;
++  auto converted = CommandPanelLayoutFromNSObject(layout);
++  ASSERT_TRUE(converted);
++  EXPECT_EQ(2, converted->FindInt("scope_width"));
++  EXPECT_EQ(20, converted->FindInt("result_count"));
++  for (id invalid in @[@YES, @0, @21, @1.5, @"8", [NSNull null]]) {
++    layout[@"result_count"] = invalid;
++    EXPECT_FALSE(CommandPanelLayoutFromNSObject(layout));
++  }
++}
+ TEST(CommandPanelLayoutMacTest, ValidatesGlowStrength) {
+   for (NSNumber* strength in @[ @0.0, @0.75, @2.0 ]) {
+     auto layout = Layout();
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -376,6 +376,11 @@ struct ArciumCommandPanelLayout: Equatab
+     var scopeTints = true
+     var glowStrength = 0.75
+     var activityDots = true
++    var resultCount = 8
++    mutating func normalize() {
++        if !connected && width == .flush { width = .offset }
++        resultCount = min(20, max(1, resultCount))
++    }
+     init(_ dictionary: [String: Any] = [:]) {
+         if let value = exactIntegerOptional(dictionary["labels"]), (0...2).contains(value) {
+             labels = value
+@@ -401,11 +406,18 @@ struct ArciumCommandPanelLayout: Equatab
+             glowStrength = value
+         }
+         activityDots = strictBoolean(dictionary["activity_dots"]) ?? true
++        if let count = exactIntegerOptional(dictionary["result_count"]), (1...20).contains(count) {
++            resultCount = count
++        }
++        normalize()
+     }
+     var dictionary: [String: Any] {
+-        ["labels": labels, "icons": icons, "scope_reveal": reveal,
+-         "connected": connected, "scope_width": width.rawValue,
+-         "scope_tints": scopeTints, "glow_strength": glowStrength, "activity_dots": activityDots]
++        var value = self
++        value.normalize()
++        return ["labels": labels, "icons": icons, "scope_reveal": reveal,
++         "connected": connected, "scope_width": value.width.rawValue,
++         "scope_tints": scopeTints, "glow_strength": glowStrength, "activity_dots": activityDots,
++         "result_count": value.resultCount]
+     }
+ }
+ 
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsUIController.swift
+@@ -41,8 +41,7 @@ public final class ArciumSettingsUIContr
+     // command panel beside these controls in the same key window.
+     @objc(makeCommandBarEditorWithPreviewAvailable:)
+     public func makeCommandBarEditor(previewAvailable: Bool) -> NSViewController {
+-        NSHostingController(rootView: AnyView(ArciumCommandBarEditorView(
+-            store: store, previewAvailable: previewAvailable)))
++        ArciumCommandBarEditorController(store: store, previewAvailable: previewAvailable)
+     }
+ 
+     // An explicit native deep link; ordinary snapshots keep navigation intact.
+@@ -53,6 +52,21 @@ public final class ArciumSettingsUIContr
+     }
+ }
+ 
++@MainActor
++final class ArciumCommandBarEditorController: NSHostingController<AnyView> {
++    private let store: ArciumSettingsStore
++    init(store: ArciumSettingsStore, previewAvailable: Bool) {
++        self.store = store
++        super.init(rootView: AnyView(ArciumCommandBarEditorView(
++            store: store, previewAvailable: previewAvailable)))
++    }
++    @available(*, unavailable)
++    required init?(coder: NSCoder) { fatalError("Command bar editor does not support storyboards") }
++    override func cancelOperation(_ sender: Any?) {
++        store.actionInvoked(name: "close_command_bar_editor")
++    }
++}
++
+ @objc public protocol ArciumSpaceThemeEditorDelegate: AnyObject {
+     @objc(spaceThemeEditorDidChangeConfiguration:)
+     func configurationChanged(_ configuration: NSDictionary)
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -1606,6 +1606,7 @@ private struct ArciumCommandBarControls:
+                 set: { value in
+                     var layout = store.snapshot.appearance.commandPanelLayout
+                     layout[keyPath: key] = value
++                    layout.normalize()
+                     store.setCommandPanelLayout(layout)
+                 })
+     }
+@@ -1624,9 +1625,12 @@ private struct ArciumCommandBarControls:
+                         (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
+                         (value: 4, label: "Flat"), (value: 5, label: "Divot")])
+                     SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
+-                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options: [
+-                        (value: .flush, label: "Flush"), (value: .iconWidth, label: "Icon-width"),
+-                        (value: .offset, label: "Offset")])
++                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options:
++                        (store.snapshot.appearance.commandPanelLayout.connected
++                         ? [(value: ArciumCommandPanelLayout.Width.flush, label: "Flush")] : []) + [
++                        (value: .iconWidth, label: "Icon-width"), (value: .offset, label: "Tabs")])
++                    SPicker("Default results", selection: commandLayoutBinding(\.resultCount),
++                            options: (1...20).map { (value: $0, label: String($0)) })
+                     SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+                     if store.snapshot.appearance.commandPanelLayout.scopeTints {
+                         SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
+@@ -1659,7 +1663,7 @@ struct ArciumCommandBarEditorView: View
+                 store.actionInvoked(name: "close_command_bar_editor")
+             }) {
+                 Text(previewAvailable
+-                     ? "Select scopes or type in the preview. Results won't open."
++                     ? "Select scopes or type to filter the examples. Results won't open."
+                      : "Open a browser window to preview scopes and results.")
+                     .settingsFont(\.caption).foregroundStyle(.secondary)
+                 ArciumCommandBarControls(store: store)
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -838,6 +838,33 @@ final class ArciumSettingsUIContractTest
+         XCTAssertEqual(delegate.settings.map { $0.value as? Int }, [200, 201])
+     }
+ 
++    func testCommandBarEditorEscapeUsesItsOwnedCloseAction() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true], delegate: delegate)
++        let controller = ArciumCommandBarEditorController(store: store, previewAvailable: false)
++        controller.cancelOperation(nil)
++        XCTAssertEqual(delegate.actions.map(\.name), ["close_command_bar_editor"])
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++
++    func testCommandPanelDetachedFlushAndResultCountNormalization() {
++        let layout = ArciumCommandPanelLayout(["connected": false, "scope_width": 0, "result_count": 20])
++        XCTAssertEqual(layout.width, .offset)
++        XCTAssertEqual(layout.resultCount, 20)
++        XCTAssertEqual(layout.dictionary["scope_width"] as? Int, 2)
++        XCTAssertEqual(layout.dictionary["result_count"] as? Int, 20)
++        for value: Any in [0, 21, true, 1.5, "3"] {
++            XCTAssertEqual(ArciumCommandPanelLayout(["result_count": value]).resultCount, 8)
++        }
++        var edited = ArciumCommandPanelLayout()
++        edited.connected = false
++        XCTAssertEqual(edited.dictionary["scope_width"] as? Int, 2)
++        edited.resultCount = 30
++        XCTAssertEqual(edited.dictionary["result_count"] as? Int, 20)
++        edited.normalize()
++        XCTAssertEqual(edited.width, .offset)
++    }
++
+     @MainActor
+     func testCommandPanelDefaultsAndTypedLayoutCallback() {
+         let delegate = TestDelegate()
+@@ -904,7 +931,7 @@ final class ArciumSettingsUIContractTest
+                 layout.reveal = (reveal + 1) % 6
+                 XCTAssertEqual(ArciumCommandPanelLayout(layout.dictionary).width, width)
+                 XCTAssertNil(layout.dictionary["full_width"])
+-                XCTAssertEqual(layout.dictionary.count, 8)
++                XCTAssertEqual(layout.dictionary.count, 9)
+             }
+         }
+         for invalid in [true, 1.5, -1, 3, "1"] as [Any] {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -35,7 +35,7 @@
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+ #include "chrome/browser/ui/chrome_pages.h"
+-#include "chrome/browser/ui/omnibox/arcium_command_preview_session.h"
++#include "chrome/browser/ui/omnibox/arcium_command_example_session.h"
+ #include "chrome/browser/ui/omnibox/arcium_command_providers.h"
+ #include "chrome/browser/ui/cocoa/arcium_command_panel_layout_mac.h"
+ #import "chrome/browser/ui/cocoa/arcium_settingsui_bridge.h"
+@@ -645,8 +645,8 @@ class CommandSettingsEditor : public vie
+     auto* browser = browser_view->browser();
+     auto* profile = browser->profile()->GetOriginalProfile();
+     auto panel = std::make_unique<arcium::CommandPanelView>(
+-        std::make_unique<arcium::CommandPreviewSession>(
+-            arcium::CreateCommandSession(browser)),
++        std::make_unique<arcium::CommandExampleSession>(
++            arcium::CreateCommandSession(browser)->GetScopes()),
+         base::BindRepeating(&CommandSettingsEditor::RequestClose,
+                             base::Unretained(this)),
+         base::DoNothing());
+@@ -759,6 +759,12 @@ class CommandSettingsEditor : public vie
+ 
+ }  // namespace
+ 
++@interface ArciumCommandControlsWindow : NSWindow
++@end
++@implementation ArciumCommandControlsWindow
++- (BOOL)canBecomeKeyWindow { return YES; }
++@end
++
+ @interface ArciumSettingsContentView : NSView
+ @property(nonatomic, copy) void (^effectiveAppearanceChanged)(void);
+ @end
+@@ -969,7 +975,7 @@ void SettingsModelProfileWillBeDestroyed
+   if (!target) {
+     // Settings remains usable after the last browser closes. The same controls
+     // are available in a normal sheet, with an explicit unavailable preview.
+-    command_controls_sheet_ = [[NSWindow alloc]
++    command_controls_sheet_ = [[ArciumCommandControlsWindow alloc]
+         initWithContentRect:NSMakeRect(0, 0, 520, 620)
+                   styleMask:NSWindowStyleMaskBorderless
+                     backing:NSBackingStoreBuffered defer:NO];
