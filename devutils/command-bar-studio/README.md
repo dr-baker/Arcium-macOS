@@ -41,6 +41,84 @@ Settings. The versioned design file contains browser layout only. A workshop
 scenario can additionally contain context and example state; importing it into
 browser Settings applies only its `layout` member.
 
+Choose **Minimal**, **Subtle**, **Stacked** or **Peek** for scope geometry.
+**Advanced…** opens Scope height, Scope width and Attach Scopes, in that order.
+Style changes preserve result count, labels, icons and lighting. A geometry
+combination outside the four styles is shown as Custom.
+
+## Live design parameters
+
+Open the **Design** disclosure groups beside the preview. Geometry, typography,
+lighting, motion and color values update the production renderer without a
+build or restart. Reset design values restores compiled defaults and preserves
+the selected style and other command-bar settings. A color's Theme button
+removes its override. Import and export include nondefault design values.
+
+The browser reads the same optional `layout.design` dictionary from its existing
+profile preference. Values are validated on preference changes and cached as
+typed fields on the panel. Paint, layout, typing and animation callbacks do not
+parse dictionaries or read files. Paint-only edits preserve result views and
+provider state; geometry edits retain query, selection and result identities.
+The browser has no design-file watcher. Studio's existing scenario polling is
+independent development tooling.
+
+Studio's **Lighting** section groups base strength, the inactive-row multiplier,
+the selected-scope multiplier, and live **Glow width**, **Glow height** and
+**Glow blur** sliders. Browser Settings keeps Styles, Results, Scope tints and
+one Glow strength slider; detailed design controls and design import/export
+are available only through Studio's explicit editor entry point.
+Strength uses the base value while scopes are active, multiplied by 61% while
+inactive and 151% for the selected scope by default. Minimal is the default
+style, with attached flat scopes and flush width. Glow width defaults to 200%.
+Width and height scale the oval independently. Attached scopes add 50% height.
+**Collapsed glow height** defaults to 55% and smoothly returns to 100% as
+scopes expand. It scales the light profile without increasing peak brightness;
+flat Minimal scopes still emit from the command bar's top edge. Blur
+feathers its edge without changing either axis or adding a GPU blur pass.
+The **Light / Dark** switch above the preview, also available with **⌘D**,
+changes the native appearance in place while retaining content and settings.
+Scope colors retain their original RGB. Only white switches to black shading
+on light glass, and built-in X icons use black on light and white on dark.
+Saved, favicons and multicolor artwork retain their original pixels.
+A cached 33-sample opacity curve matches composited OKLab contrast along the
+whole glow falloff, using the original red accent as reference. The six gradient
+stops retain the same RGB through the zero-alpha endpoint, avoiding dark fringes.
+Curves are shared in a bounded per-thread cache across panel openings. Paint
+only interpolates cached samples; it adds no color solving or drawing passes.
+Pale colors saturate at full opacity if the reference contrast is unreachable.
+Light mode adds 50 percentage points to the base strength; hover and press add
+another 45 points. Saved's yellow scope adds 20 points in dark mode; X's neutral
+scope adds 10 points in either mode. The row and selection multipliers apply
+after those additions. Zero strength continues to disable lighting.
+
+For scripted iteration on an already-running instance:
+
+```sh
+studio=devutils/command-bar-studio/studio
+$studio design --instance workshop --set row_height=48 --set glow_softness=12
+$studio design --instance workshop --set 'selection_color=#C7B47A'
+$studio design --instance workshop --reset-design
+```
+
+The CLI validates all edits before atomically replacing the isolated scenario.
+The running instance observes file edits on its 200 ms polling interval; changes
+from the controls use the preference callback directly.
+
+The canonical defaults, ranges and editor descriptors are in core
+`devutils/ui/command_bar_design.json`. To change the defaults for future profiles,
+edit that schema and run:
+
+```sh
+python3 devutils/command-bar-studio/design_tokens.py
+python3 devutils/command-bar-studio/design_tokens.py --check
+```
+
+This generates the owning production C++ header and Swift descriptors in their
+patches. Native iterations verify the captured generators and both outputs
+before compiling. Compiled-default changes require a browser build and matching
+SDK refresh; ordinary live values do not. New layout algorithms, drawing
+techniques and interactions remain source changes.
+
 ## Scenarios without compiling
 
 ```sh
@@ -57,7 +135,7 @@ Search publications have fresh revisions and query epochs. Cancelled queries
 cannot publish into a later search. Actions remain inert.
 
 A scenario uses this envelope. `layout` accepts the production eight or nine
-fields. `context` can supply UI scale, light or dark mode, palette colors,
+fields and an optional sparse `design` dictionary. `context` can supply UI scale, light or dark mode, palette colors,
 command material, surface set and the production chrome appearance dictionary.
 
 ```json

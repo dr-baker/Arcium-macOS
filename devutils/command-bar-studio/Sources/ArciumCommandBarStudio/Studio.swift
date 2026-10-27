@@ -137,7 +137,7 @@ final class StudioApp: NSObject, NSApplicationDelegate, NSWindowDelegate, Arcium
         if let saved = preferences.dictionary(forKey: "configuration") { configuration = Configuration(saved) }
         dark = preferences.object(forKey: "dark") as? Bool ?? true
         controls = ArciumSettingsUIController(snapshot: snapshot(), delegate: self)
-        editor = controls.makeCommandBarEditor(previewAvailable: true)
+        editor = controls.makeCommandBarStudioEditor()
         root.editor = editor.view; root.addSubview(editor.view); root.addSubview(root.stage); root.addSubview(root.bar)
         for (title, action) in [("Light / Dark", #selector(toggleAppearance)), ("Reset examples", #selector(resetExamples)), ("Reset settings", #selector(resetSettings)), ("Copy configuration", #selector(copyConfiguration))] {
             let button = NSButton(title: title, target: self, action: action)

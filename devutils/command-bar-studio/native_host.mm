@@ -19,8 +19,12 @@
 #include "base/memory_coordinator/test_memory_consumer_registry.h"
 #include "base/apple/bundle_locations.h"
 #include "base/command_line.h"
+#include "ui/compositor/canvas_painter.h"
+#include "ui/views/paint_info.h"
+#include "ui/views/controls/scroll_view.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
+#include "base/files/file.h"
 #include "base/json/json_writer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/arcium_command_workshop_support.h"
@@ -96,6 +100,7 @@ class Studio;
 @interface ArciumNativeStudioDelegate : NSObject <ArciumSettingsUIDelegate, NSApplicationDelegate>
 @property(nonatomic, assign) Studio* studio;
 - (void)toggleStudioAppearance:(id)sender;
+- (void)selectStudioAppearance:(NSSegmentedControl*)sender;
 - (void)showStudioPopup:(id)sender;
 - (void)resetStudio:(id)sender;
 - (void)copyStudio:(id)sender;
@@ -105,7 +110,7 @@ class Studio;
 namespace {
 
 NSDictionary* DefaultLayout() {
-  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @5,
+  return @{@"labels": @1, @"icons": @2, @"scope_reveal": @4,
            @"connected": @YES, @"scope_width": @0, @"scope_tints": @YES,
            @"glow_strength": @0.75, @"activity_dots": @YES, @"result_count": @8};
 }
@@ -122,11 +127,13 @@ class StudioRoot : public views::View {
  public:
   explicit StudioRoot(std::unique_ptr<arcium::CommandPanelView> panel) {
     controls_ = AddChildView(std::make_unique<views::NativeViewHost>());
+    appearance_ = AddChildView(std::make_unique<views::NativeViewHost>());
     panel_ = AddChildView(std::move(panel));
     panel_->SetEmbedded(true);
     preview_height_ = panel_->GetPreferredSize().height();
   }
   views::NativeViewHost* controls() { return controls_; }
+  views::NativeViewHost* appearance() { return appearance_; }
   arcium::CommandPanelView* panel() { return panel_; }
   gfx::Rect PreviewAnchorBounds() const {
     auto bounds = GetBoundsInScreen();
@@ -134,7 +141,10 @@ class StudioRoot : public views::View {
     bounds.Inset(gfx::Insets::TLBR(0, controls_width, 0, 0));
     return bounds;
   }
-  void SetWorkshopMode() { workshop_ = true; controls_->SetVisible(false); }
+  void SetWorkshopMode() {
+    workshop_ = true; controls_->SetVisible(false); appearance_->SetVisible(false);
+    InvalidateLayout();
+  }
   void ReplacePanel(std::unique_ptr<arcium::CommandPanelView> panel) {
     RemoveChildViewT(panel_); panel_ = AddChildView(std::move(panel));
     panel_->SetEmbedded(true); preview_height_ = panel_->GetPreferredSize().height();
@@ -153,13 +163,20 @@ class StudioRoot : public views::View {
   void Layout(PassKey) override {
     const int controls_width = workshop_ ? 0 : std::min(520, std::max(0, width() - 320));
     controls_->SetBounds(0, 0, controls_width, height());
-    panel_->SetBounds(controls_width + 16, 16,
-        std::max(1, width() - controls_width - 32),
-        std::clamp(preview_height_, 1, std::max(1, height() - 32)));
+    const int available = std::max(1, width() - controls_width - 32);
+    const int switch_width = std::min(180, available);
+    appearance_->SetBounds(controls_width + 16 + (available - switch_width) / 2,
+                            8, switch_width, 28);
+    const int preview_y = workshop_ ? 16 : 48;
+    const int panel_width = std::min(available, panel_->GetPreferredSize().width());
+    panel_->SetBounds(controls_width + 16 + (available - panel_width) / 2, preview_y,
+        panel_width,
+        std::clamp(preview_height_, 1, std::max(1, height() - preview_y - 16)));
     if (refresh_) refresh_.Run();
   }
  private:
   raw_ptr<views::NativeViewHost> controls_;
+  raw_ptr<views::NativeViewHost> appearance_;
   raw_ptr<arcium::CommandPanelView> panel_;
   bool workshop_ = false;
   int preview_height_ = 1;
@@ -221,9 +238,9 @@ class Studio {
     using Initialize = id (*)(id, SEL, NSDictionary*, id);
     controller_ = reinterpret_cast<Initialize>(objc_msgSend)(
         [controller_class alloc], NSSelectorFromString(@"initWithSnapshot:delegate:"), Snapshot(), delegate_);
-    using Editor = NSViewController* (*)(id, SEL, BOOL);
+    using Editor = NSViewController* (*)(id, SEL);
     controls_ = reinterpret_cast<Editor>(objc_msgSend)(controller_,
-        NSSelectorFromString(@"makeCommandBarEditorWithPreviewAvailable:"), YES);
+        NSSelectorFromString(@"makeCommandBarStudioEditor"));
     CHECK(controls_);
     auto panel = std::make_unique<arcium::CommandPanelView>(
         arcium::workshop::CreateSession(scenario_),
@@ -244,6 +261,14 @@ class Studio {
     params.delegate = widget_delegate_.get(); widget_->Init(std::move(params));
     widget_->GetCompositor()->SetBackgroundColor(SK_ColorTRANSPARENT);
     root_->controls()->Attach(gfx::NativeView(controls_.view));
+    appearance_switch_ = [NSSegmentedControl segmentedControlWithLabels:@[@"Light", @"Dark"]
+        trackingMode:NSSegmentSwitchTrackingSelectOne target:delegate_
+        action:@selector(selectStudioAppearance:)];
+    appearance_switch_.selectedSegment = dark_ ? 1 : 0;
+    appearance_switch_.accessibilityLabel = @"Preview appearance";
+    appearance_switch_.accessibilityIdentifier = @"studio-preview-appearance";
+    appearance_switch_.toolTip = @"Compare the same design in Light and Dark. ⌘D switches appearance.";
+    root_->appearance()->Attach(gfx::NativeView(appearance_switch_));
     root_->panel()->SetHeightResizeCallback(base::BindRepeating(
         [](Studio* owner, std::optional<int> height, base::TimeDelta) {
           return owner->root_->Resize(height);
@@ -308,7 +333,8 @@ class Studio {
     }
     material_.reset();
     if (widget_) {
-      root_->controls()->Detach(); widget_->CloseNow(); widget_.reset();
+      root_->controls()->Detach(); root_->appearance()->Detach();
+      widget_->CloseNow(); widget_.reset();
     }
     widget_delegate_.reset(); controls_ = nil; controller_ = nil;
   }
@@ -354,6 +380,15 @@ class Studio {
         ? arcium_settings::CommandPanelLayoutFromNSObject(FoundationDictionary(*document.FindDict("layout")))
         : arcium_settings::CommandPanelLayoutFromNSObject(layout_);
     if (!accepted) { fprintf(stderr, "Studio: invalid design layout; previous scenario retained\n"); return false; }
+    auto previous_context = scenario_.Clone(); previous_context.Remove("layout");
+    auto next_context = document.Clone(); next_context.Remove("layout");
+    if (!scenario_bytes_.empty() && previous_context == next_context) {
+      scenario_ = std::move(document);
+      layout_ = FoundationDictionary(*accepted);
+      prefs_.SetDict(arcium::kCommandPanelLayoutPref, std::move(*accepted));
+      UpdateSnapshot();
+      return true;
+    }
     const base::AutoReset<bool> applying(&applying_scenario_, true);
     if (auto* popup = arcium::CommandPanelPresentation::Get(root_)) popup->Destroy(true);
     arcium::workshop::ApplyAccessibilityContext(document);
@@ -389,6 +424,13 @@ class Studio {
   }
   void PersistScenario() {
     if (scenario_path_.empty() || !OwnsScenarioWriter()) return;
+    base::File lock(base::FilePath(scenario_path_.value() + ".lock"),
+                    base::File::FLAG_OPEN_ALWAYS | base::File::FLAG_READ |
+                        base::File::FLAG_WRITE);
+    // File::Lock uses a nonblocking POSIX record lock, matching Python lockf.
+    // A busy editor must never block the UI; the next poll retries.
+    if (!lock.IsValid() ||
+        lock.Lock(base::File::LockMode::kExclusive) != base::File::FILE_OK) return;
     std::string current;
     struct stat info;
     if (lstat(scenario_path_.value().c_str(), &info) == 0) {
@@ -561,6 +603,50 @@ class Studio {
         base::BindOnce(&Studio::AdvanceWindowLifecycle, weak_factory_.GetWeakPtr()),
         base::Milliseconds(75));
   }
+  bool RunRenderBenchmark(const std::string& report_path) {
+    root_->SetWorkshopMode();
+    widget_->SetBounds(gfx::Rect(120, 120, 1100, 760));
+    widget_->GetRootView()->DeprecatedLayoutImmediately();
+    auto* panel = root_->panel();
+    panel->input_for_testing()->SetText(u"");
+    panel->ContentsChanged(panel->input_for_testing(), u"");
+    NSMutableDictionary* result = [NSMutableDictionary dictionary];
+    for (NSString* phase in @[@"paint", @"typing", @"scopes"]) {
+      panel->input_for_testing()->SetText(u"");
+      panel->ContentsChanged(panel->input_for_testing(), u"");
+      std::vector<double> timings;
+      SkBitmap bitmap;
+      for (int i = 0; i < 280; ++i) {
+        const auto started = base::TimeTicks::Now();
+        if ([phase isEqualToString:@"typing"]) {
+          const auto text = i % 2 ? u"Design" : u"Example";
+          panel->input_for_testing()->SetText(text);
+          panel->ContentsChanged(panel->input_for_testing(), text);
+        } else if ([phase isEqualToString:@"scopes"]) {
+          panel->HandleKeyEvent(nullptr,
+              ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_RIGHT, 0));
+        }
+        widget_->GetRootView()->DeprecatedLayoutImmediately();
+        {
+          auto* root = widget_->GetRootView();
+          ui::CanvasPainter painter(&bitmap, root->size(), 1.f, SK_ColorTRANSPARENT, false);
+          root->Paint(views::PaintInfo::CreateRootPaintInfo(painter.context(), root->size()));
+        }
+        const double elapsed = (base::TimeTicks::Now() - started).InMicrosecondsF();
+        if (i >= 40) timings.push_back(elapsed);
+      }
+      std::sort(timings.begin(), timings.end());
+      uint64_t checksum = 1469598103934665603ULL;
+      const auto* bytes = static_cast<const uint8_t*>(bitmap.getPixels());
+      for (size_t i = 0; i < bitmap.computeByteSize(); ++i) checksum = (checksum ^ bytes[i]) * 1099511628211ULL;
+      result[phase] = @{@"samples": @(timings.size()), @"median_us": @(timings[120]),
+          @"p95_us": @(timings[228]), @"maximum_us": @(timings.back()),
+          @"last_bitmap_checksum": [NSString stringWithFormat:@"%llu", static_cast<unsigned long long>(checksum)]};
+    }
+    result[@"measurement"] = @"Synchronous CPU layout/record/raster with fake data; excludes native glass, GPU presentation and browser backend";
+    NSData* data = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
+    return [data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES];
+  }
   bool RunInteractionChecks(const std::string& report_path) {
     auto* panel = root_->panel();
     NSMutableDictionary* checks = [NSMutableDictionary dictionary];
@@ -626,6 +712,45 @@ class Studio {
     checks[@"live_reveal_changes_geometry"] = @(tabs_height == 42 && panel->scope_button_for_testing(0)->height() == 2);
     checks[@"reveal_edit_preserves_scope"] = @(panel->scope_for_testing() == saved_scope);
     checks[@"reveal_edit_preserves_query"] = @(panel->input_for_testing()->GetText() == u"Design");
+    // Bounded CPU update measurement, not a display-latency claim. Exercise the
+    // actual Objective-C validation -> PrefService observer -> typed view path.
+    auto* original_row = panel->scroll_for_testing()->contents()->children().empty()
+        ? nullptr : panel->scroll_for_testing()->contents()->children()[0].get();
+    const auto query = panel->input_for_testing()->GetText();
+    const auto selection_key = panel->CaptureSelectionKey();
+    const int row_count = panel->row_count_for_testing();
+    int design_geometry_notifications = 0;
+    panel->SetGeometryChangedCallback(base::BindRepeating([](int* count) { ++*count; },
+        base::Unretained(&design_geometry_notifications)));
+    std::vector<double> update_microseconds;
+    for (int i = 0; i < 500; ++i) {
+      trial[@"design"] = @{@"glow_softness": @(10 + i % 2), @"row_radius": @(i % 10)};
+      const auto started = base::TimeTicks::Now();
+      Change(@"command_panel_layout", trial);
+      update_microseconds.push_back((base::TimeTicks::Now() - started).InMicrosecondsF());
+    }
+    checks[@"design_paint_edits_skip_geometry"] = @(design_geometry_notifications == 0);
+    checks[@"design_paint_edits_retain_rows"] = @(panel->row_count_for_testing() == row_count &&
+        original_row && original_row == panel->scroll_for_testing()->contents()->children()[0].get());
+    checks[@"design_paint_edits_retain_input_selection"] = @(query == panel->input_for_testing()->GetText() &&
+        selection_key == panel->CaptureSelectionKey());
+    std::sort(update_microseconds.begin(), update_microseconds.end());
+    NSDictionary* design_metrics = @{@"samples": @500, @"median_update_us": @(update_microseconds[250]),
+        @"p95_update_us": @(update_microseconds[475]), @"maximum_update_us": @(update_microseconds.back()),
+        @"geometry_notifications": @(design_geometry_notifications),
+        @"cached_design_bytes": @(sizeof(arcium::CommandPanelDesign)),
+        @"measurement": @"CPU preference update only; no compositor presentation wait"};
+    panel->SetGeometryChangedCallback(base::BindRepeating(&Studio::RefreshMaterial, base::Unretained(this)));
+    trial[@"design"] = @{@"row_height": @56, @"panel_width": @500, @"search_height": @72,
+        @"input_font_size": @20, @"selection_ms": @35, @"text_color": @"#FF0000"};
+    apply(trial);
+    checks[@"design_geometry_updates_existing_panel"] = @(panel == root_->panel() &&
+        panel->scroll_for_testing()->contents()->children()[0]->height() == 56 &&
+        panel->GetPreferredSize().width() == 564);
+    checks[@"design_motion_updates_existing_animation"] = @(
+        panel->selection_animation_for_testing()->GetSlideDuration() == base::Milliseconds(35));
+    checks[@"design_geometry_retains_input_selection"] = @(query == panel->input_for_testing()->GetText() &&
+        selection_key == panel->CaptureSelectionKey());
     apply(saved_layout);
     panel->input_for_testing()->SetText(saved_query);
     panel->ContentsChanged(panel->input_for_testing(), saved_query);
@@ -651,7 +776,7 @@ class Studio {
     checks[@"explicit_close_requests_normal_shutdown"] = @(closing_);
     bool passed = true;
     for (NSNumber* value in checks.allValues) passed &= value.boolValue;
-    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks};
+    NSDictionary* report = @{@"pid": @(getpid()), @"passed": @(passed), @"checks": checks, @"design_metrics": design_metrics};
     NSData* data = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:nil];
     if (![data writeToFile:[NSString stringWithUTF8String:report_path.c_str()] atomically:YES]) return false;
     return passed;
@@ -681,10 +806,15 @@ class Studio {
           if (!owner) return; owner->snapshot_pending_ = false; owner->UpdateSnapshot();
         }, weak_factory_.GetWeakPtr()));
   }
-  void ToggleAppearance() {
-    dark_ = !dark_; [NSUserDefaults.standardUserDefaults setBool:dark_ forKey:@"dark"];
+  void SetAppearance(bool dark) {
+    if (dark_ == dark) return;
+    dark_ = dark; [NSUserDefaults.standardUserDefaults setBool:dark_ forKey:@"dark"];
     widget_->SetDark(dark_); UpdateSnapshot();
+    auto* popup = arcium::CommandPanelPresentation::Get(root_);
+    CaptureCurrentState(popup && popup->is_open() ? popup->panel() : root_->panel());
+    PersistScenario();
   }
+  void ToggleAppearance() { SetAppearance(!dark_); }
   void Reset() {
     Change(@"command_panel_layout", DefaultLayout()); root_->panel()->SetInvocation(true);
     root_->panel()->FocusInput();
@@ -704,6 +834,7 @@ class Studio {
       @"commandPanelLayout": layout_, @"spacePalette": @{@"available": @NO}}};
   }
   void UpdateSnapshot() {
+    appearance_switch_.selectedSegment = dark_ ? 1 : 0;
     using Update = void (*)(id, SEL, NSDictionary*);
     reinterpret_cast<Update>(objc_msgSend)(controller_, NSSelectorFromString(@"updateSnapshot:"), Snapshot());
   }
@@ -746,6 +877,7 @@ class Studio {
   ArciumNativeStudioDelegate* delegate_;
   NSViewController* controller_;
   NSViewController* controls_;
+  NSSegmentedControl* appearance_switch_ = nil;
   NSString* editor_close_reason_ = nil;
   ArciumStudioBackdrop* backdrop_ = nil;
   raw_ptr<StudioRoot> root_ = nullptr;
@@ -771,6 +903,9 @@ class Studio {
 }
 - (void)showStudioPopup:(id)sender { if (self.studio) self.studio->ShowFaithfulPreview(); }
 - (void)toggleStudioAppearance:(id)sender { if (_studio) _studio->ToggleAppearance(); }
+- (void)selectStudioAppearance:(NSSegmentedControl*)sender {
+  if (_studio) _studio->SetAppearance(sender.selectedSegment == 1);
+}
 - (void)resetStudio:(id)sender { if (_studio) _studio->Reset(); }
 - (void)copyStudio:(id)sender { if (_studio) _studio->Copy(); }
 - (void)quitStudio:(id)sender { if (_studio) _studio->RequestClose(); }
@@ -821,7 +956,8 @@ int main(int argc, const char** argv) {
           if (key.app_controller) key.app_controller->AddColorMixers(provider, key);
         }));
     ui::InitializeInputMethodForTesting();
-    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report");
+    bool interaction_checks_passed = !command->HasSwitch("interaction-check-report") &&
+        !command->HasSwitch("render-benchmark-report");
     {
       views::DesktopTestViewsDelegate views_delegate;
       views_delegate.set_context_factory(factories.GetContextFactory());
@@ -835,6 +971,14 @@ int main(int argc, const char** argv) {
               base::BindOnce([](base::WeakPtr<Studio> owner, base::FilePath path) {
                 if (owner) owner->RunWorkshopChecks(std::move(path));
               }, studio.GetWeakPtr(), command->GetSwitchValuePath("workshop-check-dir")), base::Milliseconds(800));
+        }
+        if (command->HasSwitch("render-benchmark-report")) {
+          base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
+              base::BindOnce([](base::WeakPtr<Studio> owner, bool* passed, std::string path) {
+                if (!owner) return;
+                *passed = owner->RunRenderBenchmark(path); owner->RequestClose();
+              }, studio.GetWeakPtr(), &interaction_checks_passed,
+                 command->GetSwitchValueASCII("render-benchmark-report")), base::Milliseconds(800));
         }
         if (command->HasSwitch("interaction-check-report")) {
           base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
