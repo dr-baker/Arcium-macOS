@@ -184,7 +184,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1362 @@
+@@ -0,0 +1,1365 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -617,6 +617,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  button.contentTintColor = NSColor.whiteColor;
 +  button.toolTip = label;
 +  button.accessibilityLabel = label;
++  button.cell.accessibilityLabel = label;
 +  button.focusRingType = NSFocusRingTypeExterior;
 +  return button;
 +}
@@ -823,10 +824,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  Present(_muteGlass, visible && _state.can_mute, animate);
 +  _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill", 20);
 +  _playButton.accessibilityLabel = _state.playing ? @"Pause" : @"Play";
++  _playButton.cell.accessibilityLabel = _playButton.accessibilityLabel;
 +  _playButton.toolTip = _playButton.accessibilityLabel;
 +  _muteButton.image =
 +      Symbol(_state.muted ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 13);
 +  _muteButton.accessibilityLabel = _state.muted ? @"Unmute" : @"Mute";
++  _muteButton.cell.accessibilityLabel = _muteButton.accessibilityLabel;
 +  _muteButton.toolTip = _muteButton.accessibilityLabel;
 +  _title.stringValue = [[NSString alloc]
 +      initWithCharacters:reinterpret_cast<const unichar*>(_state.title.data())
@@ -2390,7 +2393,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,648 @@
+@@ -0,0 +1,649 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -2643,6 +2646,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  NSButton* play = Button(@"Play");
 +  ASSERT_TRUE(play);
 +  ExpectPresentedWithinOverlay(play);
++  EXPECT_NSEQ(play.cell.accessibilityLabel, @"Play");
 +  [play performClick:nil];
 +  Pump();
 +  ASSERT_EQ(Count(Action::kPlayPause), 1u);
@@ -2653,6 +2657,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  NSButton* pause = Button(@"Pause");
 +  ASSERT_TRUE(pause);
 +  ExpectPresentedWithinOverlay(pause);
++  EXPECT_NSEQ(pause.cell.accessibilityLabel, @"Pause");
 +  EXPECT_FALSE(Button(@"Play"));
 +  [pause performClick:nil];
 +  Pump();
@@ -2929,7 +2934,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  return native;
 +}
 +}  // namespace
-+void VerifyChromiumNativeInput(VideoOverlayWindowViews* window) {
++void VerifyChromiumNativeHitTargetAction(VideoOverlayWindowViews* window) {
 +  NSWindow* native = PrepareNativeWindow(window);
 +  ASSERT_FALSE(native.visible);
 +  NSButton* pause = (NSButton*)FindNative(native.contentView, @"Pause");
@@ -2940,14 +2945,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +            toView:nil];
 +  NSPoint framePoint = [native.contentView.superview convertPoint:point
 +                                                         fromView:nil];
-+  EXPECT_EQ([native.contentView hitTest:framePoint], pause);
++  NSView* target = [native.contentView hitTest:framePoint];
++  ASSERT_EQ(target, pause);
 +  gfx::Point viewsPoint(point.x, NSHeight(native.contentView.bounds) - point.y);
 +  EXPECT_EQ(window->GetNonClientComponent(viewsPoint), HTCLIENT);
-+  NSEvent* up = cocoa_test_event_utils::MouseEventAtPointInWindow(
-+      point, NSEventTypeLeftMouseUp, native, 1);
-+  [NSApp postEvent:up atStart:NO];
-+  [native sendEvent:cocoa_test_event_utils::MouseEventAtPointInWindow(
-+                        point, NSEventTypeLeftMouseDown, native, 1)];
++  // Hidden windows cannot establish physical mouse delivery. Exercise the
++  // actual hit target's native accessibility action without showing the app.
++  [((NSButton*)target).cell accessibilityPerformPress];
 +  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.03, false);
 +  EXPECT_TRUE(FindNative(native.contentView, @"Play"));
 +  EXPECT_FALSE(native.visible);
@@ -3070,7 +3074,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +
 +#if BUILDFLAG(IS_MAC)
 +namespace arcium::pip::test {
-+void VerifyChromiumNativeInput(VideoOverlayWindowViews* window);
++void VerifyChromiumNativeHitTargetAction(VideoOverlayWindowViews* window);
 +void VerifyChromiumNativeAccessibilityAndFocus(VideoOverlayWindowViews* window);
 +void VerifyNativeHostVisibility(VideoOverlayWindowViews* window, bool expected);
 +void VerifyFocusedNativeRebuildAndDetach(VideoOverlayWindowViews* window);
@@ -3092,9 +3096,9 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +    ASSERT_TRUE(overlay_window().UsesNativeControls());
 +  }
 +};
-+TEST_F(VideoOverlayWindowNativeControlsTest, ChromiumWindowRoutesNativePauseExactlyOnce) {
++TEST_F(VideoOverlayWindowNativeControlsTest, ChromiumHitTargetForwardsNativePauseExactlyOnce) {
 +  EXPECT_CALL(pip_window_controller(), TogglePlayPause()).WillOnce(Return(false));
-+  arcium::pip::test::VerifyChromiumNativeInput(&overlay_window());
++  arcium::pip::test::VerifyChromiumNativeHitTargetAction(&overlay_window());
 +  EXPECT_FALSE(overlay_window().IsVisible());
 +}
 +TEST_F(VideoOverlayWindowNativeControlsTest, NativeAccessibilityAndTabFocusUseHost) {
