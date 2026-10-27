@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-10-27T08:39:30.754488+00:00",
+  "testedSource": {
+    "core": "c2aace82e82ed79b18048cbcc984d704b0d7050c",
+    "macOS": "cb30963bd035b7ee5a242b697d1653af985aa5f9",
+    "note": "Subsequent macOS main integration changes Studio tooling only; browser patch bytes and selected core are unchanged."
+  },
+  "replay": {
+    "patches": 541,
+    "problems": [],
+    "timestampSnapshotPending": false,
+    "nativePatchStrictlyReapplied": true
+  },
+  "build": {
+    "mode": "daily",
+    "targets": [
+      "chrome",
+      "arcium_feature_settings_unit_tests",
+      "arcium_feature_settings_browser_tests",
+      "arcium_omnibox_unit_tests"
+    ],
+    "steps": 502,
+    "seconds": 246.09,
+    "evidenceId": "eb73f03db5e24f26b2baa5a79efc50cf"
+  },
+  "tests": {
+    "nativeSwift": {
+      "passed": 105,
+      "failures": 0
+    },
+    "cpp": [
+      {
+        "target": "arcium_feature_settings_unit_tests",
+        "filter": "HeliumSpaceServiceTest.ContentFrame*",
+        "passed": 5,
+        "allPassedOnce": true,
+        "exitCode": 0
+      },
+      {
+        "target": "arcium_feature_settings_browser_tests",
+        "filter": "MultiContentsViewBrowserTest.ContentBorderChangesLiveWithoutPageReflow:MultiContentsViewBrowserTest.SplitContentCornersShareOutlineCenter:MultiContentsViewBrowserTest.RoundedFrameBorderWidthLayout",
+        "passed": 3,
+        "allPassedOnce": true,
+        "exitCode": 0
+      },
+      {
+        "target": "arcium_omnibox_unit_tests",
+        "filter": "ArciumNativePanelTest.*",
+        "passed": 90,
+        "allPassedOnce": true,
+        "exitCode": 0
+      }
+    ]
+  },
+  "runtime": {
+    "mode": "isolated Dev app",
+    "profile": "content-edge-effects",
+    "app": "Helium Dev - content-edge-effects.app",
+    "standaloneDirectory": ".arcium/standalone/content-edge-effects-c2aace82-ux",
+    "pidAtHandoff": 13808,
+    "foregroundConfirmed": true,
+    "mockKeychain": true,
+    "signatureVerified": true,
+    "bundledComponentLibraries": 540,
+    "loadedCandidatePaths": 527,
+    "mutableBuildOutputLoads": 0,
+    "preferenceFilePersistence": true,
+    "cachedCustomFieldsPreserved": true,
+    "oldInstancesQuitNormally": true,
+    "matchingBrowserCrashReports": 0
+  },
+  "dependencyLimits": [
+    "Optional app_mode_loader has 15 unresolved runpaths, recorded separately from browser/helper/component checks.",
+    "Malformed interleaved DYLD records were discarded. Static checks do not cover arbitrary runtime dlopen strings."
+  ],
+  "sourceReview": {
+    "model": "GPT-6-Astra",
+    "verdict": "Source GO at cb30963/core c2aace82; no integration blockers"
+  },
+  "visibleVerification": {
+    "status": "blocked",
+    "reason": "Computer Use app access was denied.",
+    "pending": [
+      "Default/None/Customize and repeated sheet opening",
+      "Theme color wheel/hex commits",
+      "Live light/dark and Space accent changes",
+      "Transparent page pixels and split focus outlines"
+    ],
+    "historicalMediaIsCurrentUxEvidence": false
+  }
+}

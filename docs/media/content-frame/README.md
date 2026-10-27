@@ -1,10 +1,23 @@
 # Page edge styling
 
-These captures and results cover the original shadow with a 2 px downward
-offset and inline controls. The follow-up uses a centered adaptive Default,
-None, and a Customize sheet with the theme color picker. Its new browser build
-and runtime verification are pending; the historical captures below do not
-show the revised controls.
+The current controls are Border 0–6 px and Shadow Default, None, or Customize.
+Customize opens the shared sheet with the theme wheel/hex color picker. Default
+is centered: black at 20% opacity and 24 px blur in light chrome; Space accent
+at 12% opacity, 48 px blur and 4 px spread in dark chrome. The command-bar shadow
+uses X 0, Y 2 with its existing blur and opacity.
+
+[Final UX validation](final-ux-validation.json) records the current build:
+541 patches, four compiled targets, 105 native tests and 98 focused C++ tests
+passed. The signed standalone app launched on the same isolated profile;
+Default and cached custom values survived normal quit/relaunch. GPT-6-Astra
+returned Source GO. Browser patch bytes are unchanged by the later main merge.
+
+Visible verification of the revised sheet, color commits, live theme/Space
+updates, transparent pages and split outlines remains blocked because Computer
+Use app access was denied. The captures below show the original inline controls
+and 2 px downward page shadow. They do not show the revised UX.
+
+## Historical captures and results
 
 The default page edge has rounded corners, no decorative border, and a subtle
 black shadow. Appearance adds a 0–6 px border, shadow opacity, blur, color,
@@ -54,4 +67,4 @@ coverage.
 
 The build reservation was released after packaging and dependency verification.
 At handoff, the isolated app was left running with Arc defaults for visual review.
-Manual feel testing is required before merge.
+The revised UX still needs the visible checks listed above.
