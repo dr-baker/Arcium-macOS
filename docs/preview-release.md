@@ -8,8 +8,6 @@ This preview is for Apple Silicon Macs running macOS 26 or later. It includes th
 
 Open the DMG, open **Install Arcium**, and click **Install**. The installer copies Arcium to Applications and offers to open it. First-run setup explains the browser's optional online services.
 
-![The published preview's installer](assets/preview-installer.png)
-
 New profiles start with a pastel sidebar, no address bar, Peek, recent-tab cycling, and Little Arc. **Command-L** opens the command bar. Existing profiles keep their settings. The installer refuses to replace an app already in Applications. Quit and move the older app to the Trash first; your profile remains in `~/Library/Application Support/Arcium`.
 
 Coming from Arc? Follow [Import from Arc](import-from-arc.md) for sidebar and history import. Passwords and optional cookies use a separate tool.

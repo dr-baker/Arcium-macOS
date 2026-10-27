@@ -29,8 +29,11 @@ if grep -q 'offset .* lines' setup.log; then
     exit 1
 fi
 
-cd "$_src_dir"
-timeout 30 ninja -C "$_out_dir" chrome chromedriver
+_smoke_since_ns=$(python3 -c 'import time; print(time.time_ns())')
+# The allowance includes the guarded plan. A timeout counts only if the build
+# actually launched and finalized its evidence; planning alone is insufficient.
+timeout -k 7m -s SIGTERM 120s bash -c \
+    'source "$1/dev.sh"; he agent build --execution local --approved chrome chromedriver' _ "$_root_dir"
 _status_code=$?
 
 # The smoke build may finish successfully before the time limit.
@@ -38,3 +41,5 @@ if [ "$_status_code" -ne 0 ] && [ "$_status_code" -ne 124 ]; then
     echo "failed with status code $_status_code" >&2
     exit 1
 fi
+PYTHONPATH="$_root_dir/devutils" python3 -m he.ci --state "$HELIUM_DEV_BUILD_ROOT/.arcium" \
+    --since-ns "$_smoke_since_ns" --status "$_status_code"

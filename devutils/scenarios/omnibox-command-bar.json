@@ -19,6 +19,7 @@
         "CommandBarMaterialTest.*",
         "ArciumOmniboxServiceTest.*",
         "ArciumNativePanelTest.*",
+        "ArciumPanelHeightTest.*",
         "CommandPanelAppearanceTest.*",
         "CommandSearchIndexTest.*",
         "ArciumCommandActionRouterTest.*",
@@ -27,7 +28,11 @@
         "ArciumCommandContextHistoryTest.*",
         "ArciumCommandLocalPresentationTest.*",
         "ArciumCommandEntryRoutingTest.*",
-        "ArciumCommandCorpusTimeTest.*"
+        "ArciumCommandCorpusTimeTest.*",
+        "CommandPanelLayoutMacTest.*",
+        "CommandPanelLayoutModelTest.*",
+        "ArciumCommandNativeResultLeaseTest.*",
+        "ArciumCommandNativeControllerLifetimeTest.*"
       ]
     },
     {
@@ -44,10 +49,13 @@
     "Record existing settings and create only acceptance-owned tabs and Spaces; preserve user items"
   ],
   "steps": [
-    "Verify unset command bar style defaults are Text, Go / Switch, Divot, connected and full width scopes, scope tints, 75% glow, and activity dots; preserve explicit saved overrides",
+    "Verify unset command bar style defaults are Text, Go / Switch, Divot, connected scopes, Flush width, scope tints, 75% glow, and activity dots; preserve explicit saved overrides",
     "Open via sidebar plus, horizontal tab-strip plus, File > New Tab, Command-T, Command-L and Command-Option-F; each must open the floating command bar. Click the address bar directly to open its existing input. Cancel each invocation before moving on",
     "Record first and repeated opening setup/presentation samples from chrome://histograms/Arcium.CommandBar and the exact bundle identity; compare the same window, corpus, material, and input method",
     "Change an acceptance-owned saved item while the bar is closed, reopen, and verify fresh local results without displaying the dirty snapshot",
+    "While typing queries with alternating long and short result lists, verify rows update immediately, both directions wait for 40 ms of stable height, growth snaps, and shrink retains blank bottom space before a 60 ms perceptual native spring, and the search field stays fixed. Reverse during contraction and close during each delay; repeat with Reduce Motion enabled",
+    "Type quickly in Omni and browser search. Keep the last list and selection background visible through pending and empty unfinished updates, reuse row views as text/icons change, and verify Enter/actions cannot activate results from an older query. Verify final empty results, scope changes, and a new invocation clear the old list",
+    "Change Scope width among Flush, Icon-width and Offset. For each width, change all reveal styles at rest, during reveal and fully open: horizontal bounds must stay independent. Scroll up and rapidly switch scopes; expansion borrows from adjacent tabs before farther ones, remains bounded, and reverses without a jump. Verify inactive glows are 66% of the selected strength with connected and detached scopes and Reduce Motion.",
     "Press Command-T and inspect the New tab bar before typing; press Escape",
     "Press Command-L, type a test URL, press Return, and inspect the original tab",
     "Press Command-T, type a second test URL, press Return, and inspect both tabs",
@@ -64,6 +72,9 @@
     "Every explicit new-tab button and keyboard entry opens the command bar; cancellation creates no tab",
     "The browser retains its local corpus across openings and defers dirty refresh until the panel is active",
     "Command-T and Escape leave tab count and current tab unchanged",
+    "Result-driven height changes keep the top edge fixed; both directions debounce height changes for 40 ms, growth snaps, and contraction uses a 60 ms perceptual critically damped macOS spring. Reduce Motion skips the spring; typing and selection never wait for resizing",
+    "Typing and icon refresh do not blank and rebuild the list. Retained rows are presentation only until the current query publishes matching results; stale callbacks, Enter, mouse activation, and action menus cannot execute the previous query",
+    "Scope reveal changes only vertical visibility. Scope width independently chooses Flush, Icon-width or Offset; legacy layouts migrate without changing width when reveal is subsequently edited. Selected labels take space from nearby tabs before farther ones, and inactive glow strength is 66% of selected strength.",
     "Command-L changes the current tab; Command-T Return creates one new ordinary tab",
     "Arrow keys select rows; saved-result Return activates or restores exactly one qualified item",
     "Active-Space Pins rank before Favorites, which rank before other-Space Pins; quality then frecency order each tier",

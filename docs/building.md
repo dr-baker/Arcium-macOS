@@ -91,8 +91,6 @@ Some things to know early:
 * Xcode 26 with Swift 6.2 or newer
 * Homebrew
 * Perl (for creating a `.dmg` package)
-* Node.js and `appdmg@0.6.6` for the drag-to-Applications DMG:
-  `npm install -g appdmg@0.6.6`.
 
 ### Build dependencies
 
@@ -137,16 +135,6 @@ A successful build produces `arcium_*.dmg` in `build/`. Packaging copies the
 compiled `Helium.app` into a temporary `Arcium.app`, rewrites its bundle
 identifiers and profile directory, and signs that copy; internal executable
 names stay the ones Chromium expects.
-
-The DMG shows the browser and an Applications shortcut over the blush
-background. Both release packaging paths use `devutils/release_dmg.py`.
-Regenerate the 1× and 2× artwork with
-`swift devutils/dmg-background.swift resources/dmg-background`.
-The browser reads its bundled initial preferences on first launch, after
-checking the existing user and system preference files. Installation does
-not need to create or edit a user profile.
-
-![Drag Arcium to Applications in the blush DMG](assets/install-dmg.png)
 
 `build.sh` always builds in `<checkout>/build`, ignores `HELIUM_BUILD_DIR` and
 `~/.config/arcium/dev.env`, and refuses a checkout whose build dir holds a
@@ -374,10 +362,15 @@ he setup --full-source
 
 ### Remote builds
 
-Set `SISO_REAPI_ADDRESS` (and optionally `SISO_REAPI_INSTANCE`, default `main`)
-to build through a NativeLink endpoint, then run `he configure
---refresh-defaults`. TLS stays on unless you set `RBE_service_no_security=true`.
-Unset the address and refresh the defaults again to return to local builds.
+Local builds are the default and require no Google account. Optional
+[Google Cloud setup and build-lane instructions](../devutils/cloud_build/README.md)
+cover account access, quota, configuration, worker ownership, and storage costs.
+Enrollment defaults to manual remote use. Automatic cloud routing requires a
+measured crossover threshold and recent console activity; idle or away builds
+favor the Mac. Use `--execution local|auto|remote` to override one
+build. `--jobs` bounds local work and `--remote-jobs` separately bounds cloud
+actions. Diagnostics, daily, and both official release architectures use the
+same compile routing, with their own existing configuration and packaging.
 
 ### Updating for a new Chromium release
 

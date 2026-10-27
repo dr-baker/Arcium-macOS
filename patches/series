@@ -56,5 +56,15 @@ personal/arcium-concentric-window-corners-macos.patch
 personal/arcium-arc-import-settings-macos.patch
 personal/arcium-system-appearance-macos.patch
 personal/arcium-onboarding-appearance-macos.patch
-personal/arcium-dmg-first-run-defaults-macos.patch
+personal/arcium-widevine-experiment-macos.patch
+
+personal/arcium-command-settings-preview-macos.patch
+personal/arcium-command-appearance-controls-macos.patch
+personal/arcium-command-controls-keyboard-macos.patch
+personal/arcium-command-bar-studio-macos.patch
+personal/arcium-command-editor-close-reason-macos.patch
+personal/arcium-ui-workshop-macos.patch
+personal/arcium-command-design-presets-macos.patch
+personal/arcium-command-bar-styles-macos.patch
+personal/arcium-command-design-tokens-macos.patch
 personal/arcium-pip-native-controls-macos.patch

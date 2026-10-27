@@ -98,7 +98,7 @@ with open(os.environ["CALL_TRACE"], "a") as trace:
 if name == "greadlink":
     print(Path(args[-1]).resolve())
 elif name == "python3":
-    if args and Path(args[0]).name in ("release_bundle.py", "release_dmg.py"):
+    if args and Path(args[0]).name == "release_bundle.py":
         os.execv(sys.executable, [sys.executable, *args])
     print("1.0.0")
 elif name == "codesign":
@@ -107,9 +107,6 @@ elif name == "codesign":
         with info_path.open("rb") as info_file:
             if plistlib.load(info_file).get("CFBundleIdentifier") != "net.imput.arcium":
                 sys.exit(9)
-        preferences = Path(args[-1]) / "Contents/Resources/initial_preferences"
-        if not json.loads(preferences.read_text())["helium"]["browser"]["mru_tab_cycling"]:
-            sys.exit(12)
     if args[-1] == os.environ.get("FAIL_SIGN_TARGET") and "--sign" in args:
         sys.exit(7)
     if args[-1] == os.environ.get("FAIL_VERIFY_TARGET") and "--verify" in args:
@@ -119,13 +116,11 @@ elif name == "appdmg":
         config = json.load(config_file)
     if (
         config.get("title") != "Arcium"
-        or not config.get("icon", "").endswith("Arcium.app/Contents/Resources/app.icns")
-        or Path(config["contents"][0]["path"]).name != "Arcium.app"
-        or config["contents"][1]["path"] != "/Applications"
-        or not Path(config["background"]).is_file()
+        or config.get("icon") != "Arcium.app/Contents/Resources/app.icns"
+        or config["contents"][0]["path"] != "Arcium.app"
     ):
         sys.exit(10)
-    app_path = Path(config["contents"][0]["path"])
+    app_path = Path(args[0]).parent / config["contents"][0]["path"]
     if not app_path.is_dir():
         sys.exit(11)
     Path(args[-1]).touch()

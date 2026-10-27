@@ -17,7 +17,6 @@ ARCIUM_NAME = "Arcium"
 PROFILE_DIR_NAME = "Arcium"
 SIGNING_IDENTITY_ENV = "ARCIUM_CODESIGN_IDENTITY"
 ENTITLEMENTS = Path(__file__).resolve().parents[2] / "entitlements"
-INITIAL_PREFERENCES = Path(__file__).resolve().parents[2] / "resources/preview/initial-preferences.json"
 _MACHO = {b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe", b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
           b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca", b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca"}
 
@@ -34,23 +33,14 @@ def _rewrite_id(value: str) -> str:
 
 
 def rewrite_metadata(app: Path) -> int:
-    """Set Arcium's identity and first-run defaults before the copy is signed."""
+    """Give a copied Helium.app Arcium's identity without renaming executables."""
     try:
-        count = apps.rewrite_identity(app, _rewrite_id, None, {
+        return apps.rewrite_identity(app, _rewrite_id, None, {
             "CFBundleIdentifier": ARCIUM_BUNDLE_ID,
             "CFBundleDisplayName": ARCIUM_NAME,
             "CFBundleName": ARCIUM_NAME,
             "CrProductDirName": PROFILE_DIR_NAME,
         })
-        resources = app / "Contents/Resources"
-        if resources.is_symlink():
-            raise ArciumError("the staged app Resources directory must not be a symbolic link")
-        resources.mkdir(parents=True, exist_ok=True)
-        target = resources / "initial_preferences"
-        target.unlink(missing_ok=True)
-        with target.open("xb") as handle:
-            handle.write(INITIAL_PREFERENCES.read_bytes())
-        return count
     except ArciumError:
         raise
     except HeError as error:

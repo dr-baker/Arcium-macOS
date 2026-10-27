@@ -45,7 +45,7 @@ Index: src/chrome/browser/ui/BUILD.gn
      "//components/schema_org/common:improved_mojom",
      "//components/search_engines",
      "//components/security_interstitials/content:security_interstitial_page",
-@@ -5835,7 +5826,6 @@ group("ui_public_dependencies") {
+@@ -5837,7 +5828,6 @@ group("ui_public_dependencies") {
      "//components/dom_distiller/core",
      "//components/enterprise/buildflags",
      "//components/paint_preview/buildflags",
