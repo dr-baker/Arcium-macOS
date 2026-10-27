@@ -53,6 +53,8 @@ The transport row keeps play/pause and shows the two 15-second seek buttons when
 the window has room. The scrubber uses a thin neutral track and a small white
 thumb with a restrained accent from the source Space. The video has no full-window
 dark wash. Source identification follows the existing trust and interaction rules.
+Scrubbing sends seek requests while the player keeps its existing playing or
+paused state. Local progress updates wait until the drag ends.
 
 The native overlay yields input to Chromium's permission prompt and specialty
 media controls. Hidden Chromium controls are removed from interaction and

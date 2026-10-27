@@ -16,7 +16,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,142 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -54,10 +54,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +  area = Normalize(area);
 +  r = Normalize(r);
 +  double scale = 1;
-+  if (r.width > area.width)
++  if (r.width > area.width) {
 +    scale = std::min(scale, area.width / r.width);
-+  if (r.height > area.height)
++  }
++  if (r.height > area.height) {
 +    scale = std::min(scale, area.height / r.height);
++  }
 +  r.width *= scale;
 +  r.height *= scale;
 +  return ClampPosition(r, area);
@@ -161,7 +163,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,76 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -191,8 +193,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  kReturn,
 +  kClose,
 +  kMute,
-+  kSeekBegin,
-+  kSeekEnd,
 +  kInteraction,
 +};
 +
@@ -213,8 +213,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +};
 +
 +// Actions are delivered asynchronously on the main queue and canceled on
-+// teardown. kSeek carries a normalized fraction. SeekBegin/End carry resume
-+// intent (0 or 1).
++// teardown. kSeek carries a normalized fraction and preserves playback state.
 +using ActionCallback = std::function<void(Action, double)>;
 +
 +// Construct/update/destroy on the main thread, after native widget
@@ -245,7 +244,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1365 @@
+@@ -0,0 +1,1363 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -558,7 +557,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  BOOL _scrolling;
 +  BOOL _consumeMomentum;
 +  BOOL _seeking;
-+  BOOL _resumeAfterSeek;
 +  BOOL _nativeVisible;
 +  BOOL _mouseInside;
 +  BOOL _hasSnapshot;
@@ -575,6 +573,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)updateKeyLoop;
 +- (void)invalidate;
 +- (void)prepareForHide;
++- (void)placeTuckedWindowAnimated:(BOOL)animate;
 +@end
 +
 +@implementation ArciumPiPNativeOverlay
@@ -1379,17 +1378,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return;
 +  }
 +  _seeking = YES;
-+  _resumeAfterSeek = _state.playing;
 +  [_hideTimer invalidate];
 +  [self refreshChrome];
-+  [self deliver:Action::kSeekBegin value:_resumeAfterSeek ? 1 : 0];
++  [self deliver:Action::kInteraction value:0];
 +}
 +- (void)endSeek {
 +  if (!_seeking) {
 +    return;
 +  }
 +  _seeking = NO;
-+  [self deliver:Action::kSeekEnd value:_resumeAfterSeek ? 1 : 0];
 +  [self refreshChrome];
 +  [self armHideTimer];
 +}
@@ -1524,7 +1521,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _nativeVisible = NO;
 +  _hasSnapshot = NO;
 +  _mouseInside = NO;
-+  _dragging = _resizing = _scrolling = _seeking = _resumeAfterSeek = NO;
++  _dragging = _resizing = _scrolling = _seeking = NO;
 +  _consumeMomentum = NO;
 +  _gestureAxis = GestureAxis::kPending;
 +  [_hideTimer invalidate];
@@ -1615,7 +1612,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
-@@ -1,31 +1,52 @@
+@@ -1,31 +1,51 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -1675,7 +1672,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  void OnNativeAction(arcium::pip::Action action, double value);
 +  base::WeakPtr<VideoOverlayWindowViews> video_;
 +  std::unique_ptr<arcium::pip::NativeControls> controls_;
-+  bool seek_was_playing_ = false;
 +  base::WeakPtrFactory<VideoOverlayWindowNativeWidgetMac> weak_factory_{this};
 +};
 +#endif
@@ -1719,7 +1715,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +35,228 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +35,212 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -1857,7 +1853,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +}
 +
 +void VideoOverlayWindowNativeWidgetMac::RestorePlacementForHide() {
-+  seek_was_playing_ = false;
 +  ReleaseNativeControlsFocus();
 +  if (controls_) {
 +    controls_->RestorePlacementForHide();
@@ -1920,27 +1915,12 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +    case Action::kMute:
 +      video->controller_->RequestMute(!video->controller_->GetMuteStatus());
 +      break;
-+    case Action::kSeekBegin:
-+      seek_was_playing_ = video->show_play_pause_button_ &&
-+                          video->playback_state_for_testing_ ==
-+                              content::VideoOverlayWindow::kPlaying;
-+      if (seek_was_playing_) {
-+        video->controller_->Pause();
-+        video->SetPlaybackState(content::VideoOverlayWindow::kPaused);
-+      }
-+      break;
 +    case Action::kSeek:
 +      if (std::isfinite(value) && !video->is_live_ &&
 +          video->position_.duration() > base::TimeDelta() &&
 +          video->position_.duration() != base::TimeDelta::Max()) {
 +        video->controller_->SeekTo(video->position_.duration() *
 +                                   std::clamp(value, 0.0, 1.0));
-+      }
-+      break;
-+    case Action::kSeekEnd:
-+      if (std::exchange(seek_was_playing_, false)) {
-+        video->controller_->Play();
-+        video->SetPlaybackState(content::VideoOverlayWindow::kPlaying);
 +      }
 +      break;
 +  }
@@ -2368,8 +2348,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 +// Use of this source code is governed by a BSD-style license.
 +#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
 +
-+#include <cmath>
 +#include <array>
++#include <cmath>
 +
 +#include "testing/gtest/include/gtest/gtest.h"
 +
@@ -2506,7 +2486,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,649 @@
+@@ -0,0 +1,673 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -2727,8 +2707,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  detached.doubleValue = 0.9;
 +  [overlay seek:detached];
 +  Pump();
-+  EXPECT_EQ(Count(Action::kSeekBegin), 1u);
-+  EXPECT_EQ(Count(Action::kSeekEnd), 1u);
++  EXPECT_EQ(Count(Action::kInteraction), 1u);
 +  EXPECT_EQ(Count(Action::kSeek), 0u);
 +  Slider().doubleValue = 0.7;
 +  [Slider() sendAction:Slider().action to:Slider().target];
@@ -2745,13 +2724,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  [Overlay() endSeek];
 +  Pump();
 +
-+  ASSERT_EQ(actions_.size(), 3u);
-+  EXPECT_EQ(actions_[0].action, Action::kSeekBegin);
-+  EXPECT_DOUBLE_EQ(actions_[0].value, 0);
++  ASSERT_EQ(actions_.size(), 2u);
++  EXPECT_EQ(actions_[0].action, Action::kInteraction);
 +  EXPECT_EQ(actions_[1].action, Action::kSeek);
 +  EXPECT_DOUBLE_EQ(actions_[1].value, 0.7);
-+  EXPECT_EQ(actions_[2].action, Action::kSeekEnd);
-+  EXPECT_DOUBLE_EQ(actions_[2].value, 0);
 +  EXPECT_EQ(Count(Action::kPlayPause), 0u);
 +}
 +
@@ -2897,7 +2873,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, PlayingScrubPreservesResumeIntent) {
++TEST_F(ArciumPiPNativeControlsTest, PlayingScrubLeavesPlaybackStateUnchanged) {
 +  state_.playing = true;
 +  state_.playback_rate = 1;
 +  Update();
@@ -2906,13 +2882,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  [Slider() sendAction:Slider().action to:Slider().target];
 +  [Overlay() endSeek];
 +  Pump();
-+  ASSERT_EQ(actions_.size(), 3u);
-+  EXPECT_EQ(actions_[0].action, Action::kSeekBegin);
-+  EXPECT_DOUBLE_EQ(actions_[0].value, 1);
++  ASSERT_EQ(actions_.size(), 2u);
++  EXPECT_EQ(actions_[0].action, Action::kInteraction);
 +  EXPECT_EQ(actions_[1].action, Action::kSeek);
 +  EXPECT_DOUBLE_EQ(actions_[1].value, 0.3);
-+  EXPECT_EQ(actions_[2].action, Action::kSeekEnd);
-+  EXPECT_DOUBLE_EQ(actions_[2].value, 1);
++  EXPECT_EQ(Count(Action::kPlayPause), 0u);
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, CloseCallbackCanDestroyNativeControls) {
@@ -3069,6 +3043,36 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_TRUE(FindNative(native.contentView, @"Play"));
 +  EXPECT_FALSE(native.visible);
 +}
++void VerifyChromiumNativeScrub(VideoOverlayWindowViews* window,
++                              bool end_before_hide,
++                              bool hide) {
++  NSWindow* native = PrepareNativeWindow(window);
++  NSView* overlay = FindNative(native.contentView, @"Picture in Picture controls");
++  ASSERT_TRUE(overlay);
++  const auto playback = window->playback_state_for_testing();
++  [overlay beginSeek];
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++  NSSlider* slider = (NSSlider*)FindNative(native.contentView, @"Playback position");
++  ASSERT_TRUE(slider);
++  slider.doubleValue = 0.6;
++  [slider sendAction:slider.action to:slider.target];
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++  if (end_before_hide) {
++    [overlay endSeek];
++  }
++  if (hide) {
++    window->Hide();
++  }
++  if (!end_before_hide) {
++    [overlay endSeek];
++  }
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++  EXPECT_EQ(window->playback_state_for_testing(), playback);
++  EXPECT_TRUE(FindNative(native.contentView,
++                        playback == content::VideoOverlayWindow::kPlaying
++                            ? @"Pause" : @"Play"));
++  EXPECT_FALSE(native.visible);
++}
 +void VerifyChromiumNativeAccessibilityAndFocus(
 +    VideoOverlayWindowViews* window) {
 +  NSWindow* native = PrepareNativeWindow(window);
@@ -3160,6 +3164,17 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
+@@ -135,8 +135,8 @@ class TestVideoPictureInPictureWindowCon
+   content::WebContents* GetWebContents() override { return web_contents_; }
+   content::WebContents* GetChildWebContents() override { return nullptr; }
+   MOCK_METHOD(bool, TogglePlayPause, (), (override));
+-  void Play() override {}
+-  void Pause() override {}
++  MOCK_METHOD(void, Play, (), (override));
++  MOCK_METHOD(void, Pause, (), (override));
+   void SkipAd() override {}
+   void NextTrack() override {}
+   void PreviousTrack() override {}
 @@ -177,6 +177,7 @@ class TestVideoPictureInPictureWindowCon
  class VideoOverlayWindowViewsTest : public ChromeViewsTestBase {
   public:
@@ -3180,7 +3195,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
      overlay_window_->set_overlay_view_cb_for_testing(
          base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
                              base::Unretained(this)));
-@@ -1927,3 +1933,60 @@ TEST_F(VideoOverlayWindowWithMuteControl
+@@ -1927,3 +1933,80 @@ TEST_F(VideoOverlayWindowWithMuteControl
    EXPECT_TRUE(overlay_window().ControlsHitTestContainsPoint(
        mute_button_bounds.CenterPoint()));
  }
@@ -3189,6 +3204,8 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +namespace arcium::pip::test {
 +void VerifyChromiumNativeHitTargetAction(VideoOverlayWindowViews* window);
 +void VerifyChromiumNativeAccessibilityAndFocus(VideoOverlayWindowViews* window);
++void VerifyChromiumNativeScrub(VideoOverlayWindowViews* window,
++                              bool end_before_hide, bool hide);
 +void VerifyNativeHostVisibility(VideoOverlayWindowViews* window, bool expected);
 +void VerifyFocusedNativeRebuildAndDetach(VideoOverlayWindowViews* window);
 +}
@@ -3213,6 +3230,24 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +  EXPECT_CALL(pip_window_controller(), TogglePlayPause()).WillOnce(Return(false));
 +  arcium::pip::test::VerifyChromiumNativeHitTargetAction(&overlay_window());
 +  EXPECT_FALSE(overlay_window().IsVisible());
++}
++TEST_F(VideoOverlayWindowNativeControlsTest, ScrubbingNeverChangesTransportState) {
++  EXPECT_CALL(pip_window_controller(), Play()).Times(0);
++  EXPECT_CALL(pip_window_controller(), Pause()).Times(0);
++  EXPECT_CALL(pip_window_controller(), TogglePlayPause()).Times(0);
++  EXPECT_CALL(pip_window_controller(), SeekTo(base::Seconds(60))).Times(6);
++  for (auto playback : {content::VideoOverlayWindow::kPlaying,
++                        content::VideoOverlayWindow::kPaused}) {
++    for (const auto& scenario : {std::pair(false, false), std::pair(false, true),
++                                 std::pair(true, true)}) {
++      SCOPED_TRACE(testing::Message() << "playback=" << playback
++                                     << " end=" << scenario.first
++                                     << " hide=" << scenario.second);
++      overlay_window().SetPlaybackState(playback);
++      arcium::pip::test::VerifyChromiumNativeScrub(
++          &overlay_window(), scenario.first, scenario.second);
++    }
++  }
 +}
 +TEST_F(VideoOverlayWindowNativeControlsTest, NativeAccessibilityAndTabFocusUseHost) {
 +  arcium::pip::test::VerifyChromiumNativeAccessibilityAndFocus(&overlay_window());
