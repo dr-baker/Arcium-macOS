@@ -1,0 +1,69 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -760,9 +760,31 @@ class CommandSettingsEditor : public vie
+ }  // namespace
+ 
+ @interface ArciumCommandControlsWindow : NSWindow
++@property(nonatomic, copy) void (^arciumCancelHandler)(void);
+ @end
+ @implementation ArciumCommandControlsWindow
+ - (BOOL)canBecomeKeyWindow { return YES; }
++- (void)cancelOperation:(id)sender {
++  void (^handler)(void) = self.arciumCancelHandler;
++  if (!handler) return;
++  self.arciumCancelHandler = nil;
++  // Close once, after AppKit finishes dispatching the current key event.
++  dispatch_async(dispatch_get_main_queue(), handler);
++}
++- (BOOL)handleEditorEscape:(NSEvent*)event {
++  const auto modifiers = NSEventModifierFlagCommand | NSEventModifierFlagControl |
++                         NSEventModifierFlagOption | NSEventModifierFlagShift;
++  if (event.type != NSEventTypeKeyDown || event.keyCode != 53 ||
++      (event.modifierFlags & modifiers)) return NO;
++  [self cancelOperation:nil];
++  return YES;
++}
++- (BOOL)performKeyEquivalent:(NSEvent*)event {
++  return [self handleEditorEscape:event] || [super performKeyEquivalent:event];
++}
++- (void)sendEvent:(NSEvent*)event {
++  if (![self handleEditorEscape:event]) [super sendEvent:event];
++}
+ @end
+ 
+ @interface ArciumSettingsContentView : NSView
+@@ -923,7 +945,7 @@ void SettingsModelProfileWillBeDestroyed
+ 
+ @implementation ArciumSettingsWindowController {
+   std::unique_ptr<CommandSettingsEditor> command_editor_;
+-  NSWindow* command_controls_sheet_;
++  ArciumCommandControlsWindow* command_controls_sheet_;
+   Profile* profile_;
+   NSValue* profile_key_;
+   BOOL profile_destroying_;
+@@ -981,6 +1003,15 @@ void SettingsModelProfileWillBeDestroyed
+                     backing:NSBackingStoreBuffered defer:NO];
+     command_controls_sheet_.releasedWhenClosed = NO;
+     command_controls_sheet_.contentViewController = controls;
++    __weak ArciumSettingsWindowController* weak_self = self;
++    __weak ArciumCommandControlsWindow* weak_sheet = command_controls_sheet_;
++    command_controls_sheet_.arciumCancelHandler = ^{
++      ArciumSettingsWindowController* owner = weak_self;
++      ArciumCommandControlsWindow* sheet = weak_sheet;
++      if (owner && sheet && owner->command_controls_sheet_ == sheet) {
++        [owner closeCommandBarEditor];
++      }
++    };
+     [self.window beginSheet:command_controls_sheet_ completionHandler:nil];
+     return;
+   }
+@@ -993,6 +1024,7 @@ void SettingsModelProfileWillBeDestroyed
+ - (void)closeCommandBarEditor {
+   command_editor_.reset();
+   if (command_controls_sheet_) {
++    command_controls_sheet_.arciumCancelHandler = nil;
+     [command_controls_sheet_.sheetParent endSheet:command_controls_sheet_];
+     [command_controls_sheet_ orderOut:nil];
+     [command_controls_sheet_ close];
