@@ -16,7 +16,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
-@@ -0,0 +1,89 @@
+@@ -0,0 +1,140 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -24,6 +24,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +#define CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_GEOMETRY_H_
 +#include <algorithm>
 +#include <cmath>
++#include <cstddef>
++#include <optional>
++#include <span>
 +
 +namespace arcium::pip::geometry {
 +struct Rect {
@@ -89,6 +92,54 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +  r.x = side == Side::kLeft ? screen.x - r.width + handle
 +                            : screen.x + screen.width - handle;
 +  return r;
++}
++struct Screen {
++  Rect frame;
++  Rect work_area;
++};
++struct TuckedPlacement {
++  Rect frame;
++  size_t screen;
++};
++inline std::optional<TuckedPlacement> ExteriorTuck(
++    Rect restore, std::span<const Screen> screens, size_t preferred, Side side) {
++  if (screens.empty() || side == Side::kNone) {
++    return std::nullopt;
++  }
++  preferred = std::min(preferred, screens.size() - 1);
++  const Rect desired = Tuck(restore, screens[preferred].frame,
++                            screens[preferred].work_area, side);
++  std::optional<TuckedPlacement> best;
++  double best_distance = 0;
++  for (size_t i = 0; i < screens.size(); ++i) {
++    const Rect frame = Tuck(restore, screens[i].frame, screens[i].work_area, side);
++    const double handle = std::min({kHandleWidth, Normalize(screens[i].frame).width,
++                                    frame.width});
++    Rect hidden = frame;
++    hidden.width -= handle;
++    if (side == Side::kRight) {
++      hidden.x += handle;
++    }
++    bool exposed = false;
++    for (size_t j = 0; j < screens.size(); ++j) {
++      const Rect other = Normalize(screens[j].frame);
++      if (j != i && hidden.width > 0 && hidden.height > 0 &&
++          hidden.x < other.x + other.width && hidden.x + hidden.width > other.x &&
++          hidden.y < other.y + other.height && hidden.y + hidden.height > other.y) {
++        exposed = true;
++        break;
++      }
++    }
++    if (exposed) {
++      continue;
++    }
++    const double distance = std::hypot(frame.x - desired.x, frame.y - desired.y);
++    if (!best || distance < best_distance) {
++      best = TuckedPlacement{frame, i};
++      best_distance = distance;
++    }
++  }
++  return best;
 +}
 +inline Rect Resize(Rect r, Rect area, double aspect, double width) {
 +  area = Normalize(area);
@@ -206,6 +257,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +#include <algorithm>
 +#include <cmath>
 +#include <utility>
++#include <vector>
 +
 +#include "arcium_pip_geometry.h"
 +
@@ -1074,28 +1126,30 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      geo::Fit(ToRect(_pipWindow.frame), ToRect(screen.visibleFrame)));
 +  _corner =
 +      geo::NearestCorner(ToRect(_restoreFrame), ToRect(screen.visibleFrame));
-+  // At an interior display seam the window would remain visible on a neighbor.
-+  // Find the exterior desktop edge at this vertical band before stashing.
-+  for (NSScreen* candidate in NSScreen.screens) {
-+    if (NSMaxY(candidate.frame) <= NSMinY(_restoreFrame) ||
-+        NSMinY(candidate.frame) >= NSMaxY(_restoreFrame)) {
-+      continue;
-+    }
-+    if ((side == geo::Side::kLeft &&
-+         NSMinX(candidate.frame) < NSMinX(screen.frame)) ||
-+        (side == geo::Side::kRight &&
-+         NSMaxX(candidate.frame) > NSMaxX(screen.frame))) {
-+      screen = candidate;
-+    }
-+  }
 +  [self rememberScreen:screen];
 +  _tucked = side;
 +  _nativeVisible = NO;
 +  [self refreshChrome];
-+  [self setWindowFrame:ToNSRect(geo::Tuck(ToRect(_restoreFrame),
-+                                          ToRect(screen.frame),
-+                                          ToRect(screen.visibleFrame), side))
-+               animate:YES];
++  [self placeTuckedWindowAnimated:YES];
++}
++- (void)placeTuckedWindowAnimated:(BOOL)animate {
++  NSArray<NSScreen*>* screens = NSScreen.screens;
++  std::vector<geo::Screen> layout;
++  size_t preferred = 0;
++  for (NSScreen* screen in screens) {
++    if ([screen.deviceDescription[@"NSScreenNumber"] isEqual:_anchorDisplay]) {
++      preferred = layout.size();
++    }
++    layout.push_back({ToRect(screen.frame), ToRect(screen.visibleFrame)});
++  }
++  auto placement = geo::ExteriorTuck(ToRect(_restoreFrame), layout, preferred,
++                                      _tucked);
++  if (!placement) {
++    [self restore:nil];
++    return;
++  }
++  [self rememberScreen:screens[placement->screen]];
++  [self setWindowFrame:ToNSRect(placement->frame) animate:animate];
 +}
 +- (void)restore:(id)sender {
 +  if (_state.blocked || _tucked == geo::Side::kNone) {
@@ -1176,10 +1230,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    }
 +    _restoreFrame = ToNSRect(geo::Anchor(
 +        ToRect(_restoreFrame), ToRect(restoreScreen.visibleFrame), _corner));
-+    [self setWindowFrame:ToNSRect(geo::Tuck(
-+                             ToRect(_restoreFrame), ToRect(screen.frame),
-+                             ToRect(screen.visibleFrame), _tucked))
-+                 animate:NO];
++    [self placeTuckedWindowAnimated:NO];
 +  }
 +}
 +
@@ -2312,12 +2363,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,117 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
 +
 +#include <cmath>
++#include <array>
 +
 +#include "testing/gtest/include/gtest/gtest.h"
 +
@@ -2382,6 +2434,36 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 +    EXPECT_DOUBLE_EQ(frame.width, fitted.width);
 +    EXPECT_DOUBLE_EQ(frame.height, fitted.height);
 +  }
++}
++
++TEST(ArciumPiPGeometryTest, TuckMovesToExteriorWhenNeighborAppears) {
++  const Rect restore{1000, 300, 400, 225};
++  const std::array<Screen, 1> original{{{{0, 0, 1440, 900}, {0, 0, 1440, 875}}}};
++  auto before = ExteriorTuck(restore, original, 0, Side::kRight);
++  ASSERT_TRUE(before);
++  EXPECT_EQ(before->screen, 0u);
++  EXPECT_DOUBLE_EQ(before->frame.x, 1440 - kHandleWidth);
++  const std::array<Screen, 2> changed{{
++      original[0], {{1440, 0, 1280, 1024}, {1440, 0, 1280, 1000}}}};
++  auto after = ExteriorTuck(restore, changed, before->screen, Side::kRight);
++  ASSERT_TRUE(after);
++  EXPECT_EQ(after->screen, 1u);
++  EXPECT_DOUBLE_EQ(after->frame.x, 2720 - kHandleWidth);
++  EXPECT_DOUBLE_EQ(after->frame.width, restore.width);
++  EXPECT_DOUBLE_EQ(after->frame.height, restore.height);
++}
++
++TEST(ArciumPiPGeometryTest, ExteriorTuckChecksFinalVerticalPlacement) {
++  const std::array<Screen, 2> screens{{
++      {{0, 0, 1000, 1000}, {0, 700, 1000, 200}},
++      {{1000, 600, 1000, 400}, {1000, 600, 1000, 400}}}};
++  auto placement = ExteriorTuck({500, 0, 800, 450}, screens, 0, Side::kRight);
++  ASSERT_TRUE(placement);
++  EXPECT_EQ(placement->screen, 1u);
++  EXPECT_DOUBLE_EQ(placement->frame.x, 2000 - kHandleWidth);
++  EXPECT_GE(placement->frame.y, 600);
++  EXPECT_NEAR(placement->frame.width / placement->frame.height, 16.0 / 9.0, 1e-6);
++  EXPECT_FALSE(ExteriorTuck({0, 0, 400, 225}, {}, 0, Side::kRight));
 +}
 +
 +TEST(ArciumPiPGeometryTest, TinyAndInvalidScreensStayFinite) {
