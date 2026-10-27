@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/BUILD.gn
 +++ src/chrome/browser/ui/BUILD.gn
-@@ -5438,6 +5438,9 @@ static_library("ui") {
+@@ -5436,6 +5436,9 @@ static_library("ui") {
          "views/apps/chrome_native_app_window_views_mac.h",
          "views/apps/chrome_native_app_window_views_mac.mm",
          "views/chrome_views_delegate_mac.cc",
@@ -2369,18 +2369,23 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -11558,6 +11558,11 @@ if (!is_android && toolkit_views) {
- 
-     if (is_mac) {
-       sources += [
-+        "../browser/ui/views/overlay/arcium_pip_geometry_unittest.cc",
-+        "../browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm",
-+      ]
-+      deps += [ "//ui/base:test_support" ]
-+      sources += [
+@@ -11607,6 +11607,8 @@ if (!is_android && toolkit_views) {
          "../browser/ui/browser_shortcuts/arcium_shortcut_presets_unittest.cc",
          "../browser/ui/browser_shortcuts/browser_shortcut_platform_mac_unittest.mm",
+         "../browser/ui/cocoa/arcium_widevine_installer_unittest.cc",
++        "../browser/ui/views/overlay/arcium_pip_geometry_unittest.cc",
++        "../browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm",
        ]
+       deps += [
+         "//chrome/browser/ui/cocoa:arcium_widevine_installer",
+@@ -11615,6 +11617,7 @@ if (!is_android && toolkit_views) {
+         "//media",
+         "//media/cdm:cdm_api",
+         "//media/cdm:cdm_paths",
++        "//ui/base:test_support",
+       ]
+       data_deps = [ "//chrome:chrome_framework" ]
+     } else if (is_linux || is_chromeos || is_win) {
 Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
 ===================================================================
 --- /dev/null
