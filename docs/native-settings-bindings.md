@@ -304,11 +304,24 @@ change before any shortcuts or appearance preferences are written.
 
 Core owns `arcium.appearance.collapsed_sidebar_style` (0 for Icon rail, 1 for
 Fully hidden) and `arcium.appearance.chrome_frame_border_width` (0–24 base points,
-default 3). Native Appearance exposes both through the existing PrefService
-bridge and respects managed/unavailable preferences. **Border width** updates
+default 5). Native Appearance exposes both through the existing PrefService
+bridge and respects managed/unavailable preferences. **Page margin** updates
 while dragging, displays scaled points, and is disabled when Rounded frame is
 off. The stored width remains available when Rounded frame is enabled again.
 The border controls page-content insets independently of webpage zoom.
+
+The separate **Page edge** group uses the profile dictionary
+`arcium.appearance.content_frame`. Its default has no decorative border and a
+black shadow at 25% opacity, with 8 px blur, 2 px vertical offset, and zero
+horizontal offset or spread. Border accepts 0–6 logical pixels independently
+of Browser UI scale. Shadow opacity accepts 0–100%, blur 0–48 px, offsets
+−24–24 px, and spread −12–12 px. Color accepts `#RRGGBB`.
+
+Soft shadow, Glow, and None change the effect while preserving Border. Use Arc
+style restores the complete default. Edits update browser windows live through
+PrefService and persist with the profile. Managed or unavailable settings reject
+edits. The shadow sits behind all page containers and excludes their interiors;
+split selection and screen-capture outlines remain separate.
 
 Navigation placement defaults to Sidebar when available. Existing browser
 layouts and explicit Top bar preferences are retained. Sidebar is available in

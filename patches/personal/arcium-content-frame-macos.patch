@@ -1,0 +1,308 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -140,6 +140,66 @@ struct ArciumSpacesSnapshot: Equatable {
+     }
+ }
+ 
++struct ArciumContentFrame: Equatable {
++    var borderWidth = 0
++    var x = 0
++    var y = 2
++    var blur = 8
++    var spread = 0
++    var opacity = 25
++    var color = "#000000"
++
++    static var glow: Self {
++        var value = Self()
++        value.y = 0
++        value.blur = 16
++        value.opacity = 50
++        value.color = "#8C7BFF"
++        return value
++    }
++
++    init(_ dictionary: [String: Any] = [:]) {
++        guard dictionary.count == 7,
++              let border = exactIntegerOptional(dictionary["borderWidth"]),
++              let x = exactIntegerOptional(dictionary["x"]),
++              let y = exactIntegerOptional(dictionary["y"]),
++              let blur = exactIntegerOptional(dictionary["blur"]),
++              let spread = exactIntegerOptional(dictionary["spread"]),
++              let opacity = exactIntegerOptional(dictionary["opacity"]),
++              let color = dictionary["color"] as? String,
++              (0...6).contains(border), (-24...24).contains(x),
++              (-24...24).contains(y), (0...48).contains(blur),
++              (-12...12).contains(spread), (0...100).contains(opacity),
++              Self.validColor(color) else { return }
++        borderWidth = border
++        self.x = x
++        self.y = y
++        self.blur = blur
++        self.spread = spread
++        self.opacity = opacity
++        self.color = color
++    }
++
++    var isValid: Bool {
++        (0...6).contains(borderWidth) && (-24...24).contains(x)
++            && (-24...24).contains(y) && (0...48).contains(blur)
++            && (-12...12).contains(spread) && (0...100).contains(opacity)
++            && Self.validColor(color)
++    }
++
++    private static func validColor(_ value: String) -> Bool {
++        value.utf8.count == 7 && value.utf8.first == 35
++            && value.utf8.dropFirst().allSatisfy {
++                (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
++            }
++    }
++
++    var payload: [String: Any] {
++        ["borderWidth": borderWidth, "x": x, "y": y, "blur": blur,
++         "spread": spread, "opacity": opacity, "color": color]
++    }
++}
++
+ struct ArciumChromeAppearanceSnapshot: Equatable {
+     struct Point: Equatable {
+         var id: String
+@@ -645,6 +705,9 @@ struct ArciumAppearanceSnapshot: Equatab
+     var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
+     var collapsedSidebarStyleAvailable = false
+     var collapsedSidebarStyleManaged = false
++    var contentFrame = ArciumContentFrame()
++    var contentFrameAvailable = false
++    var contentFrameManaged = false
+     var chromeFrameBorderWidth = 5
+     var chromeFrameBorderWidthAvailable = false
+     var chromeFrameBorderWidthManaged = false
+@@ -699,6 +762,9 @@ struct ArciumAppearanceSnapshot: Equatab
+         }
+         collapsedSidebarStyleAvailable = strictBoolean(dictionary["collapsedSidebarStyleAvailable"]) ?? false
+         collapsedSidebarStyleManaged = strictBoolean(dictionary["collapsedSidebarStyleManaged"]) ?? false
++        contentFrame = ArciumContentFrame(dictionaryValues(dictionary["contentFrame"]))
++        contentFrameAvailable = strictBoolean(dictionary["contentFrameAvailable"]) ?? false
++        contentFrameManaged = strictBoolean(dictionary["contentFrameManaged"]) ?? false
+         chromeFrameBorderWidth = min(max(integerOptional(dictionary["chromeFrameBorderWidth"]) ?? 5, 0), 24)
+         chromeFrameBorderWidthAvailable = strictBoolean(dictionary["chromeFrameBorderWidthAvailable"]) ?? false
+         chromeFrameBorderWidthManaged = strictBoolean(dictionary["chromeFrameBorderWidthManaged"]) ?? false
+@@ -1150,6 +1216,13 @@ final class ArciumSettingsStore: Observa
+         settingChanged(key: "collapsed_sidebar_style", value: style)
+     }
+ 
++    func setContentFrame(_ frame: ArciumContentFrame) {
++        guard snapshot.appearance.contentFrameAvailable,
++              !snapshot.appearance.contentFrameManaged,
++              frame.isValid else { return }
++        settingChanged(key: "content_frame", value: frame.payload)
++    }
++
+     func setChromeFrameBorderWidth(_ width: Double) {
+         guard snapshot.appearance.chromeFrameBorderWidthAvailable,
+               !snapshot.appearance.chromeFrameBorderWidthManaged,
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -943,7 +943,7 @@ private struct AppearanceSettingsPage: V
+                 .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
+                     || store.snapshot.appearance.collapsedSidebarStyleManaged)
+                 BooleanSetting(title: "Rounded frame", description: nil, enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
+-                SSlider("Border width", value: Binding(
++                SSlider("Page margin", value: Binding(
+                     get: { store.displayedChromeFrameBorderWidth },
+                     set: { store.setDisplayedChromeFrameBorderWidth($0) }
+                 ), range: 0...(24 * store.chromeUIScaleFactor).rounded(), step: 1,
+@@ -958,6 +958,10 @@ private struct AppearanceSettingsPage: V
+                     || !store.snapshot.appearance.roundedFrame)
+             }
+ 
++            Section("Page edge") {
++                ArciumContentFrameEditor(store: store)
++            }
++
+             Section("Address bar") {
+                 SPicker("Navigation placement", selection: Binding(
+                     get: { store.snapshot.appearance.sidebarNavigationEnabled ? 1 : 0 },
+@@ -1637,3 +1641,81 @@ private func shortcutSummary(_ command:
+     if command.bindings.count == 1 { return first.display }
+     return "\(first.display), plus \(command.bindings.count - 1) more"
+ }
++
++private struct ArciumContentFrameEditor: View {
++    @ObservedObject var store: ArciumSettingsStore
++
++    private var frame: ArciumContentFrame { store.snapshot.appearance.contentFrame }
++    private var editable: Bool {
++        store.snapshot.appearance.contentFrameAvailable
++            && !store.snapshot.appearance.contentFrameManaged
++            && store.snapshot.appearance.roundedFrame
++    }
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 16) {
++            slider("Border", \.borderWidth, range: 0...6)
++            HStack(spacing: 8) {
++                Button("Soft shadow") { apply(ArciumContentFrame()) }
++                Button("Glow") { apply(.glow) }
++                Button("None") {
++                    var value = frame
++                    value.opacity = 0
++                    store.setContentFrame(value)
++                }
++            }
++            .buttonStyle(.bordered)
++            slider("Opacity", \.opacity, range: 0...100, unit: "%")
++            slider("Blur", \.blur, range: 0...48)
++            ColorPicker("Color", selection: Binding(
++                get: { SettingsRGB(hex: frame.color)?.color ?? .black },
++                set: { color in
++                    guard let rgb = NSColor(color).usingColorSpace(.sRGB) else { return }
++                    func byte(_ component: CGFloat) -> Int {
++                        Int((min(max(component, 0), 1) * 255).rounded())
++                    }
++                    var value = frame
++                    value.color = String(format: "#%02X%02X%02X", byte(rgb.redComponent),
++                                         byte(rgb.greenComponent), byte(rgb.blueComponent))
++                    store.setContentFrame(value)
++                }
++            ), supportsOpacity: false)
++            DisclosureGroup("Shadow details") {
++                VStack(spacing: 16) {
++                    slider("Horizontal offset", \.x, range: -24...24)
++                    slider("Vertical offset", \.y, range: -24...24)
++                    slider("Spread", \.spread, range: -12...12)
++                }
++                .padding(.top, 12)
++            }
++            HStack {
++                Text("Changes appear in your browser windows.")
++                    .settingsFont(\.caption).foregroundStyle(.secondary)
++                Spacer(minLength: 0)
++                Button("Use Arc style") { store.setContentFrame(ArciumContentFrame()) }
++                    .buttonStyle(.bordered)
++            }
++        }
++        .disabled(!editable)
++    }
++
++    private func apply(_ preset: ArciumContentFrame) {
++        var value = preset
++        value.borderWidth = frame.borderWidth
++        store.setContentFrame(value)
++    }
++
++    private func slider(_ title: String, _ key: WritableKeyPath<ArciumContentFrame, Int>,
++                        range: ClosedRange<Double>, unit: String = " px") -> some View {
++        let update: (Double) -> Void = { number in
++            guard number.isFinite else { return }
++            var value = frame
++            value[keyPath: key] = Int(min(max(number.rounded(), range.lowerBound), range.upperBound))
++            store.setContentFrame(value)
++        }
++        return SSlider(title, value: Binding(
++            get: { Double(frame[keyPath: key]) }, set: { update($0) }
++        ), range: range, step: 1, format: { "\(Int($0.rounded()))\(unit)" },
++            commitMode: .onDragEnd, onPreviewChange: update)
++    }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -1167,6 +1167,54 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
++    func testContentFrameDefaultsAndTypedCallbacks() throws {
++        let defaults = ArciumContentFrame()
++        XCTAssertEqual(defaults.borderWidth, 0)
++        XCTAssertEqual(defaults.opacity, 25)
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "contentFrame": defaults.payload, "contentFrameAvailable": true,
++            "contentFrameManaged": false
++        ]], delegate: delegate)
++        var glow = ArciumContentFrame.glow
++        glow.borderWidth = 6
++        glow.spread = 12
++        store.setContentFrame(glow)
++        XCTAssertEqual(delegate.settings.map(\.key), ["content_frame"])
++        let payload = try XCTUnwrap(delegate.settings.first?.value as? [String: Any])
++        XCTAssertEqual(ArciumContentFrame(payload), glow)
++        XCTAssertEqual(payload["borderWidth"] as? Int, 6)
++        XCTAssertEqual(payload["y"] as? Int, 0)
++        XCTAssertEqual(payload["color"] as? String, "#8C7BFF")
++        glow.borderWidth = 7
++        store.setContentFrame(glow)
++        XCTAssertEqual(delegate.settings.count, 1)
++    }
++
++    @MainActor
++    func testContentFrameRejectsMalformedAndReadOnlyWrites() {
++        for field in ["borderWidth", "x", "y", "blur", "spread", "opacity"] {
++            for invalid: Any in [true, 0.5, Double.infinity, Double.nan, 1000, "2"] {
++                var payload = ArciumContentFrame.glow.payload
++                payload[field] = invalid
++                XCTAssertEqual(ArciumContentFrame(payload), ArciumContentFrame(), field)
++            }
++        }
++        for color in ["red", "#123", "#GGGGGG", "#FFFFFF00", "#0xFFFF", "#+FFFFF"] {
++            var payload = ArciumContentFrame.glow.payload
++            payload["color"] = color
++            XCTAssertEqual(ArciumContentFrame(payload), ArciumContentFrame())
++        }
++        let delegate = TestDelegate()
++        for (available, managed) in [(false, false), (true, true)] {
++            let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++                "contentFrameAvailable": available, "contentFrameManaged": managed
++            ]], delegate: delegate)
++            store.setContentFrame(.glow)
++        }
++        XCTAssertTrue(delegate.settings.isEmpty)
++    }
++    @MainActor
+     func testCollapsedSidebarAndFrameBorderUseTypedHostCallbacks() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -53,6 +53,7 @@
+ #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
++#include "chrome/browser/ui/helium/arcium_content_frame.h"
+ #include "chrome/browser/ui/views/helium/glass_surface.h"
+ #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "chrome/browser/ui/views/helium/glass_surface_mac.h"
+@@ -1509,6 +1510,9 @@ void SettingsModelProfileWillBeDestroyed
+     ],
+     @"sidebarFooterActionAvailable" : @(sidebar_footer_action_available),
+     @"sidebarFooterActionManaged" : @(sidebar_footer_action_managed),
++    @"contentFrame" : model ? NSDictionaryFromBaseDict(model->GetContentFrame()) : @{},
++    @"contentFrameAvailable" : @(model && model->HasPreference(arcium::kContentFramePref)),
++    @"contentFrameManaged" : @(model && model->IsManaged(arcium::kContentFramePref)),
+     @"chromeFrameBorderWidth" : @(chrome_frame_border_width),
+     @"chromeFrameBorderWidthAvailable" : @(chrome_frame_border_width_available),
+     @"chromeFrameBorderWidthManaged" : @(chrome_frame_border_width_managed),
+@@ -2298,6 +2302,15 @@ void SettingsModelProfileWillBeDestroyed
+     }
+     return;
+   }
++  if ([key isEqualToString:@"content_frame"]) {
++    if ([value isKindOfClass:[NSDictionary class]]) {
++      auto frame = BaseDictFromNSObject((NSDictionary*)value);
++      if (frame && model_->SetContentFrame(*frame)) {
++        [self modelDidChange];
++      }
++    }
++    return;
++  }
+   if ([key isEqualToString:kKeySurfaceTuning]) {
+     if ([value isKindOfClass:[NSDictionary class]]) {
+       std::optional<base::DictValue> tuning =
