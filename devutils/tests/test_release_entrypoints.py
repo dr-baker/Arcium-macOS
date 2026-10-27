@@ -63,7 +63,9 @@ class ReleaseEntrypointsTest(unittest.TestCase):
             "he() {\n"
             "  printf '%s\\n' \"$*\" >> \"$HE_CALLS\"\n"
             "  case \"$1\" in\n"
-            "    setup) [ \"$2\" = --force ] && echo 'source prepared' ;;\n"
+            "    setup) [ \"$2\" = --force ] || return 2\n"
+            "      printf '%s\\n' \"${SETUP_OUTPUT:-source prepared}\"\n"
+            "      return \"${SETUP_STATUS:-0}\" ;;\n"
             "    reset) return 2 ;;\n"
             "    *) return 2 ;;\n"
             "  esac\n"
@@ -76,18 +78,24 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.write_executable(self.bin_dir / "pip3.14", "#!/bin/bash\nexit 0\n")
         self.write_executable(
             self.bin_dir / "timeout",
-            '#!/bin/bash\nexit "$SMOKE_STATUS"\n',
+            '#!/bin/bash\necho smoke >> "$HE_CALLS"\nexit "$SMOKE_STATUS"\n',
         )
 
         environment = self.entrypoint_environment()
         environment["HE_CALLS"] = str(calls)
-        for status, expected in ((0, 0), (124, 0), (1, 1), (125, 1), (127, 1), (137, 1)):
-            with self.subTest(status=status):
+        cases = [(status, 0, "source prepared", expected)
+                 for status, expected in ((0, 0), (124, 0), (1, 1), (125, 1), (127, 1), (137, 1))]
+        offset = "Hunk #1 succeeded at 20 (offset 5 lines)."
+        cases.extend(((0, 0, offset, 0), (0, 1, "patch failed", 1),
+                      (0, 2, offset, 2)))
+        for status, setup_status, output, expected in cases:
+            with self.subTest(status=status, setup_status=setup_status, output=output):
                 calls.unlink(missing_ok=True)
                 result = subprocess.run(
                     [str(SANITY_SCRIPT)],
                     cwd=self.root,
-                    env={**environment, "SMOKE_STATUS": str(status)},
+                    env={**environment, "SMOKE_STATUS": str(status),
+                         "SETUP_STATUS": str(setup_status), "SETUP_OUTPUT": output},
                     text=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -95,8 +103,9 @@ class ReleaseEntrypointsTest(unittest.TestCase):
                 )
 
                 self.assertEqual(expected, result.returncode, result.stdout)
-                self.assertEqual("setup --force\n", calls.read_text(encoding="utf-8"))
-                if expected:
+                expected_calls = "setup --force\n" + ("" if setup_status else "smoke\n")
+                self.assertEqual(expected_calls, calls.read_text(encoding="utf-8"))
+                if expected and not setup_status:
                     self.assertIn(f"failed with status code {status}", result.stdout)
 
     def test_local_build_passes_no_fuzz_to_patch_utility(self) -> None:
