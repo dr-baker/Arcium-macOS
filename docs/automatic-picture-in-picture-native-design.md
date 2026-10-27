@@ -28,6 +28,21 @@ video view, overlay, and gesture system connected to Chromium. That establishes
 its architecture, not exact gesture thresholds or runtime behavior. This change
 implements the requested interactions independently.
 
+## Native input embedding
+
+The native overlay must attach through Chromium's `NativeViewHost` after the
+Views hierarchy is initialized. A plain AppKit child under `BridgedContentView`
+does not receive normal mouse and accessibility routing reliably: that bridge
+handles the Views hit test before traversing native children.
+
+While native controls are active, the frame returns a client hit-test result
+and the registered host routes input to AppKit. The host needs an accessible
+role, an explicit native parent, and keyboard traversal into the native controls.
+Consent and specialty controls hide the native host and restore the Views controls.
+Teardown detaches the host before releasing the native view. The hidden Chromium
+window tests and the packaged browser must verify this boundary separately from
+the standalone AppKit control tests.
+
 ## Presentation
 
 On macOS 26 the control buttons use public `NSGlassEffectView` with clear glass.
@@ -64,6 +79,11 @@ The runtime validation must verify following in both visible and tucked states.
 ## Validation requirements
 
 - Build the browser and affected test runners; replay the selected patch series.
+- Keep visual checks on the built-in MacBook screen and keep audio muted. Wait
+  for the committed player document and advancing, loaded video before any PiP
+  assertion. Use one playback session and reuse proof for unchanged policy paths.
+- Run hidden native embedding tests before playing real video. A failed setup
+  stops the pass; it must not trigger repeated playback or foreground windows.
 - Verify real-video automatic entry/return, muted pause, resume, seeks, paused
   scrubbing, settings persistence, manual PiP, source closure, and repeated teardown.
 - Inspect real glass over video and compact/roomy control layouts.
