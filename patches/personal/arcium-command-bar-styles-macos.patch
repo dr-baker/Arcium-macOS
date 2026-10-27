@@ -1,0 +1,283 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -368,6 +368,19 @@
+ 
+ nonisolated struct ArciumCommandPanelLayout: Equatable, Sendable {
+     enum Width: Int, CaseIterable, Sendable { case flush, iconWidth, offset }
++    enum Style: String, CaseIterable, Sendable {
++        case minimal = "Minimal", subtle = "Subtle", stacked = "Stacked", peek = "Peek"
++        var scopeHeight: Int {
++            switch self {
++            case .minimal: 4
++            case .subtle: 5
++            case .stacked: 0
++            case .peek: 2
++            }
++        }
++        var attached: Bool { self == .minimal || self == .subtle }
++        var width: Width { attached ? .flush : .offset }
++    }
+     var labels = 1
+     var icons = 2
+     var reveal = 5
+@@ -377,6 +390,15 @@
+     var glowStrength = 0.75
+     var activityDots = true
+     var resultCount = 8
++    var style: Style? {
++        Style.allCases.first { reveal == $0.scopeHeight && connected == $0.attached && width == $0.width }
++    }
++    mutating func applyStyle(_ style: Style) {
++        reveal = style.scopeHeight
++        connected = style.attached
++        width = style.width
++        normalize()
++    }
+     mutating func normalize() {
+         if !connected && width == .flush { width = .offset }
+         resultCount = min(20, max(1, resultCount))
+@@ -1566,4 +1588,3 @@
+     }
+     return try SettingsStylePreset.decodeJSON(Data(contentsOf: url))
+ }
+-
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -371,6 +371,8 @@
+     let title: String
+     var onClose: (() -> Void)? = nil
+     var onCancel: (() -> Void)? = nil
++    var minimumHeight: CGFloat = 400
++    var idealHeight: CGFloat = 620
+     @ViewBuilder let content: Content
+     @Environment(\.dismiss) private var dismiss
+     @Environment(\.settingsTheme) private var theme
+@@ -398,7 +400,7 @@
+             .padding(.horizontal, 24).padding(.vertical, 16)
+         }
+         .settingsSheetSurface()
+-        .frame(minWidth: 520, idealWidth: 680, minHeight: 400, idealHeight: 620)
++        .frame(minWidth: 520, idealWidth: 680, minHeight: minimumHeight, idealHeight: idealHeight)
+         .onExitCommand { if let onCancel { onCancel() } else { close() } }
+     }
+     private func close() {
+@@ -1614,7 +1616,12 @@
+ 
+ private struct ArciumCommandBarControls: View {
+     @ObservedObject var store: ArciumSettingsStore
++    @State private var showingAdvanced = false
++    @Environment(\.settingsTheme) private var theme
+ 
++    private var editable: Bool {
++        store.snapshot.appearance.commandPanelLayoutAvailable && !store.snapshot.appearance.commandPanelLayoutManaged
++    }
+     private func commandLayoutBinding<Value>(_ key: WritableKeyPath<ArciumCommandPanelLayout, Value>) -> Binding<Value> {
+         Binding(get: { store.snapshot.appearance.commandPanelLayout[keyPath: key] },
+                 set: { value in
+@@ -1627,40 +1634,125 @@
+ 
+     var body: some View {
+         SGroupedSections(showsSurfaces: false, showsDividers: false) {
+-            Section("Style") {
+-                Group {
+-                    SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
+-                        (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
+-                    SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
+-                        (value: 0, label: "Actions"), (value: 1, label: "Arrows"),
+-                        (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
+-                    SPicker("Scope reveal", selection: commandLayoutBinding(\.reveal), options: [
+-                        (value: 0, label: "Full tabs"), (value: 1, label: "Icon peek"),
+-                        (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
+-                        (value: 4, label: "Flat"), (value: 5, label: "Divot")])
+-                    SToggle("Connected scopes", isOn: commandLayoutBinding(\.connected))
+-                    SPicker("Scope width", selection: commandLayoutBinding(\.width), options:
+-                        (store.snapshot.appearance.commandPanelLayout.connected
+-                         ? [(value: ArciumCommandPanelLayout.Width.flush, label: "Flush")] : []) + [
+-                        (value: .iconWidth, label: "Icon-width"), (value: .offset, label: "Tabs")])
+-                    SPicker("Default results", selection: commandLayoutBinding(\.resultCount),
+-                            options: (1...20).map { (value: $0, label: String($0)) })
+-                    SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+-                    if store.snapshot.appearance.commandPanelLayout.scopeTints {
+-                        SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
+-                            range: 0...2, step: 0.05,
+-                            format: { "\(Int(($0 * 100).rounded()))%" },
+-                            help: SHelp(description: "Adjust the glow behind Omnibox scopes. 75% is the default strength."))
+-                        .accessibilityIdentifier("omnibox-scope-glow-strength")
++            Section("Styles") {
++                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
++                    ForEach(ArciumCommandPanelLayout.Style.allCases, id: \.self) { style in
++                        let selected = store.snapshot.appearance.commandPanelLayout.style == style
++                        Button {
++                            var layout = store.snapshot.appearance.commandPanelLayout
++                            layout.applyStyle(style)
++                            store.setCommandPanelLayout(layout)
++                        } label: {
++                            VStack(alignment: .leading, spacing: 6) {
++                                ArciumCommandStyleThumbnail(style: style)
++                                    .frame(height: 64).accessibilityHidden(true)
++                                HStack {
++                                    Text(style.rawValue).settingsFont(\.body)
++                                    Spacer(minLength: 0)
++                                    Image(systemName: "checkmark.circle.fill")
++                                        .foregroundStyle(theme.accent).opacity(selected ? 1 : 0)
++                                }
++                            }
++                            .foregroundStyle(theme.textPrimary)
++                            .padding(10).frame(maxWidth: .infinity)
++                            .contentShape(.rect(cornerRadius: 10))
++                        }
++                        .buttonStyle(.plain)
++                        .settingsInteractiveControlSurface(isSelected: selected)
++                        .accessibilityLabel(style.rawValue)
++                        .accessibilityAddTraits(selected ? .isSelected : [])
++                        .accessibilityIdentifier("command-bar-style-" + style.rawValue.lowercased())
+                     }
+-                    SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
+                 }
+-                .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
+-                          || store.snapshot.appearance.commandPanelLayoutManaged)
++                HStack {
++                    if store.snapshot.appearance.commandPanelLayout.style == nil {
++                        Text("Custom").settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                    }
++                    Spacer()
++                    Button("Advanced…") { showingAdvanced = true }
++                        .accessibilityIdentifier("command-bar-advanced")
++                }
++            }
++            Section("Results") {
++                SPicker("Categories", selection: commandLayoutBinding(\.labels), options: [
++                    (value: 0, label: "Pill"), (value: 1, label: "Text"), (value: 2, label: "Joined")])
++                SPicker("Destination icons", selection: commandLayoutBinding(\.icons), options: [
++                    (value: 0, label: "Actions"), (value: 1, label: "Arrows"),
++                    (value: 2, label: "Go / Switch"), (value: 3, label: "Return")])
++                SPicker("Default results", selection: commandLayoutBinding(\.resultCount),
++                        options: (1...20).map { (value: $0, label: String($0)) })
++                SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
++            }
++            Section("Lighting") {
++                SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
++                if store.snapshot.appearance.commandPanelLayout.scopeTints {
++                    SSlider("Glow strength", value: commandLayoutBinding(\.glowStrength),
++                        range: 0...2, step: 0.05,
++                        format: { "\(Int(($0 * 100).rounded()))%" },
++                        help: SHelp(description: "Adjust the glow behind command-bar scopes. 75% is the default strength."))
++                    .accessibilityIdentifier("omnibox-scope-glow-strength")
++                }
++            }
++        }
++        .disabled(!editable)
++        .sheet(isPresented: $showingAdvanced) {
++            ArciumLiveSettingsSheet(title: "Advanced scopes", minimumHeight: 300, idealHeight: 340) {
++                SGroupedSections(showsSurfaces: false, showsDividers: false) {
++                    Section("Scopes") {
++                        SPicker("Scope height", selection: commandLayoutBinding(\.reveal), options: [
++                            (value: 0, label: "Tall"), (value: 1, label: "Icon peek"),
++                            (value: 2, label: "Edge peek"), (value: 3, label: "Hidden"),
++                            (value: 4, label: "Flat"), (value: 5, label: "Divot")])
++                        SPicker("Scope width", selection: commandLayoutBinding(\.width), options:
++                            (store.snapshot.appearance.commandPanelLayout.connected
++                             ? [(value: ArciumCommandPanelLayout.Width.flush, label: "Flush")] : []) + [
++                                (value: .iconWidth, label: "Icon-width"), (value: .offset, label: "Tabs")])
++                        SToggle("Attach Scopes", isOn: commandLayoutBinding(\.connected))
++                    }
++                }
++                .disabled(!editable)
+             }
+         }
+     }
++}
+ 
++// A small style-selection diagram; the adjacent live preview uses production UI.
++private struct ArciumCommandStyleThumbnail: View {
++    let style: ArciumCommandPanelLayout.Style
++    @Environment(\.settingsTheme) private var theme
++    var body: some View {
++        Canvas { context, size in
++            let body = CGRect(x: 4, y: 28, width: size.width - 8, height: 34)
++            context.fill(Path(roundedRect: body, cornerRadius: 6), with: .color(theme.control.opacity(0.22)))
++            let gap: CGFloat = style.attached ? 0 : 5
++            let available = size.width - 16
++            let widths: [CGFloat] = style.attached
++                ? Array(repeating: available / 4, count: 4)
++                : [available * 0.32, available * 0.2, available * 0.2, available * 0.2]
++            var x: CGFloat = 8
++            for index in 0..<4 {
++                let height: CGFloat = switch style {
++                case .minimal: 3
++                case .subtle: index == 0 ? 7 : 3
++                case .stacked: 20
++                case .peek: 7
++                }
++                let bottom: CGFloat = style.attached ? 30 : 22
++                let tab = CGRect(x: x, y: bottom - height, width: max(8, widths[index] - gap), height: height)
++                context.fill(Path(roundedRect: tab, cornerRadius: min(5, height / 2)),
++                             with: .color(index == 0 ? theme.accent.opacity(0.8) : theme.textSecondary.opacity(0.28)))
++                if style == .stacked {
++                    context.fill(Path(ellipseIn: CGRect(x: tab.midX - 2, y: tab.midY - 2, width: 4, height: 4)),
++                                 with: .color(theme.textPrimary.opacity(0.7)))
++                }
++                x += widths[index]
++            }
++            for index in 0..<2 {
++                let row = CGRect(x: 12, y: 36 + CGFloat(index) * 10, width: size.width * (index == 0 ? 0.65 : 0.44), height: 3)
++                context.fill(Path(roundedRect: row, cornerRadius: 1.5), with: .color(theme.textSecondary.opacity(0.4)))
++            }
++        }
++    }
+ }
+ 
+ private struct ArciumCommandBarPresetDocument: FileDocument {
+@@ -1699,6 +1791,7 @@
+                      ? "Select scopes or type to filter the examples. Results won't open."
+                      : "Open a browser window to preview scopes and results.")
+                     .settingsFont(\.caption).foregroundStyle(.secondary)
++                ArciumCommandBarControls(store: store)
+                 HStack {
+                     Button("Import design…") { importingDesign = true }
+                         .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
+@@ -1706,7 +1799,6 @@
+                     Button("Export design…") { exportingDesign = true }
+                 }
+                 .settingsFont(\.caption)
+-                ArciumCommandBarControls(store: store)
+             }
+             .fileImporter(isPresented: $importingDesign, allowedContentTypes: [.json]) { result in
+                 do {
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
+@@ -2,6 +2,34 @@
+ @testable import ArciumSettingsUI
+ 
+ final class ArciumCommandBarPresetTests: XCTestCase {
++    func testStylesApplyValidGeometryWithoutChangingOtherPreferences() throws {
++        let expected: [(ArciumCommandPanelLayout.Style, Int, Bool, ArciumCommandPanelLayout.Width)] = [
++            (.minimal, 4, true, .flush), (.subtle, 5, true, .flush),
++            (.stacked, 0, false, .offset), (.peek, 2, false, .offset)]
++        var layout = ArciumCommandPanelLayout()
++        layout.labels = 2; layout.icons = 3; layout.scopeTints = false
++        layout.glowStrength = 1.35; layout.activityDots = false; layout.resultCount = 17
++        for (style, height, attached, width) in expected {
++            let before = layout
++            layout.applyStyle(style)
++            XCTAssertEqual(layout.reveal, height); XCTAssertEqual(layout.connected, attached)
++            XCTAssertEqual(layout.width, width); XCTAssertEqual(layout.style, style)
++            XCTAssertEqual(layout.labels, before.labels); XCTAssertEqual(layout.icons, before.icons)
++            XCTAssertEqual(layout.scopeTints, before.scopeTints); XCTAssertEqual(layout.glowStrength, before.glowStrength)
++            XCTAssertEqual(layout.activityDots, before.activityDots); XCTAssertEqual(layout.resultCount, before.resultCount)
++            XCTAssertEqual(try ArciumCommandBarPreset.decode(ArciumCommandBarPreset.encode(layout)), layout)
++        }
++    }
++    func testStyleSelectionFollowsGeometryAndRecognizesCustomCombinations() {
++        var layout = ArciumCommandPanelLayout()
++        XCTAssertEqual(layout.style, .subtle)
++        layout.applyStyle(.peek); layout.glowStrength = 1.5; layout.resultCount = 3
++        XCTAssertEqual(layout.style, .peek)
++        layout.width = .iconWidth
++        XCTAssertNil(layout.style)
++        layout.applyStyle(.stacked); layout.connected = true
++        XCTAssertNil(layout.style)
++    }
+     func testEveryRevealAndWidthRoundTrips() throws {
+         for reveal in 0...5 { for width in ArciumCommandPanelLayout.Width.allCases {
+             var layout = ArciumCommandPanelLayout()

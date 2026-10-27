@@ -437,34 +437,38 @@ def validate_external_includes(manifest, source_hashes):
 
 
 def build(jobs=6, keep_edits=False, source_root=None, experiments=None):
-    global ROOT
-    if not (SDK / 'manifest.json').exists(): raise RuntimeError('Capture the native SDK first; see README')
-    previous_root = ROOT
-    if source_root: ROOT = source_root
-    try:
-        validate()
-        if not keep_edits: sync()
-    finally:
-        ROOT = previous_root
-    manifest = json.loads((SDK / 'manifest.json').read_text())
-    graph, source_hashes = frozen_source_graph(manifest, experiments)
-    validate_external_includes(manifest, source_hashes)
-    start = time.monotonic()
-    run([SDK / 'ninja', '-f', graph, '-j', str(jobs)], cwd=SDK / 'src/out/Default')
-    elapsed = time.monotonic() - start
-    # Catch a frozen-header/library/SDK edit that arrived while the compiler ran.
-    previous_root = ROOT
-    if source_root: ROOT = source_root
-    try:
-        validate()
+    if type(jobs) is not int or not 1 <= jobs <= 13:
+        raise ValueError('SDK jobs must be 1...13')
+    import iteration
+    with iteration.build_lock(LAB / '.build/native'):
+        global ROOT
+        if not (SDK / 'manifest.json').exists(): raise RuntimeError('Capture the native SDK first; see README')
+        previous_root = ROOT
+        if source_root: ROOT = source_root
+        try:
+            validate()
+            if not keep_edits: sync()
+        finally:
+            ROOT = previous_root
+        manifest = json.loads((SDK / 'manifest.json').read_text())
+        graph, source_hashes = frozen_source_graph(manifest, experiments)
         validate_external_includes(manifest, source_hashes)
-    finally:
-        ROOT = previous_root
-    record = {'time': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'build_seconds': round(elapsed, 3), 'jobs': jobs}
-    with (SDK / 'timings.jsonl').open('a') as log: log.write(json.dumps(record) + '\n')
-    write(SDK / 'last-build-sources.json', (json.dumps(source_hashes, sort_keys=True) + '\n').encode())
-    print(f'Actual renderer build: {elapsed:.2f}s; no GN, Siso, or shared build output')
-    return SDK / 'src/out/Default/arcium_command_bar_studio'
+        start = time.monotonic()
+        run([SDK / 'ninja', '-f', graph, '-j', str(jobs)], cwd=SDK / 'src/out/Default')
+        elapsed = time.monotonic() - start
+        # Catch a frozen-header/library/SDK edit that arrived while the compiler ran.
+        previous_root = ROOT
+        if source_root: ROOT = source_root
+        try:
+            validate()
+            validate_external_includes(manifest, source_hashes)
+        finally:
+            ROOT = previous_root
+        record = {'time': time.strftime('%Y-%m-%dT%H:%M:%S%z'), 'build_seconds': round(elapsed, 3), 'jobs': jobs}
+        with (SDK / 'timings.jsonl').open('a') as log: log.write(json.dumps(record) + '\n')
+        write(SDK / 'last-build-sources.json', (json.dumps(source_hashes, sort_keys=True) + '\n').encode())
+        print(f'Actual renderer build: {elapsed:.2f}s; no GN, Siso, or shared build output')
+        return SDK / 'src/out/Default/arcium_command_bar_studio'
 
 
 def main():

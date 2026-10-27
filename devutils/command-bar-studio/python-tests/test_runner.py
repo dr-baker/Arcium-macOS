@@ -56,6 +56,19 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(lease.read_text(), '123')
         self.assertEqual(json.loads((self.build / 'running.json').read_text()), self.old)
 
+    def testCancellationDuringReadinessClosesOnlyCandidate(self):
+        lease = self.build / 'writer'; lease.write_text('123')
+        process = Mock(pid=456, poll=Mock(return_value=None))
+        with patch.object(runner.subprocess, 'Popen', return_value=process), \
+             patch.object(runner.time, 'sleep', side_effect=KeyboardInterrupt), \
+             patch.object(runner, 'command') as command:
+            with self.assertRaises(KeyboardInterrupt):
+                runner.launch(self.app, writer_lease=lease)
+            command.assert_called_once_with([self.app / 'Contents/MacOS/ArciumCommandBarStudio',
+                '--quit-owned', '456', str(self.app / 'Contents/MacOS/ArciumCommandBarStudio')])
+        self.assertEqual(lease.read_text(), '123')
+        self.assertEqual(json.loads((self.build / 'running.json').read_text()), self.old)
+
     def testScenarioWriterTransfersOnlyAfterPreviousAppQuit(self):
         lease = self.build / 'writer'; lease.write_text('123')
         def quit_owned(arguments): self.assertEqual(lease.read_text(), '123')
