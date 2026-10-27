@@ -1,5 +1,9 @@
 # Automatic Picture-in-Picture validation
 
+This is the original core `942f9fa4` validation. See the
+[controls follow-up](automatic-picture-in-picture-controls-validation.md) for
+muted pause corrections, new glass controls and the YouTube launch diagnosis.
+
 Tested on macOS on 2026-10-26. The Mac's physical audio outputs were muted
 before playback and remained muted. This was an isolated Dev app, with no
 installation or changes to personal browser profiles.

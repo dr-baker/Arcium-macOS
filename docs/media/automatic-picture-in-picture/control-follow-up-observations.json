@@ -1,0 +1,422 @@
+[
+  {
+    "timestamp": "2026-10-27T03:44:18.105Z",
+    "label": "fresh-paused-before-mute",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "visible",
+      "activated": false,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": false,
+        "currentTime": 0,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:45:27.219Z",
+    "label": "native-AX-mute-fresh-paused",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "visible",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 0,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:45:48.517Z",
+    "label": "confirmed-muted-before-native-play",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "visible",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 0,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:46:10.410Z",
+    "label": "native-first-play-muted",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "visible",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": false,
+        "muted": true,
+        "currentTime": 4.57718,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:48:26.883Z",
+    "label": "fresh-muted-auto-PiP-after-native-newtab",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": false,
+        "muted": true,
+        "currentTime": 141.015738,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:50:11.464Z",
+    "label": "native-PiP-center-pause-attempt",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 197.274322,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:50:27.631Z",
+    "label": "native-PiP-paused-freeze-check",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 197.274322,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:50:41.805Z",
+    "label": "native-PiP-resumed",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 197.274322,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:51:06.201Z",
+    "label": "native-PiP-resume-current-control",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": false,
+        "muted": true,
+        "currentTime": 201.285595,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:51:32.516Z",
+    "label": "paused-before-seek",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 224.825748,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:51:48.455Z",
+    "label": "native-rewind15",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 209.825755,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:51:51.771Z",
+    "label": "native-forward15",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 224.825755,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:52:47.340Z",
+    "label": "native-paused-before-return",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 226.491471,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:52:51.449Z",
+    "label": "native-back-to-tab-paused-retained",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "visible",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 226.491471,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:53:08.398Z",
+    "label": "native-paused-return-freeze-check",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 226.491471,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:53:46.562Z",
+    "label": "native-inline-play-after-paused-return",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 226.491482,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:54:04.684Z",
+    "label": "native-inline-key-play-after-return",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 226.506857,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:56:48.592Z",
+    "label": "final-foreground-precondition",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 284.192234,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:57:15.381Z",
+    "label": "final-native-playing-leave-attempt",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 284.19224,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-27T03:57:41.534Z",
+    "label": "final-followup-public-opener-ready",
+    "kind": "diagnostic-read-only-CDP",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 284.19224,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  }
+]
