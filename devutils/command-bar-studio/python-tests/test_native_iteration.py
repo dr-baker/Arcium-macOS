@@ -22,8 +22,11 @@ class CurrentProductionInputsTests(unittest.TestCase):
         self.iteration = Mock()
         self.iteration.capture.return_value = self.generation
         self.iteration.build_lock.return_value = nullcontext()
+        self.design = Mock()
         modules = patch.dict(sys.modules, {'iteration': self.iteration})
         modules.start(); self.addCleanup(modules.stop)
+        verifier = patch.object(native, 'verify_design_inputs', self.design.verify)
+        verifier.start(); self.addCleanup(verifier.stop)
 
     def test_renderer_iteration_packages_current_inspector_too(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -48,6 +51,18 @@ class CurrentProductionInputsTests(unittest.TestCase):
         with patch.object(native, 'iterate') as iterate:
             native.controls(launch_app=False, jobs=3)
             iterate.assert_called_once_with(3, launch_app=False)
+
+    def test_stale_generated_design_types_fail_before_compiling_or_replacing_app(self):
+        self.design.verify.side_effect = ValueError('stale design schema')
+        sdk = Mock()
+        with patch.dict(sys.modules, {'sdk': sdk}), \
+             patch.object(native, 'package') as package, patch.object(native, 'launch') as launch:
+            with self.assertRaisesRegex(ValueError, 'stale design schema'): native.iterate(4)
+            self.design.verify.assert_called_once_with(self.generation.root)
+            sdk.build.assert_not_called()
+            package.assert_not_called()
+            launch.assert_not_called()
+            self.iteration.publish_latest.assert_not_called()
 
     def test_experiment_build_uses_the_frozen_generation_and_checks_it_before_launch(self):
         with tempfile.TemporaryDirectory() as directory:

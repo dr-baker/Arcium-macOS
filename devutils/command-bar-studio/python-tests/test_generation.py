@@ -31,6 +31,21 @@ class GenerationTests(unittest.TestCase):
         (lab / 'native_host.mm').write_text('host')
         self.patch = self.root / 'patches/fixture.patch'
 
+    def test_nested_sdk_lock_remains_exclusive_for_other_threads(self):
+        import threading
+        entered = threading.Event()
+        def contender():
+            with iteration.build_lock(self.cache): entered.set()
+        with iteration.build_lock(self.cache):
+            with iteration.build_lock(self.cache):
+                worker = threading.Thread(target=contender)
+                worker.start()
+                self.assertFalse(entered.wait(.05))
+            self.assertFalse(entered.is_set())
+        worker.join(timeout=2)
+        self.assertTrue(entered.is_set())
+        self.assertFalse(worker.is_alive())
+
     def test_source_edit_cannot_change_captured_generation(self):
         generation = iteration.capture(self.root, self.cache)
         self.patch.write_text('new patch\n')
@@ -67,6 +82,20 @@ class GenerationTests(unittest.TestCase):
         second = iteration.capture(self.root, self.cache)
         self.assertEqual(first.root, second.root)
         self.assertEqual(first.identity, second.identity)
+
+    def test_design_schema_and_generator_are_frozen_and_supersede_candidates(self):
+        generator = self.root / 'helium-chromium/devutils/command_design.py'
+        schema = self.root / 'helium-chromium/devutils/ui/command_bar_design.json'
+        schema.parent.mkdir(parents=True)
+        schema.write_text('{"version":1}')
+        generator.write_text('original generator')
+        generation = iteration.capture(self.root, self.cache)
+        self.assertEqual((generation.root / schema.relative_to(self.root)).read_text(), '{"version":1}')
+        generator.write_text('new generator')
+        with self.assertRaises(iteration.SupersededIteration): generation.require_current()
+        next_generation = iteration.capture(self.root, self.cache)
+        schema.write_text('{"version":2}')
+        with self.assertRaises(iteration.SupersededIteration): next_generation.require_current()
 
     def test_modified_cached_generation_is_rejected(self):
         generation = iteration.capture(self.root, self.cache)

@@ -1,0 +1,24 @@
+{
+  "schema": "arcium-ui-workshop",
+  "version": 1,
+  "component": "command-bar",
+  "fixture": "mixed",
+  "query": "a",
+  "scope": "omni",
+  "layout": {
+    "activity_dots": true,
+    "connected": false,
+    "design": {
+      "glow_height": 1.4,
+      "glow_width": 1.2,
+      "row_height": 44
+    },
+    "glow_strength": 0.75,
+    "icons": 2,
+    "labels": 1,
+    "result_count": 8,
+    "scope_reveal": 0,
+    "scope_tints": true,
+    "scope_width": 2
+  }
+}

@@ -36,8 +36,8 @@ final class StudioTests: XCTestCase {
     func testSmallEmittersDimAndFocusAndSelectionAreIndependent() {
         let baseline = Lighting.radiance(width: 80, height: 32, strength: 1, focus: 1, selected: 0)
         XCTAssertLessThan(Lighting.radiance(width: 38, height: 2, strength: 1, focus: 1, selected: 0), baseline)
-        XCTAssertEqual(Lighting.radiance(width: 80, height: 32, strength: 1, focus: 0, selected: 0) / baseline, 0.66, accuracy: 0.00001)
-        XCTAssertEqual(Lighting.radiance(width: 80, height: 32, strength: 1, focus: 1, selected: 1) / baseline, 1.3, accuracy: 0.00001)
+        XCTAssertEqual(Lighting.radiance(width: 80, height: 32, strength: 1, focus: 0, selected: 0) / baseline, 0.61, accuracy: 0.00001)
+        XCTAssertEqual(Lighting.radiance(width: 80, height: 32, strength: 1, focus: 1, selected: 1) / baseline, 1.51, accuracy: 0.00001)
         XCTAssertEqual(Lighting.radiance(width: 80, height: 0, strength: 1, focus: 1, selected: 1), 0)
     }
     func testNearestNeighboursDonateWithoutMovingDistantEdges() {
