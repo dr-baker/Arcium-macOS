@@ -9,7 +9,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +struct ArciumContentFrame: Equatable {
 +    var borderWidth = 0
 +    var x = 0
-+    var y = 2
++    var y = 0
 +    var blur = 8
 +    var spread = 0
 +    var opacity = 25

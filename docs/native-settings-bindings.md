@@ -312,9 +312,9 @@ The border controls page-content insets independently of webpage zoom.
 
 The separate **Page edge** group uses the profile dictionary
 `arcium.appearance.content_frame`. Its default has no decorative border and a
-black shadow at 25% opacity, with 8 px blur, 2 px vertical offset, and zero
-horizontal offset or spread. Border accepts 0–6 logical pixels independently
-of Browser UI scale. Shadow opacity accepts 0–100%, blur 0–48 px, offsets
+black shadow at 25% opacity, with 8 px blur and zero horizontal offset,
+vertical offset or spread, centered around the page. Border accepts 0–6 logical
+pixels independently of Browser UI scale. Shadow opacity accepts 0–100%, blur 0–48 px, offsets
 −24–24 px, and spread −12–12 px. Color accepts `#RRGGBB`.
 
 Soft shadow, Glow, and None change the effect while preserving Border. Use Arc

@@ -13,7 +13,7 @@
     "Use a plain light page and a plain dark page to distinguish the page edge from its effect."
   ],
   "steps": [
-    "Open Appearance and find Page edge. Verify the default has Border 0, a black shadow, 25% opacity, Blur 8, Vertical offset 2, Horizontal offset 0 and Spread 0.",
+    "Open Appearance and find Page edge. Verify the default has Border 0, a black shadow, 25% opacity, Blur 8, Vertical offset 0, Horizontal offset 0 and Spread 0. Inspect matching straight edges to confirm the shadow is centered around the page.",
     "Change Border between 0 and 6. Inspect every corner and verify the ordinary page does not reflow.",
     "Select Soft shadow, Glow and None. Change opacity, blur, color, each offset and spread; verify live changes. Confirm the presets preserve the chosen border.",
     "Open Shadow details and check negative offsets and spread. Set Blur 0 and positive spread; verify no opaque black source shape appears behind the effect.",
