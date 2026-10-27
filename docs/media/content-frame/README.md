@@ -1,8 +1,10 @@
 # Page edge styling
 
 These captures and results cover the original shadow with a 2 px downward
-offset. The centered-shadow follow-up sets both default offsets to zero;
-its build and runtime verification are pending.
+offset and inline controls. The follow-up uses a centered adaptive Default,
+None, and a Customize sheet with the theme color picker. Its new browser build
+and runtime verification are pending; the historical captures below do not
+show the revised controls.
 
 The default page edge has rounded corners, no decorative border, and a subtle
 black shadow. Appearance adds a 0–6 px border, shadow opacity, blur, color,

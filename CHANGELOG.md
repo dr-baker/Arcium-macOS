@@ -11,7 +11,7 @@ Unreleased changes are in source, not the current download. [Roadmap](README.md#
 
 ### Polish and fixes
 
-- Use a border-free page edge with a centered soft shadow by default. Appearance adds a 0–6 px border, shadow controls, and a tinted glow preset.
+- Use a border-free page edge with an adaptive centered shadow: a soft black shadow in light mode and an accent glow in dark mode. Appearance adds a 0–6 px Border slider and Default, None, and Customize shadow choices, with the theme color picker in a customization sheet. The command bar shadow now sits 2 px below center.
 - Install by dragging Arcium to Applications in a blush DMG. New profiles keep the preview defaults without a separate installer app.
 
 - Keep Arc Space emoji and supported icons when importing. Choose Spaces from a compact list, and preserve icons edited in Arcium when refreshing an import.

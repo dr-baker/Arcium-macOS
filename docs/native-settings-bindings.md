@@ -311,14 +311,25 @@ off. The stored width remains available when Rounded frame is enabled again.
 The border controls page-content insets independently of webpage zoom.
 
 The separate **Page edge** group uses the profile dictionary
-`arcium.appearance.content_frame`. Its default has no decorative border and a
-black shadow at 25% opacity, with 8 px blur and zero horizontal offset,
-vertical offset or spread, centered around the page. Border accepts 0–6 logical
-pixels independently of Browser UI scale. Shadow opacity accepts 0–100%, blur 0–48 px, offsets
-−24–24 px, and spread −12–12 px. Color accepts `#RRGGBB`.
+`arcium.appearance.content_frame`. Border accepts 0–6 logical pixels independently
+of Browser UI scale. Shadow offers Default, None, and Customize. Default follows
+each browser window's chrome appearance: light uses black at 20% opacity with
+24 px blur; dark uses the active Space accent at 12% opacity with 48 px blur and
+4 px spread. Both are centered with zero horizontal and vertical offsets.
+Theme and accent updates do not overwrite the saved custom style.
 
-Soft shadow, Glow, and None change the effect while preserving Border. Use Arc
-style restores the complete default. Edits update browser windows live through
+Customize opens the shared live settings sheet. Its sliders use the same field
+definitions as Swift validation, and its color control is the existing theme
+wheel and hex picker. Opacity accepts 0–100%, blur 0–48 px, offsets −24–24 px,
+and spread −12–12 px. Color accepts `#RRGGBB`. Opening and closing the sheet
+preserves the selected mode; editing a value selects Custom. Default and None
+retain the border and saved custom values. The persisted `shadowMode` is
+`default`, `none`, or `custom`. Valid older seven-field styles load as Custom.
+
+The command bar shadow is centered horizontally with a 2 px vertical offset;
+its existing blur, opacity, and Shadows switch remain in effect.
+
+Edits update browser windows live through
 PrefService and persist with the profile. Managed or unavailable settings reject
 edits. The shadow sits behind all page containers and excludes their interiors;
 split selection and screen-capture outlines remain separate.
