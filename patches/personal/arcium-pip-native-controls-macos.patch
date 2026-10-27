@@ -100,7 +100,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,79 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -111,6 +111,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +#include <functional>
 +#include <memory>
 +#include <string>
++
++#include "ui/gfx/native_ui_types.h"
 +
 +#ifdef __OBJC__
 +@class NSWindow;
@@ -155,14 +157,19 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +using ActionCallback = std::function<void(Action, double)>;
 +
 +// Construct/update/destroy on the main thread, after native widget
-+// initialization. The host keeps its contentView/compositor; this adds one
-+// native sibling above it.
++// initialization. The caller attaches the returned view with NativeViewHost
++// and detaches it before destroying the controls. Video transport is unchanged.
 +class NativeControls {
 + public:
 +  NativeControls(NSWindow* window, ActionCallback callback);
 +  ~NativeControls();
 +  NativeControls(const NativeControls&) = delete;
 +  NativeControls& operator=(const NativeControls&) = delete;
++  gfx::NativeView GetNativeView() const;
++  void SetAccessibilityParent(gfx::NativeViewAccessible parent);
++  void FocusControls(bool reverse);
++  void ReleaseFocus();
++  void SetBeforeFocusRelease(std::function<void()> callback);
 +  void Update(const State& state);
 +  void RestorePlacementForHide();
 +
@@ -177,7 +184,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1216 @@
+@@ -0,0 +1,1362 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -306,7 +313,32 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +
 +@interface ArciumPiPButton : NSButton
 +@end
++namespace {
++bool HandleNativeTab(NSView* control, NSEvent* event) {
++  if (event.keyCode != 48) {
++    return false;
++  }
++  NSView* next = (event.modifierFlags & NSEventModifierFlagShift)
++                     ? control.previousValidKeyView
++                     : control.nextValidKeyView;
++  if (next) {
++    [control.window makeFirstResponder:next];
++  }
++  return true;
++}
++}  // namespace
 +@implementation ArciumPiPButton
++- (BOOL)acceptsFirstResponder {
++  return YES;
++}
++- (BOOL)canBecomeKeyView {
++  return self.enabled && !self.hiddenOrHasHiddenAncestor;
++}
++- (void)keyDown:(NSEvent*)event {
++  if (!HandleNativeTab(self, event)) {
++    [super keyDown:event];
++  }
++}
 +- (BOOL)acceptsFirstMouse:(NSEvent*)event {
 +  return YES;
 +}
@@ -343,6 +375,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@property(nonatomic, copy) void (^endDrag)(void);
 +@end
 +@implementation ArciumPiPSlider
++- (BOOL)acceptsFirstResponder {
++  return YES;
++}
++- (BOOL)canBecomeKeyView {
++  return self.enabled && !self.hiddenOrHasHiddenAncestor;
++}
++- (void)keyDown:(NSEvent*)event {
++  if (!HandleNativeTab(self, event)) {
++    [super keyDown:event];
++  }
++}
 +@synthesize beginDrag = _beginDrag;
 +@synthesize endDrag = _endDrag;
 +- (BOOL)acceptsFirstMouse:(NSEvent*)event {
@@ -402,6 +445,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@interface ArciumPiPNativeOverlay : NSView {
 + @private
 +  State _state;
++  std::function<void()> _beforeFocusRelease;
++  BOOL _releasingFocus;
++  __weak id _axParent;
 +  std::shared_ptr<Delivery> _delivery;
 +  __weak NSWindow* _pipWindow;
 +  NSView* _glassContainer;
@@ -460,6 +506,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (instancetype)initWithWindow:(NSWindow*)window
 +                      callback:(ActionCallback)callback;
 +- (void)applyState:(const State&)state;
++- (BOOL)hasControlsFocus;
++- (void)focusControls:(BOOL)reverse;
++- (void)releaseControlsFocus;
++- (void)setBeforeFocusRelease:(std::function<void()>)callback;
++- (void)updateKeyLoop;
 +- (void)invalidate;
 +- (void)prepareForHide;
 +@end
@@ -476,13 +527,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _observers = [NSMutableArray array];
 +  _aspect = NSWidth(window.frame) / std::max(1.0, NSHeight(window.frame));
 +  _tucked = geo::Side::kNone;
-+  self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 +  self.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-+  self.accessibilityElement = NO;
++  self.accessibilityElement = YES;
++  self.accessibilityRole = NSAccessibilityGroupRole;
 +  self.accessibilityLabel = @"Picture in Picture controls";
 +  [self buildChrome];
 +  [self refreshChrome];
-+  [window.contentView addSubview:self positioned:NSWindowAbove relativeTo:nil];
 +  __weak ArciumPiPNativeOverlay* weakSelf = self;
 +  NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
 +  for (NSNotificationName name in @[
@@ -572,6 +622,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)buildChrome {
++  BOOL restoreFocus = [self hasControlsFocus];
++  [self releaseControlsFocus];
 +  [self endSeek];
 +  _slider.beginDrag = nil;
 +  _slider.endDrag = nil;
@@ -680,11 +732,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  };
 +  [self addSubview:_resizeView];
 +  [self setNeedsLayout:YES];
++  if (restoreFocus) {
++    [self focusControls:NO];
++  }
 +}
 +
 +- (void)applyState:(const State&)state {
 +  if (_invalidated) {
 +    return;
++  }
++  if (state.blocked) {
++    [self releaseControlsFocus];
 +  }
 +  if (state.blocked && _tucked != geo::Side::kNone) {
 +    [self restore:nil];
@@ -710,6 +768,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _snapshotTime = NSProcessInfo.processInfo.systemUptime;
 +  _hasSnapshot = YES;
 +  [self refreshChrome];
++  if ([self hasControlsFocus]) {
++    [self layoutSubtreeIfNeeded];
++    NSView* focused = (NSView*)_pipWindow.firstResponder;
++    if (focused.hiddenOrHasHiddenAncestor ||
++        ([focused isKindOfClass:NSControl.class] &&
++         !((NSControl*)focused).enabled)) {
++      [self focusControls:NO];
++    }
++  }
 +}
 +
 +- (double)currentPosition {
@@ -825,6 +892,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  CGFloat handleX = _tucked == geo::Side::kLeft ? w - geo::kHandleWidth : 0;
 +  Place(_restoreGlass, _restoreButton,
 +        NSMakeRect(handleX, h * 0.5 - 32, geo::kHandleWidth, 64));
++  [self updateKeyLoop];
 +}
 +
 +- (NSView*)hitTest:(NSPoint)point {
@@ -871,7 +939,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)armHideTimer {
 +  [_hideTimer invalidate];
-+  if (_seeking || _state.blocked || _tucked != geo::Side::kNone) {
++  if (_seeking || [self hasControlsFocus] || _state.blocked ||
++      _tucked != geo::Side::kNone) {
 +    return;
 +  }
 +  __weak ArciumPiPNativeOverlay* weakSelf = self;
@@ -881,7 +950,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                               block:^(NSTimer* timer) {
 +                                 ArciumPiPNativeOverlay* overlay = weakSelf;
 +                                 if (!overlay || overlay->_invalidated ||
-+                                     overlay->_seeking) {
++                                     overlay->_seeking ||
++                                     [overlay hasControlsFocus]) {
 +                                   return;
 +                                 }
 +                                 overlay->_nativeVisible = NO;
@@ -910,7 +980,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)mouseExited:(NSEvent*)event {
 +  _mouseInside = NO;
-+  if (!_seeking && !_dragging) {
++  if (!_seeking && !_dragging && ![self hasControlsFocus]) {
 +    _nativeVisible = NO;
 +    [self refreshChrome];
 +  }
@@ -1301,6 +1371,71 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +
++- (id)accessibilityParent {
++  return _axParent ?: [super accessibilityParent];
++}
++- (void)setAccessibilityParent:(id)parent {
++  _axParent = parent;
++}
++
++- (BOOL)hasControlsFocus {
++  NSResponder* responder = _pipWindow.firstResponder;
++  return [responder isKindOfClass:NSView.class] &&
++         [(NSView*)responder isDescendantOf:self];
++}
++- (NSArray<NSView*>*)focusableControls {
++  NSMutableArray<NSView*>* result = [NSMutableArray array];
++  for (NSControl* control in @[
++         _returnButton, _tuckButton, _closeButton, _backButton, _playButton,
++         _forwardButton, _muteButton, _slider, _restoreButton
++       ]) {
++    if (!control.hiddenOrHasHiddenAncestor && control.enabled) {
++      [result addObject:control];
++    }
++  }
++  return result;
++}
++- (void)updateKeyLoop {
++  NSArray<NSView*>* controls = [self focusableControls];
++  for (NSUInteger i = 0; i < controls.count; ++i) {
++    controls[i].nextKeyView = controls[(i + 1) % controls.count];
++  }
++}
++- (void)focusControls:(BOOL)reverse {
++  if (_invalidated || _state.blocked || _releasingFocus) {
++    return;
++  }
++  _nativeVisible = YES;
++  [self refreshChrome];
++  [self layoutSubtreeIfNeeded];
++  NSArray<NSView*>* controls = [self focusableControls];
++  if (controls.count) {
++    [_pipWindow makeFirstResponder:reverse ? controls.lastObject
++                                           : controls.firstObject];
++  }
++  [_hideTimer invalidate];
++  _hideTimer = nil;
++}
++- (void)setBeforeFocusRelease:(std::function<void()>)callback {
++  _beforeFocusRelease = std::move(callback);
++}
++- (void)releaseControlsFocus {
++  if (_releasingFocus || ![self hasControlsFocus])
++    return;
++  __attribute__((objc_precise_lifetime)) ArciumPiPNativeOverlay* keepAlive =
++      self;
++  (void)keepAlive;
++  _releasingFocus = YES;
++  auto beforeRelease = _beforeFocusRelease;
++  if (beforeRelease)
++    beforeRelease();
++  if (!_invalidated && [self hasControlsFocus]) {
++    [_pipWindow makeFirstResponder:_pipWindow.contentView];
++    [self armHideTimer];
++  }
++  _releasingFocus = NO;
++}
++
 +- (void)prepareForHide {
 +  if (_invalidated) {
 +    return;
@@ -1345,6 +1480,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (_invalidated) {
 +    return;
 +  }
++  [self releaseControlsFocus];
++  _axParent = nil;
++  _beforeFocusRelease = nullptr;
 +  _invalidated = YES;
 +  if (_delivery) {
 +    _delivery->callback = nullptr;
@@ -1366,7 +1504,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _slider.beginDrag = nil;
 +  _slider.endDrag = nil;
 +  _resizeView.resizeEvent = nil;
-+  [self removeFromSuperview];
 +}
 +@end
 +
@@ -1387,6 +1524,22 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +            @"PiP controls must be destroyed on the main thread");
 +  [impl_->view invalidate];
 +}
++gfx::NativeView NativeControls::GetNativeView() const {
++  return gfx::NativeView(impl_->view);
++}
++void NativeControls::SetAccessibilityParent(gfx::NativeViewAccessible parent) {
++  impl_->view.accessibilityParent =
++      parent.Get() ? NSAccessibilityUnignoredAncestor(parent.Get()) : nil;
++}
++void NativeControls::FocusControls(bool reverse) {
++  [impl_->view focusControls:reverse];
++}
++void NativeControls::SetBeforeFocusRelease(std::function<void()> callback) {
++  [impl_->view setBeforeFocusRelease:std::move(callback)];
++}
++void NativeControls::ReleaseFocus() {
++  [impl_->view releaseControlsFocus];
++}
 +void NativeControls::Update(const State& state) {
 +  [impl_->view applyState:state];
 +}
@@ -1398,7 +1551,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
-@@ -1,31 +1,47 @@
+@@ -1,31 +1,52 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -1435,6 +1588,10 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  void InitNativeWidget(views::Widget::InitParams params) override;
 +  void Show(ui::mojom::WindowShowState state,
 +            const gfx::Rect& restore_bounds) override;
++  gfx::NativeView GetNativeControlsView() const;
++  void SetNativeControlsAccessibilityParent(gfx::NativeViewAccessible parent);
++  void FocusNativeControls(bool reverse);
++  void ReleaseNativeControlsFocus();
 +  bool RefreshNativeControls();
 +  void RestorePlacementForHide();
 +  void UseLegacyControlsForTesting();
@@ -1450,6 +1607,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 -#endif  // CHROME_BROWSER_UI_VIEWS_OVERLAY_VIDEO_OVERLAY_WINDOW_NATIVE_WIDGET_MAC_H_
 + private:
 +  void ApplyWindowPolicy();
++  void ClearNativeControlsFocus();
 +  void OnNativeAction(arcium::pip::Action action, double value);
 +  base::WeakPtr<VideoOverlayWindowViews> video_;
 +  std::unique_ptr<arcium::pip::NativeControls> controls_;
@@ -1461,7 +1619,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
-@@ -1,17 +1,28 @@
+@@ -1,17 +1,30 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -1486,6 +1644,8 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +#include "ui/color/color_id.h"
 +#include "ui/color/color_provider.h"
 +#include "ui/views/controls/label.h"
++#include "ui/views/controls/native/native_view_host.h"
++#include "ui/views/focus/focus_manager.h"
 +#include "ui/views/view.h"
  
  VideoOverlayWindowNativeWidgetMac::VideoOverlayWindowNativeWidgetMac(
@@ -1495,7 +1655,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +33,185 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +35,228 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -1515,6 +1675,10 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +          weak->OnNativeAction(action, value);
 +        }
 +      });
++  controls_->SetBeforeFocusRelease([weak = weak_factory_.GetWeakPtr()] {
++    if (weak)
++      weak->ClearNativeControlsFocus();
++  });
 +}
 +
 +void VideoOverlayWindowNativeWidgetMac::ApplyWindowPolicy() {
@@ -1550,12 +1714,47 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +
 +void VideoOverlayWindowNativeWidgetMac::OnWindowDestroying(
 +    gfx::NativeWindow window) {
++  if (video_) {
++    video_->DetachNativeControlsHost();
++  }
 +  weak_factory_.InvalidateWeakPtrs();
 +  if (video_) {
 +    video_->native_controls_widget_ = nullptr;
 +  }
 +  controls_.reset();
 +  NativeWidgetMac::OnWindowDestroying(window);
++}
++
++gfx::NativeView VideoOverlayWindowNativeWidgetMac::GetNativeControlsView()
++    const {
++  return controls_ ? controls_->GetNativeView() : gfx::NativeView();
++}
++void VideoOverlayWindowNativeWidgetMac::SetNativeControlsAccessibilityParent(
++    gfx::NativeViewAccessible parent) {
++  if (controls_) {
++    controls_->SetAccessibilityParent(parent);
++  }
++}
++void VideoOverlayWindowNativeWidgetMac::FocusNativeControls(bool reverse) {
++  if (controls_) {
++    controls_->FocusControls(reverse);
++  }
++}
++void VideoOverlayWindowNativeWidgetMac::ClearNativeControlsFocus() {
++  if (video_ && video_->native_controls_host_) {
++    auto* focus = video_->GetFocusManager();
++    auto* host = video_->native_controls_host_.get();
++    if (focus && (focus->GetFocusedView() == host ||
++                  focus->GetStoredFocusView() == host)) {
++      focus->SetFocusedView(nullptr);
++      focus->SetStoredFocusView(nullptr);
++    }
++  }
++}
++void VideoOverlayWindowNativeWidgetMac::ReleaseNativeControlsFocus() {
++  ClearNativeControlsFocus();
++  if (controls_)
++    controls_->ReleaseFocus();
 +}
 +
 +bool VideoOverlayWindowNativeWidgetMac::RefreshNativeControls() {
@@ -1595,15 +1794,19 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +
 +void VideoOverlayWindowNativeWidgetMac::RestorePlacementForHide() {
 +  seek_was_playing_ = false;
++  ReleaseNativeControlsFocus();
 +  if (controls_) {
 +    controls_->RestorePlacementForHide();
 +  }
 +}
 +
 +void VideoOverlayWindowNativeWidgetMac::UseLegacyControlsForTesting() {
++  if (video_) {
++    video_->DetachNativeControlsHost();
++  }
 +  controls_.reset();
 +  if (video_) {
-+    video_->RefreshNativeControls();
++    video_->UpdateControlsVisibility(video_->native_controls_visible_, false);
 +  }
 +}
 +
@@ -1685,7 +1888,12 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
-@@ -10,6 +10,7 @@
+@@ -6,10 +6,12 @@
+ 
+ #include <memory>
+ #include <string>
++#include <utility>
+ 
  #include "base/check.h"
  #include "base/feature_list.h"
  #include "base/functional/bind.h"
@@ -1693,7 +1901,57 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "base/memory/ptr_util.h"
  #include "base/memory/raw_ptr.h"
  #include "base/notreached.h"
-@@ -392,8 +393,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+@@ -63,6 +65,9 @@
+ #include "services/media_session/public/cpp/media_image_manager.h"
+ #include "third_party/blink/public/mojom/picture_in_picture/picture_in_picture.mojom.h"
+ #include "ui/base/hit_test.h"
++#include "ui/views/controls/native/native_view_host.h"
++#include "ui/views/focus/focus_manager.h"
++#include "ui/views/accessibility/view_accessibility.h"
+ #include "ui/base/l10n/l10n_util.h"
+ #include "ui/base/metadata/metadata_header_macros.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+@@ -213,6 +218,28 @@ class GradientBackground : public views:
+ }  // namespace
+ 
+ // OverlayWindow implementation of FrameView.
++#if BUILDFLAG(IS_MAC)
++class ArciumPiPNativeViewHost : public views::NativeViewHost {
++  METADATA_HEADER(ArciumPiPNativeViewHost, views::NativeViewHost)
++ public:
++  explicit ArciumPiPNativeViewHost(base::RepeatingCallback<void(bool)> focus)
++      : focus_(std::move(focus)) {
++    SetFocusBehavior(FocusBehavior::ALWAYS);
++    GetViewAccessibility().SetRole(ax::mojom::Role::kGroup);
++    GetViewAccessibility().SetName(u"Picture in Picture controls");
++  }
++  void AboutToRequestFocusFromTabTraversal(bool reverse) override {
++    reverse_ = reverse;
++  }
++  void OnFocus() override { focus_.Run(reverse_); }
++ private:
++  base::RepeatingCallback<void(bool)> focus_;
++  bool reverse_ = false;
++};
++BEGIN_METADATA(ArciumPiPNativeViewHost)
++END_METADATA
++#endif
++
+ class OverlayWindowFrameView : public views::FrameView {
+   METADATA_HEADER(OverlayWindowFrameView, views::FrameView)
+ 
+@@ -236,6 +263,10 @@ class OverlayWindowFrameView : public vi
+       return HTNOWHERE;
+     }
+ 
++#if BUILDFLAG(IS_MAC)
++    if (static_cast<VideoOverlayWindowViews*>(widget_)->UsesNativeControls())
++      return HTCLIENT;
++#endif
+     constexpr int kResizeAreaCornerSize = 16;
+     int window_component = GetHTComponentForFrame(
+         point, gfx::Insets(kOverlayBorderThickness), kResizeAreaCornerSize,
+@@ -392,8 +423,9 @@ std::unique_ptr<VideoOverlayWindowViews>
    // On Mac, we override the default native widget with our own subclass, which
    // allows us to get the default window styling (e.g. corner radius) even
    // though we're using `views::Widget::InitParams::remove_standard_frame`.
@@ -1704,7 +1962,38 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #endif  // BUILDFLAG(IS_MAC)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -638,6 +640,15 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -483,6 +515,9 @@ VideoOverlayWindowViews::VideoOverlayWin
+ }
+ 
+ VideoOverlayWindowViews::~VideoOverlayWindowViews() {
++#if BUILDFLAG(IS_MAC)
++  DetachNativeControlsHost();
++#endif
+   if (overlay_view_) {
+     overlay_view_->RemoveObserver(this);
+   }
+@@ -573,6 +608,9 @@ void VideoOverlayWindowViews::OnNativeFo
+ }
+ 
+ void VideoOverlayWindowViews::OnNativeBlur() {
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_widget_) native_controls_widget_->ReleaseNativeControlsFocus();
++#endif
+   // Controls should be hidden when there is no more focus on the window. This
+   // is used for tabbing and touch interactions. For mouse interactions, the
+   // window cannot be blurred before the ui::EventType::kMouseExited event is
+@@ -627,6 +665,10 @@ void VideoOverlayWindowViews::OnNativeWi
+ 
+ void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
+     const gfx::Size& new_size) {
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_host_)
++    native_controls_host_->SetBoundsRect(gfx::Rect(new_size));
++#endif
+   // Hide the controls when the window is being resized. The controls will
+   // reappear when the user interacts with the window again.
+   UpdateControlsVisibility(false);
+@@ -638,6 +680,15 @@ void VideoOverlayWindowViews::OnNativeWi
  }
  
  void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
@@ -1720,7 +2009,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Every time a user uses a keyboard to interact on the window, restart the
    // timer to automatically hide the controls.
    hide_controls_timer_.Reset();
-@@ -669,11 +680,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+@@ -669,11 +720,11 @@ void VideoOverlayWindowViews::OnKeyEvent
        TogglePlayPause();
        event->SetHandled();
      } else if (event->key_code() == ui::VKEY_LEFT &&
@@ -1734,7 +2023,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
        Forward15Seconds();
        event->SetHandled();
      }
-@@ -801,6 +812,11 @@ void VideoOverlayWindowViews::FireEnable
+@@ -801,6 +852,11 @@ void VideoOverlayWindowViews::FireEnable
  }
  
  bool VideoOverlayWindowViews::AreControlsVisible() const {
@@ -1746,7 +2035,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If we're animating to a visibility state, then we'll act as if we're in
    // that state.
    if (fade_animation_) {
-@@ -862,6 +878,14 @@ void VideoOverlayWindowViews::UpdateCont
+@@ -862,6 +918,14 @@ void VideoOverlayWindowViews::UpdateCont
            : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
                  !can_hide_title_and_scrim;
  
@@ -1761,7 +2050,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (should_animate) {
      // Animate the title and top scrim.
      if (title_is_visible != AreTitleAndScrimVisible()) {
-@@ -959,6 +983,9 @@ void VideoOverlayWindowViews::OnViewVisi
+@@ -959,6 +1023,9 @@ void VideoOverlayWindowViews::OnViewVisi
  
    // The visibility of `overlay_view_` affects our minimum size.
    OnSizeConstraintsChanged();
@@ -1771,7 +2060,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
-@@ -974,6 +1001,34 @@ void VideoOverlayWindowViews::SetForcedT
+@@ -974,6 +1041,63 @@ void VideoOverlayWindowViews::SetForcedT
  }
  
  #if BUILDFLAG(IS_MAC)
@@ -1780,10 +2069,14 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 +}
 +
 +void VideoOverlayWindowViews::RefreshNativeControls() {
-+  if (!native_controls_widget_)
++  if (!native_controls_widget_ || !native_controls_host_ ||
++      !native_controls_host_->native_view())
 +    return;
 +  const bool was_active = native_controls_active_;
 +  native_controls_active_ = native_controls_widget_->RefreshNativeControls();
++  if (!native_controls_active_)
++    native_controls_widget_->ReleaseNativeControlsFocus();
++  native_controls_host_->SetVisible(native_controls_active_);
 +  if (!native_controls_active_ && !was_active)
 +    return;
 +  fade_animation_.reset();
@@ -1803,10 +2096,55 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 +  controls_top_scrim_view_->layer()->SetOpacity(title_opacity);
 +}
 +
++void VideoOverlayWindowViews::FocusNativeControls(bool reverse) {
++  if (native_controls_active_ && native_controls_widget_)
++    native_controls_widget_->FocusNativeControls(reverse);
++}
++
++void VideoOverlayWindowViews::DetachNativeControlsHost() {
++  auto* host = std::exchange(native_controls_host_, nullptr).get();
++  native_controls_active_ = false;
++  if (!host) return;
++  host->SetFocusBehavior(views::View::FocusBehavior::NEVER);
++  auto* focus = GetFocusManager();
++  if (focus && (focus->GetFocusedView() == host || focus->GetStoredFocusView() == host)) {
++    focus->SetFocusedView(nullptr);
++    focus->SetStoredFocusView(nullptr);
++  }
++  if (native_controls_widget_) {
++    native_controls_widget_->ReleaseNativeControlsFocus();
++    native_controls_widget_->SetNativeControlsAccessibilityParent({});
++  }
++  host->SetVisible(false);
++  if (host->native_view()) host->Detach();
++  controls_container_view_->SetVisible(native_controls_visible_);
++  title_view_->SetVisible(native_title_visible_);
++}
++
  void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
    MoveToActiveFullscreenSpace();
  }
-@@ -1517,6 +1572,12 @@ void VideoOverlayWindowViews::UpdateLaye
+@@ -1454,6 +1578,19 @@ void VideoOverlayWindowViews::OnRootView
+   }
+   view_holder_.clear();
+ 
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_widget_ && native_controls_widget_->GetNativeControlsView()) {
++    native_controls_host_ = contents_view->AddChildView(
++        std::make_unique<ArciumPiPNativeViewHost>(base::BindRepeating(
++            &VideoOverlayWindowViews::FocusNativeControls, weak_factory_.GetWeakPtr())));
++    native_controls_host_->SetVisible(false);
++    native_controls_host_->SetBoundsRect(contents_view->GetLocalBounds());
++    native_controls_host_->Attach(native_controls_widget_->GetNativeControlsView());
++    native_controls_widget_->SetNativeControlsAccessibilityParent(
++        contents_view->GetNativeViewAccessible());
++  }
++#endif
++
+   // Don't show the controls until the mouse hovers over the window.
+   UpdateControlsVisibility(false, /*should_animate=*/false);
+ }
+@@ -1517,6 +1654,12 @@ void VideoOverlayWindowViews::UpdateLaye
  }
  
  void VideoOverlayWindowViews::OnUpdateControlsBounds() {
@@ -1819,7 +2157,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    controls_container_view_->SetSize(GetBounds().size());
  
    // Adding an extra pixel to width/height makes sure the scrim covers the
-@@ -1766,6 +1827,11 @@ bool VideoOverlayWindowViews::IsActive()
+@@ -1766,6 +1909,11 @@ bool VideoOverlayWindowViews::IsActive()
  }
  
  void VideoOverlayWindowViews::Close() {
@@ -1831,7 +2169,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1847,6 +1913,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1847,6 +1995,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -1843,7 +2181,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1888,6 +1959,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1888,6 +2041,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -1853,7 +2191,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1958,6 +2032,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1958,6 +2114,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -1863,7 +2201,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1993,11 +2070,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1993,11 +2152,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -1881,7 +2219,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2230,7 +2313,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2230,7 +2395,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -1890,7 +2228,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2408,6 +2491,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2408,6 +2573,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -1900,7 +2238,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2513,6 +2599,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2513,6 +2681,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
@@ -1916,33 +2254,38 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
-@@ -36,6 +36,7 @@ namespace viz {
+@@ -36,6 +36,8 @@ namespace viz {
  class FrameSinkId;
  }  // namespace viz
  
++namespace views { class NativeViewHost; }
 +class VideoOverlayWindowNativeWidgetMac;
  class BackToTabLabelButton;
  class CloseImageButton;
  class HangUpButton;
-@@ -273,6 +274,11 @@ class VideoOverlayWindowViews : public c
+@@ -273,6 +275,12 @@ class VideoOverlayWindowViews : public c
      meets_user_interaction_ = meets_user_interaction;
    }
  
 +#if BUILDFLAG(IS_MAC)
 +  // Portable Views tests exercise the retained fallback presentation.
 +  void UseLegacyControlsForTesting();
++  bool UsesNativeControls() const { return native_controls_active_; }
 +#endif
 +
    void FinishTuckAnimationForTesting();
  
    bool AreTitleAndScrimVisibleForTesting() const;
-@@ -590,6 +596,15 @@ class VideoOverlayWindowViews : public c
+@@ -590,6 +598,18 @@ class VideoOverlayWindowViews : public c
    // True if the playback controls should be visible.
    bool show_playback_controls_ = true;
  
 +#if BUILDFLAG(IS_MAC)
 +  friend class VideoOverlayWindowNativeWidgetMac;
 +  void RefreshNativeControls();
++  void DetachNativeControlsHost();
++  void FocusNativeControls(bool reverse);
++  raw_ptr<views::NativeViewHost> native_controls_host_ = nullptr;
 +  raw_ptr<VideoOverlayWindowNativeWidgetMac> native_controls_widget_ = nullptr;
 +  bool native_controls_active_ = false;
 +  bool native_controls_visible_ = false;
@@ -2042,7 +2385,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,460 @@
+@@ -0,0 +1,642 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -2055,9 +2398,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +#include <memory>
 +#include <vector>
 +
++#include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
 +#include "testing/gtest/include/gtest/gtest.h"
++#include "testing/gtest_mac.h"
++#include "ui/base/hit_test.h"
 +#include "ui/base/test/cocoa_helper.h"
 +#include "ui/events/test/cocoa_test_event_utils.h"
++#include "ui/views/focus/focus_manager.h"
++#include "ui/views/view.h"
++#include "ui/views/widget/root_view.h"
 +
 +// These selectors inject input at the native overlay boundary. Expectations
 +// below inspect control presentation, emitted actions, and native window
@@ -2133,6 +2482,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +        window_, [this](Action action, double value) {
 +          actions_.push_back({action, value});
 +        });
++    MountControls();
 +    state_.can_play = true;
 +    state_.can_seek = true;
 +    state_.can_mute = true;
@@ -2148,7 +2498,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  }
 +
 +  void TearDown() override {
-+    controls_.reset();
++    DestroyControls();
 +    if (window_) {
 +      EXPECT_FALSE(window_.visible);
 +      [window_ close];
@@ -2159,6 +2509,19 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  }
 +
 + protected:
++  void MountControls() {
++    NSView* view = controls_->GetNativeView().GetNativeNSView();
++    view.frame = window_.contentView.bounds;
++    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++    [window_.contentView addSubview:view];
++  }
++  void DestroyControls() {
++    if (!controls_) {
++      return;
++    }
++    [controls_->GetNativeView().GetNativeNSView() removeFromSuperview];
++    controls_.reset();
++  }
 +  NSView* Overlay() {
 +    return FindAccessibleView(window_.contentView,
 +                              @"Picture in Picture controls");
@@ -2190,6 +2553,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +    [window_ setContentSize:size];
 +    [window_.contentView layoutSubtreeIfNeeded];
 +    Pump();
++    EXPECT_NEAR(NSWidth(Overlay().bounds), NSWidth(window_.contentView.bounds),
++                0.5);
++    EXPECT_NEAR(NSHeight(Overlay().bounds),
++                NSHeight(window_.contentView.bounds), 0.5);
 +  }
 +  size_t Count(Action action) const {
 +    return std::count_if(actions_.begin(), actions_.end(),
@@ -2332,7 +2699,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  ASSERT_TRUE(Button(@"Play"));
 +  NSButton* play = Button(@"Play");
 +  [play sendAction:play.action to:play.target];
-+  controls_.reset();
++  DestroyControls();
 +  Pump();
 +  EXPECT_TRUE(actions_.empty());
 +  EXPECT_FALSE(Overlay());
@@ -2426,14 +2793,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, CloseCallbackCanDestroyNativeControls) {
-+  controls_.reset();
++  DestroyControls();
 +  controls_ = std::make_unique<NativeControls>(
 +      window_, [this](Action action, double value) {
 +        actions_.push_back({action, value});
 +        if (action == Action::kClose) {
-+          controls_.reset();
++          DestroyControls();
 +        }
 +      });
++  MountControls();
 +  Update();
 +  NSButton* close = Button(@"Close Picture in Picture");
 +  ASSERT_TRUE(close);
@@ -2503,19 +2871,245 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +
 +}  // namespace
 +}  // namespace arcium::pip
++
++namespace arcium::pip::test {
++namespace {
++NSView* FindNative(NSView* root, NSString* label) {
++  if ([root.accessibilityLabel isEqualToString:label]) {
++    return root;
++  }
++  for (NSView* child in root.subviews) {
++    if (auto* found = FindNative(child, label)) {
++      return found;
++    }
++  }
++  return nil;
++}
++bool FindAXLabel(id root,
++                 NSString* label,
++                 NSMutableSet<NSValue*>* seen,
++                 int depth = 0) {
++  if (!root || depth > 40) {
++    return false;
++  }
++  NSValue* identity = [NSValue valueWithNonretainedObject:root];
++  if ([seen containsObject:identity]) {
++    return false;
++  }
++  [seen addObject:identity];
++  if ([root respondsToSelector:@selector(accessibilityLabel)] &&
++      [[root accessibilityLabel] isEqualToString:label]) {
++    return true;
++  }
++  if ([root respondsToSelector:@selector(accessibilityChildren)]) {
++    for (id child in [root accessibilityChildren]) {
++      if (FindAXLabel(child, label, seen, depth + 1)) {
++        return true;
++      }
++    }
++  }
++  return false;
++}
++NSWindow* PrepareNativeWindow(VideoOverlayWindowViews* window) {
++  NSWindow* native = window->GetNativeWindow().GetNativeNSWindow();
++  [native.contentView layoutSubtreeIfNeeded];
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++  [native.contentView layoutSubtreeIfNeeded];
++  return native;
++}
++}  // namespace
++void VerifyChromiumNativeInput(VideoOverlayWindowViews* window) {
++  NSWindow* native = PrepareNativeWindow(window);
++  ASSERT_FALSE(native.visible);
++  NSButton* pause = (NSButton*)FindNative(native.contentView, @"Pause");
++  ASSERT_TRUE(pause);
++  ASSERT_FALSE(pause.hiddenOrHasHiddenAncestor);
++  NSPoint point = [pause
++      convertPoint:NSMakePoint(NSMidX(pause.bounds), NSMidY(pause.bounds))
++            toView:nil];
++  NSPoint framePoint = [native.contentView.superview convertPoint:point
++                                                         fromView:nil];
++  EXPECT_EQ([native.contentView hitTest:framePoint], pause);
++  gfx::Point viewsPoint(point.x, NSHeight(native.contentView.bounds) - point.y);
++  EXPECT_EQ(window->GetNonClientComponent(viewsPoint), HTCLIENT);
++  NSEvent* up = cocoa_test_event_utils::MouseEventAtPointInWindow(
++      point, NSEventTypeLeftMouseUp, native, 1);
++  [NSApp postEvent:up atStart:NO];
++  [native sendEvent:cocoa_test_event_utils::MouseEventAtPointInWindow(
++                        point, NSEventTypeLeftMouseDown, native, 1)];
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.03, false);
++  EXPECT_TRUE(FindNative(native.contentView, @"Play"));
++  EXPECT_FALSE(native.visible);
++}
++void VerifyChromiumNativeAccessibilityAndFocus(
++    VideoOverlayWindowViews* window) {
++  NSWindow* native = PrepareNativeWindow(window);
++  NSView* overlay =
++      FindNative(native.contentView, @"Picture in Picture controls");
++  ASSERT_TRUE(overlay);
++  EXPECT_TRUE(overlay.accessibilityElement);
++  EXPECT_NSEQ(overlay.accessibilityRole, NSAccessibilityGroupRole);
++  EXPECT_TRUE(
++      FindAXLabel(native, @"Picture in Picture controls", [NSMutableSet set]));
++  EXPECT_TRUE(FindAXLabel(native, @"Pause", [NSMutableSet set]));
++  ASSERT_TRUE(overlay.accessibilityParent);
++  NSMutableSet<NSValue*>* parents = [NSMutableSet set];
++  id ancestor = overlay;
++  for (int depth = 0; ancestor && depth < 40; ++depth) {
++    NSValue* identity = [NSValue valueWithNonretainedObject:ancestor];
++    ASSERT_FALSE([parents containsObject:identity]);
++    [parents addObject:identity];
++    ancestor = [ancestor respondsToSelector:@selector(accessibilityParent)]
++                   ? [ancestor accessibilityParent]
++                   : nil;
++  }
++  EXPECT_NE(overlay.accessibilityParent, overlay);
++  [native makeFirstResponder:native.contentView];
++  ui::KeyEvent tab(ui::EventType::kKeyPressed, ui::VKEY_TAB, ui::EF_NONE);
++  window->GetFocusManager()->OnKeyEvent(tab);
++  NSResponder* first = native.firstResponder;
++  ASSERT_TRUE([first isKindOfClass:NSButton.class]);
++  EXPECT_NSEQ(((NSView*)first).accessibilityLabel, @"Return to tab");
++  NSView* next = ((NSView*)first).nextValidKeyView;
++  ASSERT_TRUE(next);
++  EXPECT_NSEQ(next.accessibilityLabel, @"Tuck to screen edge");
++  [native makeFirstResponder:next];
++  EXPECT_EQ(native.firstResponder, next);
++  EXPECT_FALSE(native.visible);
++}
++void VerifyFocusedNativeRebuildAndDetach(VideoOverlayWindowViews* window) {
++  NSWindow* native = PrepareNativeWindow(window);
++  NSView* overlay =
++      FindNative(native.contentView, @"Picture in Picture controls");
++  ASSERT_TRUE(overlay);
++  NSView* button = FindNative(native.contentView, @"Pause");
++  ASSERT_TRUE(button);
++  NSPoint point = [button
++      convertPoint:NSMakePoint(NSMidX(button.bounds), NSMidY(button.bounds))
++            toView:nil];
++  gfx::Point location(point.x, NSHeight(native.contentView.bounds) - point.y);
++  views::View* host = window->GetRootView()->GetEventHandlerForPoint(location);
++  ASSERT_TRUE(host);
++  auto* focus = window->GetFocusManager();
++  for (int iteration = 0; iteration < 2; ++iteration) {
++    focus->SetFocusedView(host);
++    focus->StoreFocusedView(false);
++    ASSERT_EQ(focus->GetFocusedView(), nullptr);
++    ASSERT_EQ(focus->GetStoredFocusView(), host);
++    NSResponder* outgoing = native.firstResponder;
++    [overlay buildChrome];
++    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    ASSERT_TRUE([native.firstResponder isKindOfClass:NSView.class]);
++    EXPECT_NE(native.firstResponder, outgoing);
++    EXPECT_TRUE([(NSView*)native.firstResponder isDescendantOf:overlay]);
++    EXPECT_EQ(focus->GetStoredFocusView(), nullptr);
++  }
++  window->UseLegacyControlsForTesting();
++  EXPECT_EQ(overlay.superview, nil);
++  EXPECT_FALSE([native.firstResponder isKindOfClass:NSView.class] &&
++               [(NSView*)native.firstResponder isDescendantOf:overlay]);
++  EXPECT_NE(focus->GetFocusedView(), host);
++  EXPECT_NE(focus->GetStoredFocusView(), host);
++  EXPECT_FALSE(native.visible);
++}
++void VerifyNativeHostVisibility(VideoOverlayWindowViews* window,
++                                bool expected) {
++  NSWindow* native = PrepareNativeWindow(window);
++  NSView* overlay =
++      FindNative(native.contentView, @"Picture in Picture controls");
++  if (expected) {
++    ASSERT_TRUE(overlay);
++    EXPECT_FALSE(overlay.hiddenOrHasHiddenAncestor);
++  } else if (overlay) {
++    EXPECT_TRUE(overlay.hiddenOrHasHiddenAncestor);
++    EXPECT_FALSE([native.firstResponder isKindOfClass:NSView.class] &&
++                 [(NSView*)native.firstResponder isDescendantOf:overlay]);
++  }
++  EXPECT_FALSE(native.visible);
++}
++}  // namespace arcium::pip::test
 Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
-@@ -206,6 +206,11 @@ class VideoOverlayWindowViewsTest : publ
+@@ -177,6 +177,7 @@ class TestVideoPictureInPictureWindowCon
+ class VideoOverlayWindowViewsTest : public ChromeViewsTestBase {
+  public:
+   VideoOverlayWindowViewsTest() = default;
++  virtual bool UseNativeControls() const { return false; }
+   // ChromeViewsTestBase:
+   void SetUp() override {
+     enabled_features_.push_back(media::kPictureInPictureOcclusionTracking);
+@@ -206,6 +207,11 @@ class VideoOverlayWindowViewsTest : publ
      SetDisplayWorkArea({0, 0, 1000, 1000});
  
      overlay_window_ = VideoOverlayWindowViews::Create(&pip_window_controller_);
 +#if BUILDFLAG(IS_MAC)
 +    // The native AppKit presentation has its own behavioral suite. This suite
 +    // continues to exercise Views, including its specialty-control fallback.
-+    overlay_window_->UseLegacyControlsForTesting();
++    if (!UseNativeControls()) overlay_window_->UseLegacyControlsForTesting();
 +#endif
      overlay_window_->set_overlay_view_cb_for_testing(
          base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
                              base::Unretained(this)));
+@@ -1927,3 +1933,60 @@ TEST_F(VideoOverlayWindowWithMuteControl
+   EXPECT_TRUE(overlay_window().ControlsHitTestContainsPoint(
+       mute_button_bounds.CenterPoint()));
+ }
++
++#if BUILDFLAG(IS_MAC)
++namespace arcium::pip::test {
++void VerifyChromiumNativeInput(VideoOverlayWindowViews* window);
++void VerifyChromiumNativeAccessibilityAndFocus(VideoOverlayWindowViews* window);
++void VerifyNativeHostVisibility(VideoOverlayWindowViews* window, bool expected);
++void VerifyFocusedNativeRebuildAndDetach(VideoOverlayWindowViews* window);
++}
++
++class VideoOverlayWindowNativeControlsTest : public VideoOverlayWindowViewsTest {
++ public:
++  bool UseNativeControls() const override { return true; }
++  void SetUp() override {
++    VideoOverlayWindowViewsTest::SetUp();
++    overlay_window().SetBounds(gfx::Rect(100, 100, 400, 225));
++    overlay_window().SetPlaybackControlsVisibility(true);
++    overlay_window().SetPlayPauseButtonVisibility(true);
++    overlay_window().SetPlaybackState(content::VideoOverlayWindow::kPlaying);
++    overlay_window().SetMediaPosition(media_session::MediaPosition(
++        1, base::Seconds(100), base::Seconds(42), /*end_of_media=*/false));
++    overlay_window().UpdateControlsVisibility(true, false);
++    ASSERT_FALSE(overlay_window().IsVisible());
++    ASSERT_TRUE(overlay_window().UsesNativeControls());
++  }
++};
++TEST_F(VideoOverlayWindowNativeControlsTest, ChromiumWindowRoutesNativePauseExactlyOnce) {
++  EXPECT_CALL(pip_window_controller(), TogglePlayPause()).WillOnce(Return(false));
++  arcium::pip::test::VerifyChromiumNativeInput(&overlay_window());
++  EXPECT_FALSE(overlay_window().IsVisible());
++}
++TEST_F(VideoOverlayWindowNativeControlsTest, NativeAccessibilityAndTabFocusUseHost) {
++  arcium::pip::test::VerifyChromiumNativeAccessibilityAndFocus(&overlay_window());
++  EXPECT_FALSE(overlay_window().IsVisible());
++}
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       FocusedRebuildAndDetachClearStoredFocus) {
++  arcium::pip::test::VerifyFocusedNativeRebuildAndDetach(&overlay_window());
++  EXPECT_FALSE(overlay_window().IsVisible());
++}
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       SpecialtyFallbackRestoresAndDetachesCleanly) {
++  arcium::pip::test::VerifyNativeHostVisibility(&overlay_window(), true);
++  arcium::pip::test::VerifyChromiumNativeAccessibilityAndFocus(&overlay_window());
++  overlay_window().SetToggleCameraButtonVisibility(true);
++  WaitForLayout();
++  EXPECT_FALSE(overlay_window().UsesNativeControls());
++  arcium::pip::test::VerifyNativeHostVisibility(&overlay_window(), false);
++  overlay_window().SetToggleCameraButtonVisibility(false);
++  overlay_window().UpdateControlsVisibility(true, false);
++  EXPECT_TRUE(overlay_window().UsesNativeControls());
++  arcium::pip::test::VerifyNativeHostVisibility(&overlay_window(), true);
++  overlay_window().UseLegacyControlsForTesting();
++  EXPECT_FALSE(overlay_window().UsesNativeControls());
++  arcium::pip::test::VerifyNativeHostVisibility(&overlay_window(), false);
++  EXPECT_FALSE(overlay_window().IsVisible());
++}
++#endif
