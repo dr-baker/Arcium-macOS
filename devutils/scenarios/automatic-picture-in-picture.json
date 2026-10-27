@@ -28,7 +28,7 @@
     {
       "target": "//chrome/test:arcium_feature_settings_unit_tests",
       "filters": [
-        "VideoOverlayWindowViewsTest.*:VideoOverlayWindowWithMuteControlTest.*:ArciumPiPGeometryTest.*:ArciumPiPNativeControlsTest.*-VideoOverlayWindowViewsTest.LiveCaption*"
+        "VideoOverlayWindowViewsTest.*:VideoOverlayWindowWithMuteControlTest.*:VideoOverlayWindowNativeControlsTest.*:ArciumPiPGeometryTest.*:ArciumPiPNativeControlsTest.*-VideoOverlayWindowViewsTest.LiveCaption*"
       ]
     },
     {

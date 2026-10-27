@@ -2390,7 +2390,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,642 @@
+@@ -0,0 +1,648 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -2917,6 +2917,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +}
 +NSWindow* PrepareNativeWindow(VideoOverlayWindowViews* window) {
 +  NSWindow* native = window->GetNativeWindow().GetNativeNSWindow();
++  [native.contentView layoutSubtreeIfNeeded];
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++  // SetBounds delivers native move/resize notifications before input is tested.
++  // Finish Chromium's move suppression before revealing the hidden fixture.
++  window->FireEnableControlsAfterMoveTimerForTesting();
++  window->UpdateControlsVisibility(true, false);
 +  [native.contentView layoutSubtreeIfNeeded];
 +  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
 +  [native.contentView layoutSubtreeIfNeeded];
