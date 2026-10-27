@@ -99,5 +99,18 @@ class LaunchTests(unittest.TestCase):
             self.assertIn(str(file), inputs)
         self.assertNotIn(str(runner.LAB / 'Sources/ArciumCommandBarStudio/ProductionContract.swift'), inputs)
 
+    def testEditsDuringInitialWatchBuildAreRebuilt(self):
+        revision = {'value': 1}
+        def build(jobs):
+            revision['value'] = 2
+            return self.app
+        with patch.object(runner.sys, 'argv', ['run.py', 'watch', '--jobs', '2']), \
+             patch.object(runner, 'build', side_effect=build) as builds, \
+             patch.object(runner, 'launch'), \
+             patch.object(runner, 'watch_files', side_effect=lambda: {'input': revision['value']}), \
+             patch.object(runner.time, 'sleep', side_effect=[None, None, KeyboardInterrupt]):
+            with self.assertRaises(KeyboardInterrupt): runner.main()
+            self.assertEqual(builds.call_count, 2)
+
 
 if __name__ == '__main__': unittest.main()

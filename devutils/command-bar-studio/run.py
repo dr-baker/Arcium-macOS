@@ -201,12 +201,12 @@ def main():
     if args.action == 'test':
         command([sys.executable, '-m', 'unittest', 'discover', '-s', str(LAB / 'python-tests')])
         prepare(); swift('test', args.jobs); return
+    last = watch_files() if args.action == 'watch' else None
     app = build(args.jobs)
     if args.action == 'build': print(app); return
     launch(app)
     if args.action != 'watch': return
     print('Watching Studio source and production settings patches. Ctrl-C stops watching and leaves Studio open.')
-    last = watch_files()
     while True:
         time.sleep(.5)
         current = watch_files()
