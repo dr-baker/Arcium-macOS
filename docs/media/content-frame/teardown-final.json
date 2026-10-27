@@ -1,0 +1,7 @@
+{
+  "pid": 17768,
+  "terminated": true,
+  "normal_quit_method": "NSRunningApplication.terminate; exact own PID, bundle ID, executable verified",
+  "new_candidate_reports": [],
+  "checked_at": 1793079022.543072
+}

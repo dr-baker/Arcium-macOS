@@ -1,0 +1,32 @@
+{
+  "coreCommit": "e2a11b5228dfb60554334647e615871ad5c49bac",
+  "outerCodeCommit": "c3aff7ad489c8cfa24b8784c82e8c5747417fed0",
+  "patchesApplied": 529,
+  "patchesSelected": 529,
+  "zeroFuzz": true,
+  "finalCheckProblems": [],
+  "timestampSnapshotPending": false,
+  "compiledTargets": [
+    "chrome",
+    "arcium_feature_settings_unit_tests",
+    "arcium_feature_settings_browser_tests"
+  ],
+  "buildEvidence": "177d14deaa0b40299c848aecc7067d53",
+  "swiftTests": {
+    "passed": 88,
+    "failed": 0
+  },
+  "cppTests": {
+    "unit": {
+      "HeliumSpaceServiceTest.ContentFrameDefaultsAndBoundaryWrites": "SUCCESS, one attempt",
+      "HeliumSpaceServiceTest.ContentFrameObservesExternalChanges": "SUCCESS, one attempt",
+      "HeliumSpaceServiceTest.ContentFrameRejectsInvalidAndManagedWrites": "SUCCESS, one attempt"
+    },
+    "browser": {
+      "MultiContentsViewBrowserTest.ContentBorderChangesLiveWithoutPageReflow": "SUCCESS, one attempt",
+      "MultiContentsViewBrowserTest.RoundedFrameBorderWidthLayout": "SUCCESS, one attempt",
+      "MultiContentsViewBrowserTest.SplitContentCornersShareOutlineCenter": "SUCCESS, one attempt"
+    }
+  },
+  "astraReview": "Source GO; no confirmed source defect. Custom ColorPicker interaction and listed native scenarios remain unverified."
+}
