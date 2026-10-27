@@ -19,6 +19,9 @@ class LaunchTests(unittest.TestCase):
         self.build_patch = patch.object(runner, 'BUILD', self.build)
         self.build_patch.start(); self.addCleanup(self.build_patch.stop)
         self.old = {'pid': 123, 'executable': '/old/Studio.app/Contents/MacOS/ArciumCommandBarStudio'}
+        self.identity = patch.object(runner, 'process_executable',
+                                     return_value=Path(self.old['executable']), create=True)
+        self.identity_mock = self.identity.start(); self.addCleanup(self.identity.stop)
         (self.build / 'running.json').write_text(json.dumps(self.old))
         self.app = self.build / 'new/Studio.app'
 
@@ -44,6 +47,28 @@ class LaunchTests(unittest.TestCase):
         with patch.object(runner.subprocess, 'Popen', side_effect=self.ready_process), patch.object(runner, 'command', side_effect=[failure, None]) as command:
             with self.assertRaisesRegex(RuntimeError, 'replacement was closed'):
                 runner.launch(self.app)
+            self.assertEqual(command.call_args_list[1].args[0][2], '456')
+        self.assertEqual(json.loads((self.build / 'running.json').read_text()), self.old)
+
+    def testReusedPidDoesNotQuitUnrelatedProcessOrBlockReplacement(self):
+        self.identity_mock.return_value = Path('/unrelated/Browser')
+        def quit_owned(arguments):
+            if arguments[2] == '123':
+                raise subprocess.CalledProcessError(2, arguments)
+        with patch.object(runner.subprocess, 'Popen', side_effect=self.ready_process), \
+             patch.object(runner, 'command', side_effect=quit_owned) as command:
+            runner.launch(self.app)
+            command.assert_not_called()
+        self.assertEqual(json.loads((self.build / 'running.json').read_text())['pid'], 456)
+
+    def testUnknownPidIdentityStillRequiresGuardedQuit(self):
+        self.identity_mock.return_value = None
+        failure = subprocess.CalledProcessError(2, ['quit'])
+        with patch.object(runner.subprocess, 'Popen', side_effect=self.ready_process), \
+             patch.object(runner, 'command', side_effect=[failure, None]) as command:
+            with self.assertRaisesRegex(RuntimeError, 'replacement was closed'):
+                runner.launch(self.app)
+            self.assertEqual(command.call_args_list[0].args[0][2], '123')
             self.assertEqual(command.call_args_list[1].args[0][2], '456')
         self.assertEqual(json.loads((self.build / 'running.json').read_text()), self.old)
 
@@ -86,6 +111,19 @@ class LaunchTests(unittest.TestCase):
         for file in [runner.LAB / 'run.py', runner.ROOT / 'resources/platform_resources.txt', runner.ROOT / 'devutils/glass-lab/Sources/GlassNative/include/GlassNative.h']:
             self.assertIn(str(file), inputs)
         self.assertNotIn(str(runner.LAB / 'Sources/ArciumCommandBarStudio/ProductionContract.swift'), inputs)
+
+    def testEditsDuringInitialWatchBuildAreRebuilt(self):
+        revision = {'value': 1}
+        def build(jobs):
+            revision['value'] = 2
+            return self.app
+        with patch.object(runner.sys, 'argv', ['run.py', 'watch', '--jobs', '2']), \
+             patch.object(runner, 'build', side_effect=build) as builds, \
+             patch.object(runner, 'launch'), \
+             patch.object(runner, 'watch_files', side_effect=lambda: {'input': revision['value']}), \
+             patch.object(runner.time, 'sleep', side_effect=[None, None, KeyboardInterrupt]):
+            with self.assertRaises(KeyboardInterrupt): runner.main()
+            self.assertEqual(builds.call_count, 2)
 
 
 if __name__ == '__main__': unittest.main()

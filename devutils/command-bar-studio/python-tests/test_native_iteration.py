@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 spec = importlib.util.spec_from_file_location(
     'studio_native', Path(__file__).resolve().parents[1] / 'native.py')
 native = importlib.util.module_from_spec(spec)
