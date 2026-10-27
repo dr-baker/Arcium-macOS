@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "id": "content-frame",
+  "description": "Check adaptive page shadows, the theme color-picker sheet, and centered command-bar shadow.",
+  "profile": {
+    "policy": "isolated",
+    "name": "content-edge-effects"
+  },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "HeliumSpaceServiceTest.ContentFrame*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_browser_tests",
+      "filters": [
+        "MultiContentsViewBrowserTest.ContentBorderChangesLiveWithoutPageReflow",
+        "MultiContentsViewBrowserTest.SplitContentCornersShareOutlineCenter"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Build and package the exact candidate as an isolated Dev app with the mock Keychain.",
+    "Use a plain light page and a plain dark page to distinguish the page edge from its effect."
+  ],
+  "steps": [
+    "Open Appearance and find Page edge. Verify only Border and Shadow are shown. Border spans 0\u20136; Shadow offers Default, None, and Customize.",
+    "Change Border between 0 and 6. Inspect every corner and verify the ordinary page does not reflow.",
+    "Select Default. In light window chrome verify centered black at 20% opacity, 24 px blur, and zero spread. In dark window chrome verify active Space accent at 12% opacity, 48 px blur, and 4 px spread, centered. Change Space/accent and system appearance in Auto; verify live updates without rewriting the saved custom style.",
+    "Choose Customize. Verify the shared sheet opens with opacity, blur, X/Y offsets, spread, and the theme wheel/hex color picker. Close without editing; verify selected mode is unchanged. Reopen, edit each control, verify live changes and Custom selection. Reopen Customize while already Custom. Set Blur 0 and positive spread; verify no opaque source shape.",
+    "Create a side-by-side split and switch the focused pane. Inspect both pages and the divider for selection outlines and unwanted shadow over the pages. Repeat with a stacked split when available.",
+    "Collapse the sidebar, hide the top bar, resize the window and enter and exit fullscreen. Check that the shadow follows the page corners and remains outside the page.",
+    "Select None then Default. Verify Border and cached custom values remain saved. Open the command bar and verify its shadow is horizontally centered with a 2 px vertical offset, with existing blur and opacity and Shadows switch preserved.",
+    "Set a custom border and tinted glow. Quit normally and relaunch the same profile, then reopen Settings and verify the saved controls and visible effect.",
+    "Stop the isolated app normally and inspect for a new matching crash report."
+  ],
+  "observables": [
+    "The default page has rounded corners, no decorative hairline, and a centered shadow that follows window chrome mode and Space accent independently of website appearance.",
+    "Border is independently adjustable from 0 to 6 logical pixels. Page margin retains the previous frame-inset behavior.",
+    "The effect is behind all pages and never washes over page content, including transparent content. Split focus and capture outlines remain meaningful.",
+    "Managed and unavailable preferences reject edits without changing saved values.",
+    "The custom border and all shadow values survive normal relaunch; teardown produces no new matching crash."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

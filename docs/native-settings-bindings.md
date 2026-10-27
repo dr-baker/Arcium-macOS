@@ -304,11 +304,35 @@ change before any shortcuts or appearance preferences are written.
 
 Core owns `arcium.appearance.collapsed_sidebar_style` (0 for Icon rail, 1 for
 Fully hidden) and `arcium.appearance.chrome_frame_border_width` (0–24 base points,
-default 3). Native Appearance exposes both through the existing PrefService
-bridge and respects managed/unavailable preferences. **Border width** updates
+default 5). Native Appearance exposes both through the existing PrefService
+bridge and respects managed/unavailable preferences. **Page margin** updates
 while dragging, displays scaled points, and is disabled when Rounded frame is
 off. The stored width remains available when Rounded frame is enabled again.
 The border controls page-content insets independently of webpage zoom.
+
+The separate **Page edge** group uses the profile dictionary
+`arcium.appearance.content_frame`. Border accepts 0–6 logical pixels independently
+of Browser UI scale. Shadow offers Default, None, and Customize. Default follows
+each browser window's chrome appearance: light uses black at 20% opacity with
+24 px blur; dark uses the active Space accent at 12% opacity with 48 px blur and
+4 px spread. Both are centered with zero horizontal and vertical offsets.
+Theme and accent updates do not overwrite the saved custom style.
+
+Customize opens the shared live settings sheet. Its sliders use the same field
+definitions as Swift validation, and its color control is the existing theme
+wheel and hex picker. Opacity accepts 0–100%, blur 0–48 px, offsets −24–24 px,
+and spread −12–12 px. Color accepts `#RRGGBB`. Opening and closing the sheet
+preserves the selected mode; editing a value selects Custom. Default and None
+retain the border and saved custom values. The persisted `shadowMode` is
+`default`, `none`, or `custom`. Valid older seven-field styles load as Custom.
+
+The command bar shadow is centered horizontally with a 2 px vertical offset;
+its existing blur, opacity, and Shadows switch remain in effect.
+
+Edits update browser windows live through
+PrefService and persist with the profile. Managed or unavailable settings reject
+edits. The shadow sits behind all page containers and excludes their interiors;
+split selection and screen-capture outlines remain separate.
 
 Navigation placement defaults to Sidebar when available. Existing browser
 layouts and explicit Top bar preferences are retained. Sidebar is available in

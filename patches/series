@@ -71,3 +71,5 @@ personal/arcium-command-bar-styles-macos.patch
 personal/arcium-command-design-tokens-macos.patch
 
 personal/arcium-command-style-previews-macos.patch
+
+personal/arcium-content-frame-macos.patch

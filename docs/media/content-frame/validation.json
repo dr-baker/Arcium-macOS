@@ -1,0 +1,221 @@
+{
+  "schema": 1,
+  "scenario": "content-frame",
+  "runtime_mode": "isolated independent Dev app with mock Keychain",
+  "outer_commit": "c3aff7ad489c8cfa24b8784c82e8c5747417fed0",
+  "core_commit": "e2a11b5228dfb60554334647e615871ad5c49bac",
+  "bundle": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930/.arcium/standalone/content-edge-effects-e2a11b52/Helium Dev - content-edge-effects.app",
+  "bundle_id": "net.imput.helium.dev.22b3dfdaf87937d9",
+  "profile": "/Users/daniel/Library/Application Support/Helium Development/profiles/isolated/content-edge-effects",
+  "flags": [
+    "--user-data-dir=/Users/daniel/Library/Application Support/Helium Development/profiles/isolated/content-edge-effects",
+    "--profile-directory=Default",
+    "--enable-ui-devtools",
+    "--use-mock-keychain",
+    "--no-first-run",
+    "--disable-session-crashed-bubble",
+    "--enable-features=HeliumFavoritesAndPins",
+    "--disable-features=DialMediaRouteProvider"
+  ],
+  "pids": [
+    81278,
+    17768,
+    20832
+  ],
+  "final_pid": 20832,
+  "final_state": {
+    "running": true,
+    "url": "https://example.com/",
+    "window_size": [
+      1200,
+      1040
+    ],
+    "sidebar": "expanded",
+    "settings_and_colors": "closed",
+    "agent_display": "Settings restored before quit; no retained parked windows",
+    "saved_content_frame": {
+      "blur": 8,
+      "borderWidth": 0,
+      "color": "#000000",
+      "opacity": 25,
+      "spread": 0,
+      "x": 0,
+      "y": 2
+    },
+    "unique_capture": "handoff-example.png",
+    "unique_capture_sha256": "57421e5eb95da67d45255d029b4b520ea2359f1e46d335afc8a239a241fe9d8f",
+    "title": "Example Domain - Arcium",
+    "capture_limit": "Earlier background captures sometimes omitted the page raster; those diagnostic frames are not published.",
+    "handoff_polish": "Navigated existingPID20832 via native address field and Return; no preference, Settings, quit, or relaunch changes.",
+    "capture_result": "Parent independently reviewed the fresh example.com handoff capture: page content renders and the default rounded edge has no decorative hairline. The earlier blank final-default capture is omitted."
+  },
+  "per_step": [
+    {
+      "id": "defaults",
+      "status": "passed",
+      "observation": "Native Settings Border0, black color, opacity25, blur8; offsets0/2 and spread0 confirmed in saved final Preferences. Light/dark baseline screenshots saved."
+    },
+    {
+      "id": "border",
+      "status": "passed-with-capture-limitation",
+      "observation": "Drove native Border 0 through 6. Default light and the single rendered post-relaunch Border 6 + Glow frame both show 930 x 1028 at the same 1200 x 1040 outer window. Blank background captures are omitted. The focused C++ browser test separately verifies border changes without ordinary page reflow."
+    },
+    {
+      "id": "presets",
+      "status": "passed",
+      "observation": "At Border6, Glow set opacity50/blur16; None set opacity0; Soft shadow set opacity25/blur8. Each retained Border6."
+    },
+    {
+      "id": "individual-shadow-controls",
+      "status": "partial",
+      "observation": "Opacity25\u219226, blur8\u21929\u21920, horizontal0\u2192-1, vertical2\u2192-1, spread0\u2192-1\u2192+1 accepted in native UI. Final preset reset those values. Combined custom-value persistence was not tested."
+    },
+    {
+      "id": "color-picker",
+      "status": "manual-only",
+      "observation": "Opened native Colors, RGB Sliders; red AXIncrement140\u2192141 changed panel #8C7BFF\u2192#8D7BFF, but Settings and saved prefs retained#8C7BFF. Hex field AX value edit did not commit. Foreground retry with exact AppKit activation still lost Colors window between query and AXRaise (-25204). No source defect established; actual custom-color selection binding unverified."
+    },
+    {
+      "id": "zero-blur-positive-spread",
+      "status": "partial",
+      "observation": "UI reached Blur0, Spread1 and negative offsets; candidate screenshot saved. Page raster/transparent-content behavior requires manual review because capture state was unreliable."
+    },
+    {
+      "id": "split-focus",
+      "status": "manual-only",
+      "observation": "Horizontal and stacked split creation/focus were not reached. Menu/keyboard targeting was unreliable; no split rendering claim."
+    },
+    {
+      "id": "sidebar-topbar-resize-fullscreen",
+      "status": "partial",
+      "observation": "Sidebar collapse accepted; captured page read1188x1028 with top bar hidden and Glow around page. Expanded with Cmd-S after relaunch. Show top bar control unavailable under Sidebar navigation and not forced. Resize not reached. Fullscreen AXPress failed; ctrl+super+f did not change1200x1040 CG bounds, so fullscreen unverified."
+    },
+    {
+      "id": "rounded-frame-gating",
+      "status": "manual-only",
+      "observation": "Default on state observed. Off/on gating not reached reliably; no forced preference edit."
+    },
+    {
+      "id": "arc-reset",
+      "status": "passed",
+      "observation": "Use Arc style reset Border0/black/opacity25/blur8 together; saved final prefs also verify x0,y2,spread0."
+    },
+    {
+      "id": "persistence",
+      "status": "passed-for-border-and-preset-glow",
+      "observation": "Normal AppKit quit of PID 81278, read own Preferences, relaunched the same app/profile as PID 17768. Native Settings retained Border 6, opacity 50, blur 16 and purple. The single persisted-border6-glow.png capture shows the saved effect and 930 x 1028 light page."
+    },
+    {
+      "id": "teardown",
+      "status": "passed",
+      "observation": "Both81278 and17768 quit through NSRunningApplication.terminate after exact bundle ID/executable/PID checks; no force kill. First quit was delayed beyond10 seconds; second returned terminated true promptly. No new Helium/Arcium crash candidates since baseline."
+    },
+    {
+      "id": "managed-unavailable",
+      "status": "manual-only",
+      "observation": "No managed/unavailable preference fixture supplied; no forced feature or other-profile changes."
+    }
+  ],
+  "persistence_values_after_custom_quit": {
+    "arcium.appearance.content_frame.blur": 16,
+    "arcium.appearance.content_frame.borderWidth": 6,
+    "arcium.appearance.content_frame.color": "#8C7BFF",
+    "arcium.appearance.content_frame.opacity": 50,
+    "arcium.appearance.content_frame.spread": 0,
+    "arcium.appearance.content_frame.x": 0,
+    "arcium.appearance.content_frame.y": 0,
+    "helium.browser.layout": 2
+  },
+  "teardown_checks": [
+    {
+      "pid": 81278,
+      "normal_quit_method": "NSRunningApplication.terminate with exact PID, bundle ID, executable and profile preflight",
+      "terminated": true,
+      "new_candidate_reports": [],
+      "checked_at": 1793078498.004589
+    },
+    {
+      "pid": 17768,
+      "terminated": true,
+      "normal_quit_method": "NSRunningApplication.terminate; exact own PID, bundle ID, executable verified",
+      "new_candidate_reports": [],
+      "checked_at": 1793079022.543072
+    }
+  ],
+  "screenshots": {
+    "default-light.png": "default-light.png",
+    "default-dark.png": "default-dark.png",
+    "settings.png": "settings.png",
+    "persisted-border6-glow.png": "persisted-border6-glow.png",
+    "handoff-example.png": "handoff-example.png"
+  },
+  "video": {
+    "path": "state-sequence.mp4",
+    "kind": "Actual screenshot state sequence, visibly labelled not real-time motion; one post-relaunch Glow capture included once",
+    "frames": [
+      {
+        "source": "default-light.png",
+        "sha256": "6279991a49331dd234530ddd268b1602cd134ae445370249d4f896b9530fa90c",
+        "label": "Default light"
+      },
+      {
+        "source": "default-dark.png",
+        "sha256": "613d98f5022a1f8ca643648ffb79d73d00a325c93a30f94a513989570a3c5656",
+        "label": "Default dark"
+      },
+      {
+        "source": "settings.png",
+        "sha256": "a6e6bad9d0e0dbad978bc663885acb15ca355b9c0fce5d717beb1bbfede7aa8d",
+        "label": "Border6 and Glow controls"
+      },
+      {
+        "source": "persisted-border6-glow.png",
+        "sha256": "0ac1f81069c5af881adf308f84ebf4c42208e0e8cbba11a539975cb04dce28c2",
+        "label": "One post-relaunch Border6+Glow capture"
+      }
+    ],
+    "duration_seconds": 14.966667,
+    "dimensions": [
+      1280,
+      1160
+    ],
+    "real_time_motion": false,
+    "sha256": "df26a3ec9b5c35f8947981af14b531de86c565038cc8e349bf18397358e17167",
+    "size_bytes": 128010,
+    "full_decode_check": "ffmpeg full-file decode completed without errors"
+  },
+  "capture_method": "Computer Use get_app_state/action screenshot image blocks written as PNG; direct screencapture fallback failed and was not used for evidence",
+  "tool_limitations": [
+    "CUA getApp hung535 seconds and was interrupted; no further CUA calls",
+    "Native window snapshots sometimes remained pinned to browser after Settings/Colors opened; exact own-PID window query and AXRaise used",
+    "Sequential AX indices shifted when popup nodes appeared; fresh label matches/exact-window queries used after detection",
+    "Background browser raster sometimes blank although AX exposed page content; those frames are not used for runtime rendering claims",
+    "Color panel hid or became unavailable before actual swatch/hex commit, including one foreground retry",
+    "No native real-time recording capability used; state sequence assembled from actual captures"
+  ],
+  "recorded_at": 1793079199.028047,
+  "capture_aliases": {
+    "one_capture_pid": 17768,
+    "event": "After normal quit81278 and helper relaunch17768, sidebar expanded with Cmd-S, loaded light.html through exact native address field AXClick/AXValue/Return; screenshot saved as persisted-glow.png. border6.png and glow.png intentionally copied from it.",
+    "sha256": "0ac1f81069c5af881adf308f84ebf4c42208e0e8cbba11a539975cb04dce28c2",
+    "aliases": [
+      "persisted-glow.png",
+      "border6.png",
+      "glow.png"
+    ],
+    "independent_captures": 1
+  },
+  "artifact_qa": {
+    "rendered_glow": "Parent independently reviewed immutable glow-0ac1f81069c5.png and confirmed visible Light page/930x1028 plus Border6+purple Glow. Bounded pixel check found785 dark heading pixels, same as default light.",
+    "preview_limit": "Local image-preview interpretations were inconsistent; final image claims reference the immutable frame inspection.",
+    "aliases_are_not_independent": true
+  },
+  "curation": "Published captures are immutable reviewed frames. Blank diagnostic captures and duplicate aliases are omitted. Original raw evidence remains under /tmp/arcium-content-edge/evidence.",
+  "image_hashes": {
+    "default-light.png": "6279991a49331dd234530ddd268b1602cd134ae445370249d4f896b9530fa90c",
+    "default-dark.png": "613d98f5022a1f8ca643648ffb79d73d00a325c93a30f94a513989570a3c5656",
+    "settings.png": "a6e6bad9d0e0dbad978bc663885acb15ca355b9c0fce5d717beb1bbfede7aa8d",
+    "persisted-border6-glow.png": "0ac1f81069c5af881adf308f84ebf4c42208e0e8cbba11a539975cb04dce28c2",
+    "handoff-example.png": "57421e5eb95da67d45255d029b4b520ea2359f1e46d335afc8a239a241fe9d8f"
+  }
+}
