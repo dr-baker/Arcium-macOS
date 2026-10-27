@@ -4,6 +4,7 @@ import PackageDescription
 let package = Package(
     name: "ArciumGlassLab",
     platforms: [.macOS("26.0")],
+    products: [.library(name: "GlassNative", targets: ["GlassNative"])],
     targets: [
         .target(name: "GlassNative", path: "Sources/GlassNative", publicHeadersPath: "include",
                 cxxSettings: [.unsafeFlags(["-fobjc-arc"])],

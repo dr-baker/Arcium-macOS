@@ -61,3 +61,8 @@ personal/arcium-dmg-first-run-defaults-macos.patch
 personal/arcium-command-settings-preview-macos.patch
 personal/arcium-command-appearance-controls-macos.patch
 personal/arcium-command-controls-keyboard-macos.patch
+
+personal/arcium-command-bar-studio-macos.patch
+personal/arcium-command-editor-close-reason-macos.patch
+personal/arcium-ui-workshop-macos.patch
+personal/arcium-command-design-presets-macos.patch

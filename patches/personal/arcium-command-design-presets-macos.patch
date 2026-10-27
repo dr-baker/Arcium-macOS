@@ -1,0 +1,218 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -366,8 +366,8 @@
+     }
+ }
+ 
+-struct ArciumCommandPanelLayout: Equatable {
+-    enum Width: Int, CaseIterable { case flush, iconWidth, offset }
++nonisolated struct ArciumCommandPanelLayout: Equatable, Sendable {
++    enum Width: Int, CaseIterable, Sendable { case flush, iconWidth, offset }
+     var labels = 1
+     var icons = 2
+     var reveal = 5
+@@ -421,6 +421,57 @@
+     }
+ }
+ 
++// Portable production settings only. Workshop context and scripted results are
++// deliberately excluded when a design is applied to a browser profile.
++nonisolated enum ArciumCommandBarPreset {
++    static let maximumBytes = 1024 * 1024
++    enum Failure: LocalizedError {
++        case invalid
++        var errorDescription: String? { "Choose a valid Arcium command-bar design file." }
++    }
++    static func decode(_ data: Data) throws -> ArciumCommandPanelLayout {
++        guard data.count <= maximumBytes,
++              let document = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
++            throw Failure.invalid
++        }
++        let layout: [String: Any]
++        if let schema = document["schema"] as? String {
++            guard exactIntegerOptional(document["version"]) == 1,
++                  (schema == "arcium-command-bar-layout" ||
++                   (schema == "arcium-ui-workshop" && document["component"] as? String == "command-bar")),
++                  let value = document["layout"] as? [String: Any] else { throw Failure.invalid }
++            layout = value
++        } else {
++            layout = document
++        }
++        let required: Set<String> = ["labels", "icons", "scope_reveal", "connected", "scope_width",
++                                     "scope_tints", "glow_strength", "activity_dots"]
++        let keys = Set(layout.keys)
++        guard keys == required || keys == required.union(["result_count"]) else { throw Failure.invalid }
++        for (key, upper) in [("labels", 2), ("icons", 3), ("scope_reveal", 5), ("scope_width", 2)] {
++            guard let value = exactIntegerOptional(layout[key]), (0...upper).contains(value) else { throw Failure.invalid }
++        }
++        for key in ["connected", "scope_tints", "activity_dots"] {
++            guard strictBoolean(layout[key]) != nil else { throw Failure.invalid }
++        }
++        guard let strength = finiteDouble(layout["glow_strength"]), (0...2).contains(strength) else { throw Failure.invalid }
++        if let raw = layout["result_count"] {
++            guard let value = exactIntegerOptional(raw), (1...20).contains(value) else { throw Failure.invalid }
++        }
++        return ArciumCommandPanelLayout(layout)
++    }
++    static func encode(_ layout: ArciumCommandPanelLayout) throws -> Data {
++        try JSONSerialization.data(withJSONObject: ["schema": "arcium-command-bar-layout", "version": 1,
++                                                    "layout": layout.dictionary], options: [.prettyPrinted, .sortedKeys])
++    }
++    static func read(_ url: URL) throws -> ArciumCommandPanelLayout {
++        let file = try FileHandle(forReadingFrom: url)
++        defer { try? file.close() }
++        guard let data = try file.read(upToCount: maximumBytes + 1) else { throw Failure.invalid }
++        return try decode(data)
++    }
++}
++
+ /// Values a floating-surface preset fills in; Custom stores its own.
+ struct ArciumSurfaceTuning: Equatable {
+     static let materials = ["fast", "liquid", "systemLiquid", "glassmorphic", "solid"]
+@@ -1431,7 +1482,7 @@
+     return defaultValue
+ }
+ 
+-private func strictBoolean(_ value: Any?) -> Bool? {
++nonisolated private func strictBoolean(_ value: Any?) -> Bool? {
+     if type(of: value) == Bool.self, let value = value as? Bool {
+         return value
+     }
+@@ -1442,7 +1493,7 @@
+     return value.boolValue
+ }
+ 
+-private func finiteDouble(_ value: Any?) -> Double? {
++nonisolated private func finiteDouble(_ value: Any?) -> Double? {
+     if let value = value as? NSNumber {
+         guard CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
+         let double = value.doubleValue
+@@ -1471,7 +1522,7 @@
+     return nil
+ }
+ 
+-private func exactIntegerOptional(_ value: Any?) -> Int? {
++nonisolated private func exactIntegerOptional(_ value: Any?) -> Int? {
+     guard let value = finiteDouble(value) else { return nil }
+     return Int(exactly: value)
+ }
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -1,4 +1,5 @@
+ import SwiftUI
++import UniformTypeIdentifiers
+ import SettingsUI
+ import SettingsUIStyle
+ import SettingsUIAuthoring
+@@ -1662,9 +1663,26 @@
+ 
+ }
+ 
++private struct ArciumCommandBarPresetDocument: FileDocument {
++    static var readableContentTypes: [UTType] { [.json] }
++    let layout: ArciumCommandPanelLayout
++    init(layout: ArciumCommandPanelLayout) { self.layout = layout }
++    init(configuration: ReadConfiguration) throws {
++        guard let data = configuration.file.regularFileContents else { throw ArciumCommandBarPreset.Failure.invalid }
++        layout = try ArciumCommandBarPreset.decode(data)
++    }
++    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
++        FileWrapper(regularFileWithContents: try ArciumCommandBarPreset.encode(layout))
++    }
++}
++
+ struct ArciumCommandBarEditorView: View {
+     @ObservedObject var store: ArciumSettingsStore
+     let previewAvailable: Bool
++    @State private var importingDesign = false
++    @State private var exportingDesign = false
++    @State private var presetError: String?
++
+ 
+     var body: some View {
+         if let preset = store.preset {
+@@ -1681,8 +1699,32 @@
+                      ? "Select scopes or type to filter the examples. Results won't open."
+                      : "Open a browser window to preview scopes and results.")
+                     .settingsFont(\.caption).foregroundStyle(.secondary)
++                HStack {
++                    Button("Import design…") { importingDesign = true }
++                        .disabled(!store.snapshot.appearance.commandPanelLayoutAvailable
++                                  || store.snapshot.appearance.commandPanelLayoutManaged)
++                    Button("Export design…") { exportingDesign = true }
++                }
++                .settingsFont(\.caption)
+                 ArciumCommandBarControls(store: store)
+             }
++            .fileImporter(isPresented: $importingDesign, allowedContentTypes: [.json]) { result in
++                do {
++                    let url = try result.get()
++                    let scoped = url.startAccessingSecurityScopedResource()
++                    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
++                    store.setCommandPanelLayout(try ArciumCommandBarPreset.read(url))
++                } catch { presetError = error.localizedDescription }
++            }
++            .fileExporter(isPresented: $exportingDesign,
++                          document: ArciumCommandBarPresetDocument(layout: store.snapshot.appearance.commandPanelLayout),
++                          contentType: .json, defaultFilename: "Arcium command bar") { result in
++                if case .failure(let error) = result { presetError = error.localizedDescription }
++            }
++            .alert("Design file error", isPresented: Binding(
++                get: { presetError != nil }, set: { if !$0 { presetError = nil } })) {
++                Button("OK") { presetError = nil }
++            } message: { Text(presetError ?? "") }
+             .settingsTheme(theme)
+             .settingsFont(preset.font)
+             .settingsFontScale(CGFloat(style.surface.fontScale))
+--- /dev/null
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandBarPresetTests.swift
+@@ -0,0 +1,49 @@
++import XCTest
++@testable import ArciumSettingsUI
++
++final class ArciumCommandBarPresetTests: XCTestCase {
++    func testEveryRevealAndWidthRoundTrips() throws {
++        for reveal in 0...5 { for width in ArciumCommandPanelLayout.Width.allCases {
++            var layout = ArciumCommandPanelLayout()
++            layout.reveal = reveal; layout.width = width
++            layout.icons = 3; layout.labels = 2; layout.resultCount = 20
++            layout.glowStrength = 1.35; layout.activityDots = false
++            XCTAssertEqual(try ArciumCommandBarPreset.decode(ArciumCommandBarPreset.encode(layout)), layout)
++        }}
++    }
++    func testLegacyEightFieldsNormalizeDisconnectedFlushAndResultCount() throws {
++        var value = ArciumCommandPanelLayout().dictionary
++        value.removeValue(forKey: "result_count")
++        value["connected"] = false; value["scope_width"] = 0
++        let layout = try ArciumCommandBarPreset.decode(JSONSerialization.data(withJSONObject: value))
++        XCTAssertEqual(layout.width, .offset)
++        XCTAssertEqual(layout.resultCount, 8)
++        XCTAssertEqual(try ArciumCommandBarPreset.decode(ArciumCommandBarPreset.encode(layout)), layout)
++    }
++    func testWorkshopEnvelopeAppliesOnlyProductionLayout() throws {
++        var layout = ArciumCommandPanelLayout(); layout.icons = 0; layout.resultCount = 3
++        let document: [String: Any] = ["schema": "arcium-ui-workshop", "version": 1,
++            "component": "command-bar", "fixture": "streaming", "query": "Example",
++            "context": ["scale": 1.25], "layout": layout.dictionary]
++        XCTAssertEqual(try ArciumCommandBarPreset.decode(JSONSerialization.data(withJSONObject: document)), layout)
++    }
++    func testBooleanEnumsAndUnknownLayoutKeysAreRejected() throws {
++        for key in ["labels", "icons", "scope_reveal", "scope_width", "glow_strength", "result_count"] {
++            var value = ArciumCommandPanelLayout().dictionary; value[key] = true
++            XCTAssertThrowsError(try ArciumCommandBarPreset.decode(JSONSerialization.data(withJSONObject: value)))
++        }
++        var value = ArciumCommandPanelLayout().dictionary; value["unknown"] = 0
++        XCTAssertThrowsError(try ArciumCommandBarPreset.decode(JSONSerialization.data(withJSONObject: value)))
++    }
++    func testWrongVersionAndComponentAreRejected() throws {
++        for document: [String: Any] in [
++            ["schema": "arcium-command-bar-layout", "version": 2, "layout": ArciumCommandPanelLayout().dictionary],
++            ["schema": "arcium-ui-workshop", "version": 1, "component": "sidebar", "layout": ArciumCommandPanelLayout().dictionary]] {
++            XCTAssertThrowsError(try ArciumCommandBarPreset.decode(JSONSerialization.data(withJSONObject: document)))
++        }
++    }
++    func testOversizedAndMalformedFilesAreRejected() {
++        XCTAssertThrowsError(try ArciumCommandBarPreset.decode(Data(repeating: 32, count: ArciumCommandBarPreset.maximumBytes + 1)))
++        XCTAssertThrowsError(try ArciumCommandBarPreset.decode(Data("invalid".utf8)))
++    }
++}
