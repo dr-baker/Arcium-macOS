@@ -16,7 +16,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
-@@ -0,0 +1,79 @@
+@@ -0,0 +1,89 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -40,14 +40,24 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +  r.height = std::isfinite(r.height) ? std::max(0.0, r.height) : 0;
 +  return r;
 +}
-+inline Rect Clamp(Rect r, Rect area) {
++inline Rect ClampPosition(Rect r, Rect area) {
 +  area = Normalize(area);
 +  r = Normalize(r);
-+  r.width = std::min(r.width, area.width);
-+  r.height = std::min(r.height, area.height);
-+  r.x = std::clamp(r.x, area.x, area.x + area.width - r.width);
-+  r.y = std::clamp(r.y, area.y, area.y + area.height - r.height);
++  r.x = std::clamp(r.x, area.x, area.x + std::max(0.0, area.width - r.width));
++  r.y = std::clamp(r.y, area.y, area.y + std::max(0.0, area.height - r.height));
 +  return r;
++}
++inline Rect Fit(Rect r, Rect area) {
++  area = Normalize(area);
++  r = Normalize(r);
++  double scale = 1;
++  if (r.width > area.width)
++    scale = std::min(scale, area.width / r.width);
++  if (r.height > area.height)
++    scale = std::min(scale, area.height / r.height);
++  r.width *= scale;
++  r.height *= scale;
++  return ClampPosition(r, area);
 +}
 +inline Corner NearestCorner(Rect r, Rect area) {
 +  r = Normalize(r);
@@ -59,7 +69,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +}
 +inline Rect Anchor(Rect r, Rect area, Corner corner) {
 +  area = Normalize(area);
-+  r = Clamp(r, area);
++  r = Fit(r, area);
 +  const double mx = std::min(kMargin, (area.width - r.width) / 2);
 +  const double my = std::min(kMargin, (area.height - r.height) / 2);
 +  const bool right =
@@ -71,11 +81,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +}
 +inline Rect Tuck(Rect r, Rect screen, Rect work_area, Side side) {
 +  screen = Normalize(screen);
-+  r = Clamp(r, work_area);
++  r = Fit(r, work_area);
 +  if (side == Side::kNone) {
 +    return r;
 +  }
-+  const double handle = std::min(kHandleWidth, screen.width);
++  const double handle = std::min({kHandleWidth, screen.width, r.width});
 +  r.x = side == Side::kLeft ? screen.x - r.width + handle
 +                            : screen.x + screen.width - handle;
 +  return r;
@@ -92,7 +102,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +  r.width = width;
 +  r.height = width / aspect;
 +  r.y = top - r.height;
-+  return Clamp(r, area);
++  return ClampPosition(r, area);
 +}
 +}  // namespace arcium::pip::geometry
 +#endif
@@ -1061,7 +1071,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  _restoreDisplay = screen.deviceDescription[@"NSScreenNumber"];
 +  _restoreFrame = ToNSRect(
-+      geo::Clamp(ToRect(_pipWindow.frame), ToRect(screen.visibleFrame)));
++      geo::Fit(ToRect(_pipWindow.frame), ToRect(screen.visibleFrame)));
 +  _corner =
 +      geo::NearestCorner(ToRect(_restoreFrame), ToRect(screen.visibleFrame));
 +  // At an interior display seam the window would remain visible on a neighbor.
@@ -1101,7 +1111,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self rememberScreen:screen];
 +  _tucked = geo::Side::kNone;
 +  if (screen) {
-+    [self setWindowFrame:ToNSRect(geo::Clamp(ToRect(_restoreFrame),
++    [self setWindowFrame:ToNSRect(geo::Fit(ToRect(_restoreFrame),
 +                                             ToRect(screen.visibleFrame)))
 +                 animate:YES];
 +  }
@@ -1472,7 +1482,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _progressTimer = nil;
 +  if (screen) {
 +    [self rememberScreen:screen];
-+    [self setWindowFrame:ToNSRect(geo::Clamp(ToRect(frame),
++    [self setWindowFrame:ToNSRect(geo::Fit(ToRect(frame),
 +                                             ToRect(screen.visibleFrame)))
 +                 animate:NO];
 +  }
@@ -2302,7 +2312,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
-@@ -0,0 +1,65 @@
+@@ -0,0 +1,86 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
@@ -2350,6 +2360,27 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 +      EXPECT_GE(frame.width, 284);
 +      EXPECT_GE(frame.height, 160);
 +    }
++  }
++}
++
++TEST(ArciumPiPGeometryTest, PlacementFitsSmallerWorkAreaProportionally) {
++  const Rect area{-600, 50, 600, 400};
++  const Rect original{0, 0, 800, 450};
++  const Rect fitted = Fit(original, area);
++  EXPECT_TRUE(Inside(fitted, area));
++  EXPECT_DOUBLE_EQ(fitted.width, 600);
++  EXPECT_DOUBLE_EQ(fitted.height, 337.5);
++  for (Corner corner : {Corner::kBottomLeft, Corner::kBottomRight,
++                        Corner::kTopLeft, Corner::kTopRight}) {
++    Rect frame = Anchor(original, area, corner);
++    EXPECT_TRUE(Inside(frame, area));
++    EXPECT_NEAR(frame.width / frame.height, 16.0 / 9.0, 1e-6);
++  }
++  for (Side side : {Side::kLeft, Side::kRight}) {
++    Rect frame = Tuck(original, area, area, side);
++    EXPECT_NEAR(frame.width / frame.height, 16.0 / 9.0, 1e-6);
++    EXPECT_DOUBLE_EQ(frame.width, fitted.width);
++    EXPECT_DOUBLE_EQ(frame.height, fitted.height);
 +  }
 +}
 +
