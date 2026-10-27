@@ -87,6 +87,17 @@ class WorkflowTest(unittest.TestCase):
         self.m.he("push", "--refresh")
         self.assertNotEqual((self.m.build_dir / ".arcium" / "patches" / LONG_PATCH).read_bytes(), before)
 
+    def test_push_accepts_line_offsets_without_refreshing_patch(self) -> None:
+        self.m.he("merge")
+        path = self.m.src / "long.cc"
+        path.write_text("// Extra line before unchanged context.\n" + path.read_text())
+        patch = self.m.build_dir / ".arcium" / "patches" / LONG_PATCH
+        before = patch.read_bytes()
+        result = self.m.he("push")
+        self.assertIn("offset 1 line", result.stdout)
+        self.assertEqual(patch.read_bytes(), before)
+        self.assertIn(LONG_PATCH, (self.m.src / ".pc" / "applied-patches").read_text().split())
+
     # Timestamp keeper ------------------------------------------------------------
 
     def test_pop_and_push_without_edits_rebuilds_nothing(self) -> None:
