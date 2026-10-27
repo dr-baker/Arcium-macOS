@@ -1,0 +1,1308 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+@@ -30,6 +30,14 @@ if (use_system_xcode) {
+ 
+ _resources = [
+   "ArciumSettingsUI_ArciumSettingsUI.bundle/yellow-blue grain.json",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-minimal-dark.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-minimal-light.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-peek-dark.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-peek-light.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-stacked-dark.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-stacked-light.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-subtle-dark.svg",
++  "ArciumSettingsUI_ArciumSettingsUI.bundle/command-style-subtle-light.svg",
+ ]
+ 
+ action("build") {
+@@ -43,6 +51,14 @@ action("build") {
+     "Sources/ArciumSettingsUI/ArciumSettingsUIController.swift",
+     "Sources/ArciumSettingsUI/ArciumPublicGlass.swift",
+     "Sources/ArciumSettingsUI/Resources/yellow-blue grain.json",
++    "Sources/ArciumSettingsUI/Resources/command-style-minimal-dark.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-minimal-light.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-peek-dark.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-peek-light.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-stacked-dark.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-stacked-light.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-subtle-dark.svg",
++    "Sources/ArciumSettingsUI/Resources/command-style-subtle-light.svg",
+     _swift,
+     _swift_frontend,
+   ]
+@@ -73,7 +89,10 @@ bundle_data("library") {
+ # Install resources in the signed app resource directory. Production loaders
+ # resolve these explicitly without SwiftPM developer build-path fallbacks.
+ bundle_data("preset") {
+-  sources = [ "$_staged/ArciumSettingsUI_ArciumSettingsUI.bundle/yellow-blue grain.json" ]
++  sources = []
++  foreach(resource, _resources) {
++    sources += [ "$_staged/$resource" ]
++  }
+   outputs = [ "{{bundle_resources_dir}}/ArciumSettingsUI_ArciumSettingsUI.bundle/{{source_file_part}}" ]
+   public_deps = [ ":build" ]
+ }
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -1,4 +1,5 @@
+ import SwiftUI
++import AppKit
+ import UniformTypeIdentifiers
+ import SettingsUI
+ import SettingsUIStyle
+@@ -1617,7 +1618,7 @@ private func shortcutSummary(_ command:
+ private struct ArciumCommandBarControls: View {
+     @ObservedObject var store: ArciumSettingsStore
+     let designTools: Bool
+-    @State private var showingAdvanced = false
++    @State private var showingCustomization = false
+     @Environment(\.settingsTheme) private var theme
+ 
+     private var editable: Bool {
+@@ -1646,7 +1647,8 @@ private struct ArciumCommandBarControls:
+                         } label: {
+                             VStack(alignment: .leading, spacing: 6) {
+                                 ArciumCommandStyleThumbnail(style: style)
+-                                    .frame(height: 64).accessibilityHidden(true)
++                                    .aspectRatio(452.0 / 232.0, contentMode: .fit)
++                                    .accessibilityHidden(true)
+                                 HStack {
+                                     Text(style.rawValue).settingsFont(\.body)
+                                     Spacer(minLength: 0)
+@@ -1659,7 +1661,12 @@ private struct ArciumCommandBarControls:
+                             .contentShape(.rect(cornerRadius: 10))
+                         }
+                         .buttonStyle(.plain)
+-                        .settingsInteractiveControlSurface(isSelected: selected)
++                        .settingsInteractiveControlSurface(cornerRadius: 10)
++                        .overlay {
++                            RoundedRectangle(cornerRadius: theme.radius(10))
++                                .strokeBorder(selected ? theme.accent : .clear, lineWidth: 1.5)
++                                .allowsHitTesting(false)
++                        }
+                         .accessibilityLabel(style.rawValue)
+                         .accessibilityAddTraits(selected ? .isSelected : [])
+                         .accessibilityIdentifier("command-bar-style-" + style.rawValue.lowercased())
+@@ -1670,7 +1677,7 @@ private struct ArciumCommandBarControls:
+                         Text("Custom").settingsFont(\.caption).foregroundStyle(theme.textSecondary)
+                     }
+                     Spacer()
+-                    Button("Advanced…") { showingAdvanced = true }
++                    Button("Customize…") { showingCustomization = true }
+                         .accessibilityIdentifier("command-bar-advanced")
+                 }
+             }
+@@ -1706,8 +1713,8 @@ private struct ArciumCommandBarControls:
+             }
+         }
+         .disabled(!editable)
+-        .sheet(isPresented: $showingAdvanced) {
+-            ArciumLiveSettingsSheet(title: "Advanced scopes", minimumHeight: 300, idealHeight: 340) {
++        .sheet(isPresented: $showingCustomization) {
++            ArciumLiveSettingsSheet(title: "Customize scopes", minimumHeight: 300, idealHeight: 340) {
+                 SGroupedSections(showsSurfaces: false, showsDividers: false) {
+                     Section("Scopes") {
+                         SPicker("Scope height", selection: commandLayoutBinding(\.reveal), options: [
+@@ -1723,6 +1730,7 @@ private struct ArciumCommandBarControls:
+                 }
+                 .disabled(!editable)
+             }
++            .clipShape(.rect(cornerRadius: theme.radius(20) + 8))
+         }
+     }
+ }
+@@ -1804,41 +1812,47 @@ private struct ArciumCommandDesignContro
+     }
+ }
+ 
+-// A small style-selection diagram; the adjacent live preview uses production UI.
++// Static skeletons share the production contour, overlap and light clipping.
++// Decode once when the picker is first shown; the browser command bar does no work here.
++enum ArciumCommandStyleArtwork {
++    static let images = load(from: Bundle.main.resourceURL.flatMap {
++        Bundle(url: $0.appendingPathComponent("ArciumSettingsUI_ArciumSettingsUI.bundle"))
++    })
++
++    static func name(for style: ArciumCommandPanelLayout.Style, isDark: Bool) -> String {
++        "command-style-" + style.rawValue.lowercased() + (isDark ? "-dark" : "-light")
++    }
++
++    static func load(from bundle: Bundle?) -> [String: NSImage] {
++        var images: [String: NSImage] = [:]
++        for style in ArciumCommandPanelLayout.Style.allCases {
++            for isDark in [false, true] {
++                let name = name(for: style, isDark: isDark)
++                if let url = bundle?.url(forResource: name, withExtension: "svg"),
++                   let image = NSImage(contentsOf: url) {
++                    image.isTemplate = false
++                    images[name] = image
++                }
++            }
++        }
++        return images
++    }
++}
++
+ private struct ArciumCommandStyleThumbnail: View {
+     let style: ArciumCommandPanelLayout.Style
+-    @Environment(\.settingsTheme) private var theme
++    @Environment(\.colorScheme) private var colorScheme
++
+     var body: some View {
+-        Canvas { context, size in
+-            let body = CGRect(x: 4, y: 28, width: size.width - 8, height: 34)
+-            context.fill(Path(roundedRect: body, cornerRadius: 6), with: .color(theme.control.opacity(0.22)))
+-            let gap: CGFloat = style.attached ? 0 : 5
+-            let available = size.width - 16
+-            let widths: [CGFloat] = style.attached
+-                ? Array(repeating: available / 4, count: 4)
+-                : [available * 0.32, available * 0.2, available * 0.2, available * 0.2]
+-            var x: CGFloat = 8
+-            for index in 0..<4 {
+-                let height: CGFloat = switch style {
+-                case .minimal: 3
+-                case .subtle: index == 0 ? 7 : 3
+-                case .stacked: 20
+-                case .peek: 7
+-                }
+-                let bottom: CGFloat = style.attached ? 30 : 22
+-                let tab = CGRect(x: x, y: bottom - height, width: max(8, widths[index] - gap), height: height)
+-                context.fill(Path(roundedRect: tab, cornerRadius: min(5, height / 2)),
+-                             with: .color(index == 0 ? theme.accent.opacity(0.8) : theme.textSecondary.opacity(0.28)))
+-                if style == .stacked {
+-                    context.fill(Path(ellipseIn: CGRect(x: tab.midX - 2, y: tab.midY - 2, width: 4, height: 4)),
+-                                 with: .color(theme.textPrimary.opacity(0.7)))
+-                }
+-                x += widths[index]
+-            }
+-            for index in 0..<2 {
+-                let row = CGRect(x: 12, y: 36 + CGFloat(index) * 10, width: size.width * (index == 0 ? 0.65 : 0.44), height: 3)
+-                context.fill(Path(roundedRect: row, cornerRadius: 1.5), with: .color(theme.textSecondary.opacity(0.4)))
+-            }
++        let isDark = colorScheme == .dark
++        if let image = ArciumCommandStyleArtwork.images[
++            ArciumCommandStyleArtwork.name(for: style, isDark: isDark)] {
++            Image(nsImage: image)
++                .resizable()
++                .scaledToFit()
++                .background(isDark ? Color(red: 0.102, green: 0.098, blue: 0.090)
++                                   : Color(red: 0.910, green: 0.898, blue: 0.875))
++                .clipShape(.rect(cornerRadius: 7))
+         }
+     }
+ }
+@@ -1891,6 +1905,8 @@ struct ArciumCommandBarEditorView: View
+                     .settingsFont(\.caption)
+                 }
+             }
++            // Include the inset material rim in the controls-only mask.
++            .clipShape(.rect(cornerRadius: theme.radius(20) + 8))
+             .fileImporter(isPresented: $importingDesign, allowedContentTypes: [.json]) { result in
+                 do {
+                     let url = try result.get()
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-minimal-dark.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-minimal-dark.svg
+@@ -0,0 +1,108 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Minimal skeletal preview, resting scopes">
++  <style>.body{fill:#292724}.tab{fill:#292724}.stub{fill:#74716a}.sub-stub{fill:#504d46}.glyph{stroke:#c4bfb4;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#e7e1d914}.edge{fill:none;stroke:#e7e1d929;stroke-width:1}.dot{fill:#c4bfb4}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s0body">
++      <path d="M45.5 48H778.5A13 13 0 0 1 791.5 61V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V61A13 13 0 0 1 45.5 48Z"/>
++    </clipPath>
++    <linearGradient id="s0shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <radialGradient id="s0g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 16.1568 53.6 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.049532246837153994"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.049532246837153994"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.04159387502703288"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.024399560490556523"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.007600883299091699"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 16.1568 130.4 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.049532246837153994"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.049532246837153994"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.04159387502703288"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.024399560490556523"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.007600883299091699"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 92 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.010185058229813665"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(204,183,119)" stop-opacity="0.010185058229813665"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(204,183,119)" stop-opacity="0.008593642881405279"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(204,183,119)" stop-opacity="0.0050925291149068325"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(204,183,119)" stop-opacity="0.0015914153484083854"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 220 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.04624061286878882"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.027053718216226708"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.008406629100349379"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 348 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.04624061286878882"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.027053718216226708"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.008406629100349379"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 476 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.04624061286878882"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.027053718216226708"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.008406629100349379"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 604 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.04624061286878882"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.027053718216226708"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.008406629100349379"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 732 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.05513622015722049"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.04624061286878882"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.027053718216226708"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.008406629100349379"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="body" d="M45.5 48H778.5A13 13 0 0 1 791.5 61V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V61A13 13 0 0 1 45.5 48Z"/>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g0x0)"/>
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g0x1)"/>
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g0x2)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g1x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g2x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g3x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g4x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g5x0)"/>
++  </g>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-minimal-light.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-minimal-light.svg
+@@ -0,0 +1,108 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Minimal skeletal preview, resting scopes">
++  <style>.body{fill:#f7f5f0}.tab{fill:#f7f5f0}.stub{fill:#a29a89}.sub-stub{fill:#d4cdbf}.glyph{stroke:#7c715d;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#554a3515}.edge{fill:none;stroke:#554a352f;stroke-width:1}.dot{fill:#7c715d}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s0body">
++      <path d="M45.5 48H778.5A13 13 0 0 1 791.5 61V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V61A13 13 0 0 1 45.5 48Z"/>
++    </clipPath>
++    <linearGradient id="s0shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <radialGradient id="s0g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 16.1568 53.6 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.24193522526697425"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.24193522526697425"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.2042663607233064"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.1211085770482816"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.03783880093305675"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 16.1568 130.4 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.24193522526697425"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.24193522526697425"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.2042663607233064"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.1211085770482816"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.03783880093305675"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 92 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.050744870920061386"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(204,183,119)" stop-opacity="0.050744870920061386"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(204,183,119)" stop-opacity="0.04279691135247367"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(204,183,119)" stop-opacity="0.025335649575448843"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(204,183,119)" stop-opacity="0.007917390492327763"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 220 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.21252341538592717"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.12631258434273374"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.03953209800587716"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 348 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.21252341538592717"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.12631258434273374"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.03953209800587716"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 476 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.21252341538592717"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.12631258434273374"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.03953209800587716"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 604 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.21252341538592717"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.12631258434273374"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.03953209800587716"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s0g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 23.760000000000005 732 48)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.07407407407407418" stop-color="rgb(180,177,168)" stop-opacity="0.2515857304458211"/>
++      <stop offset="0.30555555555555564" stop-color="rgb(180,177,168)" stop-opacity="0.21252341538592717"/>
++      <stop offset="0.5370370370370371" stop-color="rgb(180,177,168)" stop-opacity="0.12631258434273374"/>
++      <stop offset="0.7685185185185186" stop-color="rgb(180,177,168)" stop-opacity="0.03953209800587716"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="body" d="M45.5 48H778.5A13 13 0 0 1 791.5 61V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V61A13 13 0 0 1 45.5 48Z"/>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g0x0)"/>
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g0x1)"/>
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g0x2)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g1x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g2x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g3x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g4x0)"/>
++  </g>
++  <g clip-path="url(#s0body)">
++    <rect x="32" y="48" width="760" height="166" fill="url(#s0g5x0)"/>
++  </g>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-peek-dark.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-peek-dark.svg
+@@ -0,0 +1,144 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Peek skeletal preview, resting scopes">
++  <style>.body{fill:#292724}.tab{fill:#292724}.stub{fill:#74716a}.sub-stub{fill:#504d46}.glyph{stroke:#c4bfb4;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#e7e1d914}.edge{fill:none;stroke:#e7e1d929;stroke-width:1}.dot{fill:#c4bfb4}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s3body">
++      <path d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++    </clipPath>
++    <linearGradient id="s3shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <clipPath id="s3cap0">
++      <path d="M56 48V48Q56 36 68 36H156Q168 36 168 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 15.558399999999999 76.16 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.08845613838543055"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.0514983684102176"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.015786449928882756"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s3g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 15.558399999999999 147.84 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.08845613838543055"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.0514983684102176"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.015786449928882756"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s3g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 112 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.0222046484375"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(204,183,119)" stop-opacity="0.0222046484375"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(204,183,119)" stop-opacity="0.01872130580357143"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(204,183,119)" stop-opacity="0.011094107142857142"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(204,183,119)" stop-opacity="0.003466908482142857"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap1">
++      <path d="M176 48V48Q176 36 188 36H276Q288 36 288 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 232 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap2">
++      <path d="M296 48V48Q296 36 308 36H396Q408 36 408 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 352 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap3">
++      <path d="M416 48V48Q416 36 428 36H516Q528 36 528 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 472 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap4">
++      <path d="M536 48V48Q536 36 548 36H636Q648 36 648 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 592 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap5">
++      <path d="M656 48V48Q656 36 668 36H756Q768 36 768 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 712 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="tab" d="M56 48V48Q56 36 68 36H156Q168 36 168 48V48Z"/>
++  <path class="edge" d="M56.5 47.5V47.5Q56.5 36.5 67.5 36.5H155.5Q166.5 36.5 166.5 47.5V47.5"/>
++  <path class="tab" d="M176 48V48Q176 36 188 36H276Q288 36 288 48V48Z"/>
++  <path class="edge" d="M176.5 47.5V47.5Q176.5 36.5 187.5 36.5H275.5Q286.5 36.5 286.5 47.5V47.5"/>
++  <path class="tab" d="M296 48V48Q296 36 308 36H396Q408 36 408 48V48Z"/>
++  <path class="edge" d="M296.5 47.5V47.5Q296.5 36.5 307.5 36.5H395.5Q406.5 36.5 406.5 47.5V47.5"/>
++  <path class="tab" d="M416 48V48Q416 36 428 36H516Q528 36 528 48V48Z"/>
++  <path class="edge" d="M416.5 47.5V47.5Q416.5 36.5 427.5 36.5H515.5Q526.5 36.5 526.5 47.5V47.5"/>
++  <path class="tab" d="M536 48V48Q536 36 548 36H636Q648 36 648 48V48Z"/>
++  <path class="edge" d="M536.5 47.5V47.5Q536.5 36.5 547.5 36.5H635.5Q646.5 36.5 646.5 47.5V47.5"/>
++  <path class="tab" d="M656 48V48Q656 36 668 36H756Q768 36 768 48V48Z"/>
++  <path class="edge" d="M656.5 47.5V47.5Q656.5 36.5 667.5 36.5H755.5Q766.5 36.5 766.5 47.5V47.5"/>
++  <g clip-path="url(#s3cap0)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g0x0)"/>
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g0x1)"/>
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g0x2)"/>
++  </g>
++  <rect x="56" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap0)"/>
++  <g clip-path="url(#s3cap1)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g1x0)"/>
++  </g>
++  <rect x="176" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap1)"/>
++  <g clip-path="url(#s3cap2)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g2x0)"/>
++  </g>
++  <rect x="296" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap2)"/>
++  <g clip-path="url(#s3cap3)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g3x0)"/>
++  </g>
++  <rect x="416" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap3)"/>
++  <g clip-path="url(#s3cap4)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g4x0)"/>
++  </g>
++  <rect x="536" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap4)"/>
++  <g clip-path="url(#s3cap5)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g5x0)"/>
++  </g>
++  <rect x="656" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap5)"/>
++  <path class="body" d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-peek-light.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-peek-light.svg
+@@ -0,0 +1,144 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Peek skeletal preview, resting scopes">
++  <style>.body{fill:#f7f5f0}.tab{fill:#f7f5f0}.stub{fill:#a29a89}.sub-stub{fill:#d4cdbf}.glyph{stroke:#7c715d;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#554a3515}.edge{fill:none;stroke:#554a352f;stroke-width:1}.dot{fill:#7c715d}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s3body">
++      <path d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++    </clipPath>
++    <linearGradient id="s3shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <clipPath id="s3cap0">
++      <path d="M56 48V48Q56 36 68 36H156Q168 36 168 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 15.558399999999999 76.16 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.4230811554445594"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.2512075611546463"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.07860154498973322"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s3g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 15.558399999999999 147.84 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.4230811554445594"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.2512075611546463"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.07860154498973322"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s3g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 112 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.11044774482596706"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(204,183,119)" stop-opacity="0.11044774482596706"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(204,183,119)" stop-opacity="0.0931462609192682"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(204,183,119)" stop-opacity="0.05528490756923353"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(204,183,119)" stop-opacity="0.017248085662703107"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap1">
++      <path d="M176 48V48Q176 36 188 36H276Q288 36 288 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 232 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap2">
++      <path d="M296 48V48Q296 36 308 36H396Q408 36 408 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 352 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap3">
++      <path d="M416 48V48Q416 36 428 36H516Q528 36 528 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 472 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap4">
++      <path d="M536 48V48Q536 36 548 36H636Q648 36 648 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 592 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s3cap5">
++      <path d="M656 48V48Q656 36 668 36H756Q768 36 768 48V48Z"/>
++    </clipPath>
++    <radialGradient id="s3g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 22.880000000000003 712 36)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="tab" d="M56 48V48Q56 36 68 36H156Q168 36 168 48V48Z"/>
++  <path class="edge" d="M56.5 47.5V47.5Q56.5 36.5 67.5 36.5H155.5Q166.5 36.5 166.5 47.5V47.5"/>
++  <path class="tab" d="M176 48V48Q176 36 188 36H276Q288 36 288 48V48Z"/>
++  <path class="edge" d="M176.5 47.5V47.5Q176.5 36.5 187.5 36.5H275.5Q286.5 36.5 286.5 47.5V47.5"/>
++  <path class="tab" d="M296 48V48Q296 36 308 36H396Q408 36 408 48V48Z"/>
++  <path class="edge" d="M296.5 47.5V47.5Q296.5 36.5 307.5 36.5H395.5Q406.5 36.5 406.5 47.5V47.5"/>
++  <path class="tab" d="M416 48V48Q416 36 428 36H516Q528 36 528 48V48Z"/>
++  <path class="edge" d="M416.5 47.5V47.5Q416.5 36.5 427.5 36.5H515.5Q526.5 36.5 526.5 47.5V47.5"/>
++  <path class="tab" d="M536 48V48Q536 36 548 36H636Q648 36 648 48V48Z"/>
++  <path class="edge" d="M536.5 47.5V47.5Q536.5 36.5 547.5 36.5H635.5Q646.5 36.5 646.5 47.5V47.5"/>
++  <path class="tab" d="M656 48V48Q656 36 668 36H756Q768 36 768 48V48Z"/>
++  <path class="edge" d="M656.5 47.5V47.5Q656.5 36.5 667.5 36.5H755.5Q766.5 36.5 766.5 47.5V47.5"/>
++  <g clip-path="url(#s3cap0)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g0x0)"/>
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g0x1)"/>
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g0x2)"/>
++  </g>
++  <rect x="56" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap0)"/>
++  <g clip-path="url(#s3cap1)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g1x0)"/>
++  </g>
++  <rect x="176" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap1)"/>
++  <g clip-path="url(#s3cap2)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g2x0)"/>
++  </g>
++  <rect x="296" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap2)"/>
++  <g clip-path="url(#s3cap3)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g3x0)"/>
++  </g>
++  <rect x="416" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap3)"/>
++  <g clip-path="url(#s3cap4)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g4x0)"/>
++  </g>
++  <rect x="536" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap4)"/>
++  <g clip-path="url(#s3cap5)">
++    <rect x="32" y="36" width="760" height="178" fill="url(#s3g5x0)"/>
++  </g>
++  <rect x="656" y="40" width="112" height="8" fill="url(#s3shade)" clip-path="url(#s3cap5)"/>
++  <path class="body" d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-stacked-dark.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-stacked-dark.svg
+@@ -0,0 +1,150 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Stacked skeletal preview, resting scopes">
++  <style>.body{fill:#292724}.tab{fill:#292724}.stub{fill:#74716a}.sub-stub{fill:#504d46}.glyph{stroke:#c4bfb4;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#e7e1d914}.edge{fill:none;stroke:#e7e1d929;stroke-width:1}.dot{fill:#c4bfb4}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s2body">
++      <path d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++    </clipPath>
++    <linearGradient id="s2shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <clipPath id="s2cap0">
++      <path d="M56 48V29Q56 16 69 16H155Q168 16 168 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 28.287999999999997 76.16 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.08845613838543055"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.0514983684102176"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.015786449928882756"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s2g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 28.287999999999997 147.84 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.10573215804456682"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.08845613838543055"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.0514983684102176"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.015786449928882756"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s2g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 112 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.0222046484375"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(204,183,119)" stop-opacity="0.0222046484375"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(204,183,119)" stop-opacity="0.01872130580357143"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(204,183,119)" stop-opacity="0.011094107142857142"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(204,183,119)" stop-opacity="0.003466908482142857"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap1">
++      <path d="M176 48V29Q176 16 189 16H275Q288 16 288 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 232 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap2">
++      <path d="M296 48V29Q296 16 309 16H395Q408 16 408 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 352 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap3">
++      <path d="M416 48V29Q416 16 429 16H515Q528 16 528 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 472 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap4">
++      <path d="M536 48V29Q536 16 549 16H635Q648 16 648 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 592 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap5">
++      <path d="M656 48V29Q656 16 669 16H755Q768 16 768 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 712 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.12417871093749999"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.1039383091517857"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.06022073102678571"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.01831389508928571"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="tab" d="M56 48V29Q56 16 69 16H155Q168 16 168 29V48Z"/>
++  <path class="edge" d="M56.5 47.5V29.5Q56.5 16.5 69.5 16.5H153.5Q166.5 16.5 166.5 29.5V47.5"/>
++  <path class="tab" d="M176 48V29Q176 16 189 16H275Q288 16 288 29V48Z"/>
++  <path class="edge" d="M176.5 47.5V29.5Q176.5 16.5 189.5 16.5H273.5Q286.5 16.5 286.5 29.5V47.5"/>
++  <path class="tab" d="M296 48V29Q296 16 309 16H395Q408 16 408 29V48Z"/>
++  <path class="edge" d="M296.5 47.5V29.5Q296.5 16.5 309.5 16.5H393.5Q406.5 16.5 406.5 29.5V47.5"/>
++  <path class="tab" d="M416 48V29Q416 16 429 16H515Q528 16 528 29V48Z"/>
++  <path class="edge" d="M416.5 47.5V29.5Q416.5 16.5 429.5 16.5H513.5Q526.5 16.5 526.5 29.5V47.5"/>
++  <path class="tab" d="M536 48V29Q536 16 549 16H635Q648 16 648 29V48Z"/>
++  <path class="edge" d="M536.5 47.5V29.5Q536.5 16.5 549.5 16.5H633.5Q646.5 16.5 646.5 29.5V47.5"/>
++  <path class="tab" d="M656 48V29Q656 16 669 16H755Q768 16 768 29V48Z"/>
++  <path class="edge" d="M656.5 47.5V29.5Q656.5 16.5 669.5 16.5H753.5Q766.5 16.5 766.5 29.5V47.5"/>
++  <g clip-path="url(#s2cap0)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g0x0)"/>
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g0x1)"/>
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g0x2)"/>
++  </g>
++  <rect x="56" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap0)"/>
++  <g clip-path="url(#s2cap1)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g1x0)"/>
++  </g>
++  <rect x="176" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap1)"/>
++  <g clip-path="url(#s2cap2)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g2x0)"/>
++  </g>
++  <rect x="296" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap2)"/>
++  <g clip-path="url(#s2cap3)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g3x0)"/>
++  </g>
++  <rect x="416" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap3)"/>
++  <g clip-path="url(#s2cap4)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g4x0)"/>
++  </g>
++  <rect x="536" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap4)"/>
++  <g clip-path="url(#s2cap5)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g5x0)"/>
++  </g>
++  <rect x="656" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap5)"/>
++  <circle class="source-dot" cx="112" cy="32" r="2.7"/>
++  <circle class="dot" cx="232" cy="32" r="2.7"/>
++  <circle class="dot" cx="352" cy="32" r="2.7"/>
++  <circle class="dot" cx="472" cy="32" r="2.7"/>
++  <circle class="dot" cx="592" cy="32" r="2.7"/>
++  <circle class="dot" cx="712" cy="32" r="2.7"/>
++  <path class="body" d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-stacked-light.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-stacked-light.svg
+@@ -0,0 +1,150 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Stacked skeletal preview, resting scopes">
++  <style>.body{fill:#f7f5f0}.tab{fill:#f7f5f0}.stub{fill:#a29a89}.sub-stub{fill:#d4cdbf}.glyph{stroke:#7c715d;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#554a3515}.edge{fill:none;stroke:#554a352f;stroke-width:1}.dot{fill:#7c715d}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s2body">
++      <path d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++    </clipPath>
++    <linearGradient id="s2shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <clipPath id="s2cap0">
++      <path d="M56 48V29Q56 16 69 16H155Q168 16 168 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 28.287999999999997 76.16 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.4230811554445594"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.2512075611546463"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.07860154498973322"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s2g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(76.16 0 0 28.287999999999997 147.84 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.5008530153170694"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.4230811554445594"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.2512075611546463"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.07860154498973322"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s2g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 112 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.11044774482596706"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(204,183,119)" stop-opacity="0.11044774482596706"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(204,183,119)" stop-opacity="0.0931462609192682"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(204,183,119)" stop-opacity="0.05528490756923353"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(204,183,119)" stop-opacity="0.017248085662703107"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap1">
++      <path d="M176 48V29Q176 16 189 16H275Q288 16 288 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 232 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap2">
++      <path d="M296 48V29Q296 16 309 16H395Q408 16 408 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 352 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap3">
++      <path d="M416 48V29Q416 16 429 16H515Q528 16 528 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 472 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap4">
++      <path d="M536 48V29Q536 16 549 16H635Q648 16 648 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 592 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <clipPath id="s2cap5">
++      <path d="M656 48V29Q656 16 669 16H755Q768 16 768 29V48Z"/>
++    </clipPath>
++    <radialGradient id="s2g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(112 0 0 41.6 712 16)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.03846153846153855" stop-color="rgb(180,177,168)" stop-opacity="0.5421338920736125"/>
++      <stop offset="0.2788461538461539" stop-color="rgb(180,177,168)" stop-opacity="0.4589704238296888"/>
++      <stop offset="0.5192307692307693" stop-color="rgb(180,177,168)" stop-opacity="0.2738989217077204"/>
++      <stop offset="0.7596153846153846" stop-color="rgb(180,177,168)" stop-opacity="0.08610839137503389"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="tab" d="M56 48V29Q56 16 69 16H155Q168 16 168 29V48Z"/>
++  <path class="edge" d="M56.5 47.5V29.5Q56.5 16.5 69.5 16.5H153.5Q166.5 16.5 166.5 29.5V47.5"/>
++  <path class="tab" d="M176 48V29Q176 16 189 16H275Q288 16 288 29V48Z"/>
++  <path class="edge" d="M176.5 47.5V29.5Q176.5 16.5 189.5 16.5H273.5Q286.5 16.5 286.5 29.5V47.5"/>
++  <path class="tab" d="M296 48V29Q296 16 309 16H395Q408 16 408 29V48Z"/>
++  <path class="edge" d="M296.5 47.5V29.5Q296.5 16.5 309.5 16.5H393.5Q406.5 16.5 406.5 29.5V47.5"/>
++  <path class="tab" d="M416 48V29Q416 16 429 16H515Q528 16 528 29V48Z"/>
++  <path class="edge" d="M416.5 47.5V29.5Q416.5 16.5 429.5 16.5H513.5Q526.5 16.5 526.5 29.5V47.5"/>
++  <path class="tab" d="M536 48V29Q536 16 549 16H635Q648 16 648 29V48Z"/>
++  <path class="edge" d="M536.5 47.5V29.5Q536.5 16.5 549.5 16.5H633.5Q646.5 16.5 646.5 29.5V47.5"/>
++  <path class="tab" d="M656 48V29Q656 16 669 16H755Q768 16 768 29V48Z"/>
++  <path class="edge" d="M656.5 47.5V29.5Q656.5 16.5 669.5 16.5H753.5Q766.5 16.5 766.5 29.5V47.5"/>
++  <g clip-path="url(#s2cap0)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g0x0)"/>
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g0x1)"/>
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g0x2)"/>
++  </g>
++  <rect x="56" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap0)"/>
++  <g clip-path="url(#s2cap1)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g1x0)"/>
++  </g>
++  <rect x="176" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap1)"/>
++  <g clip-path="url(#s2cap2)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g2x0)"/>
++  </g>
++  <rect x="296" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap2)"/>
++  <g clip-path="url(#s2cap3)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g3x0)"/>
++  </g>
++  <rect x="416" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap3)"/>
++  <g clip-path="url(#s2cap4)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g4x0)"/>
++  </g>
++  <rect x="536" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap4)"/>
++  <g clip-path="url(#s2cap5)">
++    <rect x="32" y="16" width="760" height="198" fill="url(#s2g5x0)"/>
++  </g>
++  <rect x="656" y="40" width="112" height="8" fill="url(#s2shade)" clip-path="url(#s2cap5)"/>
++  <circle class="source-dot" cx="112" cy="32" r="2.7"/>
++  <circle class="dot" cx="232" cy="32" r="2.7"/>
++  <circle class="dot" cx="352" cy="32" r="2.7"/>
++  <circle class="dot" cx="472" cy="32" r="2.7"/>
++  <circle class="dot" cx="592" cy="32" r="2.7"/>
++  <circle class="dot" cx="712" cy="32" r="2.7"/>
++  <path class="body" d="M45.5 48.5H778.5Q791.5 48.5 791.5 61.5V200.5Q791.5 213.5 778.5 213.5H45.5Q32.5 213.5 32.5 200.5V61.5Q32.5 48.5 45.5 48.5Z"/>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-subtle-dark.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-subtle-dark.svg
+@@ -0,0 +1,108 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Subtle skeletal preview, resting scopes">
++  <style>.body{fill:#292724}.tab{fill:#292724}.stub{fill:#74716a}.sub-stub{fill:#504d46}.glyph{stroke:#c4bfb4;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#e7e1d914}.edge{fill:none;stroke:#e7e1d929;stroke-width:1}.dot{fill:#c4bfb4}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s1body">
++      <path d="M45.5 46L140.6702902832441 46A13 13 0 0 1 148.33514514162206 48.5L148.33514514162206 48.5A13 13 0 0 0 163.66485485837794 48.5L163.66485485837794 48.5A13 13 0 0 1 171.3297097167559 46L268.6702902832441 46A13 13 0 0 1 276.33514514162204 48.5L276.33514514162204 48.5A13 13 0 0 0 291.66485485837796 48.5L291.66485485837796 48.5A13 13 0 0 1 299.3297097167559 46L396.6702902832441 46A13 13 0 0 1 404.33514514162204 48.5L404.33514514162204 48.5A13 13 0 0 0 419.66485485837796 48.5L419.66485485837796 48.5A13 13 0 0 1 427.3297097167559 46L524.6702902832441 46A13 13 0 0 1 532.3351451416221 48.5L532.3351451416221 48.5A13 13 0 0 0 547.6648548583779 48.5L547.6648548583779 48.5A13 13 0 0 1 555.3297097167559 46L652.6702902832441 46A13 13 0 0 1 660.3351451416221 48.5L660.3351451416221 48.5A13 13 0 0 0 675.6648548583779 48.5L675.6648548583779 48.5A13 13 0 0 1 683.3297097167559 46H778.5A13 13 0 0 1 791.5 59V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V59A13 13 0 0 1 45.5 46Z"/>
++    </clipPath>
++    <linearGradient id="s1shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <radialGradient id="s1g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 17.0544 53.6 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.0528953495279207"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.0528953495279207"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.04438249584191747"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.026044949441415503"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.008100941410874045"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 17.0544 130.4 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.0528953495279207"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.0528953495279207"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.04438249584191747"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.026044949441415503"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.008100941410874045"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 92 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.010168437703981723"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(204,183,119)" stop-opacity="0.010168437703981723"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(204,183,119)" stop-opacity="0.00857961931273458"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(204,183,119)" stop-opacity="0.005084218851990861"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(204,183,119)" stop-opacity="0.0015888183912471444"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 220 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.046163760543305316"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.027008176097421666"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.008392910710825308"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 348 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.046163760543305316"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.027008176097421666"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.008392910710825308"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 476 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.046163760543305316"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.027008176097421666"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.008392910710825308"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 604 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.046163760543305316"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.027008176097421666"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.008392910710825308"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 732 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.05504325789409268"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.046163760543305316"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.027008176097421666"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.008392910710825308"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="body" d="M45.5 46L140.6702902832441 46A13 13 0 0 1 148.33514514162206 48.5L148.33514514162206 48.5A13 13 0 0 0 163.66485485837794 48.5L163.66485485837794 48.5A13 13 0 0 1 171.3297097167559 46L268.6702902832441 46A13 13 0 0 1 276.33514514162204 48.5L276.33514514162204 48.5A13 13 0 0 0 291.66485485837796 48.5L291.66485485837796 48.5A13 13 0 0 1 299.3297097167559 46L396.6702902832441 46A13 13 0 0 1 404.33514514162204 48.5L404.33514514162204 48.5A13 13 0 0 0 419.66485485837796 48.5L419.66485485837796 48.5A13 13 0 0 1 427.3297097167559 46L524.6702902832441 46A13 13 0 0 1 532.3351451416221 48.5L532.3351451416221 48.5A13 13 0 0 0 547.6648548583779 48.5L547.6648548583779 48.5A13 13 0 0 1 555.3297097167559 46L652.6702902832441 46A13 13 0 0 1 660.3351451416221 48.5L660.3351451416221 48.5A13 13 0 0 0 675.6648548583779 48.5L675.6648548583779 48.5A13 13 0 0 1 683.3297097167559 46H778.5A13 13 0 0 1 791.5 59V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V59A13 13 0 0 1 45.5 46Z"/>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g0x0)"/>
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g0x1)"/>
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g0x2)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g1x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g2x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g3x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g4x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g5x0)"/>
++  </g>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-subtle-light.svg
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/Resources/command-style-subtle-light.svg
+@@ -0,0 +1,108 @@
++<?xml version="1.0" ?>
++<!-- Resting production scope geometry, simplified neutral skeleton artwork. -->
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="16 0 452 232" role="img" aria-label="Subtle skeletal preview, resting scopes">
++  <style>.body{fill:#f7f5f0}.tab{fill:#f7f5f0}.stub{fill:#a29a89}.sub-stub{fill:#d4cdbf}.glyph{stroke:#7c715d;fill:none;stroke-width:1.6;stroke-linecap:round}.rule{stroke:#554a3515}.edge{fill:none;stroke:#554a352f;stroke-width:1}.dot{fill:#7c715d}.source-dot{fill:#ccb777}</style>
++  <defs>
++    <clipPath id="s1body">
++      <path d="M45.5 46L140.6702902832441 46A13 13 0 0 1 148.33514514162206 48.5L148.33514514162206 48.5A13 13 0 0 0 163.66485485837794 48.5L163.66485485837794 48.5A13 13 0 0 1 171.3297097167559 46L268.6702902832441 46A13 13 0 0 1 276.33514514162204 48.5L276.33514514162204 48.5A13 13 0 0 0 291.66485485837796 48.5L291.66485485837796 48.5A13 13 0 0 1 299.3297097167559 46L396.6702902832441 46A13 13 0 0 1 404.33514514162204 48.5L404.33514514162204 48.5A13 13 0 0 0 419.66485485837796 48.5L419.66485485837796 48.5A13 13 0 0 1 427.3297097167559 46L524.6702902832441 46A13 13 0 0 1 532.3351451416221 48.5L532.3351451416221 48.5A13 13 0 0 0 547.6648548583779 48.5L547.6648548583779 48.5A13 13 0 0 1 555.3297097167559 46L652.6702902832441 46A13 13 0 0 1 660.3351451416221 48.5L660.3351451416221 48.5A13 13 0 0 0 675.6648548583779 48.5L675.6648548583779 48.5A13 13 0 0 1 683.3297097167559 46H778.5A13 13 0 0 1 791.5 59V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V59A13 13 0 0 1 45.5 46Z"/>
++    </clipPath>
++    <linearGradient id="s1shade" x1="0" x2="0" y1="0" y2="1">
++      <stop offset="0" stop-color="#000" stop-opacity="0"/>
++      <stop offset="1" stop-color="#000" stop-opacity=".251"/>
++    </linearGradient>
++    <radialGradient id="s1g0x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 17.0544 53.6 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.2577957998116765"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.2577957998116765"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.21764872049539888"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.12908100537458825"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.040336226672896006"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g0x1" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(81.6 0 0 17.0544 130.4 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.2577957998116765"/>
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.2577957998116765"/>
++      <stop offset="0.25" stop-color="rgb(204,183,119)" stop-opacity="0.21764872049539888"/>
++      <stop offset="0.5" stop-color="rgb(204,183,119)" stop-opacity="0.12908100537458825"/>
++      <stop offset="0.75" stop-color="rgb(204,183,119)" stop-opacity="0.040336226672896006"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g0x2" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 92 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(204,183,119)" stop-opacity="0.05066186350943384"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(204,183,119)" stop-opacity="0.05066186350943384"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(204,183,119)" stop-opacity="0.04272687384975667"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(204,183,119)" stop-opacity="0.02529430549977089"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(204,183,119)" stop-opacity="0.007904470468678402"/>
++      <stop offset="1" stop-color="rgb(204,183,119)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g1x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 220 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.21217919785765788"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.12610705827647192"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.03946738820118007"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g2x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 348 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.21217919785765788"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.12610705827647192"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.03946738820118007"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g3x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 476 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.21217919785765788"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.12610705827647192"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.03946738820118007"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g4x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 604 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.21217919785765788"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.12610705827647192"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.03946738820118007"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++    <radialGradient id="s1g5x0" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="1" gradientTransform="matrix(120 0 0 25.080000000000002 732 46)" color-interpolation="sRGB">
++      <stop offset="0" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.1228070175438597" stop-color="rgb(180,177,168)" stop-opacity="0.2511777689308352"/>
++      <stop offset="0.3421052631578948" stop-color="rgb(180,177,168)" stop-opacity="0.21217919785765788"/>
++      <stop offset="0.5614035087719298" stop-color="rgb(180,177,168)" stop-opacity="0.12610705827647192"/>
++      <stop offset="0.7807017543859649" stop-color="rgb(180,177,168)" stop-opacity="0.03946738820118007"/>
++      <stop offset="1" stop-color="rgb(180,177,168)" stop-opacity="0"/>
++    </radialGradient>
++  </defs>
++  <path class="body" d="M45.5 46L140.6702902832441 46A13 13 0 0 1 148.33514514162206 48.5L148.33514514162206 48.5A13 13 0 0 0 163.66485485837794 48.5L163.66485485837794 48.5A13 13 0 0 1 171.3297097167559 46L268.6702902832441 46A13 13 0 0 1 276.33514514162204 48.5L276.33514514162204 48.5A13 13 0 0 0 291.66485485837796 48.5L291.66485485837796 48.5A13 13 0 0 1 299.3297097167559 46L396.6702902832441 46A13 13 0 0 1 404.33514514162204 48.5L404.33514514162204 48.5A13 13 0 0 0 419.66485485837796 48.5L419.66485485837796 48.5A13 13 0 0 1 427.3297097167559 46L524.6702902832441 46A13 13 0 0 1 532.3351451416221 48.5L532.3351451416221 48.5A13 13 0 0 0 547.6648548583779 48.5L547.6648548583779 48.5A13 13 0 0 1 555.3297097167559 46L652.6702902832441 46A13 13 0 0 1 660.3351451416221 48.5L660.3351451416221 48.5A13 13 0 0 0 675.6648548583779 48.5L675.6648548583779 48.5A13 13 0 0 1 683.3297097167559 46H778.5A13 13 0 0 1 791.5 59V200.5A13 13 0 0 1 778.5 213.5H45.5A13 13 0 0 1 32.5 200.5V59A13 13 0 0 1 45.5 46Z"/>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g0x0)"/>
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g0x1)"/>
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g0x2)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g1x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g2x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g3x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g4x0)"/>
++  </g>
++  <g clip-path="url(#s1body)">
++    <rect x="32" y="46" width="760" height="168" fill="url(#s1g5x0)"/>
++  </g>
++  <g class="glyph" transform="translate(55 69)">
++    <circle cx="7" cy="7" r="5.8"/>
++    <path d="m11.5 11.5 4.5 4.5"/>
++  </g>
++  <rect class="stub" x="82" y="73" width="288" height="7" rx="3.5"/>
++  <path class="rule" d="M46 108H778"/>
++  <circle class="dot" cx="58" cy="134" r="2.3"/>
++  <rect class="sub-stub" x="81" y="131" width="238" height="5" rx="2.5"/>
++  <rect class="sub-stub" x="81" y="169" width="185" height="5" rx="2.5"/>
++</svg>
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandStyleArtworkTests.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandStyleArtworkTests.swift
+@@ -0,0 +1,37 @@
++import AppKit
++import XCTest
++@testable import ArciumSettingsUI
++
++final class ArciumCommandStyleArtworkTests: XCTestCase {
++    func testPackagedArtworkRendersEveryStyleInBothAppearances() async throws {
++        try await MainActor.run {
++            let images = ArciumCommandStyleArtwork.load(from: Bundle.module)
++            var renders = Set<Data>()
++            for style in ArciumCommandPanelLayout.Style.allCases {
++                for isDark in [false, true] {
++                    let image = try XCTUnwrap(images[
++                        ArciumCommandStyleArtwork.name(for: style, isDark: isDark)])
++                    XCTAssertEqual(image.size.width / image.size.height, 452.0 / 232.0, accuracy: 0.001)
++                    XCTAssertFalse(image.isTemplate)
++                    let bitmap = try XCTUnwrap(NSBitmapImageRep(
++                        bitmapDataPlanes: nil, pixelsWide: 452, pixelsHigh: 232,
++                        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
++                        isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
++                    let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
++                    NSGraphicsContext.saveGraphicsState()
++                    NSGraphicsContext.current = context
++                    image.draw(in: NSRect(x: 0, y: 0, width: 452, height: 232))
++                    NSGraphicsContext.restoreGraphicsState()
++                    let pixels = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
++                    renders.insert(pixels)
++                    XCTAssertGreaterThan(bitmap.colorAt(x: 80, y: 100)?.alphaComponent ?? 0, 0.9)
++                    // Detached tabs meet the foreground body. Stacked exposes full caps;
++                    // Peek exposes only their top edges in this resting-state artwork.
++                    let capAlpha = bitmap.colorAt(x: 80, y: 20)?.alphaComponent ?? 0
++                    XCTAssertEqual(capAlpha > 0.9, style == .stacked)
++                }
++            }
++            XCTAssertEqual(renders.count, 8, "Styles and appearances must stay visually distinct")
++        }
++    }
++}

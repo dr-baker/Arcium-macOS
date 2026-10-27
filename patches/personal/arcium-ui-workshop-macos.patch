@@ -1,0 +1,367 @@
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -2,6 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
++import("//chrome/browser/ui/views/omnibox/arcium_command_panel_sources.gni")
+ import("//build/cipd/cipd.gni")
+ import("//build/config/buildflags_paint_preview.gni")
+ import("//build/config/chrome_build.gni")
+@@ -147,8 +148,8 @@
+     testonly = true
+     sources = [
+       "arcium_command_bar_studio_mac.mm",
+-      "../browser/ui/views/omnibox/arcium_command_panel.cc",
+-      "../browser/ui/views/omnibox/arcium_command_bar_material.cc",
++      "arcium_command_workshop_mac.mm",
++    ] + arcium_command_panel_sources + arcium_space_palette_resolver_sources + arcium_command_workshop_sources + [
+       "../browser/ui/views/omnibox/arcium_command_bar_material_mac.mm",
+       "../browser/ui/views/helium/surface_style.cc",
+       "../browser/ui/views/helium/glass_surface.cc",
+@@ -11671,7 +11672,12 @@
+ 
+     data_deps = [ "//chrome:browser_tests_pak" ]
+     if (is_mac) {
+-      sources += [ "../browser/app_controller_mac_browsertest.mm" ]
++      sources += [
++        "../browser/app_controller_mac_browsertest.mm",
++        "arcium_command_workshop_browsertest.mm",
++        "arcium_command_workshop_mac.mm",
++      ] + arcium_command_workshop_sources
++      frameworks = [ "AppKit.framework" ]
+       deps += [
+         "//chrome/browser/apps/platform_apps:browser_test_support",
+         "//chrome/browser/bookmarks:test_support",
+--- /dev/null
++++ b/chrome/test/arcium_command_workshop_browsertest.mm
+@@ -0,0 +1,163 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by the GPL-3.0 license.
++#import <AppKit/AppKit.h>
++#include "base/command_line.h"
++#include "base/files/file_util.h"
++#include "base/functional/bind.h"
++#include "base/json/json_writer.h"
++#include "base/run_loop.h"
++#include "base/task/single_thread_task_runner.h"
++#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/browser.h"
++#include "chrome/browser/ui/browser_commands.h"
++#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
++#include "chrome/browser/ui/helium/arcium_settings_model.h"
++#include "base/functional/callback_helpers.h"
++#include "chrome/browser/ui/helium/helium_space_service.h"
++#include "chrome/browser/ui/helium/helium_space_service_factory.h"
++#include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
++#include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
++#include "chrome/browser/ui/views/helium/surface_style.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_panel.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_panel_presentation.h"
++#include "chrome/test/arcium_command_workshop_support.h"
++#include "chrome/test/base/in_process_browser_test.h"
++#include "components/prefs/pref_service.h"
++#include "content/public/test/browser_test.h"
++#include "ui/events/event.h"
++#include "ui/views/widget/widget.h"
++
++namespace arcium::workshop {
++class ArciumCommandWorkshopBrowserTest : public InProcessBrowserTest {
++ protected:
++  void Wait(int milliseconds) {
++    base::RunLoop loop;
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
++        loop.QuitClosure(), base::Milliseconds(milliseconds)); loop.Run();
++  }
++  void Apply(const base::DictValue& document) {
++    ApplyAccessibilityContext(document);
++    auto* view = BrowserView::GetBrowserViewForBrowser(browser());
++    auto* prefs = browser()->profile()->GetPrefs();
++    const auto& context = *document.FindDict("context");
++    prefs->SetDict(kCommandPanelLayoutPref, document.FindDict("layout")->Clone());
++    prefs->SetInteger(arcium::kChromeUIScalePref, static_cast<int>(ContextScale(document) * 100 + .5));
++    for (const auto [name, value] : ContextPreferences(document)) prefs->Set(name, value);
++    helium::HeliumSpaceServiceFactory::GetForProfile(browser()->profile())->SetThemePreviewForBrowser(browser(), ContextTheme(document));
++    const auto mode = context.FindString("mode");
++    view->GetWidget()->SetColorModeOverride(mode && *mode == "light"
++        ? ui::ColorProviderKey::ColorMode::kLight : ui::ColorProviderKey::ColorMode::kDark);
++    NSWindow* window = view->GetWidget()->GetNativeWindow().GetNativeNSWindow();
++    window.appearance = [NSAppearance appearanceNamed:mode && *mode == "light" ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua];
++    view->GetWidget()->ThemeChanged();
++    // Match the actual BrowserView viewport, excluding the native frame.
++    auto bounds = view->GetWidget()->GetWindowBoundsInScreen();
++    bounds.set_size(gfx::Size(bounds.width() + *context.FindInt("viewport_width") - view->width(),
++                             bounds.height() + *context.FindInt("viewport_height") - view->height()));
++    view->GetWidget()->SetBounds(bounds); Wait(80);
++    InstallBackdrop(view->GetWidget());
++    CommandPanelPresentation::SetSessionFactoryForTesting(view, base::BindRepeating(
++        [](const base::DictValue* scenario) { return CreateSession(*scenario); }, &document));
++    ASSERT_TRUE(view->ShowArciumCommandBar(true));
++    auto* popup = CommandPanelPresentation::Get(view); ASSERT_TRUE(popup); ASSERT_TRUE(popup->panel());
++    ApplyState(popup->panel(), document);
++  }
++};
++IN_PROC_BROWSER_TEST_F(ArciumCommandWorkshopBrowserTest, ParentDestructionCancelsPendingPublications) {
++  Browser* other = CreateBrowser(browser()->profile()); chrome::NewTab(other, NewTabTypes::kNoUserAction);
++  auto* view = BrowserView::GetBrowserViewForBrowser(other);
++  CommandPanelPresentation::SetSessionFactoryForTesting(view, base::BindRepeating([] {
++    return CreateSession(DefaultScenario("streaming"));
++  }));
++  ASSERT_TRUE(view->ShowArciumCommandBar(true)); CloseBrowserSynchronously(other); Wait(350);
++}
++IN_PROC_BROWSER_TEST_F(ArciumCommandWorkshopBrowserTest, ProductionSettingsDesignRoundTrip) {
++  arcium_settings::ArciumSettingsModel model(browser()->profile(), base::DoNothing(), base::DoNothing());
++  for (const auto& document : VisualCases()) {
++    const auto& layout = *document.FindDict("layout");
++    ASSERT_TRUE(model.SetCommandPanelLayout(layout)); EXPECT_EQ(model.GetCommandPanelLayout(), layout);
++    auto legacy = layout.Clone(); legacy.Remove("result_count");
++    ASSERT_TRUE(model.SetCommandPanelLayout(legacy)); EXPECT_EQ(model.GetCommandPanelLayout(), legacy);
++    auto canonical = model.GetCommandPanelLayout(); canonical.Set("result_count", 8);
++    ASSERT_TRUE(model.SetCommandPanelLayout(canonical)); EXPECT_EQ(model.GetCommandPanelLayout(), layout);
++  }
++}
++IN_PROC_BROWSER_TEST_F(ArciumCommandWorkshopBrowserTest, ScriptedPublicationsCancelAndPreserveKeys) {
++  auto document = DefaultScenario("streaming"); auto session = CreateSession(document);
++  std::vector<std::shared_ptr<const CommandPublication>> publications;
++  auto collect = base::BindRepeating([](std::vector<std::shared_ptr<const CommandPublication>>* target,
++      std::shared_ptr<const CommandPublication> value) { target->push_back(std::move(value)); }, &publications);
++  session->Search(kOmniScope, u"old", collect); Wait(70);
++  ASSERT_EQ(publications.size(), 2u); EXPECT_EQ(publications[0]->rows.size(), 4u);
++  EXPECT_EQ(publications[1]->rows.size(), 8u);
++  const auto old_epoch = publications.back()->query_epoch;
++  publications.clear(); session->Search(kOmniScope, u"new", collect); Wait(310);
++  ASSERT_EQ(publications.size(), 5u);
++  for (size_t index = 0; index < publications.size(); ++index) {
++    EXPECT_EQ(publications[index]->query, u"new"); EXPECT_GT(publications[index]->query_epoch, old_epoch);
++    if (index) EXPECT_NE(publications[index]->revision, publications[index-1]->revision);
++  }
++  ASSERT_GT(publications[1]->rows.size(), 1u); ASSERT_FALSE(publications[3]->rows.empty());
++  EXPECT_EQ(publications[1]->rows[1].selection_key, publications[3]->rows[0].selection_key);
++  EXPECT_TRUE(publications.back()->done);
++  session->Search(kOmniScope, u"cancel", collect); session->Cancel();
++  const auto count = publications.size(); Wait(300); EXPECT_EQ(publications.size(), count);
++  ASSERT_GT(publications[1]->rows.size(), 5u);
++  auto desired = publications[1]->rows[5].selection_key;
++  auto restored = VisualCases().front().Clone(); restored.Set("fixture", "streaming");
++  restored.Set("selected_key", desired); Apply(restored); Wait(70);
++  auto* owner = CommandPanelPresentation::Get(BrowserView::GetBrowserViewForBrowser(browser()));
++  EXPECT_EQ(owner->panel()->CaptureSelectionKey(), desired);
++  Wait(90); EXPECT_EQ(owner->panel()->CaptureSelectionKey(), desired);
++  Wait(150); EXPECT_EQ(owner->panel()->CaptureSelectionKey(), desired);
++  auto invalid = document.Clone(); invalid.EnsureDict("context")->Set("scale", 4.);
++  std::string error; EXPECT_FALSE(ValidateScenario(invalid, &error));
++}
++IN_PROC_BROWSER_TEST_F(ArciumCommandWorkshopBrowserTest, ProductionPopupScenariosAndReinvocation) {
++  auto directory = base::CommandLine::ForCurrentProcess()->GetSwitchValuePath("workshop-check-dir");
++  if (directory.empty()) { ASSERT_TRUE(base::GetTempDir(&directory)); directory = directory.AppendASCII("arcium-workshop-browser"); }
++  ASSERT_TRUE(base::CreateDirectory(directory));
++  base::ListValue results;
++  auto cases = VisualCases();
++  for (const auto& document : cases) {
++    SCOPED_TRACE(*document.FindString("name")); Apply(document); Wait(650);
++    auto* popup = CommandPanelPresentation::Get(BrowserView::GetBrowserViewForBrowser(browser()));
++    ASSERT_TRUE(popup && popup->is_open());
++    auto metadata = DescribePanel(popup->widget(), popup->panel());
++    EXPECT_EQ(metadata.FindString("material_backend") ? *metadata.FindString("material_backend") : "missing",
++              *document.FindString("expected_backend"));
++    const auto& name = *document.FindString("name"); metadata.Set("name", name);
++    const bool captured = CapturePopup(popup->widget(), directory.AppendASCII(name + ".png"));
++    metadata.Set("captured", captured); EXPECT_TRUE(captured);
++    Wait(90); EXPECT_TRUE(CapturePopup(popup->widget(), directory.AppendASCII(name + "-repeat.png")));
++    results.Append(std::move(metadata)); popup->Destroy(true);
++  }
++  const auto& document = cases.front(); Apply(document);
++  for (int cycle = 0; cycle < 20; ++cycle) {
++    auto* popup = CommandPanelPresentation::Get(BrowserView::GetBrowserViewForBrowser(browser()));
++    popup->Close(false); ASSERT_TRUE(popup->Show(cycle % 2)); Wait(80);
++    ASSERT_TRUE(popup->is_open()); EXPECT_EQ(popup->new_tab(), static_cast<bool>(cycle % 2));
++  }
++  auto* view = BrowserView::GetBrowserViewForBrowser(browser());
++  auto* popup = CommandPanelPresentation::Get(view);
++  // An old posted close must not close a synchronously replaced generation.
++  popup->Close(false); popup->Destroy(true); ASSERT_TRUE(popup->Show(true)); Wait(80);
++  EXPECT_TRUE(popup->is_open());
++  popup->panel()->HandleKeyEvent(nullptr, ui::KeyEvent(ui::EventType::kKeyPressed, ui::VKEY_ESCAPE, 0));
++  Wait(80); EXPECT_FALSE(popup->is_open());
++  popup->Show(true);
++  auto moved = view->GetWidget()->GetWindowBoundsInScreen(); moved.Offset(8, 0);
++  view->GetWidget()->SetBounds(moved); Wait(80); EXPECT_FALSE(popup->is_open());
++  popup->Show(true); moved.set_width(moved.width() + 12);
++  view->GetWidget()->SetBounds(moved); Wait(80); EXPECT_FALSE(popup->is_open());
++  auto streaming = document.Clone(); streaming.Set("fixture", "streaming"); Apply(streaming);
++  base::RunLoop trace_loop;
++  RecordHeightTrace(base::BindRepeating([](BrowserView* owner) { return CommandPanelPresentation::Get(owner); }, base::Unretained(view)),
++                    directory.AppendASCII("height-trace.json"), trace_loop.QuitClosure()); trace_loop.Run();
++  CommandPanelPresentation::SetSessionFactoryForTesting(view, {});
++  base::DictValue report; report.Set("cases", std::move(results)); report.Set("cycles", 20);
++  std::string json; base::JSONWriter::WriteWithOptions(report, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
++  ASSERT_TRUE(base::WriteFile(directory.AppendASCII("report.json"), json));
++}
++}  // namespace arcium::workshop
+--- /dev/null
++++ b/chrome/test/arcium_command_workshop_mac.mm
+@@ -0,0 +1,163 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by the GPL-3.0 license.
++#import <AppKit/AppKit.h>
++#import <objc/runtime.h>
++#include "ui/gfx/animation/animation.h"
++#include "base/functional/bind.h"
++#include "base/files/file_util.h"
++#include "base/json/json_writer.h"
++#include "base/task/single_thread_task_runner.h"
++#include "base/time/time.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_panel_presentation.h"
++#import "components/remote_cocoa/app_shim/native_window_background_view.h"
++#include "chrome/test/arcium_command_workshop_support.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_panel.h"
++#include "ui/views/widget/widget.h"
++#include "ui/views/controls/textfield/textfield.h"
++#include "ui/compositor/compositor.h"
++#include "chrome/browser/ui/color/chrome_color_id.h"
++#include "ui/color/color_provider.h"
++
++@interface ArciumWorkshopBackdrop : NSView
++@end
++@implementation ArciumWorkshopBackdrop
++- (BOOL)isOpaque { return YES; }
++- (NSView*)hitTest:(NSPoint)point { return nil; }
++- (void)drawRect:(NSRect)dirtyRect {
++  BOOL dark = [[self.effectiveAppearance bestMatchFromAppearancesWithNames:
++      @[NSAppearanceNameDarkAqua, NSAppearanceNameAqua]] isEqual:NSAppearanceNameDarkAqua];
++  [(dark ? [NSColor colorWithSRGBRed:.17 green:.20 blue:.27 alpha:1]
++          : [NSColor colorWithSRGBRed:.86 green:.90 blue:.97 alpha:1]) setFill];
++  NSRectFill(self.bounds);
++}
++@end
++namespace arcium::workshop {
++namespace {
++std::optional<bool> transparency_override, motion_override;
++BOOL (*original_transparency)(id, SEL) = nullptr;
++BOOL (*original_motion)(id, SEL) = nullptr;
++BOOL WorkshopTransparency(id owner, SEL selector) {
++  return transparency_override.has_value() ? *transparency_override : original_transparency(owner, selector);
++}
++BOOL WorkshopMotion(id owner, SEL selector) {
++  return motion_override.has_value() ? *motion_override : original_motion(owner, selector);
++}
++}
++void ApplyAccessibilityContext(const base::DictValue& document) {
++  // Test-host input override only. Never changes the system accessibility setting.
++  if (!original_transparency) {
++    Method method = class_getInstanceMethod(NSWorkspace.class, @selector(accessibilityDisplayShouldReduceTransparency));
++    original_transparency = reinterpret_cast<BOOL (*)(id, SEL)>(method_getImplementation(method));
++    method_setImplementation(method, reinterpret_cast<IMP>(WorkshopTransparency));
++    Method motion = class_getInstanceMethod(NSWorkspace.class, @selector(accessibilityDisplayShouldReduceMotion));
++    original_motion = reinterpret_cast<BOOL (*)(id, SEL)>(method_getImplementation(motion));
++    method_setImplementation(motion, reinterpret_cast<IMP>(WorkshopMotion));
++  }
++  const auto* context = document.FindDict("context");
++  transparency_override = context ? context->FindBool("reduce_transparency") : std::nullopt;
++  motion_override = context ? context->FindBool("reduce_motion") : std::nullopt;
++  gfx::Animation::SetPrefersReducedMotionForTesting(NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion);
++}
++
++void InstallBackdrop(views::Widget* parent) {
++  CGWarpMouseCursorPosition(CGPointMake(5, 5));
++  NSWindow* window = parent->GetNativeWindow().GetNativeNSWindow();
++  for (NSView* view in window.contentView.subviews.copy)
++    if ([view isKindOfClass:ArciumWorkshopBackdrop.class]) [view removeFromSuperview];
++  auto* backdrop = [[ArciumWorkshopBackdrop alloc] initWithFrame:window.contentView.bounds];
++  backdrop.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  // Above browser content, below the separate child popup. Test-only backdrop.
++  [window.contentView addSubview:backdrop positioned:NSWindowAbove relativeTo:nil];
++}
++bool CapturePopup(views::Widget* popup, const base::FilePath& path) {
++  if (!popup || popup->IsClosed()) return false;
++  NSWindow* window = popup->GetNativeWindow().GetNativeNSWindow();
++  NSTask* capture = [[NSTask alloc] init];
++  capture.executableURL = [NSURL fileURLWithPath:@"/usr/sbin/screencapture"];
++  capture.arguments = @[@"-x", @"-o", @"-a", @"-l", [NSString stringWithFormat:@"%ld", window.windowNumber],
++                       [NSString stringWithUTF8String:path.value().c_str()]];
++  NSError* error = nil;
++  if (![capture launchAndReturnError:&error]) return false;
++  [capture waitUntilExit];
++  return capture.terminationStatus == 0;
++}
++namespace {
++struct HeightTrace {
++  base::RepeatingCallback<CommandPanelPresentation*()> popup;
++  base::FilePath path;
++  base::OnceClosure complete;
++  base::TimeTicks start = base::TimeTicks::Now();
++  base::ListValue samples;
++};
++void SampleHeight(std::shared_ptr<HeightTrace> trace) {
++  auto* popup = trace->popup.Run();
++  const double elapsed = (base::TimeTicks::Now() - trace->start).InMillisecondsF();
++  if (popup && popup->widget() && popup->panel()) {
++    NSWindow* window = popup->widget()->GetNativeWindow().GetNativeNSWindow();
++    NSArray* info = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, static_cast<CGWindowID>(window.windowNumber)));
++    CGRect server = CGRectZero;
++    if (info.count) CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)info.firstObject[(__bridge NSString*)kCGWindowBounds], &server);
++    trace->samples.Append(base::DictValue().Set("ms", elapsed)
++        .Set("model_height", static_cast<double>(window.frame.size.height))
++        .Set("server_height", static_cast<double>(server.size.height))
++        .Set("target_height", popup->panel()->GetPreferredSize().height())
++        .Set("rows", static_cast<int>(popup->panel()->row_count_for_testing())));
++  }
++  if (elapsed < 700 && popup && popup->is_open()) {
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(FROM_HERE,
++        base::BindOnce(SampleHeight, trace), base::Milliseconds(5)); return;
++  }
++  base::DictValue result; result.Set("samples", std::move(trace->samples));
++  std::string json; base::JSONWriter::WriteWithOptions(result, base::JSONWriter::OPTIONS_PRETTY_PRINT, &json);
++  base::WriteFile(trace->path, json); std::move(trace->complete).Run();
++}
++}
++void RecordHeightTrace(base::RepeatingCallback<CommandPanelPresentation*()> popup,
++                       base::FilePath path, base::OnceClosure complete) {
++  auto trace = std::make_shared<HeightTrace>(); trace->popup = std::move(popup);
++  trace->path = std::move(path); trace->complete = std::move(complete); SampleHeight(std::move(trace));
++}
++base::DictValue DescribePanel(views::Widget* popup, CommandPanelView* panel) {
++  base::DictValue result;
++  if (!popup || !panel) return result;
++  const auto bounds = popup->GetWindowBoundsInScreen();
++  NSWindow* native = popup->GetNativeWindow().GetNativeNSWindow();
++  result.Set("key", static_cast<bool>(native.keyWindow)); result.Set("main", static_cast<bool>(native.mainWindow));
++  result.Set("parent_main", static_cast<bool>(native.parentWindow.mainWindow));
++  result.Set("parent_key", static_cast<bool>(native.parentWindow.keyWindow));
++  result.Set("opaque", static_cast<bool>(native.opaque));
++  result.Set("palette_panel", static_cast<double>(popup->GetColorProvider()->GetColor(kColorArciumPanel)));
++  result.Set("palette_background", static_cast<double>(popup->GetColorProvider()->GetColor(kColorArciumPanelBackground)));
++  base::ListValue native_views;
++  std::string backend = "solid";
++  for (NSView* view in native.contentView.subviews) {
++    auto item = base::DictValue().Set("class", std::string(NSStringFromClass(view.class).UTF8String))
++        .Set("hidden", static_cast<bool>(view.hidden)).Set("alpha", static_cast<double>(view.alphaValue))
++        .Set("frame", std::string(NSStringFromRect(view.frame).UTF8String));
++    base::ListValue children;
++    for (NSView* child in view.subviews) {
++      const std::string name = NSStringFromClass(child.class).UTF8String;
++      children.Append(name);
++      if (name.find("PublicPanelGlassHostingView") != std::string::npos) backend = "public-liquid";
++      else if (name == "NSGlassEffectView") backend = "native-clear";
++      else if (name == "NSVisualEffectView") backend = "blur";
++    }
++    item.Set("children", std::move(children)); native_views.Append(std::move(item));
++  }
++  result.Set("native_views", std::move(native_views));
++  result.Set("material_backend", backend);
++  const bool dark = popup->GetColorProviderKeyForTesting().color_mode == ui::ColorProviderKey::ColorMode::kDark;
++  result.Set("backdrop_rgb", dark ? base::ListValue().Append(43).Append(51).Append(69)
++                                  : base::ListValue().Append(219).Append(230).Append(247));
++  result.Set("width", bounds.width()); result.Set("height", bounds.height());
++  result.Set("rows", static_cast<int>(panel->row_count_for_testing()));
++  result.Set("scope", panel->scope_for_testing());
++  result.Set("input", panel->input_for_testing()->bounds().ToString());
++  result.Set("body", panel->body_bounds_for_testing().ToString());
++  base::ListValue scopes;
++  for (size_t i = 0; i < panel->scope_count_for_testing(); ++i)
++    scopes.Append(panel->scope_button_for_testing(i)->bounds().ToString());
++  result.Set("scopes", std::move(scopes));
++  return result;
++}
++}  // namespace arcium::workshop
