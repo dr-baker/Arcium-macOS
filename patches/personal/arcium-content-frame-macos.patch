@@ -125,7 +125,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  struct ArciumChromeAppearanceSnapshot: Equatable {
      struct Point: Equatable {
          var id: String
-@@ -645,6 +761,9 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -666,6 +782,9 @@ struct ArciumAppearanceSnapshot: Equatab
      var collapsedSidebarStyleOptions = defaultCollapsedSidebarStyleOptions
      var collapsedSidebarStyleAvailable = false
      var collapsedSidebarStyleManaged = false
@@ -135,7 +135,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var chromeFrameBorderWidth = 5
      var chromeFrameBorderWidthAvailable = false
      var chromeFrameBorderWidthManaged = false
-@@ -699,6 +818,9 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -720,6 +839,9 @@ struct ArciumAppearanceSnapshot: Equatab
          }
          collapsedSidebarStyleAvailable = strictBoolean(dictionary["collapsedSidebarStyleAvailable"]) ?? false
          collapsedSidebarStyleManaged = strictBoolean(dictionary["collapsedSidebarStyleManaged"]) ?? false
@@ -145,7 +145,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          chromeFrameBorderWidth = min(max(integerOptional(dictionary["chromeFrameBorderWidth"]) ?? 5, 0), 24)
          chromeFrameBorderWidthAvailable = strictBoolean(dictionary["chromeFrameBorderWidthAvailable"]) ?? false
          chromeFrameBorderWidthManaged = strictBoolean(dictionary["chromeFrameBorderWidthManaged"]) ?? false
-@@ -1150,6 +1272,30 @@ final class ArciumSettingsStore: Observa
+@@ -1171,6 +1293,30 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "collapsed_sidebar_style", value: style)
      }
  
@@ -180,23 +180,22 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
-@@ -723,13 +723,14 @@ private struct AppearanceSettingsPage: V
+@@ -715,12 +715,13 @@ private struct AppearanceSettingsPage: V
      @State private var customization: Customization?
  
      private enum Customization: String, Identifiable {
--        case colors, surfaces, commandBar
-+        case colors, surfaces, commandBar, shadow
+-        case colors, surfaces
++        case colors, surfaces, shadow
          var id: String { rawValue }
          var title: String {
              switch self {
              case .colors: "Space colors and backdrop"
              case .surfaces: "Floating surfaces"
-             case .commandBar: "Command bar"
 +            case .shadow: "Shadow"
              }
          }
      }
-@@ -943,7 +944,7 @@ private struct AppearanceSettingsPage: V
+@@ -935,7 +936,7 @@ private struct AppearanceSettingsPage: V
                  .disabled(!store.snapshot.appearance.collapsedSidebarStyleAvailable
                      || store.snapshot.appearance.collapsedSidebarStyleManaged)
                  BooleanSetting(title: "Rounded frame", description: nil, enabled: editable("rounded_frame"), value: booleanBinding("rounded_frame"))
@@ -205,7 +204,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
                      get: { store.displayedChromeFrameBorderWidth },
                      set: { store.setDisplayedChromeFrameBorderWidth($0) }
                  ), range: 0...(24 * store.chromeUIScaleFactor).rounded(), step: 1,
-@@ -958,6 +959,10 @@ private struct AppearanceSettingsPage: V
+@@ -950,6 +951,10 @@ private struct AppearanceSettingsPage: V
                      || !store.snapshot.appearance.roundedFrame)
              }
  
@@ -216,20 +215,19 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              Section("Address bar") {
                  SPicker("Navigation placement", selection: Binding(
                      get: { store.snapshot.appearance.sidebarNavigationEnabled ? 1 : 0 },
-@@ -1076,6 +1081,8 @@ private struct AppearanceSettingsPage: V
+@@ -1066,6 +1071,8 @@ private struct AppearanceSettingsPage: V
+                     backgroundEditor
+                 case .surfaces:
                      surfaceCustomization
-                 case .commandBar:
-                     commandBarCustomization
 +                case .shadow:
 +                    ArciumContentFrameCustomization(store: store)
                  }
              }
              .settingsTheme(theme)
-@@ -1637,3 +1644,96 @@ private func shortcutSummary(_ command:
-     if command.bindings.count == 1 { return first.display }
-     return "\(first.display), plus \(command.bindings.count - 1) more"
+@@ -1679,3 +1686,98 @@ struct ArciumCommandBarEditorView: View
+     }
  }
-+
+ 
 +private struct ArciumContentFrameEditor: View {
 +    @ObservedObject var store: ArciumSettingsStore
 +    let onCustomize: () -> Void
@@ -300,6 +298,9 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +            }
 +        }
 +        .disabled(!store.canEditContentFrame)
++        .onChange(of: store.contentFrameForCustomization()) { _, value in
++            draft = value
++        }
 +    }
 +}
 +
@@ -326,7 +327,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -1167,6 +1167,106 @@ final class ArciumSettingsUIContractTest
+@@ -1214,6 +1214,106 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor
@@ -437,15 +438,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
-@@ -53,6 +53,7 @@
- #include "chrome/browser/ui/tabs/vertical_tab_strip_state.h"
+@@ -58,6 +58,7 @@
  #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/frame/browser_widget.h"
  #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
 +#include "chrome/browser/ui/helium/arcium_content_frame.h"
  #include "chrome/browser/ui/views/helium/glass_surface.h"
  #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
  #include "chrome/browser/ui/views/helium/glass_surface_mac.h"
-@@ -1509,6 +1510,9 @@ void SettingsModelProfileWillBeDestroyed
+@@ -1837,6 +1838,9 @@ void SettingsModelProfileWillBeDestroyed
      ],
      @"sidebarFooterActionAvailable" : @(sidebar_footer_action_available),
      @"sidebarFooterActionManaged" : @(sidebar_footer_action_managed),
@@ -455,7 +456,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      @"chromeFrameBorderWidth" : @(chrome_frame_border_width),
      @"chromeFrameBorderWidthAvailable" : @(chrome_frame_border_width_available),
      @"chromeFrameBorderWidthManaged" : @(chrome_frame_border_width_managed),
-@@ -2298,6 +2302,15 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2632,6 +2636,15 @@ void SettingsModelProfileWillBeDestroyed
      }
      return;
    }
