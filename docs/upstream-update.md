@@ -9,9 +9,20 @@ not prove that Chromium compiles.
 From the macOS checkout:
 
 ```sh
+git fetch --no-recurse-submodules origin
+git -C helium-chromium fetch --no-recurse-submodules origin
+python3 devutils/upstream_status.py --ref origin/main --json > /tmp/arcium-fork-status.json
 python3 devutils/upstream_status.py --fetch
 python3 devutils/upstream_status.py --json > /tmp/arcium-upstream-status.json
 ```
+
+Check the published forks before choosing the starting commits. A local `main`
+can contain unpublished tooling while missing newer product features from
+`origin/main`. Reconcile both sets in the update branch before the expensive
+browser build. Compare trees and patch content as well as ancestry: cherry-picked
+history can report many missing commits whose changes are already present.
+The `--fetch` option refreshes only `upstream`; the two explicit fetches above
+refresh the published forks.
 
 The report records both local heads, both upstream heads, their merge bases,
 Chromium versions, the core commit selected by upstream macOS, and paths changed
