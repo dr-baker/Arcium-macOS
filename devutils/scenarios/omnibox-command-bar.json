@@ -46,7 +46,8 @@
   "preconditions": [
     "Launch the exact recorded bundle and profile after replay, compilation, and packaging pass",
     "For installed acceptance, use the session-authorized Personal profile at the Arcium user-data root and record this profile substitution separately",
-    "Record existing settings and create only acceptance-owned tabs and Spaces; preserve user items"
+    "Record existing settings and create only acceptance-owned tabs and Spaces; preserve user items",
+    "Serve the synthetic tab-lifecycle fixture on an available owned loopback port; use real HTTP responses for navigation completion checks, not New Tab or internal pages"
   ],
   "steps": [
     "Verify unset command bar style defaults are Text, Go / Switch, Divot, connected scopes, Flush width, scope tints, 75% glow, and activity dots; preserve explicit saved overrides",
@@ -58,7 +59,8 @@
     "Change Scope width among Flush, Icon-width and Offset. For each width, change all reveal styles at rest, during reveal and fully open: horizontal bounds must stay independent. Scroll up and rapidly switch scopes; expansion borrows from adjacent tabs before farther ones, remains bounded, and reverses without a jump. Verify inactive glows are 66% of the selected strength with connected and detached scopes and Reduce Motion.",
     "Press Command-T and inspect the New tab bar before typing; press Escape",
     "While the bar is open, press Command-T again; verify exactly one additional tab appears and the input is empty and focused. Escape retains both tabs. Selecting an existing saved tab switches to it and retains the newly created blank tab.",
-    "Press Command-L, type a test URL, press Return, and inspect the original tab",
+    "Press Command-L, type the local HTTP tab-lifecycle fixture URL, press Return, and wait until its title and instance token render in the original tab after the command bar has closed. Inspect this launch's log for fatal errors",
+    "Repeat with a different fixture query string after reopening and dismissing the command bar. The completed response must remain interactive and shortcut recording must not dereference a destroyed autocomplete provider",
     "Press Command-T, type a second test URL, press Return, and inspect both tabs",
     "Open the bar, type a query and select a command row, then press Command-T; verify the old query and selection clear before Escape",
     "Use matching acceptance-owned Pins in two Spaces and a Favorite to verify tiers, rich metadata, Return activation, and duplicate-URL identities",

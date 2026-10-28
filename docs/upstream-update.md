@@ -126,6 +126,24 @@ to `BrowserWindowInterface`, and `browser_view_unittest.cc` was removed. Existin
 UI checks belong in the browser-test fixture; restoring the deleted file would
 leave tests outside the current build graph.
 
+When a parent changes from automatic child layout to an explicit proposed
+layout, audit every downstream child insertion and reparenting into it. Include
+those children in bounds, visibility, and preferred-size calculations. Chromium
+156's sidebar layout initially omitted Arcium's reparented toolbar: it compiled,
+but the address field disappeared and Favorites overlapped the caption controls.
+Check the initial native window before exercising deeper feature contracts.
+
+Also trace layout adjustments that run after the parent applies bounds. Helium's
+156 address-bar centering pass reused the horizontal toolbar's FlexLayout slot
+while Arcium had moved the toolbar into the sidebar. It stretched the address
+field across the navigation row. Sidebar mode must retain its own layout through
+that final pass. Verify both sidebar and horizontal modes after such a repair.
+
+Exercise the collapse command while the saved sidebar state is collapsed and
+hover temporarily shows it. The command and its label must use the saved state;
+an expanded presentation alone must not turn an Expand action into Collapse.
+Also repeat the toggle during an animation to check reversal.
+
 Repair each rejected patch at its Quilt position using the procedure in
 [agent workflow](agent-workflow.md#repair-a-patch-that-fails-to-apply).
 Save repairs back to their owning repository. Never globally refresh the series
@@ -337,7 +355,36 @@ Preflight native app attachment before scheduling a long UI acceptance pass.
 During the 156 update, CUA inventory calls returned promptly, but app attachment
 and even a screenshot exceeded their requested timeouts by several minutes.
 An inventory result is not proof that app control works. Keep the attempt
-interruptible; after a repeated stall, record the tool blocker and leave the
-behavior gates incomplete rather than starting another blind attachment.
+interruptible. In this session, starting one native API promise, storing its
+result, and returning immediately restored usable app attachment and capture:
+
+```js
+var shot = null;
+var shotError = null;
+var shotPending = app.getScreenshot({emit: false})
+  .then(bytes => { shot = bytes; })
+  .catch(error => { shotError = String(error); });
+nodeRepl.write('Capture requested');
+```
+
+In a separate CUA call, emit the stored image or report that it is still pending.
+Start each subsequent native action in its own active tool call; chaining another
+native API from `.then` failed with `node_repl exec context not found`.
+This is a tested workaround, not an established explanation of the stall.
+If app control still fails, record the blocker and leave the behavior gates
+incomplete rather than repeatedly starting blind attachments.
 A rendered screenshot, clean launch log, and passing model tests do not prove
 interaction, GPU acceleration, or persistence through a normal browser restart.
+Inspect the screenshot before handing off even a draft build. The initial 156
+launch rendered, but its sidebar toolbar had no assigned bounds after upstream
+replaced automatic child layout with an explicit proposed-layout function.
+
+After the first window renders, navigate to a real local HTTP page and wait for
+it to finish before starting feature acceptance. New Tab and internal pages
+can bypass response-dependent callbacks. The 156 command bar closed normally,
+but the subsequent successful-navigation observer dereferenced a provider that
+the command-bar controller had already destroyed. Inspect copied matches and
+other raw pointers crossing asynchronous boundaries, including callbacks kept
+by prompts after the observer dies. Preserve any provider-derived policy before
+detaching data; this case needed separate zero-suggest flags for the primary
+and alternate matches.
