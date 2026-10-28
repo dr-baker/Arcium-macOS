@@ -5,7 +5,9 @@ Chromium 156 builds with the published Arcium features on
 All 76 focused native tests pass. Native checks found and repaired sidebar
 layout and HTTP-navigation failures; creating a Space then exposed a label
 painting crash. Its reviewed repair builds and passes the native suites.
-Delivery remains a draft while interaction and persistence checks continue. Do not advance canonical main
+Delivery remains a draft. Native control failed after the Space/profile and
+live split-pinning checks, blocking the remaining interaction and persistence
+checks. Do not advance canonical main
 or install over the daily browser.
 
 ## Native layout repairs
@@ -55,15 +57,20 @@ The form's labels enabled subpixel rendering on the sidebar's transparent
 compositor layer. The repair uses grayscale rendering for the Space form and
 inline theme labels, form buttons, and empty icon-search results. It does not
 skip the check or mark transparent layers opaque. Independent Astra reviewed
-the repair. The browser and all 76 focused native tests pass; native retry is
-in progress.
+the repair. The browser and all 76 focused native tests pass. Native retry
+opens the form, renders empty Icons and Emoji searches, creates Personal with
+a house icon and Orange/Dark theme, and reopens those values in Edit Space.
+Delete Space renders its confirmation; Keep Space and Cancel preserve Personal.
+The integrator also inspected the actual form screenshot. No new fatal or
+crash report appears at that milestone.
 
 ## Delivery proof gates
 
 - Inspected: upstream changes, both published fork histories, patch ownership,
   lifecycle changes, component linkage, and the native layout regressions.
-  Independent Astra review found no remaining source correctness finding;
-  a separate Git merge audit found no lost published change.
+  Final independent Astra review at core `9782f5e7` / macOS `b6224ef` found
+  no new source blocker, including analogous transparent-label paths.
+  A separate Git merge audit found no lost published change.
 - Replayed: all 587 combined patches with zero fuzz. Final preflight reports
   587 applied patches and no problems. Core patch lint passes.
 - Compiled: `chrome`, `arcium_optional_navigation_tests`,
@@ -97,15 +104,28 @@ in progress.
   `0, 191, 64, 255` and GL error 0. GPU Internals reports hardware-accelerated
   Canvas, compositing, rasterization, video, WebGL, and WebGPU through ANGLE
   Metal on Apple M3 Max, with GPU crash count 0. The integrator inspected
-  the repaired native window directly. Remaining lifecycle acceptance is unfinished.
-- Persistence-tested: not reached. Native model tests do not substitute for
-  quitting and relaunching the browser through its UI.
+  the repaired native window directly. On core `9782f5e7`, Personal and Work
+  retain distinct themes and profile-owned Favorites while switching in both
+  directions. Pinning an A/B split creates one durable row and preserves both
+  live instance tokens and the second pane's draft. Native control then failed
+  with `Sky Computer Use native pipe startup failed`. Parent and worker
+  connections, inventory, exact-app attachment, and a fresh tool session all
+  reproduced that error. The browser remained alive with no new fatal or
+  crash report. Remaining lifecycle acceptance is blocked by native control.
+- Persistence-tested: not reached. Native control failed before normal quit.
+  Native model tests do not substitute for quitting and relaunching through
+  the browser UI.
 - Teardown-tested: preceding iterations stopped through `he agent stop`.
   The preceding app crashed on its first HTTP navigation; PID 73092 is gone.
   PID 95009 later crashed when New Space opened. The owned fixture server
   on port 8766 remains available for the next repair retry.
-  Normal UI quit, window close, and Dock reopen are pending.
-- Manual-only: full browser-backed tests need the omitted Chromium 156 fixtures
+  PID 26946 remains open with the acceptance state intact. Normal UI quit,
+  window close, and Dock reopen are blocked by the native-control failure.
+- Manual-only: pure hover lacks a documented native-control action, and
+  coordinate drags failed with `windowNotFoundAtPosition`. The split divider
+  accepted AX Increment, but changed geometry was not proved. Native screenshots
+  were inspected in the transcript; screenshot/video file export was not reached.
+  Full browser-backed tests need the omitted Chromium 156 fixtures
   and test source. Release first-run packaging and non-macOS validation remain
   separate checks. The daily app and real data were not used.
 
@@ -124,6 +144,14 @@ scenario contracts to check:
    material/tint controls, and window dragging without stealing content input.
 6. `/webgl.html` framebuffer readback and `chrome://gpu` acceleration separately.
 7. Normal quit/relaunch persistence, close-all-windows/Dock reopen, and teardown.
+
+Resume on the same isolated app and profile after native control recovers.
+Acceptance-owned state includes Personal with house/Orange/Dark browser and
+Light pages, Work with briefcase/Blue in a separate profile, the original-profile
+B Favorite, and one saved A-left/B-right split. The live B draft is
+`split-B-live`; no beforeunload prompt is armed. Record layout before normal
+quit; split order/reopen, Peek, Little Arc, sole-Pin transfer, wider native
+Settings, media export, persistence, and normal teardown remain unfinished.
 
 Use `devutils/scenarios/fixtures/tab-lifecycle.html` and `webgl.html` with an
 owned local server. Capture native screenshots and a short interaction video.
