@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 
 set -eux
+_release_args=("$@")
 
 # Validate inputs before preparing dependencies or resetting build output.
-clone=true
-while getopts ':d' OPTION; do
+clone=false
+while getopts ':cd' OPTION; do
   case "$OPTION" in
+    c)
+      clone=true
+      ;;
     d)
       clone=false
       ;;
@@ -19,7 +23,7 @@ done
 shift "$(($OPTIND -1))"
 
 if [[ $# -gt 1 ]]; then
-  echo 'Usage: build.sh [-d] [arm64|x86_64]' >&2
+  echo 'Usage: build.sh [-c|-d] [arm64|x86_64]' >&2
   exit 2
 fi
 
@@ -52,6 +56,11 @@ if [[ -e "$_root_dir/build/.arcium/lane.lock" || -d "$_src_dir/.pc" ]]; then
   exit 2
 fi
 
+export PYTHONPATH="$_root_dir/devutils${PYTHONPATH:+:$PYTHONPATH}"
+if ! python3 -m he.release --worktree "$_root_dir" held; then
+  exec python3 -m he.release --worktree "$_root_dir" lock -- /bin/bash "$0" "${_release_args[@]}"
+fi
+
 # Keep resource retrieval inside the same release checkout.
 export HELIUM_DEV_DOWNLOAD_CACHE="$_download_cache"
 ___helium_setup_python
@@ -69,11 +78,11 @@ else
 fi
 
 mkdir -p "$_src_dir/out/Default"
+python3 -m he --worktree "$_root_dir" --build-dir "$_root_dir/build" gclient-marker
 
-python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+python3 "$_main_repo/utils/prune_binaries.py" --keep-build-dependencies "$_src_dir" "$_main_repo/pruning.list"
+python3 "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
 "$_root_dir/retrieve_and_unpack_resource.sh" -t
-"$_root_dir/devutils/setup_dawn_go.sh" \
-    "$_src_dir" "$_depot_tools_dir" "$_arch"
 
 # Apply patches, substitutions and translations
 python3 "$_main_repo/utils/patches.py" apply --no-fuzz "$_src_dir" "$_main_repo/patches" "$_root_dir/patches"
@@ -94,7 +103,10 @@ python3 "$_main_repo/utils/replace_resources.py" "$_main_repo/resources/helium_r
 # Set build flags
 cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$_src_dir/out/Default/args.gn"
 
-if command -v sccache 2>&1 >/dev/null; then
+echo 'use_siso = true' >> "$_src_dir/out/Default/args.gn"
+if python3 -m he.release --worktree "$_root_dir" enabled; then
+  printf 'use_remoteexec = true\nuse_reclient = false\n' >> "$_src_dir/out/Default/args.gn"
+elif command -v sccache 2>&1 >/dev/null; then
   echo 'cc_wrapper="sccache"' >> "$_src_dir/out/Default/args.gn";
 elif command -v ccache 2>&1 >/dev/null; then
   echo 'cc_wrapper="env CCACHE_COMPILERCHECK=content CCACHE_SLOPPINESS=time_macros ccache"' >> "$_src_dir/out/Default/args.gn";
@@ -109,15 +121,15 @@ else
   echo 'target_cpu = "x64"' >> "$_src_dir/out/Default/args.gn"
 fi
 
-if $clone; then
-  echo 'chrome_pgo_phase=2' >> "$_src_dir/out/Default/args.gn"
-fi
+echo 'chrome_pgo_phase=2' >> "$_src_dir/out/Default/args.gn"
 
 cd "$_src_dir"
 
-./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
-./out/Default/gn gen out/Default --fail-on-unused-args
+python3 -m he.release --worktree "$_root_dir" configure
+./buildtools/mac/gn gen out/Default --fail-on-unused-args
+python3 -m he.release --worktree "$_root_dir" record-ready
 
-ninja -C out/Default chrome chromedriver
+python3 -m he.release --worktree "$_root_dir" compile \
+  --execution "${HELIUM_BUILD_EXECUTION:-auto}" chrome chromedriver
 
 "$_root_dir/sign_and_package_app.sh"

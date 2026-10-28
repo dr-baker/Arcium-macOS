@@ -100,7 +100,7 @@ Some things to know early:
    a Python environment inside the build dir from `requirements-dev.txt`, so no
    global `pip3` install is needed.
 1. Install Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
-1. Install Ninja, wget, and Quilt via Homebrew: `brew install ninja wget quilt`
+1. Install Ninja, wget, and Quilt via Homebrew: `brew install ninja wget quilt zstd`
 1. Install GNU coreutils and readline via Homebrew: `brew install coreutils readline`
 1. Unlink binutils to use the one provided with Xcode: `brew unlink binutils`
 1. Restart your terminal.
@@ -160,6 +160,9 @@ the `PROD_MACOS_SPARKLE_FEED_BASE_URL` variable (an HTTPS base serving
 `mac/appcast-arm64.xml` and `mac/appcast-x86_64.xml`) together. For a manual
 build, `enable_sparkle` also needs `sparkle_ed_key` and `sparkle_feed_url` in
 the GN configuration.
+
+Use `./build.sh -c` to clone Chromium instead of downloading the prepared
+archives. `-d` explicitly selects archives.
 
 After a failed official build, remove `build/download_cache` if downloading
 failed, or `build/src` if a later step failed, and run the build again.
@@ -374,12 +377,20 @@ he setup --full-source
 
 ### Remote builds
 
-Set `SISO_REAPI_ADDRESS` (and optionally `SISO_REAPI_INSTANCE`, default `main`)
-to build through a NativeLink endpoint, then run `he configure
---refresh-defaults`. TLS stays on unless you set `RBE_service_no_security=true`.
-Unset the address and refresh the defaults again to return to local builds.
+Local builds are the default and require no Google account. Optional
+[Google Cloud setup and build-lane instructions](../devutils/cloud_build/README.md)
+cover account access, quota, configuration, worker ownership, and storage costs.
+Enrollment defaults to manual remote use. Automatic cloud routing requires a
+measured crossover threshold and recent console activity; idle or away builds
+favor the Mac. Use `--execution local|auto|remote` to override one
+build. `--jobs` bounds local work and `--remote-jobs` separately bounds cloud
+actions. Diagnostics, daily, and both official release architectures use the
+same compile routing, with their own existing configuration and packaging.
 
 ### Updating for a new Chromium release
+
+Start with [Updating from Helium](upstream-update.md) to select matching core
+and macOS revisions and inspect downstream conflicts.
 
 Use a new build dir for a version update and keep the old one until the new
 build passes. `he merge` and `he push` refuse a checkout whose Chromium version

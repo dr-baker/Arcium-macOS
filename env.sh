@@ -20,3 +20,5 @@ _siso_dir="$_src_dir/third_party/siso/cipd"
 _siso_path="$_siso_dir/siso"
 
 source "$_root_dir/devutils/setup_python.sh"
+
+_gn_path="$_src_dir/buildtools/mac/gn"

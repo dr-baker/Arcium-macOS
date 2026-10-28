@@ -1,18 +1,18 @@
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -659,6 +659,9 @@ are declared in tools/grit/grit_args.gni
-         <message name="IDS_CONTENT_CONTEXT_LIVE_CAPTION_DISABLE" desc="The name of the Live Caption command in the content area context menu to disable Live Caption">
-           &amp;Disable Live Caption
+@@ -1555,6 +1555,9 @@ are declared in tools/grit/grit_args.gni
+         <message name="IDS_PROFILE_ROW_VERIFY_MESSAGE" desc="A label to indicate that the profile needs credential verification (reauthentication). This is a shorter version of 'Verify it's you' that is used in other places.">
+           Verify
          </message>
 +        <message name="IDS_CONTENT_CONTEXT_SYSTEM_TRANSLATE" desc="The name of the macOS system Translate command in the content area context menu">
 +          Translate “<ph name="SELECTION_TEXT">$1<ex>Bonjour</ex></ph>”
 +        </message>
          <if expr="not use_titlecase">
-           <message name="IDS_CONTENT_CONTEXT_BACK" desc="The name of the Back command in the content area context menu">
-             &amp;Back
+         <if expr="is_win or is_macosx or is_linux">
+           <message name="IDS_RELAUNCH_TO_UPDATE_ALT" desc="Alternate text label of the relaunch to update Chrome menu item">
 --- a/chrome/browser/ui/cocoa/BUILD.gn
 +++ b/chrome/browser/ui/cocoa/BUILD.gn
-@@ -95,6 +95,10 @@ source_set("cocoa") {
+@@ -97,6 +97,10 @@ source_set("cocoa") {
      "main_menu_item.h",
      "profiles/profile_menu_controller.mm",
      "renderer_context_menu/chrome_swizzle_services_menu_updater.mm",
@@ -23,7 +23,7 @@
      "renderer_context_menu/render_view_context_menu_mac.mm",
      "renderer_context_menu/render_view_context_menu_mac_cocoa.mm",
      "renderer_context_menu/render_view_context_menu_mac_remote_cocoa.mm",
-@@ -144,10 +148,12 @@ source_set("cocoa") {
+@@ -149,10 +153,12 @@ source_set("cocoa") {
      "//chrome/browser/profiles:profile_manager",
      "//chrome/browser/profiles:profile_util",
      "//chrome/browser/profiles/keep_alive",
@@ -34,9 +34,9 @@
      "//chrome/browser/themes",
 +    "//chrome/browser/translate",
      "//chrome/browser/ui:accelerator_utils_headers",
-     "//chrome/browser/ui:recently_audible_helper",
-     "//chrome/browser/ui:simple_message_box_headers",
-@@ -177,7 +183,9 @@ source_set("cocoa") {
+     "//chrome/browser/ui:browser_command_controller",
+     "//chrome/browser/ui:browser_commands",
+@@ -190,7 +196,9 @@ source_set("cocoa") {
      "//components/startup_metric_utils",
      "//components/tab_groups",
      "//components/tabs:impl",
@@ -518,60 +518,62 @@
 +@end
 --- a/chrome/app/chrome_command_ids.h
 +++ b/chrome/app/chrome_command_ids.h
-@@ -485,6 +485,7 @@
+@@ -436,6 +436,7 @@
  #define IDC_CONTENT_CONTEXT_USE_PASSKEY_FROM_ANOTHER_DEVICE 50194
  // Listen to this page context menu.
  #define IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE 50195
 +#define IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE 50196
  // Open with items.
  #define IDC_CONTENT_CONTEXT_OPEN_WITH1 50200
- #define IDC_CONTENT_CONTEXT_OPEN_WITH2 50201
+ // Context menu items that provide fast access to input methods.
 --- a/chrome/browser/ui/actions/chrome_action_id.h
 +++ b/chrome/browser/ui/actions/chrome_action_id.h
-@@ -321,6 +321,8 @@
+@@ -293,6 +293,8 @@
      IDC_CONTENT_CONTEXT_REMOVELINKTOTEXT) \
    /* Other items. */ \
    E(kActionContentContextTranslate, IDC_CONTENT_CONTEXT_TRANSLATE) \
 +  E(kActionContentContextSystemTranslate, \
 +    IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE) \
    E(kActionContentContextInspectElement, IDC_CONTENT_CONTEXT_INSPECTELEMENT) \
-   E(kActionContentContextViewPageInfo, IDC_CONTENT_CONTEXT_VIEWPAGEINFO) \
    E(kActionContentContextLanguageSettings, \
+     IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS) \
 --- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
 +++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
-@@ -630,6 +630,7 @@ const std::map<int, int>& GetIdcToUmaMap
-        {IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY, 167},
-        {IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS, 168},
-        {IDC_CONTENT_CONTEXT_FORCE_PASTE, 169},
-+       {IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE, 170},
-        // UMA value 170 is owned by Arcium-macOS system translation.
-        {IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC, 171},
-        {IDC_CONTENT_CONTEXT_OPENLINKPEEK, 172},
-@@ -679,6 +680,7 @@ const std::map<int, int>& GetIdcToUmaMap
-        {IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW, 31},
-        {IDC_CONTENT_CONTEXT_GLICSHAREIMAGE, 32},
+@@ -673,7 +673,7 @@ int UmaEnumForCommand(int key, UmaEnumId
+        {IDC_CONTENT_CONTEXT_ASK_GOOGLE_ABOUT_THIS_PAGE, 170},
+        {IDC_CONTENT_CONTEXT_CONTEXTUAL_TASKS_SUBMENU, 171},
+        {IDC_CONTENT_CONTEXT_FORCE_PASTE, 172},
+-       // 173 is reserved for macOS translation; 174 for Little Arc.
++       {IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE, 173},
+        {IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC, 174},
+        {IDC_CONTENT_CONTEXT_OPENLINKPEEK, 175},
+        // To add new items:
+@@ -724,7 +724,7 @@ int UmaEnumForCommand(int key, UmaEnumId
         {IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY, 33},
-+       {IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE, 34},
-        // UMA value 34 is owned by Arcium-macOS system translation.
-        {IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC, 35},
-        {IDC_CONTENT_CONTEXT_OPENLINKPEEK, 36},
+        {IDC_CONTENT_CONTEXT_OPENLINK_ISOLATED, 34},
+        {IDC_CONTENT_CONTEXT_ASK_GOOGLE_ABOUT_THIS_PAGE, 35},
+-       // 36 is reserved for macOS translation; 37 for Little Arc.
++       {IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE, 36},
+        {IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC, 37},
+        {IDC_CONTENT_CONTEXT_OPENLINKPEEK, 38},
+        // To add new items:
 --- a/tools/metrics/histograms/metadata/ui/enums.xml
 +++ b/tools/metrics/histograms/metadata/ui/enums.xml
-@@ -79,6 +79,7 @@ chromium-metrics-reviews@google.com.
-   <int value="31" label="Open link in split view"/>
-   <int value="32" label="Create image with Gemini in Chrome"/>
+@@ -81,6 +81,7 @@ chromium-metrics-reviews@google.com.
    <int value="33" label="Remove from dictionary"/>
-+  <int value="34" label="Translate with macOS system translation"/>
-   <int value="35" label="Open link in Little Arc"/>
-   <int value="36" label="Open link in Peek"/>
+   <int value="34" label="Open link in isolated window"/>
+   <int value="35" label="Ask Google about this page"/>
++  <int value="36" label="Translate with macOS system translation"/>
+   <int value="37" label="Open link in Little Arc"/>
+   <int value="38" label="Open link in Peek"/>
  </enum>
-@@ -374,6 +375,7 @@ chromium-metrics-reviews@google.com.
-   <int value="167" label="IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY"/>
-   <int value="168" label="IDC_CONTENT_CONTEXT_SAVE_TO_MEMORY_BANKS"/>
-   <int value="169" label="IDC_CONTENT_CONTEXT_FORCE_PASTE"/>
-+  <int value="170" label="IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE"/>
-   <int value="171" label="IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC"/>
-   <int value="172" label="IDC_CONTENT_CONTEXT_OPENLINKPEEK"/>
+@@ -435,6 +436,7 @@ chromium-metrics-reviews@google.com.
+   <int value="170" label="IDC_CONTENT_CONTEXT_ASK_GOOGLE_ABOUT_THIS_PAGE"/>
+   <int value="171" label="IDC_CONTENT_CONTEXT_CONTEXTUAL_TASKS_SUBMENU"/>
+   <int value="172" label="IDC_CONTENT_CONTEXT_FORCE_PASTE"/>
++  <int value="173" label="IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE"/>
+   <int value="174" label="IDC_CONTENT_CONTEXT_OPENLINKLITTLEARC"/>
+   <int value="175" label="IDC_CONTENT_CONTEXT_OPENLINKPEEK"/>
  </enum>
 --- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac.h
 +++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac.h
@@ -584,9 +586,9 @@
  #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
  #include "ui/menus/cocoa/text_services_context_menu.h"
  
-@@ -31,6 +33,7 @@ class RenderViewContextMenuMac : public
+@@ -30,6 +32,7 @@ class RenderViewContextMenuMac : public
+ 
    // SimpleMenuModel::Delegate:
-   void ExecuteCommand(int command_id, int event_flags) override;
    bool IsCommandIdChecked(int command_id) const override;
 +  bool IsCommandIdVisible(int command_id) const override;
    bool IsCommandIdEnabled(int command_id) const override;
@@ -618,7 +620,7 @@
  #endif  // CHROME_BROWSER_UI_COCOA_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_MAC_H_
 --- a/components/translate/core/browser/translate_manager.cc
 +++ b/components/translate/core/browser/translate_manager.cc
-@@ -272,6 +272,7 @@ bool TranslateManager::CanPartiallyTrans
+@@ -309,6 +309,7 @@ bool TranslateManager::CanPartiallyTrans
        target_lang);
  }
  
@@ -668,17 +670,17 @@
  #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/resource/resource_bundle.h"
-@@ -108,6 +117,9 @@ void RenderViewContextMenuMac::ExecuteCo
+@@ -109,6 +118,9 @@ bool RenderViewContextMenuMac::ExecPlatf
      case IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY:
        RemoveFromDictionary();
-       break;
+       return true;
 +    case IDC_CONTENT_CONTEXT_SYSTEM_TRANSLATE:
 +      TranslateWithSystem();
-+      break;
++      return true;
      default:
-       RenderViewContextMenu::ExecuteCommand(command_id, event_flags);
+       return false;
    }
-@@ -123,9 +135,21 @@ bool RenderViewContextMenuMac::IsCommand
+@@ -124,9 +136,21 @@ bool RenderViewContextMenuMac::IsCommand
      return false;
    }
  
@@ -700,7 +702,7 @@
  bool RenderViewContextMenuMac::IsCommandIdEnabled(int command_id) const {
    if (text_services_context_menu_.SupportsCommand(command_id)) {
      return text_services_context_menu_.IsCommandIdEnabled(command_id);
-@@ -136,6 +160,8 @@ bool RenderViewContextMenuMac::IsCommand
+@@ -137,6 +161,8 @@ bool RenderViewContextMenuMac::IsCommand
        return true;
      case IDC_SPELLCHECK_REMOVE_FROM_DICTIONARY:
        return !user_added_word_.empty();
@@ -709,7 +711,7 @@
      default:
        return RenderViewContextMenu::IsCommandIdEnabled(command_id);
    }
-@@ -217,6 +243,20 @@ void RenderViewContextMenuMac::InitToolk
+@@ -218,6 +244,20 @@ void RenderViewContextMenuMac::InitToolk
          index++, IDC_CONTENT_CONTEXT_LOOK_UP,
          l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_LOOK_UP,
                                     printable_selection_text));
@@ -730,7 +732,7 @@
      menu_model_.InsertSeparatorAt(index++, ui::NORMAL_SEPARATOR);
    }
  
-@@ -246,6 +286,69 @@ void RenderViewContextMenuMac::RemoveFro
+@@ -247,6 +287,69 @@ void RenderViewContextMenuMac::RemoveFro
                                    user_added_word_);
  }
  

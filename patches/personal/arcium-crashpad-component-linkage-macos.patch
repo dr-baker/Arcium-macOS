@@ -1,0 +1,20 @@
+Index: src/components/crash/core/app/BUILD.gn
+===================================================================
+--- src.orig/components/crash/core/app/BUILD.gn
++++ src/components/crash/core/app/BUILD.gn
+@@ -115,11 +115,14 @@ static_library("app") {
+     "//components/crash/core/common:shared_memory_user_stream",
+     "//content/public/common:content_descriptors",
+     "//third_party/crashpad/crashpad/client",
+-    "//third_party/crashpad/crashpad/handler:common",
+     "//third_party/crashpad/crashpad/minidump",
+     "//third_party/crashpad/crashpad/util",
+   ]
+ 
++  if (!is_mac || !is_component_build) {
++    deps += [ "//third_party/crashpad/crashpad/handler:common" ]
++  }
++
+   if (is_linux || is_chromeos) {
+     sources += [ "crashpad_linux.cc" ]
+     data_deps = [ ":chrome_crashpad_handler" ]

@@ -16,14 +16,13 @@ sudo du -hs "$_src_dir"
 rm -rf "$_src_dir/out" || true
 mkdir -p "$_download_cache"
 
-"$_root_dir/retrieve_and_unpack_resource.sh" -g "$_target_cpu"
+"$_root_dir/retrieve_and_unpack_resource.sh" -d -g "$_target_cpu"
 
 mkdir -p "$_src_dir/out/Default"
 
-python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+python3 "$_main_repo/utils/prune_binaries.py" --keep-build-dependencies "$_src_dir" "$_main_repo/pruning.list"
+python3 "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
 "$_root_dir/retrieve_and_unpack_resource.sh" -t
-"$_root_dir/devutils/setup_dawn_go.sh" \
-    "$_src_dir" "$_src_dir/third_party/depot_tools" "$_target_cpu"
 
 python3 "$_main_repo/utils/patches.py" apply --no-fuzz "$_src_dir" "$_main_repo/patches" "$_root_dir/patches"
 python3 "$_main_repo/utils/domain_substitution.py" apply -r "$_main_repo/domain_regex.list" -f "$_main_repo/domain_substitution.list" "$_src_dir"

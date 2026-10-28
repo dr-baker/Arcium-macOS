@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
 
 AUTONINJA = """\
 import os, sys
-args = [a for a in sys.argv[1:]]
+args = [a for a in sys.argv[1:] if a not in ('-o', '--offline')]
 os.execvp("ninja", ["ninja", *args])
 """
 
