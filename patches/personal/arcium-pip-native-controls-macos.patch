@@ -3647,7 +3647,18 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
      overlay_window_->set_overlay_view_cb_for_testing(
          base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
                              base::Unretained(this)));
-@@ -1927,3 +1933,154 @@ TEST_F(VideoOverlayWindowWithMuteControl
+@@ -270,6 +276,10 @@ class VideoOverlayWindowViewsTest : publ
+ 
+   TestingProfile& profile() { return profile_; }
+ 
++  content::WebContents* CreateWebContentsForProfile(Profile* profile) {
++    return web_contents_factory_.CreateWebContents(profile);
++  }
++
+  private:
+   std::unique_ptr<AutoPipSettingOverlayView> GetOverlayViewImpl() {
+     return std::move(overlay_view_);
+@@ -1927,3 +1937,153 @@ TEST_F(VideoOverlayWindowWithMuteControl
    EXPECT_TRUE(overlay_window().ControlsHitTestContainsPoint(
        mute_button_bounds.CenterPoint()));
  }
@@ -3735,8 +3746,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +TEST_F(VideoOverlayWindowNativeControlsTest,
 +       PrivatePlacementDoesNotWriteRegularProfile) {
 +  auto* private_profile = profile().GetPrimaryOTRProfile(true);
-+  content::TestWebContentsFactory factory;
-+  auto* contents = factory.CreateWebContents(private_profile);
++  auto* contents = CreateWebContentsForProfile(private_profile);
 +  TestVideoPictureInPictureWindowController controller;
 +  controller.set_web_contents(contents);
 +  auto private_window = VideoOverlayWindowViews::Create(&controller);
