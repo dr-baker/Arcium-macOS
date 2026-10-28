@@ -9,6 +9,7 @@ struct Parameter {
   const char *key, *label;
   double low, high;
   double Settings::*member;
+  bool optional = false;
 };
 static const Parameter parameters[] = {
   {"response", "Spring response (seconds)", .15, .90, &Settings::response},
@@ -20,6 +21,8 @@ static const Parameter parameters[] = {
   {"restore_distance", "Pull to restore (points)", 10, 80, &Settings::restore_distance},
   {"handle", "Visible tucked strip (points)", 20, 52, &Settings::handle},
   {"resistance", "Vertical boundary resistance", .05, .85, &Settings::resistance},
+  {"free_speed", "Leave here below speed (points/s)", 0, 800, &Settings::free_speed, true},
+  {"snap_distance", "Snap attraction distance (points)", 0, 180, &Settings::snap_distance, true},
 };
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
 
@@ -52,8 +55,8 @@ static NSString *phaseName(Phase phase) {
   ExampleView *example;
   NSMutableArray<NSSlider *> *sliders;
   NSMutableArray<NSTextField *> *fields;
-  NSPopUpButton *dockMenu, *presetMenu;
-  NSTextField *status, *fileStatus;
+  NSPopUpButton *dockMenu, *presetMenu, *placementMenu;
+  NSTextField *status, *fileStatus, *explanation;
   NSTimer *animationTimer, *fileTimer, *saveTimer;
   double lastTick;
   NSString *settingsPath, *statePath;
@@ -125,31 +128,37 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
     }
   }
   NSRect area = screen.visibleFrame;
+  NSData *previousData = [NSData dataWithContentsOfFile:statePath];
+  id previousState = previousData ? [NSJSONSerialization JSONObjectWithData:previousData options:0 error:nil] : nil;
   motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
   controls = [[NSWindow alloc] initWithContentRect:NSMakeRect(area.origin.x + 28,
-      NSMaxY(area) - 748, 536, 720)
+      NSMaxY(area) - 868, 536, 840)
       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
       backing:NSBackingStoreBuffered defer:NO];
   controls.title = @"PiP Motion Lab — live tuning";
   controls.delegate = self;
   controls.releasedWhenClosed = NO;
   NSView *content = controls.contentView;
-  [content addSubview:label(@"Tune the movement", NSMakeRect(24, 676, 480, 28), 22)];
-  NSTextField *intro = label(@"Drag the floating window. Flick toward a corner; push past a side to tuck.\nClick the exposed strip to restore. Re-grab an animation to interrupt it.",
-      NSMakeRect(24, 625, 490, 44), 12);
+  [content addSubview:label(@"Tune the movement", NSMakeRect(24, 796, 480, 28), 22)];
+  NSTextField *intro = label(@"Drop slowly to leave it there; flick to dock. Push past a side to tuck.\nClick the exposed strip to restore. Re-grab an animation to interrupt it.",
+      NSMakeRect(24, 745, 490, 44), 12);
   intro.textColor = NSColor.secondaryLabelColor;
   [content addSubview:intro];
-  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 589, 234, 28) pullsDown:NO];
+  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 709, 234, 28) pullsDown:NO];
   [presetMenu addItemsWithTitles:@[@"iOS-like baseline", @"Snappy", @"Soft spring", @"Position only", @"Custom"]];
   presetMenu.target = self; presetMenu.action = @selector(presetChanged:);
   [content addSubview:presetMenu];
-  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 589, 238, 28) pullsDown:NO];
+  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 709, 238, 28) pullsDown:NO];
   [dockMenu addItemsWithTitles:@[@"Dock at four corners", @"Dock anywhere on side edges"]];
   dockMenu.target = self; dockMenu.action = @selector(dockingChanged:);
   [content addSubview:dockMenu];
+  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 671, 488, 28) pullsDown:NO];
+  [placementMenu addItemsWithTitles:@[@"Smart · slow drop stays, flick snaps", @"Always snap to dock", @"Always leave where dropped"]];
+  placementMenu.target = self; placementMenu.action = @selector(placementChanged:);
+  [content addSubview:placementMenu];
   sliders = NSMutableArray.array; fields = NSMutableArray.array;
   for (size_t i = 0; i < parameterCount; ++i) {
-    CGFloat y = 544 - i * 43;
+    CGFloat y = 626 - i * 43;
     [content addSubview:label(@(parameters[i].label), NSMakeRect(24, y + 16, 370, 18), 11)];
     NSSlider *slider = [NSSlider sliderWithValue:motion->settings.*parameters[i].member
         minValue:parameters[i].low maxValue:parameters[i].high target:self action:@selector(sliderChanged:)];
@@ -162,6 +171,8 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
     field.accessibilityLabel = [@(parameters[i].label) stringByAppendingString:@" value"];
     [fields addObject:field]; [content addSubview:field];
   }
+  explanation = label(@"", NSMakeRect(24, 153, 488, 22), 11);
+  explanation.textColor = NSColor.secondaryLabelColor; [content addSubview:explanation];
   NSArray *titles = @[@"↖ Throw", @"↗ Throw", @"↙ Throw", @"↘ Throw"];
   for (NSInteger i = 0; i < 4; ++i)
     [self button:titles[i] frame:NSMakeRect(24 + i * 124, 115, 116, 28) action:@selector(sampleThrow:) tag:i];
@@ -190,6 +201,17 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   [self syncControls];
   if ([NSFileManager.defaultManager fileExistsAtPath:settingsPath]) [self reloadSettings];
   else [self saveSettings];
+  if ([previousState isKindOfClass:NSDictionary.class] &&
+      [previousState[@"x"] isKindOfClass:NSNumber.class] && [previousState[@"y"] isKindOfClass:NSNumber.class]) {
+    double x = [previousState[@"x"] doubleValue], y = [previousState[@"y"] doubleValue];
+    if (std::isfinite(x) && std::isfinite(y)) {
+      motion->placeAt({x, y});
+      if ([previousState[@"tucked"] boolValue]) {
+        motion->tuck(x < NSMidX(area) ? Side::Left : Side::Right);
+        [self startAnimation];
+      }
+    }
+  }
   [controls makeKeyAndOrderFront:nil]; [panel orderFrontRegardless];
   [NSApp activateIgnoringOtherApps:YES];
   [self showPosition];
@@ -207,6 +229,7 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
     fields[i].stringValue = [NSString stringWithFormat:parameters[i].high > 10 ? @"%.0f" : @"%.3f", value];
   }
   [dockMenu selectItemAtIndex:motion->settings.docking == Docking::Corners ? 0 : 1];
+  [placementMenu selectItemAtIndex:static_cast<NSInteger>(motion->settings.placement)];
 }
 - (void)apply:(Settings)settings save:(BOOL)save {
   motion->retune(settings); [self syncControls]; [self startAnimation];
@@ -235,10 +258,16 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   next.docking = sender.indexOfSelectedItem == 0 ? Docking::Corners : Docking::SideEdges;
   [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
 }
+- (void)placementChanged:(NSPopUpButton *)sender {
+  Settings next = motion->settings;
+  next.placement = static_cast<Placement>(sender.indexOfSelectedItem);
+  [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
+}
 - (void)presetChanged:(NSPopUpButton *)sender {
   if (sender.indexOfSelectedItem == 4) return;
   Settings next;
   next.docking = motion->settings.docking;
+  next.placement = motion->settings.placement;
   if (sender.indexOfSelectedItem == 1) { next.response = .28; next.projection = .35; }
   if (sender.indexOfSelectedItem == 2) { next.response = .60; next.damping = .85; }
   if (sender.indexOfSelectedItem == 3) next.projection = 0;
@@ -284,11 +313,18 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   example.tucked = motion->tucked; example.needsDisplay = YES;
   status.stringValue = [NSString stringWithFormat:@"%@  ·  x %.0f  y %.0f  →  %.0f, %.0f",
       phaseName(motion->phase), motion->position.x, motion->position.y, motion->target.x, motion->target.y];
+  if (motion->decision == Decision::Keep || motion->decision == Decision::Dock) {
+    explanation.stringValue = [NSString stringWithFormat:@"%@ · release %.0f pt/s · dock %.0f pt away",
+        motion->decision == Decision::Keep ? @"Left here" : @"Snapped", motion->release_speed, motion->dock_distance];
+  } else if (motion->decision == Decision::Tuck) explanation.stringValue = @"Tucked · click the strip or pull inward to restore";
+  else if (motion->decision == Decision::Restore) explanation.stringValue = @"Restored to the side at the same height";
+  else explanation.stringValue = @"Smart mode leaves slow drops away from a dock where you put them";
   // The state file is an observable checkpoint, not a frame-by-frame trace.
   if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging) [self writeState];
 }
 - (NSDictionary *)settingsDictionary {
   NSMutableDictionary *dict = [@{@"version":@1, @"docking":motion->settings.docking == Docking::Corners ? @"corners" : @"edges"} mutableCopy];
+  dict[@"placement"] = @[@"smart", @"always-dock", @"free"][static_cast<NSInteger>(motion->settings.placement)];
   for (const auto& parameter : parameters) dict[@(parameter.key)] = @(motion->settings.*parameter.member);
   return dict;
 }
@@ -298,6 +334,7 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
     @"target_x":@(motion->target.x), @"target_y":@(motion->target.y),
     @"tucked":@(motion->tucked != Side::None), @"settings":[self settingsDictionary],
     @"native_frame":@[@(panel.frame.origin.x), @(panel.frame.origin.y), @(panel.frame.size.width), @(panel.frame.size.height)],
+    @"decision":explanation.stringValue,
     @"work_area":@[@(motion->area().x), @(motion->area().y), @(motion->area().width), @(motion->area().height)]};
   NSData *data = [NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
   [data writeToFile:statePath atomically:YES];
@@ -324,11 +361,17 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   Settings next;
   for (const auto& parameter : parameters) {
     id value = dict[@(parameter.key)];
+    if (!value && parameter.optional) continue;
     BOOL numeric = [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID();
     double number = numeric ? [value doubleValue] : NAN;
     if (!std::isfinite(number) || number < parameter.low || number > parameter.high) valid = NO;
     else next.*parameter.member = number;
   }
+  NSString *placement = dict[@"placement"] ?: @"smart";
+  NSArray *placements = @[@"smart", @"always-dock", @"free"];
+  NSUInteger placementIndex = [placements indexOfObject:placement];
+  if (placementIndex == NSNotFound) valid = NO;
+  else next.placement = static_cast<Placement>(placementIndex);
   if (!valid) {
     fileStatus.stringValue = @"Invalid settings file · keeping the last valid values"; return;
   }
@@ -350,7 +393,8 @@ int main(int argc, const char *argv[]) {
     NSString *path = nil;
     for (int i = 1; i + 1 < argc; ++i)
       if (strcmp(argv[i], "--settings") == 0) path = @(argv[++i]);
-    if (!path) path = [[NSFileManager.defaultManager currentDirectoryPath] stringByAppendingPathComponent:@"settings.json"];
+    if (!path) path = [[NSBundle.mainBundle.bundlePath stringByDeletingLastPathComponent]
+        stringByAppendingPathComponent:@"settings.json"];
     [NSFileManager.defaultManager createDirectoryAtPath:[path stringByDeletingLastPathComponent]
         withIntermediateDirectories:YES attributes:nil error:nil];
     NSApplication *app = NSApplication.sharedApplication;

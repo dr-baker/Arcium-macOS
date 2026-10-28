@@ -16,9 +16,18 @@ lives in this directory's ignored `.build/`. Quit the lab before rebuilding.
 
 ## Try it
 
-Drag the example window, then release with some velocity. It projects the release
-position forward and springs toward the nearest corner. Re-grab it during
-settlement to interrupt the movement without resetting its position.
+In **Smart** mode, drop the example slowly to leave it where you put it. A faster
+release projects forward and springs toward the nearest corner. A slow release
+close to a corner still snaps there. In side-edge docking mode, proximity to
+either side replaces proximity to a corner. Re-grab it during settlement to
+interrupt the movement without resetting its position.
+
+Two controls tune this inference: the maximum release speed for a deliberate
+placement, and the distance at which a dock attracts a slow drop. The decision
+line shows the measured speed, dock distance and result after each release.
+This is a heuristic to try, not a proven measure of intent. **Always snap** and
+**Always leave** bypass it for comparison. Explicit side tucking still works in
+all three modes.
 
 Push it past the left or right edge, or flick outward near a side, to tuck it.
 Click the exposed strip or pull inward to restore it. A fling from the middle of
@@ -33,7 +42,7 @@ are outside this experiment.
 ## Live controls
 
 Sliders apply continuously. Numeric fields apply on Return. Presets reset the
-numeric parameters while preserving the corner/side-edge choice.
+numeric parameters while preserving the docking and placement choices.
 
 | Control | Effect |
 | --- | --- |
@@ -46,6 +55,8 @@ numeric parameters while preserving the corner/side-edge choice.
 | Pull to restore | Inward drag distance needed to restore a tucked window. |
 | Visible tucked strip | Width left accessible at the side. |
 | Vertical boundary resistance | How much dragging beyond the top/bottom moves the window. |
+| Leave here below speed | Smart mode treats releases at or below this speed as deliberate placements, unless close to a dock. |
+| Snap attraction distance | How close a slow release must be to a dock to snap rather than remain in place. |
 
 Changes save to `.build/settings.json`. The app reloads external edits twice a
 second, so tuning needs no rebuild or relaunch. Invalid files keep the last valid
@@ -54,8 +65,9 @@ or choosing Quit closes both windows.
 
 The optional `--settings /absolute/path/settings.json` executable argument moves
 the tuning file. The neighboring `state.json` records settled model coordinates,
-the actual native panel frame and settings for inspection. It is not an animation
-trace or an input-control API.
+the actual native panel frame, the last decision and settings for inspection.
+The lab restores its last settled position when relaunched. This file is not an
+animation trace.
 
 ## Motion references
 

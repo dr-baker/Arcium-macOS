@@ -110,5 +110,45 @@ int main() {
 
   const double a = rubber(50, 180, .35), b = rubber(150, 180, .35);
   check(a > 0 && b > a && b < 150, "boundary resistance increases without hard clipping");
+
+  m = Motion{};
+  m.throwFrom({320, 230}, {35, 10}, true); finish(m);
+  check(m.position.x == 320 && m.position.y == 230,
+        "smart placement keeps a deliberate interior drop");
+  m.throwFrom({320, 230}, {500, 100}, true); finish(m);
+  check(m.position.x == 668 && m.position.y == 508,
+        "smart placement docks a faster throw");
+  m.throwFrom({640, 30}, {10, 0}, true); finish(m);
+  check(m.position.x == 668 && m.position.y == 12,
+        "smart placement attracts a slow drop near a corner");
+  next = m.settings; next.snap_distance = 10; m.retune(next);
+  m.throwFrom({640, 30}, {10, 0}, true); finish(m);
+  check(m.position.x == 640 && m.position.y == 30,
+        "snap distance is tunable independently of release speed");
+  next.free_speed = 600; m.retune(next);
+  m.throwFrom({320, 230}, {500, 100}, true); finish(m);
+  check(m.position.x == 320 && m.position.y == 230,
+        "release-speed threshold changes the same throw's interpretation");
+  next.placement = Placement::AlwaysDock; m.retune(next);
+  m.throwFrom({320, 230}, {}, true); finish(m);
+  check(m.position.x == 12 && m.position.y == 12,
+        "always-dock mode retains position-only docking for slow releases");
+  next.placement = Placement::Free; m.retune(next);
+  m.throwFrom({320, 230}, {1100, 600}, true); finish(m);
+  check(m.position.x == 320 && m.position.y == 230,
+        "free placement ignores throw velocity");
+  m.throwFrom({320, -20}, {}, false); finish(m);
+  check(m.position.x == 320 && m.position.y == 12,
+        "free placement returns an out-of-bounds drop into the visible area");
+  next.margin = 32; m.retune(next); finish(m);
+  check(m.position.x == 320 && m.position.y == 32,
+        "retuning the inset preserves free horizontal placement");
+  m.throwFrom({-100, 230}, {}, true); finish(m);
+  check(m.phase == Phase::Tucked,
+        "explicit side tuck still works in free-placement mode");
+  m.placeAt({320, 230});
+  next = m.settings; next.response = .6; m.retune(next); finish(m);
+  check(m.position.x == 320 && m.position.y == 230 && m.tucked == Side::None,
+        "restored free placement survives live tuning without docking");
   std::cout << checks << " checks passed\n";
 }

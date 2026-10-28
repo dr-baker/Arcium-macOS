@@ -18,8 +18,10 @@ inline double length(Point p) { return std::hypot(p.x, p.y); }
 struct Size { double width = 320, height = 180; };
 struct Rect { double x = 0, y = 0, width = 1000, height = 700; };
 enum class Docking { Corners, SideEdges };
+enum class Placement { Smart, AlwaysDock, Free };
 enum class Side { None, Left, Right };
 enum class Phase { Resting, Dragging, Settling, Tucked };
+enum class Decision { None, Keep, Dock, Tuck, Restore };
 
 struct Settings {
   double response = 0.40;
@@ -31,7 +33,10 @@ struct Settings {
   double restore_distance = 30;
   double handle = 28;
   double resistance = 0.35;
+  double free_speed = 140;
+  double snap_distance = 48;
   Docking docking = Docking::Corners;
+  Placement placement = Placement::Smart;
 };
 
 inline double rubber(double distance, double extent, double coefficient) {
@@ -99,6 +104,8 @@ class Motion {
   Point position, velocity, target;
   Phase phase = Phase::Resting;
   Side tucked = Side::None;
+  Decision decision = Decision::None;
+  double release_speed = 0, dock_distance = 0;
 
   Point dockTarget(Point origin, Point release_velocity) const {
     const Point projected = origin + release_velocity * settings.projection;
@@ -121,6 +128,7 @@ class Motion {
     restore_point_ = position;
     restore_side_ = Side::Right;
     last_throw_.reset();
+    decision = Decision::None;
   }
 
   void begin(Point pointer, double time) {
@@ -131,6 +139,16 @@ class Motion {
     velocity = {};
     tracker_.reset();
     tracker_.add(pointer, time);
+  }
+
+  void placeAt(Point origin) {
+    tucked = Side::None;
+    position = target = clampVisible(origin);
+    velocity = {};
+    phase = Phase::Resting;
+    goal_ = Goal::Free;
+    decision = Decision::None;
+    last_throw_.reset();
   }
 
   void drag(Point pointer, double time) {
@@ -181,6 +199,8 @@ class Motion {
     position = origin;
     velocity = release;
     last_throw_ = Throw{origin, release, allow_stash};
+    release_speed = length(release);
+    dock_distance = length(origin - dockTarget(origin, {}));
     tucked = Side::None;
     const double left_overlap = area_.x - origin.x;
     const double right_overlap = origin.x + size.width - area_.x - area_.width;
@@ -194,11 +214,21 @@ class Motion {
     } else if (allow_stash && (right_overlap > settings.stash_distance || fling_right)) {
       tuck(Side::Right);
     } else {
-      settle(dockTarget(origin, release), release, Goal::Dock);
+      const bool deliberate = release_speed <= settings.free_speed;
+      const bool near_dock = dock_distance <= settings.snap_distance;
+      if (settings.placement == Placement::Free ||
+          (settings.placement == Placement::Smart && deliberate && !near_dock)) {
+        decision = Decision::Keep;
+        settle(clampVisible(origin), {}, Goal::Free);
+      } else {
+        decision = Decision::Dock;
+        settle(dockTarget(origin, release), release, Goal::Dock);
+      }
     }
   }
 
   void tuck(Side side) {
+    decision = Decision::Tuck;
     if (side == Side::None)
       side = position.x + size.width / 2 < area_.x + area_.width / 2 ? Side::Left : Side::Right;
     const double y = std::clamp(position.y, area_.y + settings.margin,
@@ -214,6 +244,7 @@ class Motion {
   }
 
   void restore() {
+    decision = Decision::Restore;
     tucked = Side::None;
     restore_point_.x = restore_side_ == Side::Left ? area_.x + settings.margin :
         area_.x + area_.width - size.width - settings.margin;
@@ -240,6 +271,8 @@ class Motion {
       restore_point_.y = std::clamp(restore_point_.y, area_.y + settings.margin,
           area_.y + area_.height - size.height - settings.margin);
       settle(restore_point_, velocity, Goal::Restore);
+    } else if (goal_ == Goal::Free) {
+      settle(clampVisible(target), velocity, Goal::Free);
     } else if (goal_ == Goal::Explicit) {
       settle(target, velocity, Goal::Explicit);
     } else {
@@ -269,7 +302,13 @@ class Motion {
   Rect area() const { return area_; }
 
  private:
-  enum class Goal { Dock, Stash, Restore, Explicit };
+  enum class Goal { Dock, Stash, Restore, Free, Explicit };
+  Point clampVisible(Point p) const {
+    return {std::clamp(p.x, area_.x + settings.margin,
+                      area_.x + area_.width - size.width - settings.margin),
+            std::clamp(p.y, area_.y + settings.margin,
+                      area_.y + area_.height - size.height - settings.margin)};
+  }
   std::array<Point, 4> corners() const {
     const double l = area_.x + settings.margin;
     const double r = area_.x + area_.width - size.width - settings.margin;
