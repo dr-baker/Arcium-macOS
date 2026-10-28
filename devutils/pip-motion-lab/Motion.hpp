@@ -152,6 +152,15 @@ class Motion {
     last_throw_.reset();
   }
 
+  void resetSettings() {
+    if (phase == Phase::Resting) {
+      settings = Settings{};
+      settle(clampVisible(position), {}, Goal::Free);
+    } else {
+      retune(Settings{});
+    }
+  }
+
   void drag(Point pointer, double time) {
     if (phase != Phase::Dragging) return;
     Point next = pointer - offset_;

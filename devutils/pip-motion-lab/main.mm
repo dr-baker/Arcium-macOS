@@ -152,10 +152,11 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   [dockMenu addItemsWithTitles:@[@"Dock at four corners", @"Dock anywhere on side edges"]];
   dockMenu.target = self; dockMenu.action = @selector(dockingChanged:);
   [content addSubview:dockMenu];
-  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 671, 488, 28) pullsDown:NO];
+  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 671, 314, 28) pullsDown:NO];
   [placementMenu addItemsWithTitles:@[@"Smart · slow drop stays, flick snaps", @"Always snap to dock", @"Always leave where dropped"]];
   placementMenu.target = self; placementMenu.action = @selector(placementChanged:);
   [content addSubview:placementMenu];
+  [self button:@"Reset all variables" frame:NSMakeRect(348, 671, 164, 28) action:@selector(resetVariables:) tag:0];
   sliders = NSMutableArray.array; fields = NSMutableArray.array;
   for (size_t i = 0; i < parameterCount; ++i) {
     CGFloat y = 626 - i * 43;
@@ -283,6 +284,13 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   [self startAnimation];
 }
 - (void)reset:(id)sender { motion->reset(); [self showPosition]; [self stopAnimation]; }
+- (void)resetVariables:(id)sender {
+  [controls makeFirstResponder:nil];
+  [saveTimer invalidate]; saveTimer = nil;
+  motion->resetSettings();
+  [self syncControls]; [presetMenu selectItemAtIndex:0];
+  [self startAnimation]; [self saveSettings];
+}
 - (void)reveal:(id)sender { [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:settingsPath]]]; }
 - (pip_motion::Point)point:(NSEvent *)event {
   NSPoint p = [event.window convertPointToScreen:event.locationInWindow]; return {p.x, p.y};
