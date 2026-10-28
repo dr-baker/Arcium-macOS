@@ -47,10 +47,11 @@
       "Visible PiP joined foreign fullscreen Space 1593.",
       "Already-tucked PiP followed foreign fullscreen Space 1598 with a 28-point exposed handle.",
       "Physical handle restoration preserved foreground fixture PID 29219 and active Space 1598, and restored the 12-point corner.",
-      "Return to tab exited PiP and showed inline playback paused at 106.321097."
+      "Return to tab exited PiP and showed inline playback paused at 106.321097.",
+      "PID54680: Native Resume advanced actual hidden-video time53.800291 to67.235665 with paused=false; nativePause held78.444806.",
+      "PID54680: Physical timeline click sought paused video to357.214943; ReturnToTab showed paused5:57."
     ],
     "open": [
-      "reliableplayingtransport afterhidden-page Runtime.evaluate timeouts",
       "directscrubdrag andplaying scrub",
       "physicalwindowdrag andcornerrelease",
       "compact/roomyresize nativeappearance",
@@ -59,8 +60,10 @@
       "physicalphasedgestures anddisplaytopologychanges",
       "continuousvideoevidence"
     ],
-    "constraints": "muted MacBook; visibleactionsidleonly; noinstall; isolatedprofile only; currentappstopped",
-    "limitations": "Window-only screenshots do not show other app fullscreen context. Native Space observations are WindowServer metadata plus successfulnativehandleinteraction. DuplicateAXlabels alone do notprove duplicatevisiblecontrols."
+    "constraints": "muted MacBook; native actions began idle; isolated profile only; no install; PID54680 remains running paused after ReturnToTab and Hide request",
+    "limitations": "Window-only screenshots do not show other app fullscreen context. Native Space observations are WindowServer metadata plus successfulnativehandleinteraction. DuplicateAXlabels alone do notprove duplicatevisiblecontrols.",
+    "drag_result": "Thumb andresizegrip drags no-op, evenimmediatelyafterreveal; ordinarywebtextselectiondragworks. Sourcecauseunconfirmed; separateplainAppKitcontroltest notcompleted due677.9sec bindingstall thenactiveMac.",
+    "hidden_probe": "All separate scalars readable in later pass; previous hidden timeout rootcause unknown."
   },
   "source_naming": "namesub and translate APPLIED; nameunsub before any pop",
   "created": 1793171169.6302662,
@@ -249,6 +252,23 @@
   "recording": {
     "success": false,
     "reason": "selectiontimeout; laterControlCenterbindingstalled29685seconds; pickerCancelled; no continuousvideo produced",
-    "source_stall_hours": 8.245833333333334
+    "source_stall_hours": 8.245833333333334,
+    "frame_sampled_video": {
+      "file": "native-controls-54680/native-controls-checkpoints.mp4",
+      "duration_seconds": 64.88,
+      "original_captures": 3,
+      "continuous": false,
+      "audio": false,
+      "interpolation": false,
+      "capture_intervals": "original; last frame held one second"
+    }
+  },
+  "observed_browser_paths": {
+    "pid": 76644,
+    "intact_candidate_images": 523,
+    "intact_system_images": 1110,
+    "mutable_paths_observed": 0,
+    "complete_closure": false,
+    "limit": "Three interleaved browser records and garbled helpers prevent full process-tree closure."
   }
 }

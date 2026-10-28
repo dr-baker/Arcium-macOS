@@ -6,7 +6,9 @@ Built macOS source: `468b32abe6e950116158652b05b256a4f55d73df`.
 The independent package passed build, replay, focused tests and Astra source
 review. Native checks passed automatic entry, corner landing, paused seeking,
 foreign fullscreen following, edge tuck and restoration, and Return to tab.
-Playback diagnostics, persistence and continuous video evidence remain open.
+A later same-package check passed actual resumed playback, native Pause and
+paused timeline clicking. Direct dragging, persistence and continuous motion
+evidence remain open.
 The earlier
 [a5eb3e65 native observations](automatic-picture-in-picture-native-a5eb3e65-validation.md)
 are historical evidence and do not certify the later placement changes.
@@ -51,7 +53,9 @@ are explicit product choices, informed by open-source placement implementations.
 - Packaged: independently signed app with 540 copied, hash-matched component
   libraries. Static inspection found 554 Mach-O dependency candidates with no
   issues. This is a candidate-presence check, not proof of exact live dyld
-  resolution; live loaded paths remain pending for this package.
+  resolution. PID 76644 later logged 523 intact candidate-local images and
+  1,110 intact system images, with no observed mutable-output paths. Interleaved
+  records prevent a complete browser/helper closure claim.
 - Reviewed: [Astra source GO](media/automatic-picture-in-picture/native-landing-468b32ab/astra-source-recheck.md).
   The original sizing findings and tucked-restoration corner finding are fixed.
 
@@ -97,12 +101,25 @@ page-freezing cause or missed click. That investigation remains open. Duplicate
 legacy/native accessibility labels also do not prove duplicate drawn controls;
 the focused source review found no visibility path bypassing native suppression.
 
-Still pending: reliable playing transport under the hidden-page diagnostic;
-direct scrubber dragging and playing scrubs; window dragging and corner release;
-compact/roomy resizing; actual ordinary-Space transitions; persistence and native
-Quit/relaunch; continuous video evidence. Physical phased gestures and real
-display-topology changes need hardware validation where automation cannot
-provide it. The test app is stopped.
+A [later same-package control check](media/automatic-picture-in-picture/native-landing-468b32ab/native-controls-54680/validation.md)
+used separate bounded scalar probes. Its hidden page responded throughout.
+Native Resume advanced actual video time from 53.800291 to 67.235665 seconds;
+Pause held 78.444806. A physical timeline click sought paused media to 357.214943.
+Return to tab showed the paused 5:57 state. This confirms the controls during
+that interval and does not identify the earlier timeout's cause.
+
+Direct thumb and resize-grip drags produced no change, including immediately
+after revealing the controls. An ordinary-page text drag succeeded. Source
+inspection does not establish a common native defect; AppKit tracking and global
+pointer delivery remain possible boundaries. A standalone AppKit diagnostic
+also encountered a long Computer Use binding stall and was closed after the
+Mac became active, without running its slider test.
+
+Still pending: physical scrubber dragging and playing scrubs; window dragging
+and corner release; compact/roomy resizing; actual ordinary-Space transitions;
+persistence and native Quit/relaunch. Physical phased gestures and real display
+topology changes need hardware validation where automation cannot provide it.
+The later test app remains running with playback paused; Hide was requested.
 
 The older a5eb3e65 app closed its windows after native application-menu Quit but
 retained its process and profile ownership. The matching 468b32ab package also
@@ -114,7 +131,11 @@ lock was deleted. This remains a failed native-Quit gate.
 
 The recording attempt produced no video. The window-sharing selection timed
 out, and binding to Control Center later stalled for 29,685 seconds. The picker
-was cancelled. No checkpoint sequence is presented as continuous footage.
+was cancelled. No checkpoint sequence is presented as continuous footage. The later
+[frame-sampled control video](media/automatic-picture-in-picture/native-landing-468b32ab/native-controls-54680/native-controls-checkpoints.mp4)
+contains three original captures at their original intervals, letterboxed with
+no audio or interpolated frames. Its sparse 64.88-second sequence documents
+control checkpoints and does not establish animation smoothness.
 
 ## Playback investigation
 
