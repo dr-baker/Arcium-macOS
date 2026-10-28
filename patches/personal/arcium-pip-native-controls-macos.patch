@@ -284,7 +284,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1474 @@
+@@ -0,0 +1,1475 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1280,13 +1280,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self rememberScreen:screen];
 +  _tucked = geo::Side::kNone;
 +  if (screen) {
-+    [self setWindowFrame:ToNSRect(geo::Resize(
-+                             ToRect(_restoreFrame), ToRect(screen.visibleFrame),
-+                             _aspect,
-+                             _preferredWidth > 0 ? _preferredWidth
-+                                                 : NSWidth(_restoreFrame),
-+                             _sizeLimits))
-+                 animate:YES];
++    auto frame = geo::Resize(
++        ToRect(_restoreFrame), ToRect(screen.visibleFrame), _aspect,
++        _preferredWidth > 0 ? _preferredWidth : NSWidth(_restoreFrame),
++        _sizeLimits);
++    if (_placementReady) {
++      frame = geo::Anchor(frame, ToRect(screen.visibleFrame), _corner);
++    }
++    [self setWindowFrame:ToNSRect(frame) animate:YES];
 +  }
 +  _nativeVisible = YES;
 +  [self refreshChrome];
@@ -2791,7 +2792,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,820 @@
+@@ -0,0 +1,847 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3324,6 +3325,33 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_NEAR(NSWidth(window_.frame), 360, 0.5);
 +  EXPECT_NEAR(NSHeight(window_.frame), 202.5, 0.5);
 +  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, TuckedAspectChangeRestoresSelectedCorner) {
++  for (auto corner :
++       {geometry::Corner::kBottomLeft, geometry::Corner::kBottomRight}) {
++    controls_->PreparePlacement({corner, 360}, nil, 4.0 / 3.0, {});
++    Pump();
++    NSScreen* screen = window_.screen;
++    ASSERT_TRUE(screen);
++    [Button(@"Tuck to screen edge") performClick:nil];
++    Pump();
++    [window_ setContentSize:NSMakeSize(480, 270)];
++    controls_->Reanchor(16.0 / 9.0, {});
++    Pump();
++    [Button(@"Restore Picture in Picture") performClick:nil];
++    Pump();
++    EXPECT_NEAR(NSWidth(window_.frame), 360, 0.5);
++    EXPECT_NEAR(NSHeight(window_.frame), 202.5, 0.5);
++    EXPECT_NEAR(NSMinY(window_.frame), NSMinY(screen.visibleFrame) + 12, 0.5);
++    if (corner == geometry::Corner::kBottomLeft) {
++      EXPECT_NEAR(NSMinX(window_.frame), NSMinX(screen.visibleFrame) + 12, 0.5);
++    } else {
++      EXPECT_NEAR(NSMaxX(window_.frame), NSMaxX(screen.visibleFrame) - 12, 0.5);
++    }
++    EXPECT_FALSE(controls_->TakeUserPlacement());
++    EXPECT_FALSE(window_.visible);
++  }
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, PermissionSizingRestoresIntendedWidth) {
