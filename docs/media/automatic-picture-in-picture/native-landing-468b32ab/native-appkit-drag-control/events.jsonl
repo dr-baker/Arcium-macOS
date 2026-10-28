@@ -1,0 +1,14 @@
+{"global_y":537,"global_x":576,"value":20,"at":1793213564.642637,"kind":"ready","type":0,"local_x":0,"local_y":0}
+{"global_y":533,"global_x":530,"value":20,"at":1793213588.0542479,"kind":"window-mouse","type":1,"local_x":140.5,"local_y":126}
+{"global_y":533,"global_x":530,"value":20,"at":1793213588.0547271,"kind":"slider-down","type":1,"local_x":140.5,"local_y":126}
+{"global_y":533,"global_x":530,"value":20,"at":1793213588.0562329,"kind":"action","type":1,"local_x":140.5,"local_y":126}
+{"global_y":533,"global_x":530,"value":20,"at":1793213588.0567999,"kind":"slider-track-return","type":0,"local_x":0,"local_y":0}
+{"global_y":533,"global_x":530,"value":20,"at":1793213588.0568709,"kind":"window-mouse","type":6,"local_x":350,"local_y":126}
+{"global_y":533,"global_x":530,"value":20,"at":1793213588.0569479,"kind":"window-mouse","type":2,"local_x":350,"local_y":126}
+{"global_y":534,"global_x":528,"value":20,"at":1793213619.89116,"kind":"window-mouse","type":1,"local_x":350,"local_y":126}
+{"global_y":534,"global_x":528,"value":20,"at":1793213619.891494,"kind":"slider-down","type":1,"local_x":350,"local_y":126}
+{"global_y":534,"global_x":528,"value":59.398496240601503,"at":1793213619.893404,"kind":"action","type":1,"local_x":350,"local_y":126}
+{"global_y":534,"global_x":528,"value":59.398496240601503,"at":1793213619.894145,"kind":"slider-track-return","type":0,"local_x":0,"local_y":0}
+{"global_y":534,"global_x":528,"value":59.398496240601503,"at":1793213619.9917669,"kind":"window-mouse","type":2,"local_x":350,"local_y":126}
+{"global_y":534,"global_x":512,"value":59.398496240601503,"at":1793213627.8839831,"kind":"window-mouse","type":1,"local_x":488,"local_y":40}
+{"global_y":534,"global_x":512,"value":59.398496240601503,"at":1793213627.941776,"kind":"window-mouse","type":2,"local_x":488,"local_y":40}

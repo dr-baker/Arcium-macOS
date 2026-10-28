@@ -63,7 +63,15 @@
     "constraints": "muted MacBook; native actions began idle; isolated profile only; no install; PID54680 remains running paused after ReturnToTab and Hide request",
     "limitations": "Window-only screenshots do not show other app fullscreen context. Native Space observations are WindowServer metadata plus successfulnativehandleinteraction. DuplicateAXlabels alone do notprove duplicatevisiblecontrols.",
     "drag_result": "Thumb andresizegrip drags no-op, evenimmediatelyafterreveal; ordinarywebtextselectiondragworks. Sourcecauseunconfirmed; separateplainAppKitcontroltest notcompleted due677.9sec bindingstall thenactiveMac.",
-    "hidden_probe": "All separate scalars readable in later pass; previous hidden timeout rootcause unknown."
+    "hidden_probe": "All separate scalars readable in later pass; previous hidden timeout rootcause unknown.",
+    "drag_control": {
+      "result": "Synthetic drag no-op reproduced in a plain AppKit NSSlider outside Chromium; track click changed20 to59.3984962406015.",
+      "pid": 97228,
+      "idle_seconds": 1059.775439166,
+      "event_trace": "native-appkit-drag-control/events.jsonl",
+      "limit": "AppKit tracking returned before subsequent drag event; sampled global pointer fixed. Does not certify real physical Arcium input.",
+      "normal_close_verified": true
+    }
   },
   "source_naming": "namesub and translate APPLIED; nameunsub before any pop",
   "created": 1793171169.6302662,

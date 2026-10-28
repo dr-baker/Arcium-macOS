@@ -113,10 +113,13 @@ that interval and does not identify the earlier timeout's cause.
 
 Direct thumb and resize-grip drags produced no change, including immediately
 after revealing the controls. An ordinary-page text drag succeeded. Source
-inspection does not establish a common native defect; AppKit tracking and global
-pointer delivery remain possible boundaries. A standalone AppKit diagnostic
-also encountered a long Computer Use binding stall and was closed after the
-Mac became active, without running its slider test.
+inspection does not establish a common native defect. A later
+[plain AppKit control test](media/automatic-picture-in-picture/native-landing-468b32ab/native-appkit-drag-control/validation.md)
+reused its existing binding and reproduced the drag no-op outside Chromium,
+while timeline clicking worked. Its event trace shows standard AppKit tracking
+returning before the drag event arrived and fixed global-pointer samples during
+those callbacks. This narrows an automation boundary; it does not certify real
+physical input in Arcium.
 
 Still pending: physical scrubber dragging and playing scrubs; window dragging
 and corner release; compact/roomy resizing; actual ordinary-Space transitions;
