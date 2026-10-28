@@ -15,26 +15,27 @@ browser tests. Do not advance canonical main or install over the daily browser.
   587 applied patches and no problems.
 - Compiled: `chrome`, `arcium_optional_navigation_tests`,
   `helium_persistent_item_model_tests`, and `arcium_dmg_unit_tests` at macOS
-  `a319ef68dbf1eda4b0a3dd0e9f86f8254ac301ce` and core
-  `c1897c5e368fd94e0f6e08fb6b50885308ee2ee6`.
-  Trace `78ff1deda70a40d188f62a678650a14e` records success, complete evidence,
-  and no capture errors. Independent verification matched all ten artifact
-  hashes and sizes. All 242 configured personal production objects also pass;
-  the final core change after that pass only repairs three browser-test pointer
-  expressions.
+  `f19641b8b6ea8c87e9cd48b35a5c64fe6a8c3463` and core
+  `01397cc4bd6529068b488d72a7fcaa8fa32869b6`.
+  Trace `3dc939e259b64e9da49928ba2fa1390e` records success, complete evidence,
+  and no capture errors. All ten recorded native artifact hashes and sizes match. All 242 configured personal production objects also pass;
+  later changes repair browser-test pointer expressions, remove patch whitespace,
+  and regenerate the translation catalog. The final browser build includes those
+  source and resource changes.
 - Tested: navigation 3/3, persistent items 65/65, DMG defaults 8/8. Native
   Settings artwork/contracts pass 83 tests, packaging 20, Studio 21, release
   entrypoints 4, and the selected `he` workflow tests 36.
 - Packaged: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app` under
   the build directory below. All eight command-style SVG resources are present.
   This Dev bundle does not exercise release packaging's `initial_preferences`.
-- Launched: that labeled Diagnostics app, PID 30723, using only
+- Launched: that labeled Diagnostics app, PID 96797, using only
   `~/Library/Application Support/Helium Development/profiles/isolated/helium-156-upstream`.
   The new log segment has neither duplicate Objective-C class warning and no
   fatal or GPU-failure signature. Cross-volume clone and quarantine cleanup
   errors remain in the launch log; no resulting failure was established.
-- Behavior-tested: one native screenshot shows the seeded sidebar and New Tab
-  rendered. No UI interaction passed. The Sol agent's app attachment was
+- Behavior-tested: a native screenshot from the preceding `c1897c5e` build
+  shows the seeded sidebar and New Tab rendered. No UI interaction passed.
+  The final catalog correction received only a launch/stop smoke check. The Sol agent's app attachment was
   interrupted after 246.6 seconds despite a 15-second timeout. The integrator's
   retained-handle screenshot took 894.8 seconds despite a 10-second timeout.
   These tool stalls do not establish a browser hang. No interaction video or
@@ -42,7 +43,7 @@ browser tests. Do not advance canonical main or install over the daily browser.
 - Persistence-tested: not reached. Native model tests pass, but they do not
   substitute for quitting and relaunching the browser through its UI.
 - Teardown-tested: `he agent stop --profile helium-156-upstream` stopped PID
-  30723. No matching profile process or new Helium crash report remained.
+  96797. No matching profile process or new Helium crash report remained.
   The owned fixture server on port 8766 was stopped. Normal UI quit, window
   close, and Dock reopen remain untested.
 - Manual-only: the runtime checks below, full browser-backed tests, release
@@ -66,6 +67,22 @@ scenario contracts to check:
 Use `devutils/scenarios/fixtures/tab-lifecycle.html` and `webgl.html` with an
 owned local server. Capture native screenshots and a short interaction video.
 Do not restore omitted Chromium 156 test fixtures from Chromium 151.
+
+## CI corrections after draft publication
+
+Core [PR 19](https://github.com/dr-baker/Arcium/pull/19) and macOS
+[PR 21](https://github.com/dr-baker/Arcium-macOS/pull/21) remain drafts.
+The first CI run caught one trailing space, two whitespace-only Safety Hub test
+hunks, an unused Seatbelt patch already included upstream, and a stale generated
+translation catalog. The stricter patch linter catches cases that the earlier
+patch-file checker only warned about.
+
+Both patch linters and translation validation now pass locally. Two catalog
+regenerations are byte-identical. The catalog expands from 419 to 462 entries
+without removing any existing translation lookup; some newly listed entries
+have translations, so resources were rebuilt and all 76 native tests rerun.
+The delivery proof gates above record that corrected build. The update guide
+now runs these CI-equivalent checks before the browser build.
 
 ## Revisions
 
