@@ -563,7 +563,7 @@ Index: src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
 +                          base::Unretained(this))
 +#if BUILDFLAG(IS_MAC)
 +      , base::BindRepeating(&arcium_settings::ShowSpaceThemeDraft,
-+                            browser_view_->browser())
++                            browser_view()->browser())
 +#endif
 +      );
    editor->SetProperty(

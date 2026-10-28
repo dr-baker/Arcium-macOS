@@ -156,6 +156,8 @@ The prior Chromium 151 source and output remain separate.
   compiler diagnostic. Completed outputs remain reusable; `chrome` has not built.
   The 43-object focused production build now passes, including Spaces, Pins,
   Arc import, Little Arc, command routing, and native window integration.
+  The standalone Pin model executable builds and passes all 65 tests across
+  ten suites, including identity, persistence, projection, and drag transactions.
   Settings TypeScript and standalone Settings lint pass. Fifteen selected native
   Settings contract tests pass from a separate package copy: layout availability,
   Space/profile ownership, draft state, and serialized appearance values.
@@ -183,9 +185,12 @@ The Lit import checkbox handler uses the required checked-changed naming.
 Compiler fixes cover observer signatures, window feature and command ownership,
 the scoped omnibox enums, Pin declarations, and Little Arc's StartupTabs ingress.
 The focused pass includes three additional omnibox objects found by the API
-audit. Builds use six jobs after observed swap pressure at
-thirteen; completed compile outputs are reused across repair cycles. Native
-unit-test compilation and full chrome compilation remain pending.
+audit. Initial builds used six jobs after observed swap pressure at thirteen;
+completed compile outputs are reused across repair cycles. A later ten-minute
+sample showed 75–76% memory headroom, zero swap-out growth, and about 55% mean
+system CPU use, so the full build resumed with an eight-job trial. This is a
+resource-based adjustment, not a measured speedup. Full browser-backed native
+tests and chrome compilation remain pending.
 
 The independent tooling review found two stale output-local GN callers, a
 missing Ninja installation dependency in CI, and a broken clone fallback after
@@ -215,6 +220,15 @@ macOS audit found the material Create/Update callers and opacity paths intact.
 These are source-review results, not runtime acceptance.
 
 Graph inspection confirms that `helium_persistent_item_model_tests` and
-`arcium_optional_navigation_tests` avoid omitted WebUI fixtures. They are queued
-for executable validation; `helium_little_arc_tests` still requires the broader
-test source tree.
+`arcium_optional_navigation_tests` avoid omitted WebUI fixtures. The Pin suite
+passes all 65 tests; optional-navigation validation is queued after chrome.
+`helium_little_arc_tests` still requires the broader test source tree.
+
+The new `personal_build_targets.py` helper derives production objects from active
+personal patches and the configured compilation database. It found 239 objects,
+seven sources outside this macOS graph, and no absent sources. Its four tests
+pass, and independent review found no correctness issues within the documented
+scope. The first complete object pass exposed nine failed objects beyond the
+initial 43-object selection. Repairs cover tab ownership, frame colors, dynamic
+Favorite icon geometry, MRU thumbnail and memory-pressure APIs, favicon helpers,
+and moved sidebar layout members. Full compilation and runtime remain pending.
