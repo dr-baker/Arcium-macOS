@@ -1,6 +1,6 @@
 --- a/chrome/browser/mac/BUILD.gn
 +++ b/chrome/browser/mac/BUILD.gn
-@@ -81,6 +81,8 @@ source_set("impl") {
+@@ -82,6 +82,8 @@ source_set("impl") {
      "dock.mm",
      "exception_processor.mm",
      "initial_prefs.mm",
@@ -9,15 +9,15 @@
      "install_from_dmg.mm",
      "key_window_notifier.cc",
      "metrics.mm",
-@@ -106,6 +108,7 @@ source_set("unit_tests") {
-     "auth_session_request_unittest.mm",
+@@ -112,6 +114,7 @@ source_set("unit_tests") {
      "code_sign_clone_manager_unittest.mm",
+     "dock_unittest.mm",
      "exception_processor_unittest.mm",
 +    "initial_prefs_paths_unittest.cc",
      "metrics_unittest.mm",
    ]
    deps = [
-@@ -135,3 +138,20 @@ source_set("browser_tests") {
+@@ -149,3 +152,20 @@ source_set("browser_tests") {
      "//testing/gtest",
    ]
  }
