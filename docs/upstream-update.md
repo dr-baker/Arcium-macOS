@@ -404,3 +404,10 @@ the final manifest. Keep the existing guarded build nested under that lock,
 and validate only after the supervisor returns. A timeout during planning or
 an unfinalized hard kill still fails the smoke gate. The release-entrypoint
 regression uses a real timer and delayed shutdown to exercise this ordering.
+
+Check the actual process arguments before certifying multi-profile restoration.
+The first 156 restart omitted a profile-directory option at the CLI, but the
+Dev launcher still injected `--profile-directory=Default`. The launcher now
+fixes only the isolated user-data directory and leaves saved subprofile
+selection to Chromium. An argument-level test protects that boundary; native
+quit/relaunch remains necessary to prove restoration.

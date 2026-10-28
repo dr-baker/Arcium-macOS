@@ -125,6 +125,22 @@ class AppsTest(unittest.TestCase):
         self.assertNotIn("https://example.com/",
                          (self.profile("blank") / "stub-args").read_text().splitlines())
 
+    def test_existing_profile_selection_is_not_overridden(self) -> None:
+        profile = self.profile("multiple")
+        (profile / "Profile 1").mkdir(parents=True)
+        state = json.dumps({"profile": {"last_used": "Profile 1",
+                                       "last_active_profiles": ["Default", "Profile 1"]}})
+        (profile / "Local State").write_text(state)
+        self.m.he("run", "--profile", "multiple")
+        args = (profile / "stub-args").read_text().splitlines()
+        self.assertIn(f"--user-data-dir={profile}", args)
+        self.assertFalse(any(arg.startswith("--profile-directory=") for arg in args))
+        self.assertEqual((profile / "Local State").read_text(), state)
+        self.m.he("stop", "--profile", "multiple")
+        refused = self.m.he("run", "--profile", "multiple",
+                            "--profile-directory=../other", check=False)
+        self.assertNotEqual(refused.returncode, 0)
+
     def test_seeding_copies_a_stopped_profile_once(self) -> None:
         seed = self.m.root / "seed"
         (seed / "Default").mkdir(parents=True)

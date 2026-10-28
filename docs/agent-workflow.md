@@ -135,6 +135,9 @@ uses, unless that is already established:
 Use the contract in `devutils/scenarios/` for the feature when one exists.
 
 Reuse the same named Dev profile when iterating on a build or taking screenshots.
+A named Dev profile is an isolated user-data directory. It can contain several
+Chromium profiles created through Spaces. Relaunch lets Chromium restore its
+saved profile selection; `he run` does not force the Default subprofile.
 Rebuilding and relabeling the app preserve that profile's favicon cache. A new
 profile starts with synthetic saved items and no cached icons for them; creating
 a new name for every build makes those icons disappear again. For an isolated
