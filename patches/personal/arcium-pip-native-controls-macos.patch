@@ -16,7 +16,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,165 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -25,12 +25,20 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +#include <algorithm>
 +#include <cmath>
 +#include <cstddef>
++#include <limits>
 +#include <optional>
 +#include <span>
 +
 +namespace arcium::pip::geometry {
 +struct Rect {
 +  double x, y, width, height;
++};
++struct SizeLimits {
++  double minimum_width = 284;
++  double minimum_height = 160;
++  double maximum_width = std::numeric_limits<double>::infinity();
++  double maximum_height = std::numeric_limits<double>::infinity();
++  bool operator==(const SizeLimits&) const = default;
 +};
 +enum class Corner { kBottomLeft, kBottomRight, kTopLeft, kTopRight };
 +enum class Side { kNone, kLeft, kRight };
@@ -143,18 +151,33 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +  }
 +  return best;
 +}
-+inline Rect Resize(Rect r, Rect area, double aspect, double width) {
++inline Rect Resize(Rect r,
++                   Rect area,
++                   double aspect,
++                   double width,
++                   SizeLimits limits = {}) {
 +  area = Normalize(area);
 +  r = Normalize(r);
 +  width = std::isfinite(width) ? width : r.width;
 +  aspect = std::isfinite(aspect) && aspect > 0 ? aspect : 16.0 / 9.0;
-+  const double max_width = std::min(area.width, area.height * aspect);
-+  const double min_width = std::min(max_width, std::max(284.0, 160.0 * aspect));
-+  width = std::clamp(width, min_width, max_width);
++  double height;
++  if (area.width < limits.minimum_width ||
++      area.height < limits.minimum_height) {
++    width = std::clamp(width, 0.0, std::min(area.width, area.height * aspect));
++    height = width / aspect;
++  } else {
++    const double maximum_width = std::min(
++        area.width, std::max(limits.minimum_width, limits.maximum_width));
++    const double maximum_height = std::min(
++        area.height, std::max(limits.minimum_height, limits.maximum_height));
++    width = std::clamp(width, limits.minimum_width, maximum_width);
++    height = std::clamp(width / aspect, limits.minimum_height, maximum_height);
++    width = std::clamp(height * aspect, limits.minimum_width, maximum_width);
++  }
 +  const double top = r.y + r.height;
 +  r.width = width;
-+  r.height = width / aspect;
-+  r.y = top - r.height;
++  r.height = height;
++  r.y = top - height;
 +  return ClampPosition(r, area);
 +}
 +}  // namespace arcium::pip::geometry
@@ -207,6 +230,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +};
 +
 +struct State {
++  geometry::SizeLimits size_limits;
 +  bool playing = false;
 +  bool can_play = false;
 +  bool can_seek = false;
@@ -245,9 +269,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  void PreparePlacement(const Placement& placement,
 +                        NSWindow* opener,
 +                        double aspect,
-+                        double minimum_width,
-+                        double minimum_height);
-+  void Reanchor(double aspect);
++                        geometry::SizeLimits limits);
++  void Reanchor(double aspect, geometry::SizeLimits limits);
 +  std::optional<Placement> TakeUserPlacement();
 +
 + private:
@@ -261,7 +284,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1453 @@
+@@ -0,0 +1,1474 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -583,6 +606,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  std::optional<Placement> _userPlacement;
 +  __weak NSWindow* _openerWindow;
 +  double _preferredWidth;
++  geo::SizeLimits _sizeLimits;
++  BOOL _placementReady;
 +  BOOL _magnifying;
 +  NSRect _magnifyStartFrame;
 +}
@@ -600,9 +625,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)preparePlacement:(const Placement&)placement
 +                  opener:(NSWindow*)opener
 +                  aspect:(double)aspect
-+            minimumWidth:(double)minimumWidth
-+           minimumHeight:(double)minimumHeight;
-+- (void)reanchor:(double)aspect;
++                  limits:(geo::SizeLimits)limits;
++- (void)reanchor:(double)aspect limits:(geo::SizeLimits)limits;
 +- (std::optional<Placement>)takeUserPlacement;
 +@end
 +
@@ -847,6 +871,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  } else if (state.show_controls && !_state.show_controls && !_mouseInside) {
 +    _nativeVisible = YES;
 +  }
++  const bool limits_changed = !(_sizeLimits == state.size_limits);
++  _sizeLimits = state.size_limits;
 +  _state = state;
 +  if (!std::isfinite(_state.position)) {
 +    _state.position = 0;
@@ -859,6 +885,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  _snapshotTime = NSProcessInfo.processInfo.systemUptime;
 +  _hasSnapshot = YES;
++  if (limits_changed && _placementReady && _pipWindow.visible &&
++      !_state.blocked && !_dragging && !_resizing && !_scrolling &&
++      !_magnifying) {
++    [self reanchor:_aspect limits:_sizeLimits];
++  }
 +  [self refreshChrome];
 +  if ([self hasControlsFocus]) {
 +    [self layoutSubtreeIfNeeded];
@@ -1132,8 +1163,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)preparePlacement:(const Placement&)placement
 +                  opener:(NSWindow*)opener
 +                  aspect:(double)aspect
-+            minimumWidth:(double)minimumWidth
-+           minimumHeight:(double)minimumHeight {
++                  limits:(geo::SizeLimits)limits {
 +  if (_invalidated || !_pipWindow) {
 +    return;
 +  }
@@ -1147,29 +1177,37 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _aspect = std::isfinite(aspect) && aspect > 0 ? aspect : 16.0 / 9.0;
 +  auto frame = ToRect(_pipWindow.frame);
 +  _preferredWidth = placement.width > 0 ? placement.width : frame.width;
-+  frame = geo::Resize(
-+      frame, ToRect(screen.visibleFrame), _aspect,
-+      std::max({_preferredWidth, minimumWidth, minimumHeight * _aspect}));
++  _sizeLimits = limits;
++  _placementReady = YES;
++  frame = geo::Resize(frame, ToRect(screen.visibleFrame), _aspect,
++                      _preferredWidth, _sizeLimits);
 +  [self rememberScreen:screen];
 +  _tucked = geo::Side::kNone;
 +  _restoreFrame =
 +      ToNSRect(geo::Anchor(frame, ToRect(screen.visibleFrame), _corner));
 +  [self setWindowFrame:_restoreFrame animate:NO];
 +}
-+- (void)reanchor:(double)aspect {
-+  if (_invalidated || !_pipWindow || _tucked != geo::Side::kNone) {
++- (void)reanchor:(double)aspect limits:(geo::SizeLimits)limits {
++  if (_invalidated || !_pipWindow) {
++    return;
++  }
++  _aspect = std::isfinite(aspect) && aspect > 0 ? aspect : _aspect;
++  _sizeLimits = limits;
++  if (_tucked != geo::Side::kNone) {
 +    return;
 +  }
 +  NSScreen* screen = [self anchorScreen];
 +  if (!screen) {
 +    return;
 +  }
-+  _aspect = std::isfinite(aspect) && aspect > 0 ? aspect : _aspect;
 +  [self rememberScreen:screen];
-+  [self
-+      setWindowFrame:ToNSRect(geo::Anchor(ToRect(_pipWindow.frame),
-+                                          ToRect(screen.visibleFrame), _corner))
-+             animate:NO];
++  const auto frame = geo::Resize(
++      ToRect(_pipWindow.frame), ToRect(screen.visibleFrame), _aspect,
++      _preferredWidth > 0 ? _preferredWidth : NSWidth(_pipWindow.frame),
++      _sizeLimits);
++  [self setWindowFrame:ToNSRect(geo::Anchor(frame, ToRect(screen.visibleFrame),
++                                            _corner))
++               animate:NO];
 +}
 +- (std::optional<Placement>)takeUserPlacement {
 +  return std::exchange(_userPlacement, std::nullopt);
@@ -1242,8 +1280,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self rememberScreen:screen];
 +  _tucked = geo::Side::kNone;
 +  if (screen) {
-+    [self setWindowFrame:ToNSRect(geo::Fit(ToRect(_restoreFrame),
-+                                             ToRect(screen.visibleFrame)))
++    [self setWindowFrame:ToNSRect(geo::Resize(
++                             ToRect(_restoreFrame), ToRect(screen.visibleFrame),
++                             _aspect,
++                             _preferredWidth > 0 ? _preferredWidth
++                                                 : NSWidth(_restoreFrame),
++                             _sizeLimits))
 +                 animate:YES];
 +  }
 +  _nativeVisible = YES;
@@ -1270,8 +1312,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (_adjusting || _dragging || _scrolling || _resizing) {
 +    return;
 +  }
-+  _aspect =
-+      NSWidth(_pipWindow.frame) / std::max(1.0, NSHeight(_pipWindow.frame));
++  if (!_placementReady) {
++    _aspect =
++        NSWidth(_pipWindow.frame) / std::max(1.0, NSHeight(_pipWindow.frame));
++  }
 +  if (_tucked != geo::Side::kNone) {
 +    _restoreFrame.size = _pipWindow.frame.size;
 +    [self screenConfigurationChanged];
@@ -1423,7 +1467,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    double width = NSWidth(_resizeStartFrame) + (dx + dy * _aspect) * 0.5;
 +    [self setWindowFrame:ToNSRect(geo::Resize(ToRect(_resizeStartFrame),
 +                                              ToRect(screen.visibleFrame),
-+                                              _aspect, width))
++                                              _aspect, width, _sizeLimits))
 +                 animate:NO];
 +  } else if (phase == 2 && _resizing) {
 +    _resizing = NO;
@@ -1452,7 +1496,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      setWindowFrame:ToNSRect(geo::Resize(
 +                         ToRect(_pipWindow.frame), ToRect(screen.visibleFrame),
 +                         _aspect,
-+                         NSWidth(_pipWindow.frame) * (1 + event.magnification)))
++                         NSWidth(_pipWindow.frame) * (1 + event.magnification),
++                         _sizeLimits))
 +             animate:NO];
 +  if (event.phase & NSEventPhaseEnded) {
 +    _magnifying = NO;
@@ -1610,6 +1655,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _tucked = geo::Side::kNone;
 +  _nativeVisible = NO;
 +  _hasSnapshot = NO;
++  _placementReady = NO;
 +  _mouseInside = NO;
 +  _dragging = _resizing = _scrolling = _seeking = _magnifying = NO;
 +  _consumeMomentum = NO;
@@ -1697,16 +1743,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +void NativeControls::PreparePlacement(const Placement& placement,
 +                                      NSWindow* opener,
 +                                      double aspect,
-+                                      double minimum_width,
-+                                      double minimum_height) {
++                                      geometry::SizeLimits limits) {
 +  [impl_->view preparePlacement:placement
 +                         opener:opener
 +                         aspect:aspect
-+                   minimumWidth:minimum_width
-+                  minimumHeight:minimum_height];
++                         limits:limits];
 +}
-+void NativeControls::Reanchor(double aspect) {
-+  [impl_->view reanchor:aspect];
++void NativeControls::Reanchor(double aspect, geometry::SizeLimits limits) {
++  [impl_->view reanchor:aspect limits:limits];
 +}
 +std::optional<Placement> NativeControls::TakeUserPlacement() {
 +  return [impl_->view takeUserPlacement];
@@ -1784,7 +1828,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  void OnNativeAction(arcium::pip::Action action, double value);
 +  base::WeakPtr<VideoOverlayWindowViews> video_;
 +  base::WeakPtr<Profile> profile_;
-+  base::Value::Dict placement_pref_snapshot_;
++  base::DictValue placement_pref_snapshot_;
 +  std::unique_ptr<arcium::pip::NativeControls> controls_;
 +  base::WeakPtrFactory<VideoOverlayWindowNativeWidgetMac> weak_factory_{this};
 +};
@@ -1793,7 +1837,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
-@@ -1,17 +1,33 @@
+@@ -1,17 +1,45 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -1824,6 +1868,18 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +#include "ui/views/controls/native/native_view_host.h"
 +#include "ui/views/focus/focus_manager.h"
 +#include "ui/views/view.h"
++
++namespace {
++arcium::pip::geometry::SizeLimits SizeLimitsFor(
++    VideoOverlayWindowViews* video) {
++  const auto minimum = video->GetMinimumSize();
++  const auto maximum = video->GetMaximumSize();
++  return {static_cast<double>(minimum.width()),
++          static_cast<double>(minimum.height()),
++          static_cast<double>(maximum.width()),
++          static_cast<double>(maximum.height())};
++}
++}  // namespace
  
  VideoOverlayWindowNativeWidgetMac::VideoOverlayWindowNativeWidgetMac(
      VideoOverlayWindowViews* widget)
@@ -1832,7 +1888,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +38,285 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +50,286 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -1896,7 +1952,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +      placement_pref_snapshot_) {
 +    return;
 +  }
-+  base::Value::Dict value;
++  base::DictValue value;
 +  value.Set("version", 1);
 +  value.Set("corner", static_cast<int>(placement->corner));
 +  value.Set("width", placement->width);
@@ -1925,23 +1981,23 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  auto* contents = video_->GetController()->GetWebContents();
 +  NSWindow* opener =
 +      contents ? contents->GetTopLevelNativeWindow().GetNativeNSWindow() : nil;
-+  const auto minimum = video_->GetMinimumSize();
 +  const auto natural = video_->natural_size_;
 +  const double aspect =
 +      natural.IsEmpty()
 +          ? 16.0 / 9.0
 +          : static_cast<double>(natural.width()) / natural.height();
-+  controls_->PreparePlacement(placement, opener, aspect, minimum.width(),
-+                              minimum.height());
++  controls_->PreparePlacement(placement, opener, aspect,
++                              SizeLimitsFor(video_.get()));
 +}
 +
 +void VideoOverlayWindowNativeWidgetMac::Reanchor() {
 +  if (controls_ && video_) {
 +    const auto natural = video_->natural_size_;
-+    controls_->Reanchor(natural.IsEmpty()
-+                            ? 16.0 / 9.0
-+                            : static_cast<double>(natural.width()) /
-+                                  natural.height());
++    controls_->Reanchor(
++        natural.IsEmpty()
++            ? 16.0 / 9.0
++            : static_cast<double>(natural.width()) / natural.height(),
++        SizeLimitsFor(video_.get()));
 +  }
 +}
 +
@@ -2009,6 +2065,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  }
 +  auto* video = video_.get();
 +  arcium::pip::State state;
++  state.size_limits = SizeLimitsFor(video);
 +  state.playing = video->playback_state_for_testing_ ==
 +                  content::VideoOverlayWindow::kPlaying;
 +  state.can_play =
@@ -2561,7 +2618,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
-@@ -0,0 +1,117 @@
+@@ -0,0 +1,147 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
@@ -2664,6 +2721,36 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 +  EXPECT_FALSE(ExteriorTuck({0, 0, 400, 225}, {}, 0, Side::kRight));
 +}
 +
++TEST(ArciumPiPGeometryTest, RememberedWidthRespectsMaximumDimensions) {
++  const Rect area{-1440, 50, 1440, 900};
++  const SizeLimits limits{284, 160, 1152, 720};
++  const Rect frame = Resize({0, 0, 400, 225}, area, 16.0 / 9.0, 1200, limits);
++  EXPECT_TRUE(Inside(frame, area));
++  EXPECT_DOUBLE_EQ(frame.width, 1152);
++  EXPECT_DOUBLE_EQ(frame.height, 648);
++}
++
++TEST(ArciumPiPGeometryTest, ExtremeAspectKeepsControlsUsableWithLetterboxing) {
++  const Rect area{0, 0, 1440, 900};
++  const SizeLimits limits{284, 160, 1152, 720};
++  const auto portrait = Resize({0, 0, 400, 225}, area, 0.1, 1200, limits);
++  EXPECT_DOUBLE_EQ(portrait.width, 284);
++  EXPECT_DOUBLE_EQ(portrait.height, 720);
++  const auto landscape = Resize({0, 0, 400, 225}, area, 10, 1200, limits);
++  EXPECT_DOUBLE_EQ(landscape.width, 1152);
++  EXPECT_DOUBLE_EQ(landscape.height, 160);
++}
++
++TEST(ArciumPiPGeometryTest,
++     PermissionMinimumTakesPriorityOverConflictingMaximum) {
++  const Rect area{0, 0, 1440, 900};
++  const SizeLimits limits{600, 300, 400, 240};
++  const auto frame = Resize({0, 0, 400, 225}, area, 16.0 / 9.0, 360, limits);
++  EXPECT_TRUE(Inside(frame, area));
++  EXPECT_DOUBLE_EQ(frame.width, 600);
++  EXPECT_DOUBLE_EQ(frame.height, 300);
++}
++
 +TEST(ArciumPiPGeometryTest, TinyAndInvalidScreensStayFinite) {
 +  Rect tiny = Resize({0, 0, 400, 225}, {0, 0, 240, 120}, 16.0 / 9.0, 500);
 +  EXPECT_TRUE(Inside(tiny, {0, 0, 240, 120}));
@@ -2704,7 +2791,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,789 @@
+@@ -0,0 +1,820 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3207,7 +3294,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +
 +TEST_F(ArciumPiPNativeControlsTest, FinalSizeLandingIgnoresPlaceholderOrigin) {
 +  [window_ setFrame:NSMakeRect(-5000, -5000, 400, 225) display:NO];
-+  controls_->PreparePlacement({}, nil, 16.0 / 9.0, 284, 160);
++  controls_->PreparePlacement({}, nil, 16.0 / 9.0, {});
 +  Pump();
 +  NSScreen* screen = window_.screen;
 +  ASSERT_TRUE(screen);
@@ -3221,7 +3308,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +TEST_F(ArciumPiPNativeControlsTest, RememberedWidthUsesNewVideoAspect) {
 +  Placement placement{geometry::Corner::kTopLeft, 360};
 +  [window_ setContentSize:NSMakeSize(640, 480)];
-+  controls_->PreparePlacement(placement, window_, 4.0 / 3.0, 284, 160);
++  controls_->PreparePlacement(placement, window_, 4.0 / 3.0, {});
 +  Pump();
 +  NSScreen* screen = window_.screen;
 +  ASSERT_TRUE(screen);
@@ -3230,16 +3317,47 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_NEAR(NSMinX(window_.frame), NSMinX(screen.visibleFrame) + 12, 0.5);
 +  EXPECT_NEAR(NSMaxY(window_.frame), NSMaxY(screen.visibleFrame) - 12, 0.5);
 +  [window_ setContentSize:NSMakeSize(320, 180)];
-+  controls_->Reanchor(16.0 / 9.0);
++  controls_->Reanchor(16.0 / 9.0, {});
 +  Pump();
 +  EXPECT_NEAR(NSMinX(window_.frame), NSMinX(screen.visibleFrame) + 12, 0.5);
 +  EXPECT_NEAR(NSMaxY(window_.frame), NSMaxY(screen.visibleFrame) - 12, 0.5);
++  EXPECT_NEAR(NSWidth(window_.frame), 360, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 202.5, 0.5);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PermissionSizingRestoresIntendedWidth) {
++  const geometry::SizeLimits normal{284, 160, 1152, 720};
++  const geometry::SizeLimits prompt{600, 300, 1152, 720};
++  controls_->PreparePlacement({geometry::Corner::kTopLeft, 360}, nil,
++                              16.0 / 9.0, normal);
++  [window_ setContentSize:NSMakeSize(800, 450)];
++  controls_->Reanchor(16.0 / 9.0, prompt);
++  Pump();
++  EXPECT_NEAR(NSWidth(window_.frame), 600, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 337.5, 0.5);
++  controls_->Reanchor(16.0 / 9.0, normal);
++  Pump();
++  EXPECT_NEAR(NSWidth(window_.frame), 360, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 202.5, 0.5);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest,
++       ExtremeAspectRespectsMaximumAndShowsControls) {
++  controls_->PreparePlacement({geometry::Corner::kBottomRight, 1200}, nil, 0.1,
++                              {284, 160, 1152, 720});
++  Pump();
++  EXPECT_NEAR(NSWidth(window_.frame), 284, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 720, 0.5);
++  ExpectPresentedWithinOverlay(Button(@"Play"));
++  EXPECT_FALSE(IsPresented(Button(@"Back 15 seconds")));
 +  EXPECT_FALSE(controls_->TakeUserPlacement());
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, TemporaryFitDoesNotReplaceIntendedWidth) {
 +  Placement placement{geometry::Corner::kBottomRight, 16000};
-+  controls_->PreparePlacement(placement, nil, 16.0 / 9.0, 284, 160);
++  controls_->PreparePlacement(placement, nil, 16.0 / 9.0, {});
 +  Pump();
 +  EXPECT_LT(NSWidth(window_.frame), placement.width);
 +  [Overlay() snap];
@@ -3249,7 +3367,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, OnlySettledUserPlacementIsRemembered) {
-+  controls_->PreparePlacement({}, nil, 16.0 / 9.0, 284, 160);
++  controls_->PreparePlacement({}, nil, 16.0 / 9.0, {});
 +  [Overlay() snap];
 +  Pump();
 +  auto saved = controls_->TakeUserPlacement();
@@ -3529,7 +3647,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
      overlay_window_->set_overlay_view_cb_for_testing(
          base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
                              base::Unretained(this)));
-@@ -1927,3 +1933,147 @@ TEST_F(VideoOverlayWindowWithMuteControl
+@@ -1927,3 +1933,154 @@ TEST_F(VideoOverlayWindowWithMuteControl
    EXPECT_TRUE(overlay_window().ControlsHitTestContainsPoint(
        mute_button_bounds.CenterPoint()));
  }
@@ -3573,7 +3691,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +}
 +TEST_F(VideoOverlayWindowNativeControlsTest,
 +       PlacementSurvivesWindowReplacement) {
-+  base::Value::Dict value;
++  base::DictValue value;
 +  value.Set("version", 1);
 +  value.Set("corner", 2);
 +  value.Set("width", 360.0);
@@ -3596,7 +3714,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +       OldWindowCannotOverwriteNewerPlacement) {
 +  overlay_window().UpdateNaturalSize(gfx::Size(640, 360));
 +  arcium::pip::test::SettleNativePlacement(&overlay_window());
-+  base::Value::Dict newer;
++  base::DictValue newer;
 +  newer.Set("version", 1);
 +  newer.Set("corner", 3);
 +  newer.Set("width", 450.0);
@@ -3606,7 +3724,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +}
 +TEST_F(VideoOverlayWindowNativeControlsTest,
 +       InvalidPlacementUsesVisibleDefault) {
-+  base::Value::Dict value;
++  base::DictValue value;
 +  value.Set("version", 1);
 +  value.Set("corner", 99);
 +  value.Set("width", -1.0);
@@ -3617,12 +3735,19 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +TEST_F(VideoOverlayWindowNativeControlsTest,
 +       PrivatePlacementDoesNotWriteRegularProfile) {
 +  auto* private_profile = profile().GetPrimaryOTRProfile(true);
-+  base::Value::Dict value;
-+  value.Set("version", 1);
-+  value.Set("corner", 3);
-+  value.Set("width", 400.0);
-+  private_profile->GetPrefs()->SetDict("arcium.pip.placement",
-+                                       std::move(value));
++  content::TestWebContentsFactory factory;
++  auto* contents = factory.CreateWebContents(private_profile);
++  TestVideoPictureInPictureWindowController controller;
++  controller.set_web_contents(contents);
++  auto private_window = VideoOverlayWindowViews::Create(&controller);
++  private_window->SetPlaybackControlsVisibility(true);
++  private_window->UpdateNaturalSize(gfx::Size(640, 360));
++  arcium::pip::test::SettleNativePlacement(private_window.get());
++  private_window->Hide();
++  EXPECT_EQ(private_profile->GetPrefs()
++                ->GetDict("arcium.pip.placement")
++                .FindInt("corner"),
++            1);
 +  EXPECT_TRUE(profile().GetPrefs()->GetDict("arcium.pip.placement").empty());
 +  TestingProfile other;
 +  EXPECT_TRUE(other.GetPrefs()->GetDict("arcium.pip.placement").empty());

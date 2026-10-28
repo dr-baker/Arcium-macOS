@@ -98,7 +98,11 @@ gesture restores its starting frame. Controls and the scrubber own their input.
 
 Placement accounts for negative display origins, changing display arrangements,
 aspect ratio, and small work areas. Resizing and magnification retain video aspect
-ratio. Reduced Motion avoids animated movement.
+ratio. Native sizing carries Chromium's minimum and maximum window dimensions.
+When the natural aspect cannot meet both, the window keeps usable controls and
+Chromium letterboxes the video. Reanchoring resolves size from intended width
+again after temporary permission sizing or an aspect change. Reduced Motion
+avoids animated movement.
 
 The PiP window requests participation in all Spaces and other applications'
 full-screen Spaces and retains Chromium's independent activation behavior.
