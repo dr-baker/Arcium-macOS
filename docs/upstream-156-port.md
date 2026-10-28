@@ -2,67 +2,111 @@
 
 Chromium 156 builds with the published Arcium features on
 `update/helium-156-published` and `update/helium-156-published-core`.
-All 76 focused native tests pass. Delivery remains a draft because native UI
-automation stalls, and the prepared source archive cannot run the broader
-browser tests. Do not advance canonical main or install over the daily browser.
+All 76 focused native tests pass, but the first real HTTP navigation crashed
+after the layout repairs. Delivery remains a draft while that failure is fixed
+and native interaction and persistence checks continue. Do not advance canonical main
+or install over the daily browser.
+
+## Native layout repairs
+
+Native control became usable by starting an asynchronous CUA call and consuming
+its stored result in a subsequent call. Actual inspection found three regressions
+that compilation and the native model tests had missed:
+
+- Chromium 156's explicit sidebar layout omitted the reparented toolbar.
+  The patch now supplies its bounds, visibility, and preferred height.
+- Helium's post-layout address-bar centering pass replaced the sidebar field's
+  bounds with its horizontal FlexLayout slot, covering the navigation row.
+  Sidebar mode now skips that horizontal centering pass.
+- The collapse command read the temporary presentation state while its label
+  read the saved state. Clicking Expand Tabs collapsed the temporarily revealed
+  sidebar again. The command now checks the saved state as well, preserving
+  the existing animation reversal behavior.
+
+Independent Astra source review accepted these repairs. Native screenshots of
+`d5ec540f` confirmed normal navigation controls and a single-row address field;
+its next interaction exposed the toggle bug. The current build includes that
+additional correction. Full native acceptance remains in progress.
+
+## Command-bar navigation crash
+
+On the `37c5ecf2` build, Cmd-L followed by the local lifecycle fixture committed
+an HTTP navigation, then crashed in shortcut recording. The command-bar
+controller had already released the autocomplete provider; the navigation
+observer retained a copied match with a raw pointer to that provider.
+`AutocompleteMatch::Validate` reached `TypeToString` with invalid type 0.
+The matching crash report is `Helium-2026-10-28-150136.ips`.
+
+The repair copies the match data at the asynchronous navigation boundary and
+removes provider references, following the existing alternate-infobar pattern.
+Primary and alternate zero-suggest flags are captured separately so shortcut
+exclusion remains intact. The centralized infobar callback also receives a
+provider-independent snapshot. Independent Astra accepted the exact repair. The combined browser and all
+76 focused native tests pass. Native Cmd-L navigation now renders both local
+HTTP fixtures after command-bar closure, with distinct instance tokens and
+exactly one ordinary tab. No fatal appears in the new launch segment.
 
 ## Delivery proof gates
 
 - Inspected: upstream changes, both published fork histories, patch ownership,
-  lifecycle changes, and component linkage. Independent Astra review and a Git
-  merge audit found no remaining production defect or lost published change.
+  lifecycle changes, component linkage, and the native layout regressions.
+  Independent Astra review found no remaining source correctness finding;
+  a separate Git merge audit found no lost published change.
 - Replayed: all 587 combined patches with zero fuzz. Final preflight reports
-  587 applied patches and no problems.
+  587 applied patches and no problems. Core patch lint passes.
 - Compiled: `chrome`, `arcium_optional_navigation_tests`,
   `helium_persistent_item_model_tests`, and `arcium_dmg_unit_tests` at macOS
-  `f19641b8b6ea8c87e9cd48b35a5c64fe6a8c3463` and core
-  `01397cc4bd6529068b488d72a7fcaa8fa32869b6`.
-  Trace `3dc939e259b64e9da49928ba2fa1390e` records success, complete evidence,
-  and no capture errors. All ten recorded native artifact hashes and sizes match. All 242 configured personal production objects also pass;
-  later changes repair browser-test pointer expressions, remove patch whitespace,
-  and regenerate the translation catalog. The final browser build includes those
-  source and resource changes.
-- Tested: navigation 3/3, persistent items 65/65, DMG defaults 8/8. Native
+  `19ad04f` and core `0a5c0b328182c6228328abade71ea812eaf40789`.
+  Trace `da18f3ac69ca4e97934d7a652782ea4c` records success, complete evidence,
+  and no capture errors. All ten recorded native artifact hashes and sizes match.
+  The earlier production-object inventory covered all 242 configured personal
+  objects; subsequent browser builds include the changed production sources.
+- Tested: navigation 3/3, persistent items 65/65, DMG defaults 8/8. Earlier native
   Settings artwork/contracts pass 83 tests, packaging 20, Studio 21, release
   entrypoints 4, and the selected `he` workflow tests 36.
 - Packaged: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app` under
   the build directory below. All eight command-style SVG resources are present.
   This Dev bundle does not exercise release packaging's `initial_preferences`.
-- Launched: that labeled Diagnostics app, PID 96797, using only
+- Launched: that labeled Diagnostics app, PID 95009, using only
   `~/Library/Application Support/Helium Development/profiles/isolated/helium-156-upstream`.
-  The new log segment has neither duplicate Objective-C class warning and no
-  fatal or GPU-failure signature. Cross-volume clone and quarantine cleanup
-  errors remain in the launch log; no resulting failure was established.
-- Behavior-tested: a native screenshot from the preceding `c1897c5e` build
-  shows the seeded sidebar and New Tab rendered. No UI interaction passed.
-  The final catalog correction received only a launch/stop smoke check. The Sol agent's app attachment was
-  interrupted after 246.6 seconds despite a 15-second timeout. The integrator's
-  retained-handle screenshot took 894.8 seconds despite a 10-second timeout.
-  These tool stalls do not establish a browser hang. No interaction video or
-  hosted visual evidence is available.
-- Persistence-tested: not reached. Native model tests pass, but they do not
-  substitute for quitting and relaunching the browser through its UI.
-- Teardown-tested: `he agent stop --profile helium-156-upstream` stopped PID
-  96797. No matching profile process or new Helium crash report remained.
-  The owned fixture server on port 8766 was stopped. Normal UI quit, window
-  close, and Dock reopen remain untested.
-- Manual-only: the runtime checks below, full browser-backed tests, release
-  first-run packaging, and non-macOS validation. The daily app and real data
-  were not used.
+  Its initial log segment has neither duplicate Objective-C class warning nor
+  a fatal or GPU-process-failure signature. Cross-volume clone and quarantine
+  cleanup errors remain; no resulting failure was established.
+- Behavior-tested: preceding builds exercised Cmd-L and repeated Cmd-T/Escape.
+  Cmd-T creates one tab per invocation and Escape retains it, as intended by
+  the published command-bar behavior. Toolbar geometry was visibly repaired.
+  On the preceding `37c5ecf2` build, explicit expansion persists after pointer exit, collapse
+  hides the sidebar, Cmd-S restores it, and Classic/Vertical settings roundtrip
+  retains the collapse preference. Pure hover remains unverified through the
+  available native-control API. The repaired `0a5c0b32` build passes Cmd-L
+  HTTP navigation to fixture A and B, rendering both titles and instance tokens
+  without a duplicate tab or fatal. Graphics and lifecycle acceptance is unfinished.
+- Persistence-tested: not reached. Native model tests do not substitute for
+  quitting and relaunching the browser through its UI.
+- Teardown-tested: preceding iterations stopped through `he agent stop`.
+  The preceding app crashed on its first HTTP navigation; PID 73092 is gone.
+  The repaired app is running as PID 95009 for acceptance, with the owned
+  fixture server on port 8766.
+  Normal UI quit, window close, and Dock reopen are pending.
+- Manual-only: full browser-backed tests need the omitted Chromium 156 fixtures
+  and test source. Release first-run packaging and non-macOS validation remain
+  separate checks. The daily app and real data were not used.
 
-Before marking the PRs ready, use the same isolated profile and the existing
+Before marking the PRs ready, use the same isolated profile and existing
 scenario contracts to check:
 
-1. Pin/Favorite identity and home navigation, sidebar scale and temporary hover,
-   Space/profile ownership, and split resize/reopen/order.
-2. Immediate Cmd-T creation, repeated Cmd-T, Escape retention, and Cmd-L/current
+1. Initial window geometry, collapse/hover/expand, animation reversal, resizing,
+   and horizontal/sidebar mode changes.
+2. Pin/Favorite identity and home navigation, sidebar scale, Space/profile
+   ownership, and split resize/reopen/order.
+3. Immediate Cmd-T creation, repeated Cmd-T, Escape retention, and Cmd-L/current
    tab navigation without duplicate tabs.
-3. Peek close cancellation, Little Arc promotion, and sole-Pin Space transfer,
+4. Peek close cancellation, Little Arc promotion, and sole-Pin Space transfer,
    preserving the fixture's live instance token and draft.
-4. Native Settings window reuse, all style artwork, page borders/shadows,
+5. Native Settings window reuse, style artwork, page borders/shadows,
    material/tint controls, and window dragging without stealing content input.
-5. `/webgl.html` framebuffer readback and `chrome://gpu` acceleration separately.
-6. Normal quit/relaunch persistence, close-all-windows/Dock reopen, and teardown.
+6. `/webgl.html` framebuffer readback and `chrome://gpu` acceleration separately.
+7. Normal quit/relaunch persistence, close-all-windows/Dock reopen, and teardown.
 
 Use `devutils/scenarios/fixtures/tab-lifecycle.html` and `webgl.html` with an
 owned local server. Capture native screenshots and a short interaction video.
