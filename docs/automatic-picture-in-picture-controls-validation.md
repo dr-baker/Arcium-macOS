@@ -1,106 +1,132 @@
 # Native PiP controls validation
 
-The later automatic-landing and per-profile placement correction is awaiting
-its matching build, focused checks and Astra implementation review. Evidence
-below certifies source `a5eb3e65`, not that later correction.
-
-The current implementation retains Chromium’s compositor, decoder, audio and
-NSWindow. Native AppKit controls provide clear Liquid Glass on macOS 26, with a
-material fallback. Automatic entry remains in the shared browser core. It does
-not copy frames through AVKit or rely on Apple’s private PiP framework.
-
-The window has adaptive ±15-second controls, a neutral scrubber with a small
-theme-colored thumb center, corner snapping, an edge-tuck handle and gesture
-handling. Follow-across-Spaces flags are implemented. Actual Spaces and foreign
-fullscreen acceptance remains open; the flags and hidden tests do not prove it.
-
 Built core: `845368ed6045b80fa2bd3ff99d9db4c3c103a576`.
-Built macOS source: `a5eb3e651de0a9a75b1b778d79fa7ccde7b81dbe`.
-Documentation commits after that revision do not change the built code.
+Built macOS source: `468b32abe6e950116158652b05b256a4f55d73df`.
 
-## Source, build and package
+The independent package passed build, replay, focused tests and Astra source
+review. Native checks passed automatic entry, corner landing, paused seeking,
+foreign fullscreen following, edge tuck and restoration, and Return to tab.
+Playback diagnostics, persistence and continuous video evidence remain open.
+The earlier
+[a5eb3e65 native observations](automatic-picture-in-picture-native-a5eb3e65-validation.md)
+are historical evidence and do not certify the later placement changes.
 
-- Final source check: 538/538 selected patches applied, no problems, no pending
-  timestamp snapshot. The final native patch was reapplied strictly with zero
-  fuzz. This is not a fresh replay of the entire selected series.
-- Daily Chrome and four focused test runners built. Final build evidence:
-  `7c2e447f84b246249a158172e633343b` and
-  `5b8bae1b5ae645949cff9e101da9f256`.
-- All 38 hidden checks passed with zero retries: 29 native host, controls and
-  geometry cases; five media-session cases; four renderer cases. These do not
-  replace visible desktop or hardware-gesture tests.
-- The independently signed app has 540 copied, hash-matched component libraries.
-  Static validation examined 554 Mach-O dependency candidates with no issues.
-  Live inspection of 13 candidate processes found 535 candidate library paths,
-  zero mutable `out/Default` references and no unclassified mapped paths.
-- Astra’s [focused source recheck](media/automatic-picture-in-picture/native-controls-a5eb3e65/astra-source-recheck.md)
-  accepted the final aspect-ratio, display-tuck and scrub-state fixes. Its verdict
-  is source GO, with native runtime acceptance open.
+## Implementation
 
-## Native observations
+Chromium retains its compositor, decoder, audio and NSWindow. Native AppKit
+controls use clear Liquid Glass on macOS 26, with a material fallback. Shared
+core owns automatic entry and media transport. There is no frame-copy bridge to
+AVKit and no dependency on Apple's private PiP framework.
 
-Tests used the existing isolated automatic-picture-in-picture profile, mock
-Keychain and the built-in MacBook display. The Mac and video were muted. The
-public YouTube video was loaded and advancing before native tab departure.
-Read-only CDP recorded state and supplied no navigation, playback or PiP input.
-A fixed nonzero diagnostic port kept `navigator.webdriver` false.
+Controls include adaptive ±15-second buttons, a neutral scrubber with a small
+theme-accent center in its thumb, corner snapping, a 28-point edge-tuck handle,
+and gesture handling. Spaces/fullscreen window behaviors are configured;
+native checks below verify foreign fullscreen following and first-click handle
+restoration. Actual ordinary-Space transitions remain unverified.
 
-Automatic PiP entry worked. A mapped native center click paused the video at
-547.379574 seconds. It held exactly that position more than a minute later.
-Native Back and Forward moved paused playback to 532.379596 and back to
-547.379596. Later native AX slider seeking and a mapped scrubber track click
-changed position while preserving pause. No YouTube player error was observed.
+Each new PiP entry lands on the source window's display at its remembered
+corner, defaulting to bottom-right with 12-point work-area margins. An unsynced
+per-profile preference stores the corner and intended width; it does not store
+a display identifier. Private-profile placement stays private. Temporary
+permission sizing and display fitting preserve intended width. Aspect changes
+while tucked restore to the selected corner without saving an automatic move.
 
-Native edge tuck left a 28-point exposed handle on the built-in screen.
-A mapped click on the handle restored the window while the browser remained
-in the background. The window registered in all four ordinary Spaces, but no
-actual Space transition has passed yet. The attempted Ctrl+Right input reached
-the slider and did not switch Spaces; it is not following evidence.
+[Arc investigation](media/automatic-picture-in-picture/native-landing-468b32ab/arc-placement-investigation.md)
+recovered its custom NSPanel host and corner/stash/gesture machinery, but not
+its exact initial corner, snap thresholds or persistence policy. Arcium's margins
+are explicit product choices, informed by open-source placement implementations.
 
-The direct scrubber drag attempts did not move playback. Native slider value
-changes and track clicks passed, so dragging remains unproved rather than
-being reported as a passing seek test. The current controls and glass were
-visually inspected through Computer Use.
+## Source and build proof
 
-## Open acceptance gates
+- Inspected: feature patch and applied native/geometry/controller source.
+- Replayed: all 538 selected patches applied strictly with zero fuzz. After
+  naming and translation restoration, all 2,185 present patch-owned file bytes
+  and 134 absent-path records matched the successful build inputs. Final check
+  had no problems and no pending timestamp snapshot.
+- Compiled: daily Chrome and four focused runners, build evidence
+  `a042b1eee0f94a438436706b9e55485a`, seven incremental actions.
+- Checked: 54 focused cases passed once, with zero launcher retries: 45 hidden
+  native/control/geometry/host cases, five mocked media-session cases and four
+  renderer cases. No real media played in these checks.
+- Packaged: independently signed app with 540 copied, hash-matched component
+  libraries. Static inspection found 554 Mach-O dependency candidates with no
+  issues. This is a candidate-presence check, not proof of exact live dyld
+  resolution; live loaded paths remain pending for this package.
+- Reviewed: [Astra source GO](media/automatic-picture-in-picture/native-landing-468b32ab/astra-source-recheck.md).
+  The original sizing findings and tucked-restoration corner finding are fixed.
 
-- Automatic landing corner, edge spacing and remembered placement, compared
-  with inspectable Arc behavior and an open-source reference.
-- Visible and already-tucked following into ordinary and foreign fullscreen
-  Spaces, with first-click controls that do not activate the browser or change
-  the current Space.
-- Direct scrubber dragging, playing scrubs and interrupted interactions.
-- Mouse dragging and corner placement, compact/roomy resizing, physical phased
-  trackpad gestures, and actual display-topology changes where hardware permits.
-- Settings persistence, normal native Quit, profile-lock release and relaunch.
-- Fresh saved screenshots and continuous video from this exact native build.
+The archived earlier failures remain distinct from the passing run: build 1
+used an unavailable dictionary alias; the first focused run crashed in a test
+fixture that registered a second global WebContents factory. Both were fixed
+before the matching build and 54-case pass.
 
-The recording helper never reached its Start selection action. It exited after
-its five-minute selection timeout with zero output bytes. Native app binding in
-Computer Use stalled far longer. This is a tooling failure, not evidence that
-macOS recording permission is missing. No new recording was produced.
+## Runtime gates
 
-The Mac must be idle before further native Space/fullscreen checks. No install
-or changes to other apps or profiles are part of this pass.
+Native tests use the existing isolated automatic-picture-in-picture profile,
+mock Keychain and built-in MacBook display. Output and video must remain muted,
+and visible checks wait for an idle console. No main-app installation is part
+of this pass.
 
-## YouTube investigation
+The loaded, advancing video entered automatic PiP after a real player
+interaction and tab departure. Its 384-by-216-point window landed at the
+MacBook's bottom-right corner with 12-point work-area margins. Native Pause
+stopped actual playback at 85.348459 seconds. It held that position through an
+eight-hour Computer Use stall. Physical Back and Forward moved paused playback
+to 70.348469 seconds and back to 85.348469. The Forward check preserved the
+foreground app and ordinary Space.
 
-The strongest captured cause of the earlier intermittent YouTube rejection was
-our test launch with `--remote-debugging-port=0`. With the same original profile,
-uBlock and filters, the fixed-port run reached 252.998889 seconds without a
-player error; the port-zero run last played at 37.420608 before
-`ump.spsrejectfailure`. Chromium enables automation signaling for port zero.
-The interrupted return control prevents claiming a completed A/B/A experiment
-or that the JavaScript property alone caused the rejection.
+WindowServer observations show visible PiP joining the separate fixture app's
+fullscreen Space. A second transition began with PiP tucked, leaving a 28-point
+handle exposed at the right screen edge. The handle followed into fullscreen
+Space 1598. A physical click restored the 12-point corner while the fixture
+remained foreground and Space 1598 stayed active. Return to tab later exited
+PiP and showed inline playback paused at 106.321097 seconds.
 
-Astra’s [upstream Helium and playback review](media/automatic-picture-in-picture/native-controls-a5eb3e65/astra-youtube-investigation.md)
-found no justified ad-blocker product fix. No extension or filter modification
-landed. The broader intermittent playback complaint remains incompletely
-isolated. The separate muted-pause dispatch bug is fixed and has both a focused
-test and the native pause observations above.
+[The native controls screenshot](media/automatic-picture-in-picture/native-landing-468b32ab/native-controls.png)
+comes from this exact package. Its provenance record identifies the original
+Computer Use image and the format conversion. Window-only screenshots do not
+show another app's fullscreen context. The fullscreen claim relies on
+[native window observations](media/automatic-picture-in-picture/native-landing-468b32ab/native-window-observations.json)
+and the successful handle interaction.
 
-[Current machine-readable evidence](media/automatic-picture-in-picture/native-controls-a5eb3e65/validation-summary.json)
-and [read-only playback observations](media/automatic-picture-in-picture/native-controls-a5eb3e65/playback-observations.json)
-record the current revision. Earlier glass captures and test results are retained
-in the [legacy controls report](automatic-picture-in-picture-legacy-controls-validation.md).
-Those images and videos do not certify this native implementation.
+Later play/pause attempts produced inconsistent accessibility position
+estimates. Some read-only `Runtime.evaluate` requests timed out while the video
+was hidden in PiP, although CDP HTTP endpoints remained responsive. The same
+read succeeded after Return to tab. This does not establish a transport bug,
+page-freezing cause or missed click. That investigation remains open. Duplicate
+legacy/native accessibility labels also do not prove duplicate drawn controls;
+the focused source review found no visibility path bypassing native suppression.
+
+Still pending: reliable playing transport under the hidden-page diagnostic;
+direct scrubber dragging and playing scrubs; window dragging and corner release;
+compact/roomy resizing; actual ordinary-Space transitions; persistence and native
+Quit/relaunch; continuous video evidence. Physical phased gestures and real
+display-topology changes need hardware validation where automation cannot
+provide it. The test app is stopped.
+
+The older a5eb3e65 app closed its windows after native application-menu Quit but
+retained its process and profile ownership. The matching 468b32ab package also
+reproduced this with only a blank New Tab window, before any video or PiP window
+existed. Astra confirmed incomplete teardown without identifying the lifetime
+owner. Native PiP-window ownership cannot explain that blank-window case.
+Supported isolated-profile stop commands completed cleanup. No live profile
+lock was deleted. This remains a failed native-Quit gate.
+
+The recording attempt produced no video. The window-sharing selection timed
+out, and binding to Control Center later stalled for 29,685 seconds. The picker
+was cancelled. No checkpoint sequence is presented as continuous footage.
+
+## Playback investigation
+
+The strongest captured cause of the earlier YouTube rejection was the test
+launch with `--remote-debugging-port=0`. With the same original profile, uBlock
+and filters, a fixed-port run reached 252.998889 seconds without a player error;
+the port-zero run last played at 37.420608 before `ump.spsrejectfailure`.
+The incomplete return control prevents claiming a completed A/B/A experiment.
+Astra found no justified ad-blocker product change. The broader intermittent
+complaint remains incompletely isolated. The separate muted-pause dispatch
+bug is fixed and has focused and historical native pause evidence.
+
+[Machine-readable evidence](media/automatic-picture-in-picture/native-landing-468b32ab/validation-summary.json)
+records the exact matching package and case results. Historical screenshots and
+videos are labeled by their own source revision.
