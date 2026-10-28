@@ -42,7 +42,7 @@ are explicit product choices, informed by open-source placement implementations.
 
 - Inspected: feature patch and applied native/geometry/controller source.
 - Replayed: all 538 selected patches applied strictly with zero fuzz. After
-  naming and translation restoration, all 2,185 present patch-owned file bytes
+  naming and translation restoration, all 2,185 present patch-owned files were byte-identical
   and 134 absent-path records matched the successful build inputs. Final check
   had no problems and no pending timestamp snapshot.
 - Compiled: daily Chrome and four focused runners, build evidence
@@ -58,6 +58,9 @@ are explicit product choices, informed by open-source placement implementations.
   records prevent a complete browser/helper closure claim.
 - Reviewed: [Astra source GO](media/automatic-picture-in-picture/native-landing-468b32ab/astra-source-recheck.md).
   The original sizing findings and tucked-restoration corner finding are fixed.
+- Evidence reviewed: [Astra accepts draft review](media/automatic-picture-in-picture/native-landing-468b32ab/astra-evidence-review-8c1d7d2.md).
+  No new confirmed product-code defect was found. Full acceptance remains
+  blocked by the native runtime gates below.
 
 The archived earlier failures remain distinct from the passing run: build 1
 used an unavailable dictionary alias; the first focused run crashed in a test
@@ -139,8 +142,8 @@ control checkpoints and does not establish animation smoothness.
 
 ## Playback investigation
 
-The strongest captured cause of the earlier YouTube rejection was the test
-launch with `--remote-debugging-port=0`. With the same original profile, uBlock
+The strongest captured correlation in the earlier YouTube rejection was the
+test launch with `--remote-debugging-port=0`. With the same original profile, uBlock
 and filters, a fixed-port run reached 252.998889 seconds without a player error;
 the port-zero run last played at 37.420608 before `ump.spsrejectfailure`.
 The incomplete return control prevents claiming a completed A/B/A experiment.

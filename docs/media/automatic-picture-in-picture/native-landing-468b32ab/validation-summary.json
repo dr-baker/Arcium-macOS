@@ -270,5 +270,17 @@
     "mutable_paths_observed": 0,
     "complete_closure": false,
     "limit": "Three interleaved browser records and garbled helpers prevent full process-tree closure."
+  },
+  "evidence_review": {
+    "reviewed_outer": "8c1d7d2b8d6023eef3714718cd3fb530817c4400",
+    "report": "astra-evidence-review-8c1d7d2.md",
+    "draft_review": "accepted after wording corrections",
+    "full_acceptance": false,
+    "confirmed_product_code_findings": 0,
+    "corrections": [
+      "Renderer grace period is three seconds.",
+      "Port-zero rejection is a correlation, not an established cause.",
+      "2185 is a present-file count, not a byte count."
+    ]
   }
 }
