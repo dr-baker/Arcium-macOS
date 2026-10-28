@@ -4,9 +4,12 @@ set -eux
 _release_args=("$@")
 
 # Validate inputs before preparing dependencies or resetting build output.
-clone=true
-while getopts ':d' OPTION; do
+clone=false
+while getopts ':cd' OPTION; do
   case "$OPTION" in
+    c)
+      clone=true
+      ;;
     d)
       clone=false
       ;;
@@ -20,7 +23,7 @@ done
 shift "$(($OPTIND -1))"
 
 if [[ $# -gt 1 ]]; then
-  echo 'Usage: build.sh [-d] [arm64|x86_64]' >&2
+  echo 'Usage: build.sh [-c|-d] [arm64|x86_64]' >&2
   exit 2
 fi
 
@@ -77,10 +80,9 @@ fi
 mkdir -p "$_src_dir/out/Default"
 python3 -m he --worktree "$_root_dir" --build-dir "$_root_dir/build" gclient-marker
 
-python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+python3 "$_main_repo/utils/prune_binaries.py" --keep-build-dependencies "$_src_dir" "$_main_repo/pruning.list"
+python3 "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
 "$_root_dir/retrieve_and_unpack_resource.sh" -t
-"$_root_dir/devutils/setup_dawn_go.sh" \
-    "$_src_dir" "$_depot_tools_dir" "$_arch"
 
 # Apply patches, substitutions and translations
 python3 "$_main_repo/utils/patches.py" apply --no-fuzz "$_src_dir" "$_main_repo/patches" "$_root_dir/patches"
@@ -119,15 +121,12 @@ else
   echo 'target_cpu = "x64"' >> "$_src_dir/out/Default/args.gn"
 fi
 
-if $clone; then
-  echo 'chrome_pgo_phase=2' >> "$_src_dir/out/Default/args.gn"
-fi
+echo 'chrome_pgo_phase=2' >> "$_src_dir/out/Default/args.gn"
 
 cd "$_src_dir"
 
-./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
 python3 -m he.release --worktree "$_root_dir" configure
-./out/Default/gn gen out/Default --fail-on-unused-args
+./buildtools/mac/gn gen out/Default --fail-on-unused-args
 python3 -m he.release --worktree "$_root_dir" record-ready
 
 python3 -m he.release --worktree "$_root_dir" compile \

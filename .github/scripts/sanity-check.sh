@@ -3,7 +3,7 @@ set -exo pipefail
 
 sudo mdutil -a -i off
 
-brew install ninja coreutils python@3.14 quilt llvm@20 --overwrite
+brew install ninja coreutils python@3.14 quilt zstd llvm@20 --overwrite
 brew unlink python || true
 brew link python@3.14 llvm@20 --force
 

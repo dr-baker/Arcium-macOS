@@ -9,11 +9,11 @@
 +#include "chrome/browser/preloading/preloading_prefs.h"
  #include "chrome/browser/profiles/delete_profile_helper.h"
  #include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
- #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile.h"
 @@ -64,7 +65,11 @@
- #include "chrome/browser/ui/cocoa/confirm_quit_panel_controller.h"
  #include "chrome/browser/ui/cocoa/history_menu_bridge.h"
  #include "chrome/browser/ui/cocoa/test/run_loop_testing.h"
+ #include "chrome/browser/ui/browser_commands.h"
 +#include "chrome/browser/ui/helium/helium_favorites_and_pins.h"
  #include "chrome/browser/ui/helium/helium_little_arc.h"
 +#include "chrome/browser/ui/helium/helium_space.h"
@@ -44,9 +44,9 @@
  #include "net/test/embedded_test_server/embedded_test_server.h"
 +#include "testing/gtest_mac.h"
  #include "third_party/blink/public/common/features.h"
- #include "ui/color/color_id.h"
- #include "ui/color/color_provider.h"
-@@ -272,6 +280,16 @@ class ScopedMockConfirmQuitPanel {
+ #include "ui/base/page_transition_types.h"
+ #include "ui/base/window_open_disposition.h"
+@@ -274,6 +282,16 @@ class ScopedMockConfirmQuitPanel {
  
  using AppControllerBrowserTest = InProcessBrowserTest;
  
@@ -63,7 +63,7 @@
  // Returns whether a window's pixels are actually on the screen, which is the
  // case when it and all of its parents are marked visible.
  bool IsReallyVisible(NSWindow* window) {
-@@ -351,6 +369,65 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -357,6 +375,65 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
  }
  
@@ -129,7 +129,7 @@
  // Test browser shutdown with a command in the message queue.
  IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, CommandDuringShutdown) {
    EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
-@@ -775,32 +852,102 @@ class AppControllerFirstRunBrowserTest :
+@@ -781,32 +858,102 @@ class AppControllerFirstRunBrowserTest :
    }
  };
  
@@ -245,7 +245,7 @@
  }
  
  class AppControllerOpenShortcutBrowserTest : public InProcessBrowserTest {
-@@ -1674,6 +1821,10 @@ class AppControllerHandoffBrowserTest :
+@@ -1685,6 +1832,10 @@ class AppControllerHandoffBrowserTest :
  // Handoff.
  IN_PROC_BROWSER_TEST_F(AppControllerHandoffBrowserTest, TestHandoffURLs) {
    ASSERT_TRUE(embedded_test_server()->Start());
@@ -256,17 +256,17 @@
    EXPECT_EQ(g_handoff_url, GURL(url::kAboutBlankURL));
    EXPECT_EQ(g_handoff_title, u"about:blank");
  
-@@ -1728,6 +1879,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+@@ -1739,6 +1890,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
        browser(), GURL(test_url4), WindowOpenDisposition::OFF_THE_RECORD,
        ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
-   Browser* const browser3 = browser_created_observer->Wait();
+   BrowserWindowInterface* const browser3 = browser_created_observer->Wait();
 +  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser3));
 +  ASSERT_EQ(browser3,
 +            GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser());
    EXPECT_EQ(g_handoff_url, GURL());
    EXPECT_EQ(g_handoff_title, u"");
  
-@@ -1744,8 +1898,10 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+@@ -1755,8 +1909,10 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
    EXPECT_EQ(g_handoff_url, GURL());
    EXPECT_EQ(g_handoff_title, u"");
  
@@ -279,7 +279,7 @@
    EXPECT_EQ(g_handoff_url, test_url2);
    EXPECT_EQ(g_handoff_title, u"Title Of Awesomeness");
  }
-@@ -1754,6 +1910,15 @@ class AppControllerHandoffPrerenderBrows
+@@ -1765,6 +1921,15 @@ class AppControllerHandoffPrerenderBrows
      : public AppControllerHandoffBrowserTest {
   public:
    void SetUpOnMainThread() override {
@@ -295,7 +295,7 @@
      prerender_helper_.RegisterServerRequestMonitor(embedded_test_server());
      host_resolver()->AddRule("*", "127.0.0.1");
      embedded_test_server()->ServeFilesFromDirectory(
-@@ -1790,6 +1955,13 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+@@ -1801,6 +1966,13 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
    GURL url = embedded_test_server()->GetURL("/empty.html");
    ASSERT_TRUE(content::NavigateToURL(GetActiveWebContents(), url));
  

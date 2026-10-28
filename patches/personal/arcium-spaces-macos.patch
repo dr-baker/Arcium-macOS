@@ -2,9 +2,9 @@ Index: src/chrome/browser/app_controller_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/app_controller_mac.mm
 +++ src/chrome/browser/app_controller_mac.mm
-@@ -76,6 +76,9 @@
+@@ -79,6 +79,9 @@
+ #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
  #include "chrome/browser/task_manager/task_manager_metrics_recorder.h"
- #include "chrome/browser/ui/browser.h"
  #include "chrome/browser/ui/browser_command_controller.h"
 +#include "chrome/browser/ui/helium/helium_space.h"
 +#include "chrome/browser/ui/helium/helium_space_service.h"
@@ -12,7 +12,7 @@ Index: src/chrome/browser/app_controller_mac.mm
  #include "chrome/browser/ui/browser_commands.h"
  #include "chrome/browser/ui/browser_live_tab_context.h"
  #include "chrome/browser/ui/helium/helium_little_arc.h"
-@@ -1576,10 +1579,58 @@ class AppControllerProfileObserver : pub
+@@ -1587,10 +1590,58 @@ class AppControllerProfileObserver : pub
    return [self safeProfileForNewWindows:unsafeLastProfile] ? YES : NO;
  }
  
@@ -71,7 +71,7 @@ Index: src/chrome/browser/app_controller_mac.mm
    BOOL enable = NO;
    // Whether the profile is loaded and opening a new browser window is allowed.
    BOOL canOpenNewBrowser = [self canOpenNewBrowser];
-@@ -2131,14 +2182,116 @@ class AppControllerProfileObserver : pub
+@@ -2149,14 +2200,116 @@ class AppControllerProfileObserver : pub
    [self commandDispatch:sender];
  }
  

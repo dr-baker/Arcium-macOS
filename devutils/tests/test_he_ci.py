@@ -36,8 +36,9 @@ class CIBuildTest(unittest.TestCase):
         values = dict(target_cpu=json.dumps(cpu), use_siso='false', use_remoteexec='false', use_reclient='false')
         (out / 'values.json').write_text(json.dumps([dict(name=k, current=dict(value=v)) for k,v in values.items()]))
         (out / 'args.gn').write_text('\n'.join(k+' = '+v for k,v in values.items()) + '\nchrome_pgo_phase = 2\nis_official_build = true\n')
-        gn = out / 'gn'
-        gn.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys\nassert sys.argv[1]=="args"\nprint(Path(__file__).with_name("values.json").read_text())\n')
+        gn = src / 'buildtools/mac/gn'
+        gn.parent.mkdir(parents=True)
+        gn.write_text(f'#!{sys.executable}\nfrom pathlib import Path\nimport sys\nassert sys.argv[1]=="args"\nprint((Path(sys.argv[2])/"values.json").read_text())\n')
         gn.chmod(0o755)
         (src / 'unit.cc').write_text('int answer() { return 42; }\n')
         (src / 'wait.py').write_text('import time,sys\nfrom pathlib import Path\nPath("started").touch()\n'

@@ -2,7 +2,7 @@ Index: src/chrome/browser/app_controller_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/app_controller_mac.mm
 +++ src/chrome/browser/app_controller_mac.mm
-@@ -91,6 +91,7 @@
+@@ -94,6 +94,7 @@
  #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
  #include "chrome/browser/ui/chrome_pages.h"
  #include "chrome/browser/ui/cocoa/apps/quit_with_apps_controller_mac.h"
@@ -19,7 +19,7 @@ Index: src/chrome/browser/app_controller_mac.mm
    // Reset the keep-alive that has been keeping the browser process alive. Once
    // all the browsers get dealloc'd, it will stop the RunLoop and fall back into
    // main().
-@@ -2127,6 +2130,9 @@ class AppControllerProfileObserver : pub
+@@ -2145,6 +2148,9 @@ class AppControllerProfileObserver : pub
  // Show the preferences window, or bring it to the front if it's already
  // visible.
  - (IBAction)showPreferences:(id)sender {
@@ -29,7 +29,7 @@ Index: src/chrome/browser/app_controller_mac.mm
    // Asynchronously load profile first if needed.
    app_controller_mac::RunInLastProfileSafely(
        base::BindOnce(^(Profile* profile) {
-@@ -2140,12 +2146,10 @@ class AppControllerProfileObserver : pub
+@@ -2158,12 +2164,10 @@ class AppControllerProfileObserver : pub
      // Failed to load profile, show Profile Picker instead.
      return;
    }
@@ -49,13 +49,13 @@ Index: src/chrome/browser/profiles/keep_alive/profile_keep_alive_types.h
 ===================================================================
 --- src.orig/chrome/browser/profiles/keep_alive/profile_keep_alive_types.h
 +++ src/chrome/browser/profiles/keep_alive/profile_keep_alive_types.h
-@@ -183,7 +183,10 @@ enum class ProfileKeepAliveOrigin {
-   // Used during WebApp database cleanup from corruption
-   kWebAppDatabaseCorruptionRecovery = 44,
+@@ -190,7 +190,10 @@ enum class ProfileKeepAliveOrigin {
+   // alive.
+   kOmniboxEverywhere = 46,
  
--  kMaxValue = kWebAppDatabaseCorruptionRecovery,
+-  kMaxValue = kOmniboxEverywhere,
 +  // A native Arcium Settings window is visible for this profile.
-+  kArciumSettingsWindow = 45,
++  kArciumSettingsWindow = 47,
 +
 +  kMaxValue = kArciumSettingsWindow,
  };
@@ -65,10 +65,10 @@ Index: src/chrome/browser/profiles/keep_alive/profile_keep_alive_types.cc
 ===================================================================
 --- src.orig/chrome/browser/profiles/keep_alive/profile_keep_alive_types.cc
 +++ src/chrome/browser/profiles/keep_alive/profile_keep_alive_types.cc
-@@ -89,6 +89,8 @@ std::ostream& operator<<(std::ostream& o
-       return out << "kSkillsDialog";
-     case ProfileKeepAliveOrigin::kWebAppDatabaseCorruptionRecovery:
-       return out << "kWebAppDatabaseCorruptionRecovery";
+@@ -93,6 +93,8 @@ std::ostream& operator<<(std::ostream& o
+       return out << "kFetchKeepAlive";
+     case ProfileKeepAliveOrigin::kOmniboxEverywhere:
+       return out << "kOmniboxEverywhere";
 +    case ProfileKeepAliveOrigin::kArciumSettingsWindow:
 +      return out << "kArciumSettingsWindow";
    }
@@ -78,17 +78,17 @@ Index: src/chrome/browser/ui/chrome_pages.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/chrome_pages.cc
 +++ src/chrome/browser/ui/chrome_pages.cc
-@@ -43,6 +43,9 @@
- #include "chrome/browser/ui/user_education/show_promo_in_page.h"
+@@ -44,6 +44,9 @@
  #include "chrome/browser/ui/webui/bookmarks/bookmarks_ui.h"
  #include "chrome/browser/ui/webui/settings/site_settings_helper.h"
+ #include "chrome/browser/ui/window_feature_controller/window_feature_controller.h"
 +#if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cocoa/arcium_settings_window_controller.h"
 +#endif
  #include "chrome/browser/user_education/tutorial_identifiers.h"
  #include "chrome/browser/user_education/user_education_service.h"
  #include "chrome/browser/user_education/user_education_service_factory.h"
-@@ -457,6 +460,11 @@ bool IsTrustedPopupWindowWithScheme(cons
+@@ -463,6 +466,11 @@ bool IsTrustedPopupWindowWithScheme(cons
  }
  
  void ShowSettings(BrowserWindowInterface* browser) {
@@ -104,7 +104,7 @@ Index: src/chrome/browser/ui/cocoa/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/BUILD.gn
 +++ src/chrome/browser/ui/cocoa/BUILD.gn
-@@ -7,6 +7,9 @@ import("//chrome/browser/buildflags.gni"
+@@ -9,6 +9,9 @@ assert(is_mac)
  source_set("cocoa") {
    public = [
      "accelerators_cocoa.h",
@@ -114,7 +114,7 @@ Index: src/chrome/browser/ui/cocoa/BUILD.gn
      "applescript/apple_event_util.h",
      "applescript/bookmark_folder_applescript.h",
      "applescript/bookmark_item_applescript.h",
-@@ -55,6 +58,8 @@ source_set("cocoa") {
+@@ -57,6 +60,8 @@ source_set("cocoa") {
    sources = [
      "accelerator_utils_cocoa.mm",
      "accelerators_cocoa.mm",
@@ -123,10 +123,10 @@ Index: src/chrome/browser/ui/cocoa/BUILD.gn
      "applescript/apple_event_util.mm",
      "applescript/bookmark_folder_applescript.mm",
      "applescript/bookmark_item_applescript.mm",
-@@ -155,6 +160,7 @@ source_set("cocoa") {
-     "//chrome/browser/themes",
-     "//chrome/browser/translate",
-     "//chrome/browser/ui:accelerator_utils_headers",
+@@ -164,6 +169,7 @@ source_set("cocoa") {
+     "//chrome/browser/ui:browser_commands",
+     "//chrome/browser/ui:browser_window_header",
+     "//chrome/browser/ui:fullscreen_util_mac",
 +    "//chrome/browser/ui:arcium_settings_prefs",
      "//chrome/browser/ui:recently_audible_helper",
      "//chrome/browser/ui:simple_message_box_headers",
@@ -2804,11 +2804,11 @@ Index: src/tools/metrics/histograms/metadata/profile/enums.xml
 ===================================================================
 --- src.orig/tools/metrics/histograms/metadata/profile/enums.xml
 +++ src/tools/metrics/histograms/metadata/profile/enums.xml
-@@ -424,6 +424,7 @@ chromium-metrics-reviews@google.com.
-   <int value="42" label="kWaitingForBookmarksImportOnFirstRun"/>
-   <int value="43" label="kSkillsDialog"/>
+@@ -430,6 +430,7 @@ chromium-metrics-reviews@google.com.
    <int value="44" label="kWebAppDatabaseCorruptionRecovery"/>
-+  <int value="45" label="kArciumSettingsWindow"/>
+   <int value="45" label="kFetchKeepAlive"/>
+   <int value="46" label="kOmniboxEverywhere"/>
++  <int value="47" label="kArciumSettingsWindow"/>
  </enum>
  
  <!-- LINT.IfChange(ProfileLockStatus) -->
@@ -2829,14 +2829,14 @@ Index: src/chrome/BUILD.gn
 ===================================================================
 --- src.orig/chrome/BUILD.gn
 +++ src/chrome/BUILD.gn
-@@ -544,6 +544,7 @@ if (is_win) {
-     configs += [ "//build/config/compiler:wexit_time_destructors" ]
+@@ -569,6 +569,7 @@ if (is_win) {
  
      deps = [
+       "//base:compiler_specific",
 +      "//chrome/browser/ui/cocoa/arcium_settings_swift:bundle",
-       ":chrome_app_strings_bundle_data",
-       ":chrome_resources",
-       ":chrome_versioned_bundle_data",
+       "//base/allocator:early_zone_registration_apple",
+       "//build:branding_buildflags",
+       "//build/config/compiler:compiler_buildflags",
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
 ===================================================================
 --- /dev/null
@@ -15163,15 +15163,15 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
 ===================================================================
 --- src.orig/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
-@@ -28,6 +28,7 @@
+@@ -29,6 +29,7 @@
  #import "chrome/browser/ui/cocoa/chrome_command_dispatcher_delegate.h"
  #import "chrome/browser/ui/cocoa/touchbar/browser_window_touch_bar_controller.h"
  #include "chrome/browser/ui/color/chrome_color_id.h"
 +#include "chrome/browser/ui/helium/arcium_settings_prefs.h"
  #include "chrome/browser/ui/immersive/immersive_mode_controller.h"
+ #include "chrome/browser/ui/layout_constants.h"
  #include "chrome/browser/ui/lens/lens_overlay_entry_point_controller.h"
- #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
-@@ -153,6 +154,10 @@ BrowserNativeWidgetMac::BrowserNativeWid
+@@ -195,6 +196,10 @@ BrowserNativeWidgetMac::BrowserNativeWid
          helium::kArciumChromeAppearancePref,
          base::BindRepeating(&BrowserNativeWidgetMac::OnGlassAppearanceChanged,
                              weak_ptr_factory_.GetWeakPtr()));
@@ -15182,7 +15182,7 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
    }
  
    base::WeakPtr<BrowserNativeWidgetMac> weak_this =
-@@ -848,6 +853,13 @@ void BrowserNativeWidgetMac::UpdateBackg
+@@ -908,6 +913,13 @@ void BrowserNativeWidgetMac::UpdateBackg
  
    auto color_mode = widget->GetColorMode();
    auto theme_color = widget->GetColorProvider()->GetColor(kColorToolbar);
@@ -15194,8 +15194,8 @@ Index: src/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
 +    }
 +  }
  
-   if (!ns_window) {
-     return;
+   NSView* content_view = [ns_window contentView];
+   if (!content_view) {
 Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumColorHarmonyPicker.swift
 ===================================================================
 --- /dev/null

@@ -2,17 +2,17 @@ Index: src/chrome/browser/ui/cocoa/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/BUILD.gn
 +++ src/chrome/browser/ui/cocoa/BUILD.gn
-@@ -127,6 +127,7 @@ source_set("cocoa") {
-   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+@@ -132,6 +132,7 @@ source_set("cocoa") {
+   ]
  
    deps = [
 +    ":arcium_widevine_installer",
      "//chrome/app:command_ids",
      "//chrome/app/theme:chrome_unscaled_resources_grit",
      "//chrome/browser:app_controller_mac",
-@@ -214,3 +215,16 @@ source_set("cocoa") {
-     ]
-   }
+@@ -471,3 +472,16 @@ source_set("interactive_ui_tests") {
+     "//ui/views",
+   ]
  }
 +
 +source_set("arcium_widevine_installer") {
@@ -504,7 +504,7 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -11551,8 +11551,16 @@ if (!is_android && toolkit_views) {
+@@ -9992,8 +9992,16 @@ if (!is_android && toolkit_views) {
        sources += [
          "../browser/ui/browser_shortcuts/arcium_shortcut_presets_unittest.cc",
          "../browser/ui/browser_shortcuts/browser_shortcut_platform_mac_unittest.mm",

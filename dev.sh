@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Helium's development commands, based on upstream helium-macos dev.sh at the
-# commit this checkout's core pin matches (c0056de). Upstream commands keep
+# Chromium 156 update. Upstream commands keep
 # their names and meaning. Arcium's additions are listed in
 # docs/development-changes.md; the Python helpers live in devutils/he.
 
@@ -154,7 +154,6 @@ ___helium_setup_gn() {
     fi
 
     echo 'target_cpu = "'"$TARGET_CPU"'"' >> "$OUT_FILE"
-    echo 'devtools_skip_typecheck = false' >> "$OUT_FILE"
     echo 'use_siso = true' >> "$OUT_FILE"
 
     sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE"
@@ -176,14 +175,14 @@ ___helium_setup_remoteexec_toolchain() {
 
 ___helium_info_pull() {
     local mode="$1"
-    # fall back to git clone if tarball is unavailable
     if [ "$mode" = full ]; then
-        "$_root_dir/retrieve_and_unpack_resource.sh" -g "$_arch"
+        "$_root_dir/retrieve_and_unpack_resource.sh" -g "$_arch" || return $?
     elif "$_root_dir/retrieve_and_unpack_resource.sh" -d -g "$_arch"; then
-        mode=lite
+        mode=prepared
     else
-        "$_root_dir/retrieve_and_unpack_resource.sh" -g "$_arch"
-        mode=full
+        echo "Prepared source acquisition failed; preserved $_src_dir for diagnosis." >&2
+        echo "Fix the acquisition error and retry, or choose a fresh HELIUM_BUILD_DIR with he setup --full-source." >&2
+        return 1
     fi
     ___helium_he acquisition record --source-mode "$mode"
     _he_source_mode="$mode"
@@ -207,9 +206,7 @@ ___helium_configure() {
     ___helium_configure_siso
     ___helium_setup_remoteexec_toolchain
     ___helium_he test-assets
-    "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch"
-    python3 ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles
-    "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands
+    "$_gn_path" gen "$_out_dir" --fail-on-unused-args --export-compile-commands
     ___helium_he remote record-ready
 }
 
@@ -249,6 +246,7 @@ ___helium_setup_presetup() {
     fi
     $force || ___helium_he space --need-gib 100
     ___helium_use_build_tmpdir
+    ___helium_setup_python
 
     rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir"
     ___helium_he timestamps discard --reason "fresh source" || true
@@ -258,7 +256,7 @@ ___helium_setup_presetup() {
     ___helium_he gclient-marker
     # Full-source build dirs keep Chromium's test data for browser_tests.
     if [ "$_he_source_mode" != full ]; then
-        python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+        python3 "$_main_repo/utils/prune_binaries.py" --keep-build-dependencies "$_src_dir" "$_main_repo/pruning.list"
         "$_python_env_bin" "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
     fi
     ___helium_toolchain

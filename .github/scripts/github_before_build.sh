@@ -64,5 +64,4 @@ echo 'chrome_pgo_phase=2' >> "$_src_dir/out/Default/args.gn"
 
 cd "$_src_dir"
 
-./tools/gn/bootstrap/bootstrap.py -o out/Default/gn --skip-generate-buildfiles
-./out/Default/gn gen out/Default --fail-on-unused-args
+./buildtools/mac/gn gen out/Default --fail-on-unused-args
