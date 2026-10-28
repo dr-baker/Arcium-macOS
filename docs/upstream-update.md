@@ -388,3 +388,11 @@ other raw pointers crossing asynchronous boundaries, including callbacks kept
 by prompts after the observer dies. Preserve any provider-derived policy before
 detaching data; this case needed separate zero-suggest flags for the primary
 and alternate matches.
+
+When a port adds a compositor layer under a translucent surface, audit its
+plain labels, button text, and hidden or empty-state labels. Chromium's subpixel
+text check requires an opaque painting surface. The 156 Space form only failed
+when opened, and its icon picker had the same risk on an empty search. Disable
+subpixel rendering for text on those transparent surfaces; do not bypass the
+check or claim the layer is opaque. Exercise the form, edit/delete confirmation,
+and empty icon and emoji results in the diagnostic build.

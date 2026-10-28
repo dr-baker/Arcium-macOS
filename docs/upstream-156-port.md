@@ -2,9 +2,10 @@
 
 Chromium 156 builds with the published Arcium features on
 `update/helium-156-published` and `update/helium-156-published-core`.
-All 76 focused native tests pass, but the first real HTTP navigation crashed
-after the layout repairs. Delivery remains a draft while that failure is fixed
-and native interaction and persistence checks continue. Do not advance canonical main
+All 76 focused native tests pass. Native checks found and repaired sidebar
+layout and HTTP-navigation failures; creating a Space then exposed a label
+painting crash. Its reviewed repair builds and passes the native suites.
+Delivery remains a draft while interaction and persistence checks continue. Do not advance canonical main
 or install over the daily browser.
 
 ## Native layout repairs
@@ -46,6 +47,17 @@ provider-independent snapshot. Independent Astra accepted the exact repair. The 
 HTTP fixtures after command-bar closure, with distinct instance tokens and
 exactly one ordinary tab. No fatal appears in the new launch segment.
 
+## Space form rendering crash
+
+On the `0a5c0b32` build, Pin creation, Reset to Home, and promotion to Favorite
+passed. Opening New Space then hit `Label::PaintText`'s opaque-layer DCHECK.
+The form's labels enabled subpixel rendering on the sidebar's transparent
+compositor layer. The repair uses grayscale rendering for the Space form and
+inline theme labels, form buttons, and empty icon-search results. It does not
+skip the check or mark transparent layers opaque. Independent Astra reviewed
+the repair. The browser and all 76 focused native tests pass; native retry is
+in progress.
+
 ## Delivery proof gates
 
 - Inspected: upstream changes, both published fork histories, patch ownership,
@@ -56,8 +68,8 @@ exactly one ordinary tab. No fatal appears in the new launch segment.
   587 applied patches and no problems. Core patch lint passes.
 - Compiled: `chrome`, `arcium_optional_navigation_tests`,
   `helium_persistent_item_model_tests`, and `arcium_dmg_unit_tests` at macOS
-  `19ad04f` and core `0a5c0b328182c6228328abade71ea812eaf40789`.
-  Trace `da18f3ac69ca4e97934d7a652782ea4c` records success, complete evidence,
+  `61c7a35` and core `9782f5e7ae4757871d86592a0cf2a2664d58f690`.
+  Trace `21a56d8633ec4afab00f55b7a190237c` records success, complete evidence,
   and no capture errors. All ten recorded native artifact hashes and sizes match.
   The earlier production-object inventory covered all 242 configured personal
   objects; subsequent browser builds include the changed production sources.
@@ -67,7 +79,7 @@ exactly one ordinary tab. No fatal appears in the new launch segment.
 - Packaged: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app` under
   the build directory below. All eight command-style SVG resources are present.
   This Dev bundle does not exercise release packaging's `initial_preferences`.
-- Launched: that labeled Diagnostics app, PID 95009, using only
+- Launched: that labeled Diagnostics app, PID 26946, using only
   `~/Library/Application Support/Helium Development/profiles/isolated/helium-156-upstream`.
   Its initial log segment has neither duplicate Objective-C class warning nor
   a fatal or GPU-process-failure signature. Cross-volume clone and quarantine
@@ -80,13 +92,18 @@ exactly one ordinary tab. No fatal appears in the new launch segment.
   retains the collapse preference. Pure hover remains unverified through the
   available native-control API. The repaired `0a5c0b32` build passes Cmd-L
   HTTP navigation to fixture A and B, rendering both titles and instance tokens
-  without a duplicate tab or fatal. Graphics and lifecycle acceptance is unfinished.
+  without a duplicate tab or fatal. A read-only check after that app stopped
+  confirmed the fixture and WebGL URLs in its shortcut database. WebGL 2 renders green with RGBA
+  `0, 191, 64, 255` and GL error 0. GPU Internals reports hardware-accelerated
+  Canvas, compositing, rasterization, video, WebGL, and WebGPU through ANGLE
+  Metal on Apple M3 Max, with GPU crash count 0. The integrator inspected
+  the repaired native window directly. Remaining lifecycle acceptance is unfinished.
 - Persistence-tested: not reached. Native model tests do not substitute for
   quitting and relaunching the browser through its UI.
 - Teardown-tested: preceding iterations stopped through `he agent stop`.
   The preceding app crashed on its first HTTP navigation; PID 73092 is gone.
-  The repaired app is running as PID 95009 for acceptance, with the owned
-  fixture server on port 8766.
+  PID 95009 later crashed when New Space opened. The owned fixture server
+  on port 8766 remains available for the next repair retry.
   Normal UI quit, window close, and Dock reopen are pending.
 - Manual-only: full browser-backed tests need the omitted Chromium 156 fixtures
   and test source. Release first-run packaging and non-macOS validation remain
