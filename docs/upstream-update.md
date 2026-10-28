@@ -396,3 +396,11 @@ when opened, and its icon picker had the same risk on an empty search. Disable
 subpixel rendering for text on those transparent surfaces; do not bypass the
 check or claim the layer is opaque. Exercise the form, edit/delete confirmation,
 and empty icon and emoji results in the diagnostic build.
+
+For a timed CI smoke, make the timeout command own the build-lock supervisor
+directly. Timing a shell wrapper lets that shell exit on TERM while the
+supervised build is still draining, so immediate evidence validation can race
+the final manifest. Keep the existing guarded build nested under that lock,
+and validate only after the supervisor returns. A timeout during planning or
+an unfinalized hard kill still fails the smoke gate. The release-entrypoint
+regression uses a real timer and delayed shutdown to exercise this ordering.

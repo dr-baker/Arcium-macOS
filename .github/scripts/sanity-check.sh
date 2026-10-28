@@ -29,7 +29,11 @@ set +e
 _smoke_since_ns=$(python3 -c 'import time; print(time.time_ns())')
 # The allowance includes the guarded plan. A timeout counts only if the build
 # actually launched and finalized its evidence; planning alone is insufficient.
-timeout -k 7m -s SIGTERM 120s bash -c \
+# Time the lock owner so cancellation drains before evidence is checked. A shell
+# wrapper can exit on TERM while its supervised build is still shutting down.
+PYTHONPATH="$_root_dir/devutils" timeout -k 7m -s SIGTERM 120s \
+    python3 -m he --worktree "$_root_dir" --build-dir "$HELIUM_DEV_BUILD_ROOT" \
+    --build-mode "$_he_build_mode" lock --label build -- bash -c \
     'source "$1/dev.sh"; he agent build --execution local --approved chrome chromedriver' _ "$_root_dir"
 _status_code=$?
 

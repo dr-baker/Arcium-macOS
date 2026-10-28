@@ -173,6 +173,22 @@ have translations, so resources were rebuilt and all 76 native tests rerun.
 The delivery proof gates above record that corrected build. The update guide
 now runs these CI-equivalent checks before the browser build.
 
+## CI smoke shutdown repair
+
+The sanity failure on macOS `6d5ac0e` was a shutdown race. GNU timeout returned
+124 and the smoke validator ran at 21:53:40.39 UTC; the supervised build did not
+finalize its manifest until 21:53:41.64 UTC. Compilation had started and the
+final build status was the expected 143 from TERM. The old shell wrapper let
+the validator run before the lock owner drained its process group.
+
+The timeout now owns the lock supervisor directly, with the guarded build
+nested under that lock. Validation still rejects planning-only timeouts,
+unfinished evidence, and hard kills. A regression with a real GNU timer and
+delayed shutdown failed before this repair and passes afterward. All 14
+release-entrypoint and CI tests pass, the build-entrypoint checker passes,
+and independent Astra review accepted the repair. The hosted rerun is pending;
+this shell-only change does not alter the browser binary or its native gates.
+
 ## Revisions
 
 | Repository | Arcium starting commit | Upstream target |
