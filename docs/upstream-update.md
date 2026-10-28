@@ -190,6 +190,31 @@ in Browser and Spaces before review found its separate UnloadController caller.
 Keep a read-only state query separate from callback registration so observing
 the state cannot erase a pending continuation.
 
+After configuration, list the C++ and Objective-C++ objects owned by active
+personal patches in both repositories:
+
+```sh
+python3 devutils/personal_build_targets.py --build-dir "$HELIUM_BUILD_DIR" --json
+```
+
+The command reads the selected compilation database, excludes test/support
+objects, and reports sources absent from that configuration. It never builds or
+guesses targets for other platforms. Add `--daily` to inspect `out/Default`.
+In zsh, use its plain output for a complete downstream object pass:
+
+```zsh
+targets=("${(@f)$(python3 devutils/personal_build_targets.py --build-dir "$HELIUM_BUILD_DIR")}")
+if [[ -n "${targets[1]:-}" ]]; then
+    he agent build --approved --jobs 6 "${targets[@]}"
+fi
+```
+
+The 156 port initially checked 43 objects; the complete inventory found 239.
+Compiling this set can expose downstream API errors before the full browser's
+remaining libraries. It covers directly patched `.cc` and `.mm` files, not every
+consumer of a changed header. It still needs generated prerequisites and does
+not replace linking `chrome`, executing tests, or runtime acceptance.
+
 When a feature is retired during a UI framework port, remove its template
 control as well as its property, preference, strings, and availability data.
 An obsolete control can survive patch replay and fail only during the full
