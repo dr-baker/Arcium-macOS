@@ -71,3 +71,4 @@ personal/arcium-command-design-presets-macos.patch
 personal/arcium-command-bar-styles-macos.patch
 personal/arcium-command-design-tokens-macos.patch
 personal/arcium-spaces-browser-window-interface-macos.patch
+personal/arcium-crashpad-component-linkage-macos.patch
