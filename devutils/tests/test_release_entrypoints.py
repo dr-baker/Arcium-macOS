@@ -57,6 +57,8 @@ class ReleaseEntrypointsTest(unittest.TestCase):
     def test_sanity_check_build_exit_statuses_and_setup(self) -> None:
         src_dir = self.root / "source"
         (self.root / "dev.sh").write_text(
+            f"_root_dir={str(ROOT)!r}\n"
+            f"HELIUM_DEV_BUILD_ROOT={str(self.root / 'build')!r}\n"
             f"_src_dir={str(src_dir)!r}\n"
             f"_out_dir={str(src_dir / 'out/Default')!r}\n"
             "mkdir -p \"$_src_dir\"\n"
@@ -78,7 +80,19 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.write_executable(self.bin_dir / "pip3.14", "#!/bin/bash\nexit 0\n")
         self.write_executable(
             self.bin_dir / "timeout",
-            '#!/bin/bash\necho smoke >> "$HE_CALLS"\nexit "$SMOKE_STATUS"\n',
+            '#!/bin/bash\necho smoke >> "$HE_CALLS"\n'
+            f'{sys.executable!r} - <<\'PY\'\n'
+            'from datetime import datetime, timezone\n'
+            'import json, os\n'
+            'from pathlib import Path\n'
+            'path = Path("build/.arcium/build-evidence/smoke/manifest.json")\n'
+            'path.parent.mkdir(parents=True, exist_ok=True)\n'
+            'now = datetime.now(timezone.utc).isoformat()\n'
+            'status = int(os.environ["SMOKE_STATUS"])\n'
+            'path.write_text(json.dumps({"started_at": now, "finished_at": now,\n'
+            '    "returncode": 143 if status == 124 else status,\n'
+            '    "phases": [{"name": "build", "attributes": {"child_started_offset_nanos": 0}}]}))\n'
+            'PY\nexit "$SMOKE_STATUS"\n',
         )
 
         environment = self.entrypoint_environment()
