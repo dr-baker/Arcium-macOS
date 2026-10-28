@@ -61,9 +61,25 @@ replaces an entry point, port its required source/toolchain changes into the
 guarded path and document the retained downstream behavior. Run
 `python3 devutils/check_build_entrypoints.py` afterward.
 
-Do not regenerate translations from an unpatched source tree. Preserve local
+Resolve translation conflicts after reconciling the patch series. Preserve local
 message additions as well as product-name substitutions; taking the upstream
-generated JSON alone loses Arc import, Spaces, and onboarding text.
+generated JSON alone loses Arc import, Spaces, and onboarding text. Run the
+repository's catalog generator and inspect its changes before committing them.
+
+Run the same catalog checks as CI before the expensive build, from macOS:
+
+```sh
+python3 helium-chromium/devutils/lint.py
+python3 helium-chromium/devutils/lint.py -t .
+python3 helium-chromium/devutils/i18n.py generate -o /tmp/arcium-source.gen.json
+cmp helium-chromium/i18n/source.gen.json /tmp/arcium-source.gen.json
+python3 helium-chromium/devutils/i18n_lint.py
+```
+
+`check_patch_files.py` warnings are not a substitute for the stricter linter.
+Remove retired patch files as well as their series entries. The 156 port reached
+a passing browser build with a trailing space, an unused Seatbelt patch file,
+and stale generated translation entries; these checks catch all three earlier.
 
 ## Replay and build
 
