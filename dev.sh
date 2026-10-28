@@ -157,6 +157,8 @@ ___helium_setup_gn() {
     echo 'use_siso = true' >> "$OUT_FILE"
 
     sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE"
+    # Static ANGLE duplicates Objective-C classes across macOS component dylibs.
+    echo 'use_static_angle = false' >> "$OUT_FILE"
     sed -i '' '/^[[:space:]]*dcheck_always_on[[:space:]]*=/d; /^[[:space:]]*enable_expensive_dchecks[[:space:]]*=/d' "$OUT_FILE"
     local checks=false
     [ "$_he_build_mode" != diagnostics ] || checks=true
