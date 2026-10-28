@@ -59,7 +59,7 @@ within the default inset and keeps the recorded throw available for replay.
 | Damping | 1 is critically damped. Below 1 allows bounce; above 1 gives a slower return. |
 | Momentum projection | How far the release velocity influences destination selection. Zero selects by position alone. |
 | Screen inset | Distance between the resting window and work-area edges. |
-| Tuck past edge | How far the window body must cross a side to tuck on release. |
+| Tuck past edge | Percentage of the window's width that must be offscreen to tuck on release. 25% is a quarter; 50% is half. |
 | Outward tuck speed | Alternate tuck trigger near an edge, and inward pull-out velocity threshold. |
 | Pull to restore | Inward drag distance needed to restore a tucked window. |
 | Visible tucked strip | Width left accessible at the side. |
@@ -71,6 +71,10 @@ Changes save to `.build/settings.json`. The app reloads external edits twice a
 second, so tuning needs no rebuild or relaunch. Invalid files keep the last valid
 settings and show an error. **JSON…** reveals the file. Closing the tuning window
 or choosing Quit closes both windows.
+
+The tuck threshold uses `stash_percent`, with a default of 25. Older
+`stash_distance` values in points convert to the equivalent percentage on load
+and save in the new format, preserving the existing threshold.
 
 The optional `--settings /absolute/path/settings.json` executable argument moves
 the tuning file. The neighboring `state.json` records settled model coordinates,

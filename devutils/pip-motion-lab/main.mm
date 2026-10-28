@@ -30,9 +30,10 @@ static const Parameter parameters[] = {
     "The gap between a resting docked window and the display's visible work-area edges.\n\n"
     "Higher: leaves more breathing room. Lower: rests closer to the edges.\n\n"
     "The work area excludes space reserved for the menu bar and Dock."},
-  {"stash_distance", "Tuck past edge (points)", 20, 160, &Settings::stash_distance,
-    "How far the window must cross the left or right screen edge before releasing it tucks it away.\n\n"
-    "Lower: a smaller push is enough. Higher: requires pushing farther offscreen.\n\n"
+  {"stash_percent", "Tuck past edge (% of width)", 0, 75, &Settings::stash_percent,
+    "The percentage of the window's width that must be past the left or right screen edge when you release to tuck it.\n\n"
+    "25% means one quarter of the window is offscreen. 50% means half. This scales with the window's size.\n\n"
+    "Lower: a smaller push is enough. Higher: more of the window must be offscreen.\n\n"
     "A fast outward flick near a side can also trigger tucking."},
   {"stash_velocity", "Outward tuck speed (points/s)", 300, 1800, &Settings::stash_velocity,
     "The outward release speed needed to tuck near a side. The flick must be mostly horizontal.\n\n"
@@ -465,6 +466,21 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   NSDictionary *dict = valid ? object : @{};
   valid = valid && [dict[@"version"] isEqual:@1] &&
       ([dict[@"docking"] isEqual:@"corners"] || [dict[@"docking"] isEqual:@"edges"]);
+  BOOL migratedTuckDistance = NO;
+  if (valid && !dict[@"stash_percent"] && dict[@"stash_distance"]) {
+    id legacy = dict[@"stash_distance"];
+    BOOL numeric = [legacy isKindOfClass:NSNumber.class] &&
+        CFGetTypeID((__bridge CFTypeRef)legacy) != CFBooleanGetTypeID();
+    double points = numeric ? [legacy doubleValue] : NAN;
+    if (!std::isfinite(points) || points < 20 || points > 160) valid = NO;
+    else {
+      NSMutableDictionary *converted = [dict mutableCopy];
+      converted[@"stash_percent"] = @(100 * points / motion->size.width);
+      [converted removeObjectForKey:@"stash_distance"];
+      dict = converted;
+      migratedTuckDistance = YES;
+    }
+  }
   Settings next;
   for (const auto& parameter : parameters) {
     id value = dict[@(parameter.key)];
@@ -485,7 +501,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   next.docking = [dict[@"docking"] isEqual:@"corners"] ? Docking::Corners : Docking::SideEdges;
   [saveTimer invalidate]; saveTimer = nil;
   [presetMenu selectItemAtIndex:4]; [self apply:next save:NO];
-  fileStatus.stringValue = @"Reloaded JSON · all controls are live";
+  if (migratedTuckDistance) [self saveSettings];
+  else fileStatus.stringValue = @"Reloaded JSON · all controls are live";
 }
 - (void)checkFile:(NSTimer *)timer { [self reloadSettings]; }
 - (void)windowWillClose:(NSNotification *)notification { [NSApp terminate:nil]; }

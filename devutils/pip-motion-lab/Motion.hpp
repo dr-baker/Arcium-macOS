@@ -28,7 +28,7 @@ struct Settings {
   double damping = 1.00;
   double projection = 0.499;
   double margin = 12;
-  double stash_distance = 80;
+  double stash_percent = 25;
   double stash_velocity = 900;
   double restore_distance = 30;
   double handle = 28;
@@ -223,9 +223,10 @@ class Motion {
         release.x < -settings.stash_velocity && horizontal;
     const bool fling_right = origin.x + size.width > area_.x + area_.width - 32 &&
         release.x > settings.stash_velocity && horizontal;
-    if (allow_stash && (left_overlap > settings.stash_distance || fling_left)) {
+    const double tuck_distance = size.width * settings.stash_percent / 100;
+    if (allow_stash && ((left_overlap > 0 && left_overlap >= tuck_distance) || fling_left)) {
       tuck(Side::Left);
-    } else if (allow_stash && (right_overlap > settings.stash_distance || fling_right)) {
+    } else if (allow_stash && ((right_overlap > 0 && right_overlap >= tuck_distance) || fling_right)) {
       tuck(Side::Right);
     } else {
       const bool deliberate = release_speed <= settings.free_speed;

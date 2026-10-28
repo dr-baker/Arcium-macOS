@@ -248,5 +248,26 @@ int main() {
   }
   check(vertically_accessible && m.phase == Phase::Resting,
         "vertical spring overshoot leaves a grabbable part onscreen");
+
+  for (double width : {200.0, 320.0, 640.0}) {
+    for (bool right : {false, true}) {
+      m = Motion{}; m.size.width = width;
+      double overlap = width * .25;
+      auto drop = [&](double amount) {
+        m.throwFrom({right ? 1000 - width + amount : -amount, 200}, {}, true);
+      };
+      drop(overlap - .01);
+      check(m.tucked == Side::None,
+            "below 25% stays untucked width=" + std::to_string(width) + (right ? " right" : " left"));
+      drop(overlap); finish(m);
+      check(m.phase == Phase::Tucked && m.tucked == (right ? Side::Right : Side::Left),
+            "25% tucks at the same fraction width=" + std::to_string(width) + (right ? " right" : " left"));
+    }
+  }
+  m = Motion{}; m.settings.stash_percent = 0;
+  m.throwFrom({0, 200}, {}, true);
+  check(m.tucked == Side::None, "zero-percent threshold still requires crossing the screen edge");
+  m.throwFrom({-.01, 200}, {}, true);
+  check(m.tucked == Side::Left, "zero-percent threshold tucks on any positive overlap");
   std::cout << checks << " checks passed\n";
 }
