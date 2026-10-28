@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Arcium lifecycle fixture</title>
+<style>
+  body { font: 18px system-ui; max-width: 44rem; margin: 2rem auto; padding: 1rem; }
+  label, p { display: block; margin: 1rem 0; }
+  textarea { box-sizing: border-box; width: 100%; min-height: 8rem; font: inherit; }
+  code { overflow-wrap: anywhere; }
+</style>
+<h1 id="heading"></h1>
+<p>Instance: <code id="instance"></code></p>
+<p>Page color scheme: <span id="scheme"></span></p>
+<label>Draft text <textarea id="draft"></textarea></label>
+<label><input id="confirm-close" type="checkbox"> Ask before leaving this page</label>
+<p><a id="other-page">Open the other page</a></p>
+<p><a id="new-tab" target="_blank" rel="noopener">Open the other page in a new tab</a></p>
+<p>The instance and draft should survive live-tab promotion and cancelled close.
+Reloading creates a new instance. Unsaved drafts are not a restart-persistence check.</p>
+<script>
+  const page = new URLSearchParams(location.search).get('page') === 'B' ? 'B' : 'A';
+  document.title = `Arcium fixture ${page}`;
+  document.querySelector('#heading').textContent = document.title;
+  document.querySelector('#instance').textContent = crypto.randomUUID();
+  const other = new URL(location.href);
+  other.search = new URLSearchParams({page: page === 'A' ? 'B' : 'A'});
+  document.querySelector('#other-page').href = other;
+  document.querySelector('#new-tab').href = other;
+  const scheme = matchMedia('(prefers-color-scheme: dark)');
+  const updateScheme = () => {
+    document.querySelector('#scheme').textContent = scheme.matches ? 'dark' : 'light';
+  };
+  scheme.addEventListener('change', updateScheme);
+  updateScheme();
+  addEventListener('beforeunload', event => {
+    if (document.querySelector('#confirm-close').checked) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+</script>
+</html>
