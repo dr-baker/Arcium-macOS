@@ -1,5 +1,9 @@
 # Native PiP controls validation
 
+The later automatic-landing and per-profile placement correction is awaiting
+its matching build, focused checks and Astra implementation review. Evidence
+below certifies source `a5eb3e65`, not that later correction.
+
 The current implementation retains Chromium’s compositor, decoder, audio and
 NSWindow. Native AppKit controls provide clear Liquid Glass on macOS 26, with a
 material fallback. Automatic entry remains in the shared browser core. It does

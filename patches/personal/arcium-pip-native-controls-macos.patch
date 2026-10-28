@@ -163,7 +163,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,93 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -173,8 +173,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +#include <cstdint>
 +#include <functional>
 +#include <memory>
++#include <optional>
 +#include <string>
 +
++#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
 +#include "ui/gfx/native_ui_types.h"
 +
 +#ifdef __OBJC__
@@ -185,6 +187,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +
 +namespace arcium::pip {
 +
++inline constexpr char kPlacementPref[] = "arcium.pip.placement";
++
++struct Placement {
++  geometry::Corner corner = geometry::Corner::kBottomRight;
++  double width = 0;
++};
++
 +enum class Action {
 +  kPlayPause,
 +  kBack15,
@@ -194,6 +203,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  kClose,
 +  kMute,
 +  kInteraction,
++  kPlacementChanged,
 +};
 +
 +struct State {
@@ -232,6 +242,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  void SetBeforeFocusRelease(std::function<void()> callback);
 +  void Update(const State& state);
 +  void RestorePlacementForHide();
++  void PreparePlacement(const Placement& placement,
++                        NSWindow* opener,
++                        double aspect,
++                        double minimum_width,
++                        double minimum_height);
++  void Reanchor(double aspect);
++  std::optional<Placement> TakeUserPlacement();
 +
 + private:
 +  struct Impl;
@@ -244,7 +261,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1363 @@
+@@ -0,0 +1,1453 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -263,6 +280,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +namespace {
 +using arcium::pip::Action;
 +using arcium::pip::ActionCallback;
++using arcium::pip::Placement;
 +using arcium::pip::State;
 +namespace geo = arcium::pip::geometry;
 +enum class GestureAxis { kPending, kHorizontal, kVertical };
@@ -562,6 +580,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  BOOL _hasSnapshot;
 +  BOOL _invalidated;
 +  uint64_t _sessionGeneration;
++  std::optional<Placement> _userPlacement;
++  __weak NSWindow* _openerWindow;
++  double _preferredWidth;
++  BOOL _magnifying;
++  NSRect _magnifyStartFrame;
 +}
 +- (instancetype)initWithWindow:(NSWindow*)window
 +                      callback:(ActionCallback)callback;
@@ -574,6 +597,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)invalidate;
 +- (void)prepareForHide;
 +- (void)placeTuckedWindowAnimated:(BOOL)animate;
++- (void)preparePlacement:(const Placement&)placement
++                  opener:(NSWindow*)opener
++                  aspect:(double)aspect
++            minimumWidth:(double)minimumWidth
++           minimumHeight:(double)minimumHeight;
++- (void)reanchor:(double)aspect;
++- (std::optional<Placement>)takeUserPlacement;
 +@end
 +
 +@implementation ArciumPiPNativeOverlay
@@ -650,7 +680,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                     }
 +                                     return event;
 +                                   }];
-+  [self screenConfigurationChanged];
++  _corner = geo::Corner::kBottomRight;
 +  return self;
 +}
 +
@@ -1086,7 +1116,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      return screen;
 +    }
 +  }
-+  return _pipWindow.screen ?: NSScreen.mainScreen ?: NSScreen.screens.firstObject;
++  return _openerWindow.screen ?: _pipWindow.screen ?: NSScreen.mainScreen ?: NSScreen.screens.firstObject;
 +}
 +- (void)rememberScreen:(NSScreen*)screen {
 +  _anchorDisplay = screen.deviceDescription[@"NSScreenNumber"];
@@ -1098,6 +1128,51 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _adjusting = YES;
 +  [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
 +  _adjusting = NO;
++}
++- (void)preparePlacement:(const Placement&)placement
++                  opener:(NSWindow*)opener
++                  aspect:(double)aspect
++            minimumWidth:(double)minimumWidth
++           minimumHeight:(double)minimumHeight {
++  if (_invalidated || !_pipWindow) {
++    return;
++  }
++  _openerWindow = opener;
++  NSScreen* screen = opener.screen ?: [self anchorScreen];
++  screen = screen ?: NSScreen.mainScreen ?: NSScreen.screens.firstObject;
++  if (!screen) {
++    return;
++  }
++  _corner = placement.corner;
++  _aspect = std::isfinite(aspect) && aspect > 0 ? aspect : 16.0 / 9.0;
++  auto frame = ToRect(_pipWindow.frame);
++  _preferredWidth = placement.width > 0 ? placement.width : frame.width;
++  frame = geo::Resize(
++      frame, ToRect(screen.visibleFrame), _aspect,
++      std::max({_preferredWidth, minimumWidth, minimumHeight * _aspect}));
++  [self rememberScreen:screen];
++  _tucked = geo::Side::kNone;
++  _restoreFrame =
++      ToNSRect(geo::Anchor(frame, ToRect(screen.visibleFrame), _corner));
++  [self setWindowFrame:_restoreFrame animate:NO];
++}
++- (void)reanchor:(double)aspect {
++  if (_invalidated || !_pipWindow || _tucked != geo::Side::kNone) {
++    return;
++  }
++  NSScreen* screen = [self anchorScreen];
++  if (!screen) {
++    return;
++  }
++  _aspect = std::isfinite(aspect) && aspect > 0 ? aspect : _aspect;
++  [self rememberScreen:screen];
++  [self
++      setWindowFrame:ToNSRect(geo::Anchor(ToRect(_pipWindow.frame),
++                                          ToRect(screen.visibleFrame), _corner))
++             animate:NO];
++}
++- (std::optional<Placement>)takeUserPlacement {
++  return std::exchange(_userPlacement, std::nullopt);
 +}
 +- (void)snap {
 +  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
@@ -1111,6 +1186,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                      ToRect(screen.visibleFrame), _corner));
 +  [self setWindowFrame:frame animate:YES];
 +  _restoreFrame = frame;
++  _userPlacement = Placement{
++      _corner, _preferredWidth > 0 ? _preferredWidth : NSWidth(frame)};
++  [self deliver:Action::kPlacementChanged value:0];
 +}
 +- (void)tuckToSide:(geo::Side)side {
 +  if (_state.blocked || !_pipWindow) {
@@ -1213,8 +1291,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  [self rememberScreen:screen];
 +  if (_tucked == geo::Side::kNone) {
-+    _corner = geo::NearestCorner(ToRect(_pipWindow.frame),
-+                                 ToRect(screen.visibleFrame));
 +    [self setWindowFrame:ToNSRect(geo::Anchor(ToRect(_pipWindow.frame),
 +                                              ToRect(screen.visibleFrame),
 +                                              _corner))
@@ -1351,11 +1427,21 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                 animate:NO];
 +  } else if (phase == 2 && _resizing) {
 +    _resizing = NO;
++    _preferredWidth = NSWidth(_pipWindow.frame);
 +    [self snap];
 +  }
 +}
 +- (void)magnifyWithEvent:(NSEvent*)event {
 +  if (_state.blocked || _tucked != geo::Side::kNone) {
++    return;
++  }
++  if (!_magnifying || (event.phase & NSEventPhaseBegan)) {
++    _magnifying = YES;
++    _magnifyStartFrame = _pipWindow.frame;
++  }
++  if (event.phase & NSEventPhaseCancelled) {
++    _magnifying = NO;
++    [self setWindowFrame:_magnifyStartFrame animate:NO];
 +    return;
 +  }
 +  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
@@ -1368,7 +1454,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                         _aspect,
 +                         NSWidth(_pipWindow.frame) * (1 + event.magnification)))
 +             animate:NO];
-+  if (event.phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
++  if (event.phase & NSEventPhaseEnded) {
++    _magnifying = NO;
++    _preferredWidth = NSWidth(_pipWindow.frame);
 +    [self snap];
 +  }
 +}
@@ -1516,12 +1604,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      }
 +    }
 +  }
-+  NSRect frame = wasTucked ? _restoreFrame : _pipWindow.frame;
++  NSRect frame = wasTucked
++                     ? _restoreFrame
++                     : (_magnifying ? _magnifyStartFrame : _pipWindow.frame);
 +  _tucked = geo::Side::kNone;
 +  _nativeVisible = NO;
 +  _hasSnapshot = NO;
 +  _mouseInside = NO;
-+  _dragging = _resizing = _scrolling = _seeking = NO;
++  _dragging = _resizing = _scrolling = _seeking = _magnifying = NO;
 +  _consumeMomentum = NO;
 +  _gestureAxis = GestureAxis::kPending;
 +  [_hideTimer invalidate];
@@ -1604,6 +1694,23 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +void NativeControls::Update(const State& state) {
 +  [impl_->view applyState:state];
 +}
++void NativeControls::PreparePlacement(const Placement& placement,
++                                      NSWindow* opener,
++                                      double aspect,
++                                      double minimum_width,
++                                      double minimum_height) {
++  [impl_->view preparePlacement:placement
++                         opener:opener
++                         aspect:aspect
++                   minimumWidth:minimum_width
++                  minimumHeight:minimum_height];
++}
++void NativeControls::Reanchor(double aspect) {
++  [impl_->view reanchor:aspect];
++}
++std::optional<Placement> NativeControls::TakeUserPlacement() {
++  return [impl_->view takeUserPlacement];
++}
 +void NativeControls::RestorePlacementForHide() {
 +  [impl_->view prepareForHide];
 +}
@@ -1612,7 +1719,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
-@@ -1,31 +1,51 @@
+@@ -1,31 +1,58 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -1625,6 +1732,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +#include <memory>
 +
 +#include "base/memory/weak_ptr.h"
++#include "base/values.h"
  #include "ui/views/widget/native_widget_mac.h"
  
 +namespace arcium::pip {
@@ -1632,6 +1740,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +enum class Action;
 +}  // namespace arcium::pip
  class VideoOverlayWindowViews;
++class Profile;
  
 -// This NativeWidget allows VideoOverlayWindowViews to have default Mac window
 -// styling despite removing the standard frame.
@@ -1646,6 +1755,8 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 -
    ~VideoOverlayWindowNativeWidgetMac() override;
  
++  void PreparePlacement();
++  void Reanchor();
 +  void InitNativeWidget(views::Widget::InitParams params) override;
 +  void Show(ui::mojom::WindowShowState state,
 +            const gfx::Rect& restore_bounds) override;
@@ -1667,10 +1778,13 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
 -#endif  // CHROME_BROWSER_UI_VIEWS_OVERLAY_VIDEO_OVERLAY_WINDOW_NATIVE_WIDGET_MAC_H_
 + private:
++  void SaveUserPlacement();
 +  void ApplyWindowPolicy();
 +  void ClearNativeControlsFocus();
 +  void OnNativeAction(arcium::pip::Action action, double value);
 +  base::WeakPtr<VideoOverlayWindowViews> video_;
++  base::WeakPtr<Profile> profile_;
++  base::Value::Dict placement_pref_snapshot_;
 +  std::unique_ptr<arcium::pip::NativeControls> controls_;
 +  base::WeakPtrFactory<VideoOverlayWindowNativeWidgetMac> weak_factory_{this};
 +};
@@ -1679,7 +1793,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
-@@ -1,17 +1,30 @@
+@@ -1,17 +1,33 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -1695,12 +1809,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +#include <utility>
 +
 +#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
++#include "chrome/browser/profiles/profile.h"
 +#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
  #include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
 +#include "components/global_media_controls/public/views/media_progress_view.h"
++#include "components/prefs/pref_service.h"
 +#include "components/remote_cocoa/app_shim/native_widget_mac_nswindow.h"
  #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
 +#include "content/public/browser/video_picture_in_picture_window_controller.h"
++#include "content/public/browser/web_contents.h"
 +#include "ui/color/color_id.h"
 +#include "ui/color/color_provider.h"
 +#include "ui/views/controls/label.h"
@@ -1715,7 +1832,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +35,212 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +38,285 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -1728,6 +1845,10 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +    return;
 +  }
 +  ApplyWindowPolicy();
++  if (auto* contents = video_->GetController()->GetWebContents()) {
++    profile_ = Profile::FromBrowserContext(contents->GetBrowserContext())
++                   ->GetWeakPtr();
++  }
 +  controls_ = std::make_unique<arcium::pip::NativeControls>(
 +      window, [weak = weak_factory_.GetWeakPtr()](arcium::pip::Action action,
 +                                                  double value) {
@@ -1763,8 +1884,72 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  window.collectionBehavior = behavior;
 +}
 +
++void VideoOverlayWindowNativeWidgetMac::SaveUserPlacement() {
++  if (!controls_ || !profile_) {
++    return;
++  }
++  auto placement = controls_->TakeUserPlacement();
++  if (!placement) {
++    return;
++  }
++  if (profile_->GetPrefs()->GetDict(arcium::pip::kPlacementPref) !=
++      placement_pref_snapshot_) {
++    return;
++  }
++  base::Value::Dict value;
++  value.Set("version", 1);
++  value.Set("corner", static_cast<int>(placement->corner));
++  value.Set("width", placement->width);
++  placement_pref_snapshot_ = value.Clone();
++  profile_->GetPrefs()->SetDict(arcium::pip::kPlacementPref, std::move(value));
++}
++
++void VideoOverlayWindowNativeWidgetMac::PreparePlacement() {
++  if (!controls_ || !video_) {
++    return;
++  }
++  SaveUserPlacement();
++  arcium::pip::Placement placement;
++  if (profile_) {
++    const auto& value =
++        profile_->GetPrefs()->GetDict(arcium::pip::kPlacementPref);
++    placement_pref_snapshot_ = value.Clone();
++    const int corner = value.FindInt("corner").value_or(-1);
++    const double width = value.FindDouble("width").value_or(0);
++    if (value.FindInt("version").value_or(0) == 1 && corner >= 0 &&
++        corner <= 3 && std::isfinite(width) && width > 0 && width <= 16384) {
++      placement.corner = static_cast<arcium::pip::geometry::Corner>(corner);
++      placement.width = width;
++    }
++  }
++  auto* contents = video_->GetController()->GetWebContents();
++  NSWindow* opener =
++      contents ? contents->GetTopLevelNativeWindow().GetNativeNSWindow() : nil;
++  const auto minimum = video_->GetMinimumSize();
++  const auto natural = video_->natural_size_;
++  const double aspect =
++      natural.IsEmpty()
++          ? 16.0 / 9.0
++          : static_cast<double>(natural.width()) / natural.height();
++  controls_->PreparePlacement(placement, opener, aspect, minimum.width(),
++                              minimum.height());
++}
++
++void VideoOverlayWindowNativeWidgetMac::Reanchor() {
++  if (controls_ && video_) {
++    const auto natural = video_->natural_size_;
++    controls_->Reanchor(natural.IsEmpty()
++                            ? 16.0 / 9.0
++                            : static_cast<double>(natural.width()) /
++                                  natural.height());
++  }
++}
++
 +void VideoOverlayWindowNativeWidgetMac::Show(ui::mojom::WindowShowState state,
 +                                             const gfx::Rect& restore_bounds) {
++  if (![GetNativeWindow().GetNativeNSWindow() isVisible]) {
++    PreparePlacement();
++  }
 +  NativeWidgetMac::Show(state, restore_bounds);
 +  ApplyWindowPolicy();
 +  if (video_) {
@@ -1774,6 +1959,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +
 +void VideoOverlayWindowNativeWidgetMac::OnWindowDestroying(
 +    gfx::NativeWindow window) {
++  SaveUserPlacement();
 +  if (video_) {
 +    video_->DetachNativeControlsHost();
 +  }
@@ -1853,6 +2039,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +}
 +
 +void VideoOverlayWindowNativeWidgetMac::RestorePlacementForHide() {
++  SaveUserPlacement();
 +  ReleaseNativeControlsFocus();
 +  if (controls_) {
 +    controls_->RestorePlacementForHide();
@@ -1911,6 +2098,9 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +      if (!video->is_live_) {
 +        video->Forward15Seconds();
 +      }
++      break;
++    case Action::kPlacementChanged:
++      SaveUserPlacement();
 +      break;
 +    case Action::kMute:
 +      video->controller_->RequestMute(!video->controller_->GetMuteStatus());
@@ -2213,7 +2403,19 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1847,6 +1995,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1814,6 +1962,11 @@ void VideoOverlayWindowViews::ShowInacti
+     overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
+     overlay_view_->ShowBubble(GetNativeView());
+     SetBounds(CalculateAndUpdateWindowBounds());
++#if BUILDFLAG(IS_MAC)
++    if (native_controls_widget_) {
++      native_controls_widget_->Reanchor();
++    }
++#endif
+   }
+ 
+   // When the window is first shown, make the title and top controls
+@@ -1847,6 +2000,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -2225,7 +2427,23 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1888,6 +2041,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1880,6 +2038,15 @@ void VideoOverlayWindowViews::UpdateNatu
+   // Update the views::Widget bounds to adhere to sizing spec. This will also
+   // update the layout of the controls.
+   SetBounds(CalculateAndUpdateWindowBounds());
++#if BUILDFLAG(IS_MAC)
++  if (native_controls_widget_) {
++    if (IsVisible()) {
++      native_controls_widget_->Reanchor();
++    } else {
++      native_controls_widget_->PreparePlacement();
++    }
++  }
++#endif
+   if (is_tucking_forced_) {
+     tucker_->Tuck();
+   }
+@@ -1888,6 +2055,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -2235,7 +2453,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1958,6 +2114,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1958,6 +2128,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -2245,7 +2463,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1993,11 +2152,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1993,11 +2166,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -2263,7 +2481,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2230,7 +2395,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2230,7 +2409,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -2272,7 +2490,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2408,6 +2573,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2408,6 +2587,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -2282,7 +2500,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2513,6 +2681,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2513,6 +2695,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
@@ -2486,7 +2704,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,673 @@
+@@ -0,0 +1,789 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -2517,7 +2735,21 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +- (void)buildChrome;
 +- (void)seek:(id)sender;
 +- (void)endSeek;
++- (void)snap;
 +- (BOOL)consumeScroll:(NSEvent*)event;
++@end
++
++@interface ArciumPiPMagnificationTestEvent : NSEvent
++@property NSEventPhase testPhase;
++@property CGFloat testMagnitude;
++@end
++@implementation ArciumPiPMagnificationTestEvent
++- (NSEventPhase)phase {
++  return self.testPhase;
++}
++- (CGFloat)magnification {
++  return self.testMagnitude;
++}
 +@end
 +
 +namespace arcium::pip {
@@ -2955,6 +3187,81 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_NEAR(NSHeight(window_.frame), 240, 0.5);
 +}
 +
++TEST_F(ArciumPiPNativeControlsTest,
++       CancelledMagnificationDoesNotSavePartialWidth) {
++  NSRect original = window_.frame;
++  auto* event = [ArciumPiPMagnificationTestEvent new];
++  event.testPhase = NSEventPhaseBegan;
++  [Overlay() magnifyWithEvent:event];
++  event.testPhase = NSEventPhaseChanged;
++  event.testMagnitude = 0.2;
++  [Overlay() magnifyWithEvent:event];
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(original));
++  event.testPhase = NSEventPhaseCancelled;
++  event.testMagnitude = 0;
++  [Overlay() magnifyWithEvent:event];
++  Pump();
++  ExpectSameFrame(window_.frame, original);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, FinalSizeLandingIgnoresPlaceholderOrigin) {
++  [window_ setFrame:NSMakeRect(-5000, -5000, 400, 225) display:NO];
++  controls_->PreparePlacement({}, nil, 16.0 / 9.0, 284, 160);
++  Pump();
++  NSScreen* screen = window_.screen;
++  ASSERT_TRUE(screen);
++  EXPECT_NEAR(NSMaxX(window_.frame), NSMaxX(screen.visibleFrame) - 12, 0.5);
++  EXPECT_NEAR(NSMinY(window_.frame), NSMinY(screen.visibleFrame) + 12, 0.5);
++  EXPECT_NEAR(NSWidth(window_.frame) / NSHeight(window_.frame), 16.0 / 9.0,
++              0.001);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, RememberedWidthUsesNewVideoAspect) {
++  Placement placement{geometry::Corner::kTopLeft, 360};
++  [window_ setContentSize:NSMakeSize(640, 480)];
++  controls_->PreparePlacement(placement, window_, 4.0 / 3.0, 284, 160);
++  Pump();
++  NSScreen* screen = window_.screen;
++  ASSERT_TRUE(screen);
++  EXPECT_NEAR(NSWidth(window_.frame), 360, 0.5);
++  EXPECT_NEAR(NSHeight(window_.frame), 270, 0.5);
++  EXPECT_NEAR(NSMinX(window_.frame), NSMinX(screen.visibleFrame) + 12, 0.5);
++  EXPECT_NEAR(NSMaxY(window_.frame), NSMaxY(screen.visibleFrame) - 12, 0.5);
++  [window_ setContentSize:NSMakeSize(320, 180)];
++  controls_->Reanchor(16.0 / 9.0);
++  Pump();
++  EXPECT_NEAR(NSMinX(window_.frame), NSMinX(screen.visibleFrame) + 12, 0.5);
++  EXPECT_NEAR(NSMaxY(window_.frame), NSMaxY(screen.visibleFrame) - 12, 0.5);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, TemporaryFitDoesNotReplaceIntendedWidth) {
++  Placement placement{geometry::Corner::kBottomRight, 16000};
++  controls_->PreparePlacement(placement, nil, 16.0 / 9.0, 284, 160);
++  Pump();
++  EXPECT_LT(NSWidth(window_.frame), placement.width);
++  [Overlay() snap];
++  auto saved = controls_->TakeUserPlacement();
++  ASSERT_TRUE(saved);
++  EXPECT_DOUBLE_EQ(saved->width, 16000);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, OnlySettledUserPlacementIsRemembered) {
++  controls_->PreparePlacement({}, nil, 16.0 / 9.0, 284, 160);
++  [Overlay() snap];
++  Pump();
++  auto saved = controls_->TakeUserPlacement();
++  ASSERT_TRUE(saved);
++  EXPECT_EQ(saved->corner, geometry::Corner::kBottomRight);
++  EXPECT_NEAR(saved->width, NSWidth(window_.frame), 0.5);
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  controls_->RestorePlacementForHide();
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
 +TEST_F(ArciumPiPNativeControlsTest, SeekCanRemainAvailableWithoutPlayPause) {
 +  state_.can_play = false;
 +  Update();
@@ -3021,6 +3328,33 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  return native;
 +}
 +}  // namespace
++void VerifyNativeLanding(VideoOverlayWindowViews* window,
++                         int corner,
++                         double width) {
++  NSWindow* native = window->GetNativeWindow().GetNativeNSWindow();
++  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++  ASSERT_FALSE(native.visible);
++  NSScreen* screen = native.screen;
++  ASSERT_TRUE(screen);
++  const NSRect frame = native.frame;
++  const NSRect area = screen.visibleFrame;
++  const bool right = corner == 1 || corner == 3;
++  const bool top = corner == 2 || corner == 3;
++  EXPECT_NEAR(right ? NSMaxX(frame) : NSMinX(frame),
++              right ? NSMaxX(area) - 12 : NSMinX(area) + 12, 0.5);
++  EXPECT_NEAR(top ? NSMaxY(frame) : NSMinY(frame),
++              top ? NSMaxY(area) - 12 : NSMinY(area) + 12, 0.5);
++  if (width > 0) {
++    EXPECT_NEAR(NSWidth(frame), width, 0.5);
++  }
++}
++void SettleNativePlacement(VideoOverlayWindowViews* window) {
++  NSWindow* native = PrepareNativeWindow(window);
++  NSView* overlay =
++      FindNative(native.contentView, @"Picture in Picture controls");
++  ASSERT_TRUE(overlay);
++  [overlay snap];
++}
 +void VerifyChromiumNativeHitTargetAction(VideoOverlayWindowViews* window) {
 +  NSWindow* native = PrepareNativeWindow(window);
 +  ASSERT_FALSE(native.visible);
@@ -3195,7 +3529,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
      overlay_window_->set_overlay_view_cb_for_testing(
          base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
                              base::Unretained(this)));
-@@ -1927,3 +1933,80 @@ TEST_F(VideoOverlayWindowWithMuteControl
+@@ -1927,3 +1933,147 @@ TEST_F(VideoOverlayWindowWithMuteControl
    EXPECT_TRUE(overlay_window().ControlsHitTestContainsPoint(
        mute_button_bounds.CenterPoint()));
  }
@@ -3207,6 +3541,10 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +void VerifyChromiumNativeScrub(VideoOverlayWindowViews* window,
 +                              bool end_before_hide, bool hide);
 +void VerifyNativeHostVisibility(VideoOverlayWindowViews* window, bool expected);
++void VerifyNativeLanding(VideoOverlayWindowViews* window,
++                         int corner,
++                         double width);
++void SettleNativePlacement(VideoOverlayWindowViews* window);
 +void VerifyFocusedNativeRebuildAndDetach(VideoOverlayWindowViews* window);
 +}
 +
@@ -3226,6 +3564,69 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +    ASSERT_TRUE(overlay_window().UsesNativeControls());
 +  }
 +};
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       FinalNaturalSizeLandsInDefaultCorner) {
++  overlay_window().SetBounds(gfx::Rect(-5000, -5000, 220, 110));
++  overlay_window().UpdateNaturalSize(gfx::Size(640, 360));
++  arcium::pip::test::VerifyNativeLanding(&overlay_window(), 1, 0);
++  EXPECT_TRUE(profile().GetPrefs()->GetDict("arcium.pip.placement").empty());
++}
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       PlacementSurvivesWindowReplacement) {
++  base::Value::Dict value;
++  value.Set("version", 1);
++  value.Set("corner", 2);
++  value.Set("width", 360.0);
++  value.Set("display", "missing-display");
++  profile().GetPrefs()->SetDict("arcium.pip.placement", std::move(value));
++  overlay_window().UpdateNaturalSize(gfx::Size(640, 480));
++  arcium::pip::test::VerifyNativeLanding(&overlay_window(), 2, 360);
++  arcium::pip::test::SettleNativePlacement(&overlay_window());
++  overlay_window().Hide();
++  const auto saved =
++      profile().GetPrefs()->GetDict("arcium.pip.placement").Clone();
++  EXPECT_EQ(saved.FindInt("corner"), 2);
++  EXPECT_DOUBLE_EQ(saved.FindDouble("width").value_or(0), 360);
++  DestroyOverlayWindow();
++  auto replacement = VideoOverlayWindowViews::Create(&pip_window_controller());
++  replacement->UpdateNaturalSize(gfx::Size(640, 360));
++  arcium::pip::test::VerifyNativeLanding(replacement.get(), 2, 360);
++}
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       OldWindowCannotOverwriteNewerPlacement) {
++  overlay_window().UpdateNaturalSize(gfx::Size(640, 360));
++  arcium::pip::test::SettleNativePlacement(&overlay_window());
++  base::Value::Dict newer;
++  newer.Set("version", 1);
++  newer.Set("corner", 3);
++  newer.Set("width", 450.0);
++  profile().GetPrefs()->SetDict("arcium.pip.placement", newer.Clone());
++  overlay_window().Hide();
++  EXPECT_EQ(profile().GetPrefs()->GetDict("arcium.pip.placement"), newer);
++}
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       InvalidPlacementUsesVisibleDefault) {
++  base::Value::Dict value;
++  value.Set("version", 1);
++  value.Set("corner", 99);
++  value.Set("width", -1.0);
++  profile().GetPrefs()->SetDict("arcium.pip.placement", std::move(value));
++  overlay_window().UpdateNaturalSize(gfx::Size(640, 360));
++  arcium::pip::test::VerifyNativeLanding(&overlay_window(), 1, 0);
++}
++TEST_F(VideoOverlayWindowNativeControlsTest,
++       PrivatePlacementDoesNotWriteRegularProfile) {
++  auto* private_profile = profile().GetPrimaryOTRProfile(true);
++  base::Value::Dict value;
++  value.Set("version", 1);
++  value.Set("corner", 3);
++  value.Set("width", 400.0);
++  private_profile->GetPrefs()->SetDict("arcium.pip.placement",
++                                       std::move(value));
++  EXPECT_TRUE(profile().GetPrefs()->GetDict("arcium.pip.placement").empty());
++  TestingProfile other;
++  EXPECT_TRUE(other.GetPrefs()->GetDict("arcium.pip.placement").empty());
++}
 +TEST_F(VideoOverlayWindowNativeControlsTest, ChromiumHitTargetForwardsNativePauseExactlyOnce) {
 +  EXPECT_CALL(pip_window_controller(), TogglePlayPause()).WillOnce(Return(false));
 +  arcium::pip::test::VerifyChromiumNativeHitTargetAction(&overlay_window());
@@ -3276,3 +3677,28 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 +  EXPECT_FALSE(overlay_window().IsVisible());
 +}
 +#endif
+Index: src/chrome/browser/ui/browser_ui_prefs.cc
+===================================================================
+--- src.orig/chrome/browser/ui/browser_ui_prefs.cc
++++ src/chrome/browser/ui/browser_ui_prefs.cc
+@@ -13,6 +13,10 @@
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
+ #include "chrome/browser/ui/ui_features.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
++#endif
++
+ #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
+ #if defined(TOOLKIT_VIEWS)
+ #include "chrome/browser/ui/helium/arcium_settings_prefs.h"
+@@ -174,6 +178,9 @@ void RegisterBrowserUserPrefs(user_prefs
+   registry->RegisterBooleanPref(prefs::kArciumAutoPictureInPictureEnabled,
+                                 true);
+ 
++#if BUILDFLAG(IS_MAC)
++  registry->RegisterDictionaryPref(arcium::pip::kPlacementPref);
++#endif
+   registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
+                                 pref_registration_flags);
+   registry->RegisterBooleanPref(prefs::kShowHomeButton, false,

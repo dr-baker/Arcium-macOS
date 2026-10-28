@@ -62,6 +62,33 @@ accessibility while the native controls are active.
 
 ## Window behavior
 
+Each hidden-to-visible entry lands on the source browser window's display.
+A fresh profile uses bottom-right, normally 12 points inside the visible work
+area. The profile remembers the user's corner and intended width. Height follows
+the current video's natural aspect. A private profile overrides this state in
+memory without writing the regular profile's preference.
+
+Placement runs after Chromium supplies final video bounds and before native
+show, including hidden-window reuse. Later permission sizing and aspect changes
+retain the visible session's selected display and corner. A user can move PiP to
+another display for the current session. A new entry uses its source display
+again. A missing display falls back safely without saving temporary fitted size.
+
+Only completed user movement or sizing changes update the semantic preference.
+Hide and destruction flush pending user intent, without letting an old window
+overwrite a newer preference. Tuck remains transient, and new entries reopen
+fully visible. Cancelled magnification restores the starting frame and does not
+save its intermediate width.
+
+Arc's binary confirms custom corner, stash and gesture state, but its exact
+initial corner, margins and persistence policy were not recovered. Our landing
+policy is an explicit product decision reviewed with Astra.
+[Glance's snap engine](https://github.com/filippocappa/glance/blob/main/Glance/Utilities/SnapEngine.swift)
+separates initial landing from drag settlement, and
+[MyWindowPiP](https://github.com/ljzxzxl/my-window-pip/blob/main/Sources/my-window-pip/PiPWindowController.swift)
+restores position or uses a bottom-right default. Their constants are not Arc
+parity claims.
+
 Dragging the video moves the window and snaps it to the nearest corner on release.
 Dragging to a screen edge or using the tuck button stashes the window at an outer
 desktop edge, leaving a restore handle. An inward swipe or a click restores it.
