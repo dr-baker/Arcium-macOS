@@ -76,6 +76,15 @@ overlay. Both target architectures use the overlay for the machine doing the
 build. Preserve build dependencies during pruning. The overlay supplies GN,
 Siso, Clang, Rust, Node, and other pinned tools; do not run the old toolchain
 download and Node-moving steps over it.
+
+Refresh development defaults when adopting the 156 tooling:
+`he agent configure --diagnostics --refresh-defaults`. Plain configure preserves
+existing `args.gn`. The development defaults set `use_static_angle=false` because
+156's static default links the same Objective-C graphics class into both Blink
+and GL component libraries. Dynamic ANGLE restores the previous macOS ownership.
+Refresh `--daily` separately before validating that development output mode.
+Official release configuration uses a separate entry point.
+
 If archive acquisition fails, setup preserves the incomplete source and stops.
 Fix the reported download or extraction error and retry, or select a fresh build
 directory for `he agent setup --full-source`. Do not automatically clone over a
@@ -158,6 +167,13 @@ missing dependencies, or tests in the wrong executable. Put public headers and
 implementation sources in their current targets, then validate the graph during
 configuration.
 
+After changing GN dependencies, run `he agent configure --diagnostics` before
+the guarded build. This preserves existing arguments while regenerating the
+graph. Siso's dry run can otherwise report only the planned regeneration and
+zero steps, leaving the agent guard unable to count the actual compile plan.
+Inspect the plan error, then regenerate explicitly instead of bypassing the
+guard or treating that zero as a successful build.
+
 For onboarding imports, keep stable profile IDs in selections and resolve them
 to the current import indices at dispatch. Block discovery refresh while a batch
 is running. Preserve upstream permission prompts when restoring a custom flow;
@@ -229,6 +245,32 @@ A supervised restart with fewer jobs can reduce the concurrent working set
 supervisor drain its children before restarting. Completed outputs are reused;
 do not bypass the supervisor or assume fewer jobs is always faster.
 
+Recheck memory during later compilation phases. Several hours of healthy
+samples do not establish a safe job ceiling for the remaining graph. Record
+the pressure interval and the revised ceiling when restarting, and distinguish
+an intentional interruption from a compiler failure in the handoff.
+
+For live diagnostics, inspect the console log and `siso.INFO` alongside resource
+samples. Raw phase output can lag because the capture writer buffers writes.
+The Python 3.14 runtime used for this port flushed stdout in 128 KiB batches.
+A stale raw-file timestamp alone does not prove the build stopped or lost
+output. The in-progress manifest is also an initial snapshot. Check the final
+manifest and capture warnings after the command drains before claiming complete
+evidence. Console-drop warnings and raw-capture failures have different effects.
+
+After an agent or server restart, verify the recorded process identities before
+resuming. A build child can survive its outer shell, leaving queued test commands
+unexecuted. Confirm that the old process group has exited before starting a
+replacement, and explicitly requeue any tests that never ran.
+
+Use command-completion notifications for long builds. In T3 Code, a scheduled
+check bound to the working thread can provide recovery if those notifications
+are lost. Each run should read the current result once and end quietly while
+compilation progresses. Disable the schedule on completion or a failure that
+needs intervention. Reserve an agent for diagnosing a concrete problem rather
+than keeping one alive to poll logs; the build supervisor already handles
+resource backoff.
+
 Choose native-test coverage before acquiring source. Prepared release archives
 can build the browser while omitting test fixtures such as
 `chrome/test/data/webui/chai_assert.ts`. Even a single unit-test object can need
@@ -255,3 +297,9 @@ cancellation. The color-scheme witness updates live for native Settings checks.
 Use the existing Pin/split contracts for restart persistence; this fixture's
 unsaved DOM state is only a live-content identity witness. Stop the server when
 testing ends.
+
+For graphics linkage changes, open `/webgl.html` on the same fixture server.
+It checks WebGL context creation and a green framebuffer readback. Capture the
+visible result and inspect `chrome://gpu` separately; a passing framebuffer
+does not establish hardware acceleration. Inspect new-launch diagnostics for
+duplicate Objective-C classes, including classes that native tests never load.

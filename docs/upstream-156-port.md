@@ -1,7 +1,8 @@
 # Chromium 156 port
 
 Work in progress on `update/helium-156` and `update/helium-156-core`.
-This is an integration record, not a completed-build receipt.
+The full diagnostic browser build and focused native tests pass, including
+the graphics linkage correction. Isolated runtime acceptance is in progress.
 
 ## Revisions
 
@@ -17,7 +18,9 @@ There were 294 incoming core commits and 67 incoming macOS commits at fetch time
 
 The isolated worktree starts from committed HEAD. It does not include the
 original checkout's uncommitted agent guidance or build-lane plan. It also does
-not include feature work landed after the starting commits above.
+not initially include feature work landed after the starting commits above.
+Delivery integration is now incorporating published macOS `93bc1e5` and core
+`de237767` before final runtime acceptance.
 
 ## Integration decisions
 
@@ -150,19 +153,18 @@ The prior Chromium 151 source and output remain separate.
 - Onboarding: the complete series passes all 124 tests and Svelte checking with
   zero errors and warnings. Product resources, version metadata, name substitution,
   and translations are applied; the build preflight reports no problems.
-- Compiled: the first full diagnostic `chrome` build was interrupted through its
-  supervisor to repair confirmed BrowserWindowInterface API mismatches. It had
-  progressed through generated resources and third-party libraries without a
-  compiler diagnostic. Completed outputs remain reusable; `chrome` has not built.
-  The 43-object focused production build now passes, including Spaces, Pins,
-  Arc import, Little Arc, command routing, and native window integration.
-  The standalone Pin model executable builds and passes all 65 tests across
-  ten suites, including identity, persistence, projection, and drag transactions.
+- Compiled: diagnostic `chrome` passes at outer `e9364348` and core `ef60d812`.
+  All 239 configured personal production objects pass. Both focused native
+  executables build at those revisions: optional navigation passes three tests,
+  and the Pin model passes all 65 tests across ten suites, including identity,
+  persistence, projection, and drag transactions.
   Settings TypeScript and standalone Settings lint pass. Fifteen selected native
   Settings contract tests pass from a separate package copy: layout availability,
   Space/profile ownership, draft state, and serialized appearance values.
-- Packaged, launched, behavior, persistence, and teardown: pending. Daniel
-  selected testing in an isolated Dev profile; do not install over daily.
+- Packaged and launched: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app`
+  beneath the build directory, with the isolated `helium-156-upstream` profile.
+  Behavior, persistence, and teardown acceptance are in progress. Daniel selected
+  isolated testing; do not install over daily.
 
 Do not advance canonical main's core pin until the port's required verification
 and review are complete. See [Updating from Helium](upstream-update.md) for the
@@ -190,7 +192,7 @@ completed compile outputs are reused across repair cycles. A later ten-minute
 sample showed 75–76% memory headroom, zero swap-out growth, and about 55% mean
 system CPU use, so the full build resumed with an eight-job trial. This is a
 resource-based adjustment, not a measured speedup. Full browser-backed native
-tests and chrome compilation remain pending.
+tests still require the omitted test source tree.
 
 The independent tooling review found two stale output-local GN callers, a
 missing Ninja installation dependency in CI, and a broken clone fallback after
@@ -209,8 +211,8 @@ registers the required close callback. Both share the same active-state lookup,
 and the existing outermost-guard test queries after callback registration. The
 focused set now includes UnloadController (43 objects) and passes. Independent
 review accepted the fix and traced callback release through BrowserView to the
-new unload state machine. Full chrome compilation and executable lifecycle
-coverage remain pending.
+new unload state machine. Full chrome compilation now passes; executable
+Browser/UnloadController lifecycle coverage still requires the test source tree.
 
 Independent Astra source review accepted the tooling and lifecycle fixes. Its
 remaining bounded passes found no concrete regressions in Peek coordination,
@@ -221,7 +223,7 @@ These are source-review results, not runtime acceptance.
 
 Graph inspection confirms that `helium_persistent_item_model_tests` and
 `arcium_optional_navigation_tests` avoid omitted WebUI fixtures. The Pin suite
-passes all 65 tests; optional-navigation validation is queued after chrome.
+passes all 65 tests; optional navigation passes all three tests after chrome.
 `helium_little_arc_tests` still requires the broader test source tree.
 
 The new `personal_build_targets.py` helper derives production objects from active
@@ -231,4 +233,53 @@ pass, and independent review found no correctness issues within the documented
 scope. The first complete object pass exposed nine failed objects beyond the
 initial 43-object selection. Repairs cover tab ownership, frame colors, dynamic
 Favorite icon geometry, MRU thumbnail and memory-pressure APIs, favicon helpers,
-and moved sidebar layout members. Full compilation and runtime remain pending.
+and moved sidebar layout members. All 239 objects and the full browser now
+compile; runtime acceptance is in progress.
+
+The final resumed browser build completed on 2026-10-28 at 18:34:58 UTC. Its
+trace is `7ba5a300b0364d22abfb4927f51bafc6` under `.arcium/build-evidence/`.
+The manifest records success and complete evidence with no capture errors.
+This invocation took 2h18m30s including planning and reused outputs from earlier
+attempts; it is not a clean-build timing. The queued native build completed at
+18:36:23 UTC. Logs are `/tmp/arcium-156-build-8.log`,
+`/tmp/arcium-156-native-tests-build-8.log`,
+`/tmp/arcium-156-navigation-tests.log`, and
+`/tmp/arcium-156-pin-tests-current.log`.
+
+The thirteen-job attempt developed sustained swap pressure after several hours.
+Its compiler survived a T3 restart, but its outer shell and queued tests did not.
+After verifying process identities, the integrator interrupted the owned
+resource supervisor and confirmed its process group had exited. The resumed
+build requested eight jobs; desktop activity limited it to two. Both native
+suites were explicitly requeued. A later headroom dip to 37–39% recovered
+without swapping and did not require another restart. T3 scheduled checks
+replaced the polling agent, and the schedule was disabled on completion.
+
+Native test startup exposed a duplicate `ANGLESwapCGLLayer` Objective-C class.
+Chromium 156 changed `use_static_angle` to true on macOS. Existing Blink and GL
+dependencies then pulled the same ANGLE backend source set into two component
+dylibs. The old 151 link rules did not do this, and no downstream patch owns the
+changed default. Development configuration now sets `use_static_angle=false`;
+156 retains the dynamic build, bundling, and loader paths. Independent Astra
+review accepted this correction. Fresh configuration, the browser rebuild, and
+all 68 focused native tests pass at outer `ce2c585`. Neither test executable now
+emits the duplicate-class warning. The corrected build completed at 18:53:32 UTC
+with complete evidence and no capture errors, trace
+`90bbf48cb1774c5ca7b2c35e3215b8e7`. The same labeled isolated profile relaunched
+successfully; GPU and behavior acceptance remain in progress.
+The first native UI connection timed out before returning app state or making
+any interaction; it supplies no behavior evidence.
+
+The launched browser exposed a second duplicate class,
+`CrashpadHTTPBodyStreamTransport`. Chromium 156 added `handler:common` to the
+Crashpad app library on every platform, pulling its HTTP transport into both
+browser UI and Chrome component dylibs. Independent review found no references
+from the macOS app archive to symbols supplied by that dependency. The new
+macOS patch omits it only for component builds; handler executable dependencies,
+release builds, and other platforms retain it. All 581 combined patches replay
+strictly. Outer `2623643` contains the correction. The full browser relink and
+all 68 focused native tests pass. The subsequent launch no longer emits either
+duplicate-class warning; behavior acceptance remains pending. The first build
+attempt stopped before compilation because its dry run only described GN
+regeneration. Explicit configuration regenerated the graph, after which the
+guarded build succeeded.
