@@ -150,5 +150,103 @@ int main() {
   next = m.settings; next.response = .6; m.retune(next); finish(m);
   check(m.position.x == 320 && m.position.y == 230 && m.tucked == Side::None,
         "restored free placement survives live tuning without docking");
+
+  m = Motion{};
+  m.tuck(Side::Right); finish(m); m.restore(); m.step(.04);
+  auto grab = m.position + Point{10, 90};
+  m.begin(grab, 10); m.end(10.1); finish(m);
+  check(m.position.x == 668 && m.position.y == 12 && m.decision == Decision::Restore,
+        "click interruption resumes restore to a fully visible destination");
+  next = m.settings; next.margin = 24; m.retune(next); finish(m);
+  check(m.position.x == 656 && m.position.y == 24,
+        "inset tuning after interrupted restore keeps the window fully visible");
+
+  for (bool above : {false, true}) {
+    m = Motion{}; m.settings.placement = Placement::Free;
+    m.throwFrom({300, above ? 540.0 : -20.0}, {}, false); m.step(.02);
+    before = m.position; grab = before + Point{40, 90};
+    m.begin(grab, 20); m.drag(grab + Point{1, 0}, 20.01);
+    check(near(m.position.x, before.x + 1) && near(m.position.y, before.y),
+          above ? "upper-boundary re-grab does not reapply resistance" :
+                  "lower-boundary re-grab does not reapply resistance");
+    m.drag(grab + Point{1, above ? -1.0 : 1.0}, 20.02);
+    check(near(m.position.y, before.y + (above ? -1 : 1)),
+          above ? "upper-boundary inward pull follows the pointer" :
+                  "lower-boundary inward pull follows the pointer");
+    m.drag(grab + Point{1, above ? 1.0 : -1.0}, 20.03);
+    const double outward = (m.position.y - before.y) * (above ? 1 : -1);
+    check(outward > 0 && outward < 1,
+          above ? "upper-boundary outward pull is resisted without jumping" :
+                  "lower-boundary outward pull is resisted without jumping");
+  }
+
+  m = Motion{}; next = m.settings;
+  next.free_speed = 800; next.projection = .9; m.retune(next);
+  m.throwFrom({640, 30}, {-500, 0}, false);
+  check(m.target.x == 668 && m.target.y == 12,
+        "deliberate nearby attraction uses the nearby dock rather than a projected opposite dock");
+  next.response = .6; m.retune(next);
+  check(m.target.x == 668 && m.target.y == 12,
+        "live retuning preserves the nearby deliberate attraction");
+  m.throwFrom({640, 30}, {-800, 0}, false);
+  check(m.target.x == 668 && m.target.y == 12,
+        "release speed equal to the deliberate threshold attracts locally");
+  m.throwFrom({640, 30}, {-800.01, 0}, false);
+  check(m.target.x == 12 && m.target.y == 12,
+        "release speed above the deliberate threshold projects the destination");
+  m.throwFrom({620, 12}, {}, false);
+  check(m.decision == Decision::Dock && m.target.x == 668,
+        "slow drops exactly at the attraction radius still snap");
+  m.throwFrom({619.99, 12}, {}, false);
+  check(m.decision == Decision::Keep && m.target.x == 619.99,
+        "slow drops beyond the attraction radius stay where placed");
+
+  for (bool right : {false, true}) {
+    m = Motion{}; m.settings.response = .9; m.settings.damping = .65;
+    m.throwFrom({right ? 900.0 : -220.0, 200}, {right ? 1800.0 : -1800.0, 0}, true);
+    bool accessible = true;
+    for (int i = 0; i < 1200; ++i) {
+      m.step(1.0 / 120);
+      accessible &= m.position.x >= -320 + m.settings.handle &&
+                    m.position.x <= 1000 - m.settings.handle;
+    }
+    check(accessible && m.phase == Phase::Tucked && length(m.velocity) == 0,
+          right ? "right tuck keeps its handle exposed throughout underdamped overshoot" :
+                  "left tuck keeps its handle exposed throughout underdamped overshoot");
+  }
+
+  m = Motion{}; next = m.settings; next.docking = Docking::SideEdges; m.retune(next);
+  m.throwFrom({60, 210}, {10, 0}, false);
+  check(m.decision == Decision::Dock && m.target.x == 12 && m.target.y == 210,
+        "smart side-edge mode attracts a slow nearby drop at its existing height");
+  m.throwFrom({60.01, 210}, {10, 0}, false);
+  check(m.decision == Decision::Keep && m.target.x == 60.01 && m.target.y == 210,
+        "smart side-edge mode keeps a slow drop outside the attraction distance");
+  m.throwFrom({300, 210}, {1000, 100}, false);
+  check(m.decision == Decision::Dock && m.target.x == 668 && near(m.target.y, 259.9),
+        "smart side-edge mode projects a faster throw along the edge");
+
+  m = Motion{};
+  m.throwFrom({320, 230}, {500, 100}, false); finish(m);
+  next = m.settings; next.free_speed = 600; m.retune(next); m.replay(); finish(m);
+  check(m.decision == Decision::Keep && m.position.x == 320 && m.position.y == 230,
+        "replay reclassifies the same throw with a changed release-speed threshold");
+  next.placement = Placement::AlwaysDock; m.retune(next); m.replay(); finish(m);
+  check(m.decision == Decision::Dock && m.position.x == 668 && m.position.y == 508,
+        "replay applies always-dock mode to the same stored throw");
+  next.placement = Placement::Free; m.retune(next); m.replay(); finish(m);
+  check(m.decision == Decision::Keep && m.position.x == 320 && m.position.y == 230,
+        "replay applies free mode to the same stored throw");
+
+  m = Motion{}; m.settings.response = .9; m.settings.damping = .65;
+  m.throwFrom({300, 500}, {0, 5000}, false);
+  bool vertically_accessible = true;
+  for (int i = 0; i < 1200; ++i) {
+    m.step(1.0 / 120);
+    vertically_accessible &= m.position.y >= -180 + m.settings.handle &&
+                             m.position.y <= 700 - m.settings.handle;
+  }
+  check(vertically_accessible && m.phase == Phase::Resting,
+        "vertical spring overshoot leaves a grabbable part onscreen");
   std::cout << checks << " checks passed\n";
 }

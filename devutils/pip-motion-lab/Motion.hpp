@@ -132,6 +132,7 @@ class Motion {
   }
 
   void begin(Point pointer, double time) {
+    start_settling_ = phase == Phase::Settling;
     start_position_ = position;
     offset_ = pointer - position;
     drag_side_ = tucked;
@@ -154,15 +155,17 @@ class Motion {
   void drag(Point pointer, double time) {
     if (phase != Phase::Dragging) return;
     Point next = pointer - offset_;
-    const double low = area_.y + settings.margin;
-    const double high = area_.y + area_.height - size.height - settings.margin;
+    // An interrupted spring may already be beyond a boundary. Anchor resistance
+    // at that presentation position so re-grabbing does not resist it twice.
+    const double low = std::min(area_.y + settings.margin, start_position_.y);
+    const double high = std::max(area_.y + area_.height - size.height - settings.margin,
+                                 start_position_.y);
     if (next.y < low)
       next.y = low + rubber(next.y - low, size.height, settings.resistance);
     if (next.y > high)
       next.y = high + rubber(next.y - high, size.height, settings.resistance);
-    next.x = std::clamp(next.x, area_.x - size.width + settings.handle,
-                        area_.x + area_.width - settings.handle);
     position = next;
+    constrainPresentation();
     tracker_.add(pointer, time);
   }
 
@@ -184,15 +187,17 @@ class Motion {
       return;
     }
     if (length(displacement) < 2 && length(release) < 1) {
-      settle(start_position_, {}, Goal::Explicit);
+      settleUnmovedGrab();
       return;
     }
     throwFrom(position, release, true);
   }
 
   void cancel() {
-    tucked = drag_side_;
-    settle(start_position_, {}, Goal::Explicit);
+    if (phase != Phase::Dragging) return;
+    velocity = {};
+    if (drag_side_ != Side::None) tuck(drag_side_);
+    else settleUnmovedGrab();
   }
 
   void throwFrom(Point origin, Point release, bool allow_stash) {
@@ -222,7 +227,7 @@ class Motion {
         settle(clampVisible(origin), {}, Goal::Free);
       } else {
         decision = Decision::Dock;
-        settle(dockTarget(origin, release), release, Goal::Dock);
+        settle(dockDestination(origin, release), release, Goal::Dock);
       }
     }
   }
@@ -273,12 +278,10 @@ class Motion {
       settle(restore_point_, velocity, Goal::Restore);
     } else if (goal_ == Goal::Free) {
       settle(clampVisible(target), velocity, Goal::Free);
-    } else if (goal_ == Goal::Explicit) {
-      settle(target, velocity, Goal::Explicit);
     } else {
       Point next_target = dockTarget(position, {});
       if (phase == Phase::Settling && last_throw_)
-        next_target = dockTarget(last_throw_->origin, last_throw_->velocity);
+        next_target = dockDestination(last_throw_->origin, last_throw_->velocity);
       settle(next_target, velocity, Goal::Dock);
     }
   }
@@ -287,6 +290,7 @@ class Motion {
     if (phase != Phase::Settling || dt <= 0 || !std::isfinite(dt)) return false;
     spring(position.x, velocity.x, target.x, settings.response, settings.damping, dt);
     spring(position.y, velocity.y, target.y, settings.response, settings.damping, dt);
+    constrainPresentation();
     if (length(position - target) < 0.1 && length(velocity) < 1) {
       position = target;
       velocity = {};
@@ -302,7 +306,36 @@ class Motion {
   Rect area() const { return area_; }
 
  private:
-  enum class Goal { Dock, Stash, Restore, Free, Explicit };
+  enum class Goal { Dock, Stash, Restore, Free };
+  Point dockDestination(Point origin, Point release) const {
+    const bool deliberate_attraction = settings.placement == Placement::Smart &&
+        length(release) <= settings.free_speed;
+    return dockTarget(origin, deliberate_attraction ? Point{} : release);
+  }
+  void settleUnmovedGrab() {
+    velocity = {};
+    if (start_settling_ && goal_ == Goal::Restore) {
+      restore();
+    } else if (start_settling_ && goal_ == Goal::Dock) {
+      settle(dockTarget(target, {}), {}, Goal::Dock);
+    } else {
+      decision = Decision::Keep;
+      release_speed = 0;
+      Point destination = clampVisible(start_settling_ ? target : start_position_);
+      dock_distance = length(destination - dockTarget(destination, {}));
+      settle(destination, {}, Goal::Free);
+    }
+  }
+  void constrainPresentation() {
+    auto bound = [](double& coordinate, double& speed, double low, double high) {
+      if (coordinate < low) { coordinate = low; speed = std::max(0.0, speed); }
+      if (coordinate > high) { coordinate = high; speed = std::min(0.0, speed); }
+    };
+    bound(position.x, velocity.x, area_.x - size.width + settings.handle,
+          area_.x + area_.width - settings.handle);
+    bound(position.y, velocity.y, area_.y - size.height + settings.handle,
+          area_.y + area_.height - settings.handle);
+  }
   Point clampVisible(Point p) const {
     return {std::clamp(p.x, area_.x + settings.margin,
                       area_.x + area_.width - size.width - settings.margin),
@@ -327,6 +360,7 @@ class Motion {
   Point offset_, start_position_, restore_point_;
   Side drag_side_ = Side::None;
   Side restore_side_ = Side::Right;
+  bool start_settling_ = false;
   Goal goal_ = Goal::Dock;
   VelocityTracker tracker_;
   std::optional<Throw> last_throw_;

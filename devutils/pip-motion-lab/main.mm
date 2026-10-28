@@ -314,10 +314,13 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   status.stringValue = [NSString stringWithFormat:@"%@  ·  x %.0f  y %.0f  →  %.0f, %.0f",
       phaseName(motion->phase), motion->position.x, motion->position.y, motion->target.x, motion->target.y];
   if (motion->decision == Decision::Keep || motion->decision == Decision::Dock) {
-    explanation.stringValue = [NSString stringWithFormat:@"%@ · release %.0f pt/s · dock %.0f pt away",
+    explanation.stringValue = [NSString stringWithFormat:@"%@ · release %.0f pt/s · nearest dock %.0f pt away",
         motion->decision == Decision::Keep ? @"Left here" : @"Snapped", motion->release_speed, motion->dock_distance];
   } else if (motion->decision == Decision::Tuck) explanation.stringValue = @"Tucked · click the strip or pull inward to restore";
-  else if (motion->decision == Decision::Restore) explanation.stringValue = @"Restored to the side at the same height";
+  else if (motion->decision == Decision::Restore)
+    explanation.stringValue = motion->phase == Phase::Resting ? @"Restored to the side at the same height" :
+        motion->phase == Phase::Dragging ? @"Grabbed during restore · release to continue or drag to place" :
+        @"Restoring to the side at the same height";
   else explanation.stringValue = @"Smart mode leaves slow drops away from a dock where you put them";
   // The state file is an observable checkpoint, not a frame-by-frame trace.
   if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging) [self writeState];

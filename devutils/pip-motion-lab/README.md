@@ -20,7 +20,8 @@ In **Smart** mode, drop the example slowly to leave it where you put it. A faste
 release projects forward and springs toward the nearest corner. A slow release
 close to a corner still snaps there. In side-edge docking mode, proximity to
 either side replaces proximity to a corner. Re-grab it during settlement to
-interrupt the movement without resetting its position.
+interrupt the movement without resetting its position. Clicking during a restore
+without dragging lets that restore finish instead of leaving the panel offscreen.
 
 Two controls tune this inference: the maximum release speed for a deliberate
 placement, and the distance at which a dock attracts a slow drop. The decision
@@ -31,7 +32,8 @@ all three modes.
 
 Push it past the left or right edge, or flick outward near a side, to tuck it.
 Click the exposed strip or pull inward to restore it. A fling from the middle of
-the display selects a corner rather than tucking.
+the display selects a corner rather than tucking. Spring overshoot stops at the
+screen's accessibility limit so an exposed strip remains available to grab.
 
 The tuning window has four repeatable throws. Each starts at the display center
 with the same velocity. Change a parameter and use **Replay throw** to compare.
