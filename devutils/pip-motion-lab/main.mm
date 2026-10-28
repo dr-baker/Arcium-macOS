@@ -9,20 +9,55 @@ struct Parameter {
   const char *key, *label;
   double low, high;
   double Settings::*member;
+  const char *help;
   bool optional = false;
 };
 static const Parameter parameters[] = {
-  {"response", "Spring response (seconds)", .15, .90, &Settings::response},
-  {"damping", "Damping · 1 = no bounce", .65, 1.35, &Settings::damping},
-  {"projection", "Momentum projection (seconds)", 0, .90, &Settings::projection},
-  {"margin", "Screen inset (points)", 0, 36, &Settings::margin},
-  {"stash_distance", "Tuck past edge (points)", 20, 160, &Settings::stash_distance},
-  {"stash_velocity", "Outward tuck speed (points/s)", 300, 1800, &Settings::stash_velocity},
-  {"restore_distance", "Pull to restore (points)", 10, 80, &Settings::restore_distance},
-  {"handle", "Visible tucked strip (points)", 20, 52, &Settings::handle},
-  {"resistance", "Vertical boundary resistance", .05, .85, &Settings::resistance},
-  {"free_speed", "Leave here below speed (points/s)", 0, 800, &Settings::free_speed, true},
-  {"snap_distance", "Snap attraction distance (points)", 0, 180, &Settings::snap_distance, true},
+  {"response", "Spring response (seconds)", .15, .90, &Settings::response,
+    "How quickly the spring brings the window to its destination.\n\n"
+    "Lower: faster and tighter. Higher: slower and floatier.\n\n"
+    "This is the spring's response parameter, not the total animation duration. Damping and release velocity also affect the movement."},
+  {"damping", "Damping · 1 = no bounce", .65, 1.35, &Settings::damping,
+    "Controls how much the spring bounces as it settles.\n\n"
+    "Below 1: more bounce. At 1: critically damped. Above 1: a more restrained, usually slower return.\n\n"
+    "Strong release momentum can still carry the window past a target."},
+  {"projection", "Momentum projection (seconds)", 0, .90, &Settings::projection,
+    "Estimates where your flick is headed when choosing a corner or edge.\n\n"
+    "Projected position = release position + velocity × projection time.\n\n"
+    "At 0.5 seconds, a 1,000-point/second release looks about 500 points ahead. Higher favors distant docks; lower favors nearby docks. Zero chooses by release position alone.\n\n"
+    "Used for faster flicks in Smart mode and releases in Always snap. Slow deliberate attraction stays local. Spring response and damping control how the window gets there."},
+  {"margin", "Screen inset (points)", 0, 36, &Settings::margin,
+    "The gap between a resting docked window and the display's visible work-area edges.\n\n"
+    "Higher: leaves more breathing room. Lower: rests closer to the edges.\n\n"
+    "The work area excludes space reserved for the menu bar and Dock."},
+  {"stash_distance", "Tuck past edge (points)", 20, 160, &Settings::stash_distance,
+    "How far the window must cross the left or right screen edge before releasing it tucks it away.\n\n"
+    "Lower: a smaller push is enough. Higher: requires pushing farther offscreen.\n\n"
+    "A fast outward flick near a side can also trigger tucking."},
+  {"stash_velocity", "Outward tuck speed (points/s)", 300, 1800, &Settings::stash_velocity,
+    "The outward release speed needed to tuck near a side. The flick must be mostly horizontal.\n\n"
+    "Lower: easier to tuck with a flick. Higher: requires a faster flick.\n\n"
+    "The same threshold lets a fast inward flick restore a tucked window."},
+  {"restore_distance", "Pull to restore (points)", 10, 80, &Settings::restore_distance,
+    "How far inward you must pull a tucked window before releasing to restore it.\n\n"
+    "Lower: a shorter pull restores. Higher: requires a longer pull.\n\n"
+    "Clicking the exposed strip or making a fast inward flick also restores it."},
+  {"handle", "Visible tucked strip (points)", 20, 52, &Settings::handle,
+    "The width of the strip left onscreen when the window is tucked.\n\n"
+    "Higher: easier to grab, but occupies more screen space. Lower: hides more of the window.\n\n"
+    "Also limits spring overshoot so a grabbable part of the window remains onscreen."},
+  {"resistance", "Vertical boundary resistance", .05, .85, &Settings::resistance,
+    "How much the window follows your pointer when pulled beyond the top or bottom boundary.\n\n"
+    "Lower: less movement for the same pull, so the edge feels firmer. Higher: more movement, so it feels softer.\n\n"
+    "Affects dragging beyond vertical boundaries. Damping controls spring bounce after release."},
+  {"free_speed", "Leave here below speed (points/s)", 0, 800, &Settings::free_speed,
+    "In Smart mode, releases at or below this speed count as deliberate placement.\n\n"
+    "Away from a dock, the window stays where dropped. Near a dock, it snaps locally. Faster releases project toward a dock.\n\n"
+    "Higher: more drops stay where placed. Lower: you must release more slowly. Briefly pausing before release helps place precisely.", true},
+  {"snap_distance", "Snap attraction distance (points)", 0, 180, &Settings::snap_distance,
+    "In Smart mode, how close a slow drop must be to the nearest allowed dock to snap there.\n\n"
+    "Higher: a larger attraction zone. Lower: more freedom to leave the window near a dock. Zero requires exact alignment.\n\n"
+    "Measured from the window's dropped position to the nearest corner or side-edge dock. Faster flicks use momentum projection instead.", true},
 };
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
 
@@ -112,6 +147,50 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   return view;
 }
 
+@interface HelpButton : NSButton {
+  NSString *helpText;
+  NSPopover *helpPopover;
+}
+- (instancetype)initWithFrame:(NSRect)frame name:(NSString *)name help:(NSString *)help;
+@end
+
+@implementation HelpButton
+- (instancetype)initWithFrame:(NSRect)frame name:(NSString *)name help:(NSString *)help {
+  if ((self = [super initWithFrame:frame])) {
+    helpText = help;
+    self.title = @""; self.bordered = NO;
+    self.image = [NSImage imageWithSystemSymbolName:@"info.circle" accessibilityDescription:nil];
+    self.imagePosition = NSImageOnly;
+    self.contentTintColor = NSColor.secondaryLabelColor;
+    self.toolTip = help;
+    self.accessibilityLabel = [@"About " stringByAppendingString:name];
+    self.accessibilityHelp = help;
+    self.target = self; self.action = @selector(showHelp:);
+  }
+  return self;
+}
+- (void)showHelp:(id)sender {
+  if (helpPopover.shown) { [helpPopover close]; return; }
+  NSTextField *text = [NSTextField wrappingLabelWithString:helpText];
+  text.font = [NSFont systemFontOfSize:13]; text.selectable = YES;
+  NSSize measured = [helpText boundingRectWithSize:NSMakeSize(348, CGFLOAT_MAX)
+      options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+      attributes:@{NSFontAttributeName:text.font}].size;
+  text.frame = NSMakeRect(16, 14, 348, std::ceil(measured.height) + 4);
+  NSViewController *controller = [[NSViewController alloc] init];
+  controller.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 380, NSMaxY(text.frame) + 14)];
+  [controller.view addSubview:text];
+  helpPopover = [[NSPopover alloc] init];
+  helpPopover.behavior = NSPopoverBehaviorTransient;
+  helpPopover.contentViewController = controller;
+  [helpPopover showRelativeToRect:self.bounds ofView:self preferredEdge:NSMaxXEdge];
+}
+@end
+
+static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text) {
+  [parent addSubview:[[HelpButton alloc] initWithFrame:frame name:name help:text]];
+}
+
 @implementation MotionLab
 - (instancetype)initWithSettingsPath:(NSString *)path {
   if ((self = [super init])) {
@@ -144,32 +223,49 @@ static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
       NSMakeRect(24, 745, 490, 44), 12);
   intro.textColor = NSColor.secondaryLabelColor;
   [content addSubview:intro];
-  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 709, 234, 28) pullsDown:NO];
+  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 709, 210, 28) pullsDown:NO];
   [presetMenu addItemsWithTitles:@[@"iOS-like baseline", @"Snappy", @"Soft spring", @"Position only", @"Custom"]];
   presetMenu.target = self; presetMenu.action = @selector(presetChanged:);
   [content addSubview:presetMenu];
-  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 709, 238, 28) pullsDown:NO];
+  addHelp(content, NSMakeRect(238, 714, 18, 18), @"Presets",
+      @"Loads a set of numeric tuning values while preserving your docking and placement modes.\n\n"
+      "iOS-like baseline uses the defaults. Snappy uses a faster spring and shorter projection. Soft spring is slower with some bounce. Position only sets projection to zero. Custom means values were changed individually.\n\n"
+      "Reset all variables also resets the docking and placement modes.");
+  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 709, 214, 28) pullsDown:NO];
   [dockMenu addItemsWithTitles:@[@"Dock at four corners", @"Dock anywhere on side edges"]];
   dockMenu.target = self; dockMenu.action = @selector(dockingChanged:);
   [content addSubview:dockMenu];
-  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 671, 314, 28) pullsDown:NO];
+  addHelp(content, NSMakeRect(494, 714, 18, 18), @"Docking mode",
+      @"Chooses the allowed resting destinations when a release snaps.\n\n"
+      "Four corners: docks at a corner of the visible work area. Side edges: docks on the left or right while allowing any height.\n\n"
+      "Momentum projection can choose a farther destination. Slow deliberate attraction uses the nearest dock.");
+  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 671, 288, 28) pullsDown:NO];
   [placementMenu addItemsWithTitles:@[@"Smart · slow drop stays, flick snaps", @"Always snap to dock", @"Always leave where dropped"]];
   placementMenu.target = self; placementMenu.action = @selector(placementChanged:);
   [content addSubview:placementMenu];
+  addHelp(content, NSMakeRect(318, 676, 18, 18), @"Placement mode",
+      @"Smart: slow releases stay where dropped unless near a dock; faster flicks snap using momentum.\n\n"
+      "Always snap: every release docks. Always leave: releases stop where dropped, within the visible inset.\n\n"
+      "Side tucking still works in every mode. The two attraction controls below tune Smart mode.");
   [self button:@"Reset all variables" frame:NSMakeRect(348, 671, 164, 28) action:@selector(resetVariables:) tag:0];
   sliders = NSMutableArray.array; fields = NSMutableArray.array;
   for (size_t i = 0; i < parameterCount; ++i) {
     CGFloat y = 626 - i * 43;
-    [content addSubview:label(@(parameters[i].label), NSMakeRect(24, y + 16, 370, 18), 11)];
+    NSTextField *heading = label(@(parameters[i].label), NSMakeRect(24, y + 16, 370, 18), 11);
+    [heading sizeToFit]; [content addSubview:heading];
+    addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 6, y + 15, 18, 18),
+        @(parameters[i].label), @(parameters[i].help));
     NSSlider *slider = [NSSlider sliderWithValue:motion->settings.*parameters[i].member
         minValue:parameters[i].low maxValue:parameters[i].high target:self action:@selector(sliderChanged:)];
     slider.frame = NSMakeRect(24, y - 2, 392, 22); slider.tag = i; slider.continuous = YES;
     slider.accessibilityLabel = @(parameters[i].label);
+    slider.accessibilityHelp = @(parameters[i].help);
     [sliders addObject:slider]; [content addSubview:slider];
     NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(434, y + 1, 78, 24)];
     field.tag = i; field.target = self; field.action = @selector(fieldChanged:);
     field.alignment = NSTextAlignmentRight;
     field.accessibilityLabel = [@(parameters[i].label) stringByAppendingString:@" value"];
+    field.accessibilityHelp = @(parameters[i].help);
     [fields addObject:field]; [content addSubview:field];
   }
   explanation = label(@"", NSMakeRect(24, 153, 488, 22), 11);

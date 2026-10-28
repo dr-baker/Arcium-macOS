@@ -45,6 +45,9 @@ are outside this experiment.
 
 Sliders apply continuously. Numeric fields apply on Return. Presets reset the
 numeric parameters while preserving the docking and placement choices.
+Hover over an information icon for an explanation of the control and the effect
+of higher and lower values. Click the icon to keep the explanation open in a
+selectable popover. The presets and mode menus also have information icons.
 **Reset all variables** restores every numeric default, corner docking and Smart
 placement, then saves the values. It preserves the current resting location
 within the default inset and keeps the recorded throw available for replay.
