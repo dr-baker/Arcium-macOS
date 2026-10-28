@@ -1,8 +1,71 @@
 # Chromium 156 port
 
-Work in progress on `update/helium-156` and `update/helium-156-core`.
-The full diagnostic browser build and focused native tests pass, including
-the graphics linkage correction. Isolated runtime acceptance is in progress.
+Chromium 156 builds with the published Arcium features on
+`update/helium-156-published` and `update/helium-156-published-core`.
+All 76 focused native tests pass. Delivery remains a draft because native UI
+automation stalls, and the prepared source archive cannot run the broader
+browser tests. Do not advance canonical main or install over the daily browser.
+
+## Delivery proof gates
+
+- Inspected: upstream changes, both published fork histories, patch ownership,
+  lifecycle changes, and component linkage. Independent Astra review and a Git
+  merge audit found no remaining production defect or lost published change.
+- Replayed: all 587 combined patches with zero fuzz. Final preflight reports
+  587 applied patches and no problems.
+- Compiled: `chrome`, `arcium_optional_navigation_tests`,
+  `helium_persistent_item_model_tests`, and `arcium_dmg_unit_tests` at macOS
+  `a319ef68dbf1eda4b0a3dd0e9f86f8254ac301ce` and core
+  `c1897c5e368fd94e0f6e08fb6b50885308ee2ee6`.
+  Trace `78ff1deda70a40d188f62a678650a14e` records success, complete evidence,
+  and no capture errors. Independent verification matched all ten artifact
+  hashes and sizes. All 242 configured personal production objects also pass;
+  the final core change after that pass only repairs three browser-test pointer
+  expressions.
+- Tested: navigation 3/3, persistent items 65/65, DMG defaults 8/8. Native
+  Settings artwork/contracts pass 83 tests, packaging 20, Studio 21, release
+  entrypoints 4, and the selected `he` workflow tests 36.
+- Packaged: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app` under
+  the build directory below. All eight command-style SVG resources are present.
+  This Dev bundle does not exercise release packaging's `initial_preferences`.
+- Launched: that labeled Diagnostics app, PID 30723, using only
+  `~/Library/Application Support/Helium Development/profiles/isolated/helium-156-upstream`.
+  The new log segment has neither duplicate Objective-C class warning and no
+  fatal or GPU-failure signature. Cross-volume clone and quarantine cleanup
+  errors remain in the launch log; no resulting failure was established.
+- Behavior-tested: one native screenshot shows the seeded sidebar and New Tab
+  rendered. No UI interaction passed. The Sol agent's app attachment was
+  interrupted after 246.6 seconds despite a 15-second timeout. The integrator's
+  retained-handle screenshot took 894.8 seconds despite a 10-second timeout.
+  These tool stalls do not establish a browser hang. No interaction video or
+  hosted visual evidence is available.
+- Persistence-tested: not reached. Native model tests pass, but they do not
+  substitute for quitting and relaunching the browser through its UI.
+- Teardown-tested: `he agent stop --profile helium-156-upstream` stopped PID
+  30723. No matching profile process or new Helium crash report remained.
+  The owned fixture server on port 8766 was stopped. Normal UI quit, window
+  close, and Dock reopen remain untested.
+- Manual-only: the runtime checks below, full browser-backed tests, release
+  first-run packaging, and non-macOS validation. The daily app and real data
+  were not used.
+
+Before marking the PRs ready, use the same isolated profile and the existing
+scenario contracts to check:
+
+1. Pin/Favorite identity and home navigation, sidebar scale and temporary hover,
+   Space/profile ownership, and split resize/reopen/order.
+2. Immediate Cmd-T creation, repeated Cmd-T, Escape retention, and Cmd-L/current
+   tab navigation without duplicate tabs.
+3. Peek close cancellation, Little Arc promotion, and sole-Pin Space transfer,
+   preserving the fixture's live instance token and draft.
+4. Native Settings window reuse, all style artwork, page borders/shadows,
+   material/tint controls, and window dragging without stealing content input.
+5. `/webgl.html` framebuffer readback and `chrome://gpu` acceleration separately.
+6. Normal quit/relaunch persistence, close-all-windows/Dock reopen, and teardown.
+
+Use `devutils/scenarios/fixtures/tab-lifecycle.html` and `webgl.html` with an
+owned local server. Capture native screenshots and a short interaction video.
+Do not restore omitted Chromium 156 test fixtures from Chromium 151.
 
 ## Revisions
 
@@ -19,8 +82,33 @@ There were 294 incoming core commits and 67 incoming macOS commits at fetch time
 The isolated worktree starts from committed HEAD. It does not include the
 original checkout's uncommitted agent guidance or build-lane plan. It also does
 not initially include feature work landed after the starting commits above.
-Delivery integration is now incorporating published macOS `93bc1e5` and core
-`de237767` before final runtime acceptance.
+Delivery integration includes published macOS `93bc1e5` and core `de237767`.
+
+Core merge `d77246c6` and macOS merge `563e939` retain those published heads.
+The actual core gap was three feature patches plus a generator refactor;
+every pre-existing personal patch matched the original starting tree. The
+macOS merge retains the newer page-edge controls, style artwork, DMG packaging,
+and Studio process-identity fixes alongside the tested build tooling. An
+independent Git audit found no lost published-only files. All 587 combined
+patches replay with zero fuzz after the initial compatibility repairs.
+The packaging suites pass 20 tests, Studio runner and native iteration pass
+21 tests, and all four release entrypoint tests pass with the repaired evidence
+fixture. These checks do not certify the combined browser binary.
+Core `70e4db7c` and macOS `22cc726` contain the compatibility repairs.
+All 83 selected native Settings artwork and contract tests pass from an isolated
+Swift package copy.
+Its first attempt failed in two new content-view loops because Chromium 156
+uses `raw_ptr` entries in that vector. Core `08fec385` and macOS `d5a9591`
+correct the iteration type; the resumed build retains successful outputs.
+The first run's evidence is complete with no capture errors. The newly linked
+DMG default suite passes all eight tests, including existing-profile protection.
+The resumed build succeeds in trace `9dd3814fb9b14b6aad784c2555a919d1`,
+with complete evidence and no capture errors. Chrome and all 242 configured
+personal production objects compile. Navigation passes 3 tests, Pins 65,
+and DMG defaults 8. Independent source review found three matching pointer
+deduction errors in browser tests, corrected in core `c1897c5e` and pinned by
+macOS `a319ef68` before the final build.
+The prepared archive still prevents compilation of those browser-backed tests.
 
 ## Integration decisions
 
@@ -124,7 +212,10 @@ Delivery integration is now incorporating published macOS `93bc1e5` and core
 - Preserve update-feed URL and public-key validation through upstream's Python
   formatting changes. All seven plist metadata tests pass.
 
-## Validation record
+## Earlier validation and repair record
+
+The entries below record intermediate revisions. The delivery proof gates
+above describe the final combined build and remaining acceptance work.
 
 The new build directory is
 `/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/upstream-156-20261027`.
