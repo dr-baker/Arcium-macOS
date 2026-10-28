@@ -296,6 +296,8 @@ source does not imply a small dependency graph.
 
 For isolated manual lifecycle checks, serve the synthetic fixture locally:
 
+Check port ownership first and choose another port if it is already in use.
+
 ```sh
 python3 -m http.server 8765 --bind 127.0.0.1 --directory devutils/scenarios/fixtures
 ```
@@ -314,3 +316,12 @@ It checks WebGL context creation and a green framebuffer readback. Capture the
 visible result and inspect `chrome://gpu` separately; a passing framebuffer
 does not establish hardware acceleration. Inspect new-launch diagnostics for
 duplicate Objective-C classes, including classes that native tests never load.
+
+Preflight native app attachment before scheduling a long UI acceptance pass.
+During the 156 update, CUA inventory calls returned promptly, but app attachment
+and even a screenshot exceeded their requested timeouts by several minutes.
+An inventory result is not proof that app control works. Keep the attempt
+interruptible; after a repeated stall, record the tool blocker and leave the
+behavior gates incomplete rather than starting another blind attachment.
+A rendered screenshot, clean launch log, and passing model tests do not prove
+interaction, GPU acceleration, or persistence through a normal browser restart.
