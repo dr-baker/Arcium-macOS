@@ -1,0 +1,294 @@
+{
+  "core": "845368ed6045b80fa2bd3ff99d9db4c3c103a576",
+  "outer": "468b32abe6e950116158652b05b256a4f55d73df",
+  "native_patch_sha256": "e1bff1bbb2cf22d142d8bb1762b4340c6b3978d50965f14bde82659f4042e95f",
+  "source_check": {
+    "patches": {
+      "applied": 538,
+      "series": 538,
+      "top": "personal/arcium-pip-native-controls-macos.patch"
+    },
+    "problems": [],
+    "timestamp_snapshot_pending": false
+  },
+  "build_evidence": [
+    {
+      "log": "arcium-pip-placement-build1.log",
+      "id": "0294f1cd8c1e430fbeee6f6e42cd856c"
+    },
+    {
+      "log": "arcium-pip-placement-build2.log",
+      "id": "6a102302c10a4b81944e4197232a354f"
+    },
+    {
+      "log": "arcium-pip-placement-build3.log",
+      "id": "a042b1eee0f94a438436706b9e55485a"
+    }
+  ],
+  "focused_checks": {
+    "native_geometry_host": 45,
+    "mock_media_session": 5,
+    "mock_renderer": 4,
+    "launcher_retries": 0
+  },
+  "historical_failures": "build1 dictionary API compile error fixed65802d4; run1 OTR fixture global factory registration crash fixed6e27866; retained evidence is not a passing run",
+  "app": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/publication-full-20260930/.arcium/standalone/automatic-picture-in-picture-native-468b32ab/browser/Helium Dev - automatic-picture-in-picture.app",
+  "component_libraries": 540,
+  "static_macho_dependency_candidates": 554,
+  "dependency_issues": [],
+  "static_dependency_limit": "local suffix candidates checked; exact live dyld mappings require independent launch",
+  "runtime": {
+    "verified": [
+      "Automatic PiP after loaded, advancing muted playback and a real player interaction.",
+      "Bottom-right landing with 12-point work-area margins on the built-in display.",
+      "Native Pause held actual position 85.348459 through an eight-hour tool stall.",
+      "Physical 15-second backward and forward seeking preserved pause.",
+      "An inactive physical Forward click preserved foreground PID 92171 and ordinary Space 3.",
+      "Visible PiP joined foreign fullscreen Space 1593.",
+      "Already-tucked PiP followed foreign fullscreen Space 1598 with a 28-point exposed handle.",
+      "Physical handle restoration preserved foreground fixture PID 29219 and active Space 1598, and restored the 12-point corner.",
+      "Return to tab exited PiP and showed inline playback paused at 106.321097.",
+      "PID54680: Native Resume advanced actual hidden-video time53.800291 to67.235665 with paused=false; nativePause held78.444806.",
+      "PID54680: Physical timeline click sought paused video to357.214943; ReturnToTab showed paused5:57."
+    ],
+    "open": [
+      "directscrubdrag andplaying scrub",
+      "physicalwindowdrag andcornerrelease",
+      "compact/roomyresize nativeappearance",
+      "actualordinarySpace transition",
+      "normalappQuit/profilelockrelease/persistence",
+      "physicalphasedgestures anddisplaytopologychanges",
+      "continuousvideoevidence"
+    ],
+    "constraints": "muted MacBook; native actions began idle; isolated profile only; no install; PID54680 remains running paused after ReturnToTab and Hide request",
+    "limitations": "Window-only screenshots do not show other app fullscreen context. Native Space observations are WindowServer metadata plus successfulnativehandleinteraction. DuplicateAXlabels alone do notprove duplicatevisiblecontrols.",
+    "drag_result": "Thumb andresizegrip drags no-op, evenimmediatelyafterreveal; ordinarywebtextselectiondragworks. Sourcecauseunconfirmed; separateplainAppKitcontroltest notcompleted due677.9sec bindingstall thenactiveMac.",
+    "hidden_probe": "All separate scalars readable in later pass; previous hidden timeout rootcause unknown.",
+    "drag_control": {
+      "result": "Synthetic drag no-op reproduced in a plain AppKit NSSlider outside Chromium; track click changed20 to59.3984962406015.",
+      "pid": 97228,
+      "idle_seconds": 1059.775439166,
+      "event_trace": "native-appkit-drag-control/events.jsonl",
+      "limit": "AppKit tracking returned before subsequent drag event; sampled global pointer fixed. Does not certify real physical Arcium input.",
+      "normal_close_verified": true
+    }
+  },
+  "source_naming": "namesub and translate APPLIED; nameunsub before any pop",
+  "created": 1793171169.6302662,
+  "source_review": "GO; all three sizing/corner P2 findings resolved, runtime gates remain open",
+  "source_equivalence": {
+    "present_files": 2185,
+    "absent_patch_paths": 134,
+    "identical": true
+  },
+  "test_cases": {
+    "hidden": {
+      "ArciumPiPGeometryTest.ExteriorTuckChecksFinalVerticalPlacement": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.ExtremeAspectKeepsControlsUsableWithLetterboxing": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.FourCornersStayInNegativeOriginWorkArea": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.PermissionMinimumTakesPriorityOverConflictingMaximum": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.PlacementFitsSmallerWorkAreaProportionally": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.RememberedWidthRespectsMaximumDimensions": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.ResizeKeepsAspectAndReachableBounds": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.TinyAndInvalidScreensStayFinite": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.TuckKeepsRestoreHandleOnEitherEdge": [
+        "SUCCESS"
+      ],
+      "ArciumPiPGeometryTest.TuckMovesToExteriorWhenNeighborAppears": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.AdaptiveSeekControlsSurviveCompactRoundTrip": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.AppearanceRebuildEndsScrubAndRejectsDetachedSlider": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.CancelledMagnificationDoesNotSavePartialWidth": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.CloseCallbackCanDestroyNativeControls": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.DestructionCancelsAlreadyQueuedActions": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.ExtremeAspectRespectsMaximumAndShowsControls": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.FinalSizeLandingIgnoresPlaceholderOrigin": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.HideCancelsInputFromPreviousSession": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.HideRestoresTuckBeforeWindowReuse": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.NaturalSizeChangesSurviveTuckAndRestore": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.OnlySettledUserPlacementIsRemembered": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.PausedScrubNeverRequestsResume": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.PermissionBlockingRestoresTuckedWindow": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.PermissionBlockingYieldsInputAndSuppressesActions": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.PermissionSizingRestoresIntendedWidth": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.PlaybackUpdatesChangeAccessibleAction": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.PlayingScrubLeavesPlaybackStateUnchanged": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.RememberedWidthUsesNewVideoAspect": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.SeekCanRemainAvailableWithoutPlayPause": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.SyntheticCancelledScrollRestoresStartingFrame": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.SyntheticDownwardSwipeEmitsCloseAction": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.SyntheticInwardSwipeRestoresTuckedWindow": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.TemporaryFitDoesNotReplaceIntendedWidth": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.TuckLeavesOnlyHandleAndRestoreReturnsOriginalFrame": [
+        "SUCCESS"
+      ],
+      "ArciumPiPNativeControlsTest.TuckedAspectChangeRestoresSelectedCorner": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.ChromiumHitTargetForwardsNativePauseExactlyOnce": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.FinalNaturalSizeLandsInDefaultCorner": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.FocusedRebuildAndDetachClearStoredFocus": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.InvalidPlacementUsesVisibleDefault": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.NativeAccessibilityAndTabFocusUseHost": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.OldWindowCannotOverwriteNewerPlacement": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.PlacementSurvivesWindowReplacement": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.PrivatePlacementDoesNotWriteRegularProfile": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.ScrubbingNeverChangesTransportState": [
+        "SUCCESS"
+      ],
+      "VideoOverlayWindowNativeControlsTest.SpecialtyFallbackRestoresAndDetachesCleanly": [
+        "SUCCESS"
+      ]
+    },
+    "media": {
+      "BrowserAutomaticPip/MediaSessionControllerSilentPipTest.MutedVideoKeepsFocusPolicyAcrossPipAndInline/1": [
+        "SUCCESS"
+      ],
+      "BrowserAutomaticPip/MediaSessionControllerSilentPipTest.NeverAudibleVideoDoesNotGainFocusForPip/1": [
+        "SUCCESS"
+      ],
+      "MediaSessionImplTest.BrowserInitiatedAutoPipPauseWhileSessionInactive": [
+        "SUCCESS"
+      ],
+      "MediaSessionImplTest.SuspendUI": [
+        "SUCCESS"
+      ],
+      "MediaSessionImplTest.SuspendUI_WithAction": [
+        "SUCCESS"
+      ]
+    },
+    "renderer": {
+      "WebMediaPlayerImplAutomaticPipTest.ExplicitPauseCancelsGrace": [
+        "SUCCESS"
+      ],
+      "WebMediaPlayerImplAutomaticPipTest.KeepsPlayingUntilPipCanOpen": [
+        "SUCCESS"
+      ],
+      "WebMediaPlayerImplAutomaticPipTest.PausesAfterGraceIfPipDoesNotOpen": [
+        "SUCCESS"
+      ],
+      "WebMediaPlayerImplAutomaticPipTest.ReturningCancelsPendingPause": [
+        "SUCCESS"
+      ]
+    }
+  },
+  "historical_quit_failure": {
+    "running_a5_pid": 29648,
+    "blank_468_pid": 26641,
+    "blank_without_video_or_pip": true,
+    "result": "NativeQuitclosedwindowsbutretainedprofileownership; supportedhe stopcleanupcompleted. Exactoriginunknown; nativePiP-windowownership cannotcauseblankreproduction."
+  },
+  "recording": {
+    "success": false,
+    "reason": "selectiontimeout; laterControlCenterbindingstalled29685seconds; pickerCancelled; no continuousvideo produced",
+    "source_stall_hours": 8.245833333333334,
+    "frame_sampled_video": {
+      "file": "native-controls-54680/native-controls-checkpoints.mp4",
+      "duration_seconds": 64.88,
+      "original_captures": 3,
+      "continuous": false,
+      "audio": false,
+      "interpolation": false,
+      "capture_intervals": "original; last frame held one second"
+    }
+  },
+  "observed_browser_paths": {
+    "pid": 76644,
+    "intact_candidate_images": 523,
+    "intact_system_images": 1110,
+    "mutable_paths_observed": 0,
+    "complete_closure": false,
+    "limit": "Three interleaved browser records and garbled helpers prevent full process-tree closure."
+  },
+  "evidence_review": {
+    "reviewed_outer": "8c1d7d2b8d6023eef3714718cd3fb530817c4400",
+    "report": "astra-evidence-review-8c1d7d2.md",
+    "draft_review": "accepted after wording corrections",
+    "full_acceptance": false,
+    "confirmed_product_code_findings": 0,
+    "corrections": [
+      "Renderer grace period is three seconds.",
+      "Port-zero rejection is a correlation, not an established cause.",
+      "2185 is a present-file count, not a byte count."
+    ]
+  }
+}

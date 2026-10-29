@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "id": "automatic-picture-in-picture",
+  "description": "Automatic video Picture-in-Picture with native macOS glass controls, window gestures, and following across Spaces.",
+  "profile": {
+    "policy": "isolated",
+    "name": "automatic-picture-in-picture"
+  },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_browser_tests",
+      "filters": [
+        "ArciumAutomaticPictureInPictureBrowserTest.*",
+        "BrowserInitiatedAutoPictureInPictureBrowserTest.*",
+        "AutoPictureInPictureWithVideoPlaybackBrowserTest.PromptResultRecorded_VideoPlaybackAllowOnce",
+        "AutoPictureInPictureWithVideoPlaybackBrowserTest.DoesNotAutopipIfNotRegistered"
+      ]
+    },
+    {
+      "target": "//content/test:arcium_media_session_impl_unittests",
+      "filters": [
+        "MediaSessionImplTest.*BrowserInitiatedAutoPip*",
+        "MediaSessionImplTest.Suspend*",
+        "MediaSessionImplTest.Resume*"
+      ]
+    },
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "VideoOverlayWindowViewsTest.*:VideoOverlayWindowWithMuteControlTest.*:VideoOverlayWindowNativeControlsTest.*:ArciumPiPGeometryTest.*:ArciumPiPNativeControlsTest.*-VideoOverlayWindowViewsTest.LiveCaption*"
+      ]
+    },
+    {
+      "target": "//content/test:arcium_media_session_impl_unittests",
+      "filters": [
+        "*MediaSessionController*.*"
+      ]
+    },
+    {
+      "target": "//third_party/blink/renderer/controller:arcium_web_media_player_unittests",
+      "filters": [
+        "WebMediaPlayerImplAutomaticPipTest.*"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Mute the Mac's physical audio outputs and verify mute before starting playback.",
+    "Keep every visual test window on the built-in MacBook display, identified with CGDisplayIsBuiltin. Do not activate apps or change full-screen Spaces while the user is actively working.",
+    "Confirm the intended committed document, initialized player and video element before the initial native Play action. After that action, wait for unpaused playback, readyState at least HAVE_CURRENT_DATA and advancing currentTime before switching tabs or evaluating PiP.",
+    "Use one loaded, muted video session for the remaining native-control gates. Reuse completed baseline evidence for unchanged policy behavior; do not repeat the full visible browser suite for a native-control-only change.",
+    "If navigation, playback readiness or a native action fails, stop and diagnose that precondition. Do not keep pressing Play or repeat the same fixture.",
+    "Use an isolated Dev profile and record the exact commits, app bundle, profile, and launch flags.",
+    "Launch without enabling experimental web platform features or overriding BrowserInitiatedAutomaticPictureInPicture.",
+    "Use public video and background pages so screenshot and video evidence can be shared.",
+    "Exclude LiveCaption* from the overlay suite: the core deliberately removes Live Caption support and its PiP controls.",
+    "If remote debugging is needed, use a fixed nonzero localhost port. Port zero advertises navigator.webdriver and is not a faithful manual browser configuration."
+  ],
+  "steps": [
+    "Open the public YouTube video and wait for the intended page and player. Mute the video while paused, start it once through the native player, and establish the playback readiness checks before testing automatic PiP.",
+    "Switch to a public background tab. Confirm a floating PiP window appears without a permission overlay, and playback continues.",
+    "Return to YouTube. Confirm automatic PiP closes and the same video continues in the page.",
+    "Use the same muted playback session for the remaining controls and lifecycle checks. Record mute and actual playback state with each relevant action.",
+    "Click the native PiP pause control and verify currentTime holds across two observations. Exercise the paused seeks, then resume once and confirm time advances while muted.",
+    "Pause the video, switch away, and confirm automatic PiP does not appear.",
+    "Use that PiP session to verify hover controls, seeking, return to tab, window dragging, resizing, and rounded clipping.",
+    "Resize between compact 284\u00d7160 and roomy 400\u00d7225. Keep play/pause available; show quick seek only when room permits and verify it returns after shrinking and enlarging. Inspect real Liquid Glass over video, the neutral scrubber and subtle source-Space accent in the thumb.",
+    "With playback paused, drag the native scrubber and verify seeking changes time without resuming playback. Repeat while playing and verify its prior playing state returns.",
+    "With the same paused/muted session, place PiP slowly in the interior and verify it stays there. Press into each exterior edge to dock, and into two edges for a corner. Docking starts at 2.4% displayed depth; side tuck starts at 24.7%. Cross shared screen seams without resistance, then verify work areas update on the larger display. Tuck on each exterior side, restore by clicking and dragging the handle, and verify an explicit tuck restores the original free position. Keep the first visual pass on the MacBook until the user authorizes the external-display check.",
+    "Exercise precise phased scrolling: outward horizontal movement tucks, inward movement on the handle restores, downward movement dismisses, and cancellation restores the starting frame. Label synthetic AppKit event checks separately from hardware trackpad proof.",
+    "Switch between ordinary macOS Spaces while PiP is visible and while tucked. Verify the window or restore handle remains visible and usable.",
+    "Enter another application\u2019s full-screen Space after PiP already exists. Verify visible and tucked PiP follow there, and the first pause/restore click works without bringing the browser to the foreground or changing Spaces. Exit full screen and verify following still works.",
+    "Inspect native keyboard and accessibility controls. Confirm hidden Chromium controls do not appear as duplicate usable controls. Verify permission and specialty-action fallback when those states are available.",
+    "Disable automatic PiP in native Settings. Confirm an already-open PiP window remains open, then close it and verify subsequent departures do not open automatic PiP.",
+    "With the preference disabled, enter PiP manually and confirm it remains available when switching away and returning.",
+    "Re-enable automatic PiP and verify entry resumes. Quit normally, relaunch the same profile, and verify the preference persists.",
+    "Capture a public-only screenshot and a short video showing playback, departure, PiP, and return. Close test media normally and inspect fresh crash reports."
+  ],
+  "observables": [
+    "Automatic PiP works on YouTube in the default configuration, including muted playback.",
+    "Returning to the source tab restores inline playback without pausing or restarting the video.",
+    "Paused videos do not open automatic PiP.",
+    "The preference controls automatic entry while preserving manual PiP and existing windows.",
+    "Explicit site blocks remain effective.",
+    "The floating window clips video and hover controls to rounded corners and preserves its aspect ratio while resizing.",
+    "Normal close and quit finish without a new crash.",
+    "The PiP window and tucked restore handle follow ordinary Spaces and a different application\u2019s full-screen Space.",
+    "The native controls preserve paused seeking, while visible and hidden states avoid duplicate legacy focus or accessibility controls.",
+    "Tucking preserves playback and a reachable restore handle; normal dismissal preserves automatic-PiP user-dismiss suppression.",
+    "Glass buttons remain native clear glass throughout motion. The shadow companion ignores mouse events; clicks outside the visible PiP reach the underlying window. Gentle cues do not chase flick velocity, and the stay-here haptic is requested when settle progress reaches 95%."
+  ],
+  "verify_persistence": true,
+  "verify_teardown": true
+}

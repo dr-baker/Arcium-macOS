@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-10-28T05:47:12.816577+00:00",
+  "core": "845368ed6045b80fa2bd3ff99d9db4c3c103a576",
+  "built_outer": "a5eb3e651de0a9a75b1b778d79fa7ccde7b81dbe",
+  "native_patch_sha256": "aa341c4ae3f5c95ead2fb14660f03f5735e1d9c13723f246395af70e144dbea4",
+  "build_evidence": [
+    "7c2e447f84b246249a158172e633343b",
+    "5b8bae1b5ae645949cff9e101da9f256"
+  ],
+  "hidden_checks": {
+    "native": 29,
+    "media": 5,
+    "renderer": 4,
+    "retries": 0
+  },
+  "package": {
+    "component_libraries": 540,
+    "static_macho_dependency_candidates": 554,
+    "dependency_issues": 0,
+    "live_processes": 13,
+    "unique_candidate_loaded_paths": 535,
+    "mutable_default_references": 0,
+    "unclassified_mapped_paths": []
+  },
+  "runtime_status": "Partial acceptance; no continuous video captured on this revision",
+  "native_passes": [
+    "Muted public YouTube playback and automatic PiP entry",
+    "Mapped center click pauses; position held unchanged across observations",
+    "Paused native Back/Forward 15 seconds",
+    "Native AX slider seek and mapped scrubber track click preserve pause",
+    "Edge tuck exposes 28-point glass handle; mapped handle click restores without foregrounding browser"
+  ],
+  "open_gates": [
+    "Actual visible/tucked ordinary-Space and foreign-fullscreen transitions",
+    "Direct scrubber dragging and playing scrubs",
+    "Mouse corner dragging, compact/roomy resize, physical phased trackpad gestures",
+    "Settings persistence and normal native Quit/relaunch",
+    "Fresh continuous PR video and saved screenshot evidence"
+  ],
+  "capture_attempt": {
+    "started": false,
+    "reason": "selection_timeout",
+    "file_bytes": 0,
+    "note": "CUA helper binding stalled; Start selection was never invoked. No recording was made."
+  }
+}

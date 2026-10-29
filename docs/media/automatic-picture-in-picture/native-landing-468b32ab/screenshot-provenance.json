@@ -1,0 +1,13 @@
+{
+  "source_outer": "468b32abe6e950116158652b05b256a4f55d73df",
+  "source_core": "845368ed6045b80fa2bd3ff99d9db4c3c103a576",
+  "capture": "ComputerUse nativePiP window screenshot",
+  "tool_item_id": "turn-item:provider:codex:native-item:call_8ea9418227074b1986cb90b201b2e3ae",
+  "tool_item_position": 1913,
+  "source_mime": "image/jpeg",
+  "source_sha256": "db14568b59d350561a760102fe21e7556b38ca1e3cbb00f83349f22cda9ed896",
+  "published_file": "native-controls.png",
+  "published_sha256": "5dfc8e869b9b642f15519fb4df9140aaa711d08a957feacfc47011973ad7ed98",
+  "conversion": "sips JPEG-to-PNG; no content edits",
+  "continuous_recording": false
+}

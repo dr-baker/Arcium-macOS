@@ -1,0 +1,2172 @@
+{
+  "core": "8397a055183bbbb30c5649e2fbfa3a68712e2a31",
+  "macos": "1c51e10e05c5db1d82dfb42abc68fc460f8f9113",
+  "app": "standalone/automatic-picture-in-picture-8397a055-glass/browser/Helium Dev - automatic-picture-in-picture.app",
+  "copy_method": "apfs-clone",
+  "component_libraries": {
+    "libAPP_TYPES.dylib": {
+      "bytes": 108736,
+      "sha256": "0b3110e3980f87064ac9aecb77bd5e4421c1f08dd3847b79f11a7978e9671af0"
+    },
+    "libAPP_UPDATE.dylib": {
+      "bytes": 152160,
+      "sha256": "68f98ee81b4964150dd2baee78df627e9dbc0e94de49209dd98886b2b1ff4270"
+    },
+    "libEGL.dylib": {
+      "bytes": 73856,
+      "sha256": "8b5ae711aeb571570a3581f5221b4249b9b4ef8b2dc69b9b52289fa696c54df5"
+    },
+    "libGLESv2.dylib": {
+      "bytes": 9587552,
+      "sha256": "fd107d2527e2d156011dd2c06b2459340e1ec4db70d3171dcf2accf4ebbde99f"
+    },
+    "libVkICD_mock_icd.dylib": {
+      "bytes": 274848,
+      "sha256": "2edc8e96e0763299d27b23ac3117f2624f25e8b07433a3b1b29fef668b4c7f40"
+    },
+    "libVkLayer_khronos_validation.dylib": {
+      "bytes": 23411104,
+      "sha256": "c03c83707c6702c3eb300bd2c4bc172e0b363411880ba9ec464e65b3ffcdfd3a"
+    },
+    "libaccessibility_platform.dylib": {
+      "bytes": 1397648,
+      "sha256": "1251267e1dbe330227e26be6143048fc437afc950de08bd69471cbd9c0c7eecd"
+    },
+    "libandroid_mojo_bindings_shared.dylib": {
+      "bytes": 244384,
+      "sha256": "ed744df8a88c7edd8ea3d813ca68eacf5711b7725c87a6fb2c057cd322633803"
+    },
+    "libaudio_public_cpp.dylib": {
+      "bytes": 290784,
+      "sha256": "0662f39a0a4793da8101768d8ee6c7ad2c027376c8ac85fa8276ea2c92957a43"
+    },
+    "libauthenticator_mojom.dylib": {
+      "bytes": 312400,
+      "sha256": "c611728db759fa96935abfe661e8c52f5afd03981801ccf6b1babd49f5ed85c6"
+    },
+    "libauthenticator_mojom_shared.dylib": {
+      "bytes": 89584,
+      "sha256": "16e74dab213dc2ceebb83f69af9e03b1eca38e68a40fa7fec6f04011fbe8565e"
+    },
+    "libautofill_core_common_features.dylib": {
+      "bytes": 155680,
+      "sha256": "2d1c397fc0033248dd4ba5c2f7664722ad70be60f0ccebb775ae8501dc413ae3"
+    },
+    "libbase.dylib": {
+      "bytes": 4579168,
+      "sha256": "a2d91fe6f7b3e81f67f7d0f8151618df222c7e26e3d30a9685fed5588ca4a9dd"
+    },
+    "libbase_allocator_partition_allocator_src_partition_alloc_allocator_base.dylib": {
+      "bytes": 107792,
+      "sha256": "ef54b600a287051a017ac6f6e3c6e6dc158f14876e92a50e89a72c250c650d77"
+    },
+    "libbase_allocator_partition_allocator_src_partition_alloc_allocator_core.dylib": {
+      "bytes": 353840,
+      "sha256": "57d74012e76a349009e15f3023e7409586f8b043152b84d84ae59a1bda8d145a"
+    },
+    "libbase_allocator_partition_allocator_src_partition_alloc_allocator_shim.dylib": {
+      "bytes": 111232,
+      "sha256": "2bad953413d98eb75fe94c74fd4cf863cfdf7b899444f8437eec0ac858fdd532"
+    },
+    "libbase_allocator_partition_allocator_src_partition_alloc_raw_ptr.dylib": {
+      "bytes": 17472,
+      "sha256": "708daddf4f774e965cac803f2492bad1d540669fb5549ca95d10e5c1113e854d"
+    },
+    "libbase_i18n.dylib": {
+      "bytes": 1372080,
+      "sha256": "0ab4a739aef673183e7ffb80ac64e81385c25aeb099327571f7c5df538216929"
+    },
+    "libbase_test_proto_test_support.dylib": {
+      "bytes": 44032,
+      "sha256": "3941e19273f756a14d140313eb074a445ba8716c8720b5d8cbcecf6e4e3fcd26"
+    },
+    "libblink_common.dylib": {
+      "bytes": 13771632,
+      "sha256": "8c737391a42b864243a69f61469990d679b55c93506d95823f8cc22d1aef3df5"
+    },
+    "libblink_controller.dylib": {
+      "bytes": 287232,
+      "sha256": "bc4a5cc1c9221991122864a7669460397fa71604ae2291ceeeff6a59be44aea6"
+    },
+    "libblink_core.dylib": {
+      "bytes": 59152208,
+      "sha256": "b6bd7adb03cf1430f1cfc5bec8cd3eb3f010e689c51ba7528921b9b5ffb44789"
+    },
+    "libblink_embedded_frame_sink_mojo_bindings_shared.dylib": {
+      "bytes": 43040,
+      "sha256": "8b71eb686b338be2c12489c8f04cf941172541a4854c637f1cf47482d2c89490"
+    },
+    "libblink_gpu_mojom.dylib": {
+      "bytes": 73632,
+      "sha256": "3cfa851ad14e2094d9ef92d3831b88acfd0af6e6f6067ea9524fb57c04bdf7d8"
+    },
+    "libblink_gpu_mojom_shared.dylib": {
+      "bytes": 36496,
+      "sha256": "9fcca32bc1d884e55282449cda88cfcae64a8806f1de4dbd4382a6c160194447"
+    },
+    "libblink_histogram.dylib": {
+      "bytes": 34576,
+      "sha256": "382797d79b17e07367a65b6e7f0060a8f9e9e2742de6799ed762079d25057d2d"
+    },
+    "libblink_modules.dylib": {
+      "bytes": 40016016,
+      "sha256": "a666c0aaac1833e5016e1db376bf09769653710d7bc7d816a9921f128d55b76c"
+    },
+    "libblink_platform.dylib": {
+      "bytes": 29963168,
+      "sha256": "4937609cd01ebe388b16357854ce6e6ece5da1952bf1f7f561e5f61a1cab625f"
+    },
+    "libblink_platform_media.dylib": {
+      "bytes": 14061408,
+      "sha256": "da892f0ba7540978458aa86d029c33975d6f9128876a60d4d279c72e8fba3169"
+    },
+    "libblink_platform_wtf.dylib": {
+      "bytes": 685120,
+      "sha256": "c6e2f5f7dc0a94669548dd95f4a4fb94ed034b9345192ca784e28bad41e905ce"
+    },
+    "libbrowser_ui_views.dylib": {
+      "bytes": 262176,
+      "sha256": "7881bc4fe6d5dae2384aac7dfad55e927c59a5e5c1a1a71212864d31f0af7482"
+    },
+    "libbrowsing_topics_common.dylib": {
+      "bytes": 84784,
+      "sha256": "39db56a1be206ec5a972f165c3e4f6c6a27b55bf4240de8a01a5d6643bbcda36"
+    },
+    "libc++_chrome.dylib": {
+      "bytes": 1403424,
+      "sha256": "38733b5a92cd37930591268037c110aa468e652028d018104f2051aec71c6f09"
+    },
+    "libcaptive_portal_core.dylib": {
+      "bytes": 47504,
+      "sha256": "d202180f74db1b728b6ebc627d0f563a07587cabfd5617ae0a32f3e275c7206f"
+    },
+    "libcaptive_portal_features.dylib": {
+      "bytes": 52448,
+      "sha256": "278fdbeb3b91273c747644206fc88b175cfe818d63aefec41b4be5b0cd0d22f2"
+    },
+    "libcc.dylib": {
+      "bytes": 3567392,
+      "sha256": "b1bc413bc7f3404c341ff0a199c7820b4894a4fa6e0323321c1d21bf2761e3a4"
+    },
+    "libcc_animation.dylib": {
+      "bytes": 334864,
+      "sha256": "278d603a748682c89dccddb8611d5e538f461468f9fd02135f5f0b3261cf45ce"
+    },
+    "libcc_base.dylib": {
+      "bytes": 221600,
+      "sha256": "ce99dc2fd3d450224cbce2b5a7db5ab30b770c5a6ed64a12d9b37512e81f58b7"
+    },
+    "libcc_debug.dylib": {
+      "bytes": 50368,
+      "sha256": "40164e60faf93aec9d2f666f49a4bb1eb1ca31605ecf2d3207a097cee02c4bbf"
+    },
+    "libcc_layer_selection_bound.dylib": {
+      "bytes": 35232,
+      "sha256": "102cd6e6ec865625463456651b4825b0bc9c8f1e5b1f34467193ded1bf03fcfd"
+    },
+    "libcc_mojo_embedder.dylib": {
+      "bytes": 699968,
+      "sha256": "3f01d3b46811fc626ac7af9e38b6428f8d9952ee099c5b46261fcd06a536ecc9"
+    },
+    "libcc_paint.dylib": {
+      "bytes": 1017824,
+      "sha256": "3c5d2a7d7278af68f1616c184647b0966728f248c17b1ec3ad906ee8fcb5c5a3"
+    },
+    "libcc_shared_mojom_traits.dylib": {
+      "bytes": 160480,
+      "sha256": "669008980547aa9beacdf43fd77aa6da22cee25c6e3bd57916209dfd0a3282a6"
+    },
+    "libcc_slim.dylib": {
+      "bytes": 599872,
+      "sha256": "46dda7192e246db2b0aedcf2a027e8a5b41286a6a8c1d25a337346c749418d2b"
+    },
+    "libchrome_common_chrome_features.dylib": {
+      "bytes": 166672,
+      "sha256": "a9d3681abf2d46cf54dd488c821e85f485e0f6c3059d3813e50cd0abab986095"
+    },
+    "libchrome_common_platform_runtime.dylib": {
+      "bytes": 38208,
+      "sha256": "76bfc5250a06840eab1d58080f5e1cfd89173c5efce2358b1bad97049cf6c616"
+    },
+    "libchrome_dll.dylib": {
+      "bytes": 144078720,
+      "sha256": "413168e74029e85d9bbed2a2fc7e5854e4a25426cb04d89012b0157f1375e5f4"
+    },
+    "libchrome_zlib.dylib": {
+      "bytes": 149680,
+      "sha256": "748b6a3396d0728ee083bdf127f18d835abaa2441a932fe7d8bf9e6c05a06c82"
+    },
+    "libcolor_scheme_mojo_bindings_shared.dylib": {
+      "bytes": 36848,
+      "sha256": "b95e8206714579ee72680be18c43922ac82ba2c62306c548cda63e7dd14ceec6"
+    },
+    "libcomponents_access_code_cast_common_metrics.dylib": {
+      "bytes": 39552,
+      "sha256": "72d300f1f920d9abd713b7952c788f4cc1d95fa3bbe52b8082b57295c7a3e73c"
+    },
+    "libcomponents_account_id.dylib": {
+      "bytes": 45552,
+      "sha256": "e22cfb74ba769d94619ff3236cacb45c5514f6a27cd37c24d2c82ad4bc18ad92"
+    },
+    "libcomponents_aggregation_service.dylib": {
+      "bytes": 58496,
+      "sha256": "2a08d9c3aa4496ca7ed515a03b3583209d70251e1ed19275e20a6a4faa360f5a"
+    },
+    "libcomponents_apdu.dylib": {
+      "bytes": 40272,
+      "sha256": "6c69d0d75ce73ff49c15a087c9e24e10b9f50b69e1c3c632cf31c329f23af65f"
+    },
+    "libcomponents_attribution_reporting.dylib": {
+      "bytes": 397712,
+      "sha256": "9fce8fe3b4077f9db9e5765bfd023659d7366f63cd0970b6a1d17a50581ade42"
+    },
+    "libcomponents_attribution_reporting_features.dylib": {
+      "bytes": 52480,
+      "sha256": "a766fc7ba209a1b021d3eb8d150f1aaf78c67594545d1c92540b9909f9189425"
+    },
+    "libcomponents_attribution_reporting_is_origin_suitable.dylib": {
+      "bytes": 34048,
+      "sha256": "53739e1143c35d518415fa755d753945f76b1f1a5b6d2a34e85f4c82255b9e74"
+    },
+    "libcomponents_attribution_reporting_registration_header_error_mojom_traits.dylib": {
+      "bytes": 35552,
+      "sha256": "5304e3aff65f88cdec918b3ec610aa2ba871ce4880a3db6a462a4a9deb4828d7"
+    },
+    "libcomponents_attribution_reporting_registration_mojom_traits.dylib": {
+      "bytes": 136384,
+      "sha256": "0fc3a01f75083c73201100eca834939fa94d8a2beced1cf6f4f57eeec58a9df4"
+    },
+    "libcomponents_capture_mode.dylib": {
+      "bytes": 225120,
+      "sha256": "195fa2a7c904fd0b86275d31758187faae3221bd49942314d0e44a562c316583"
+    },
+    "libcomponents_cbor.dylib": {
+      "bytes": 75824,
+      "sha256": "bb4749b6b9d65c71dfe953c9563292407b78a8db20094a7a6e1b5de512be8e70"
+    },
+    "libcomponents_certificate_matching.dylib": {
+      "bytes": 37072,
+      "sha256": "7399edb6dd6bd607175efeece1966d12ae91a792f5645e2b81534bbf4cb3684e"
+    },
+    "libcomponents_certificate_transparency.dylib": {
+      "bytes": 109280,
+      "sha256": "4b1b79bbc30512dab3b214c473af0b81b30ed73ca28a8e59bf19b2ae03e1ef9c"
+    },
+    "libcomponents_component_updater_component_updater_paths.dylib": {
+      "bytes": 53328,
+      "sha256": "85563aeb5732c195df2ffe28f47701acd706937251bdcaf2a839e3094debbf3e"
+    },
+    "libcomponents_continuous_search_common.dylib": {
+      "bytes": 35152,
+      "sha256": "bf8dc082eb451509d2e4edd92b638952431db2236c3b3c08285d233be0cb8515"
+    },
+    "libcomponents_cookie_config.dylib": {
+      "bytes": 45728,
+      "sha256": "27f3ec11e0dd0931d2f5323bd6126adc5f3443444d61006713b2247323aaa8d2"
+    },
+    "libcomponents_country_codes.dylib": {
+      "bytes": 34064,
+      "sha256": "d54ea40cab9d15dfca88db3e77b8395c31f22bb887608fc5e515dc252a57a8e3"
+    },
+    "libcomponents_crash_content_browser_error_reporting.dylib": {
+      "bytes": 38368,
+      "sha256": "e77dd773fab3e89f3336e2504e9f6233bf5daad943a22bb8ca8d50ba76fc3ce2"
+    },
+    "libcomponents_crash_core_common_zombies.dylib": {
+      "bytes": 61536,
+      "sha256": "3db2afe2140650a8b316459846f4c8837ef057899b7a2accb855d0462420a17d"
+    },
+    "libcomponents_cross_device_logging.dylib": {
+      "bytes": 43472,
+      "sha256": "bac1be87f539b9b7147f9d5799dcc3708adc14f796bea35fcb43de4e93527e9b"
+    },
+    "libcomponents_device_event_log.dylib": {
+      "bytes": 75632,
+      "sha256": "7a1f4d05d92c5d1b53b113b39606c564343b7fc1ddd28738f36c50909e6613d4"
+    },
+    "libcomponents_dom_distiller_core_dom_distiller_features.dylib": {
+      "bytes": 55232,
+      "sha256": "132ba2eae0a1b4a247de7a8e321f0b70f7535f3d74ea4f1d3a543546fd7ebece"
+    },
+    "libcomponents_domain_reliability.dylib": {
+      "bytes": 160224,
+      "sha256": "f98f1c8f139c40199062bbaade8156454922f7f2b69f213fd7ce654ea8b76cc9"
+    },
+    "libcomponents_download_public_background_service_public.dylib": {
+      "bytes": 89200,
+      "sha256": "4808c8182e2d2bd363c068358b68e9c6d488e8c7fefc62528712798387facc97"
+    },
+    "libcomponents_download_public_common_public.dylib": {
+      "bytes": 987536,
+      "sha256": "26b281c0955d84ba0c5745e7710890d554da925146143de8db417d7984c0c21f"
+    },
+    "libcomponents_download_public_task_public.dylib": {
+      "bytes": 40608,
+      "sha256": "c1754fed9fc0f2dad2568d05d0e7d98811d6fe2d2f486182cda47c420f0e0584"
+    },
+    "libcomponents_drive.dylib": {
+      "bytes": 944352,
+      "sha256": "3f22287fcb0f92c1b6e40e3557f955a436dc3133cb2f2e5c154bbcc75a7a5374"
+    },
+    "libcomponents_enterprise_obfuscation_core_enterprise_obfuscation.dylib": {
+      "bytes": 93200,
+      "sha256": "e9737600622fe47889c595c12380ca5b607e598f9cd2679f09c466584f1d1b50"
+    },
+    "libcomponents_enterprise_platform_auth_enterprise_platform_auth.dylib": {
+      "bytes": 369136,
+      "sha256": "4e69d53eb9b73e962e3b763ce3b43d5716aeb6d5dd4a388282aa800af7e5b82a"
+    },
+    "libcomponents_feature_engagement_public_feature_constants.dylib": {
+      "bytes": 77216,
+      "sha256": "631fb3ca7820ab8fa880cf3035249c9f2524016b8aba66cc266a75fc94052e34"
+    },
+    "libcomponents_feed_feature_list.dylib": {
+      "bytes": 55728,
+      "sha256": "b5a00abd61eb1063a4235ae688a02ca70a77cef7c618aa3ac7325ff6d6cecca3"
+    },
+    "libcomponents_gcm_driver_common.dylib": {
+      "bytes": 37632,
+      "sha256": "75bb848d4b37f9a5dd1c6c69392e102f17a58b0ea8a977b548d030878035fe58"
+    },
+    "libcomponents_global_media_controls.dylib": {
+      "bytes": 609136,
+      "sha256": "a1838062e387a20a150522ffb243bce74943765e8d2d06a20be82c972b0bc515"
+    },
+    "libcomponents_headless_select_file_dialog.dylib": {
+      "bytes": 37648,
+      "sha256": "6ede6fd2e954f26537c335020f8206a44f5ae4403b7c0ff5424e68f4719b46cf"
+    },
+    "libcomponents_helium_services.dylib": {
+      "bytes": 41632,
+      "sha256": "61cfa5b0a3b6e2c114cebe9593924ed66dd009e7e1abcdb31266e5800d509ff0"
+    },
+    "libcomponents_history_core_browser_features.dylib": {
+      "bytes": 56000,
+      "sha256": "8cb921006b33b5f187f58488c8349dbdfb2353ddd6ee2e149e482bcebbc13c4f"
+    },
+    "libcomponents_input.dylib": {
+      "bytes": 766736,
+      "sha256": "daa84dbccf392b1aad861e711870c29cf7c3e2e2f97ceb614855db01fadac549"
+    },
+    "libcomponents_input_mojom.dylib": {
+      "bytes": 231904,
+      "sha256": "c420e7a2f13f68525202e40c1e605814a309c3a91b8ccfeecd948d2d26a3ad64"
+    },
+    "libcomponents_input_mojom_shared.dylib": {
+      "bytes": 44304,
+      "sha256": "01af07fc024cddcfc9e279a353f0e5128bb64d50b43e4ce33125c2bd61b742e2"
+    },
+    "libcomponents_language_detection_core.dylib": {
+      "bytes": 1380896,
+      "sha256": "8cfd8716c67a1c25c8b775e0e95b696726a2cab7cf058073471d84c6a0a227a1"
+    },
+    "libcomponents_leveldb_proto.dylib": {
+      "bytes": 344976,
+      "sha256": "db818c12e65e6d45989d7cc964aa69619082d18e86560f0347079527be35dbfe"
+    },
+    "libcomponents_manta.dylib": {
+      "bytes": 902640,
+      "sha256": "23c70f1a1f3a31afab7be1b92bc42edb3299eaf0033b9215cf7e5e9204a19d9b"
+    },
+    "libcomponents_media_message_center.dylib": {
+      "bytes": 311216,
+      "sha256": "cf10109a22f00d302db8afef6ab0fc8f5e2added38f989d972b109808349fed6"
+    },
+    "libcomponents_metrics_mapping.dylib": {
+      "bytes": 65296,
+      "sha256": "4f362d863d96e8b8b8fc53f57c0353accc154b44e0a318dba9482c595a96d1e3"
+    },
+    "libcomponents_metrics_metrics_component.dylib": {
+      "bytes": 97744,
+      "sha256": "1d2dd46a737fa825b44bddc03bff99c3f378513f2edd3a6e99fad3a4f36f2079"
+    },
+    "libcomponents_metrics_private_metrics_dwa_recorder.dylib": {
+      "bytes": 92064,
+      "sha256": "0dd098b438eb18d751b584c4486d7ff7f83afcd61b669a802cb72ae68c52a572"
+    },
+    "libcomponents_metrics_private_metrics_private_insights.dylib": {
+      "bytes": 1838784,
+      "sha256": "e46c2ac15bf956aa2d58fc73893a174f70bdea32f60f9043709fdee621c75871"
+    },
+    "libcomponents_metrics_private_metrics_private_metrics_features.dylib": {
+      "bytes": 53456,
+      "sha256": "0a0028449a297f4a8f57bb5ebd74b6d89d5e331ef9d7330e33c98c01046bab19"
+    },
+    "libcomponents_metrics_private_metrics_private_metrics_recorders.dylib": {
+      "bytes": 36304,
+      "sha256": "50f06424632894d125dfb52afe474badbefa0b826e3125efe24008eeaf4acb0d"
+    },
+    "libcomponents_mirroring_service_mirroring_service.dylib": {
+      "bytes": 2600576,
+      "sha256": "1d730d2831ceaf7d53b26637c9e3cec6290a99839f589a9d09df3aec838abc17"
+    },
+    "libcomponents_onc.dylib": {
+      "bytes": 75760,
+      "sha256": "c1ab4e338ff6aac7006abad1b2713938de1307563f57f932ea1b5edcd176c55f"
+    },
+    "libcomponents_one_time_tokens_core_common_features.dylib": {
+      "bytes": 52768,
+      "sha256": "38539e54595ad3ad5e79534a3a7756a81a070a2ce96ad9e4b7c14a6616657632"
+    },
+    "libcomponents_optimization_guide_core_features.dylib": {
+      "bytes": 458320,
+      "sha256": "c49bfa7db6343a8275a306edb2c0867685b9367d02951ebe2c3f94a2195427af"
+    },
+    "libcomponents_os_crypt_async_browser.dylib": {
+      "bytes": 65904,
+      "sha256": "f1e5b24d27f74fbdd5a00e3f1b77ec536a2a4238474f9c942f5aa84e460e124b"
+    },
+    "libcomponents_os_crypt_async_common.dylib": {
+      "bytes": 47232,
+      "sha256": "8ef27644e1b413f45d6c185dc938ce27b51985d2eb2910e663b98a009b7e93f7"
+    },
+    "libcomponents_page_content_annotations_core_features.dylib": {
+      "bytes": 71712,
+      "sha256": "c343fe040fa1dbc6d5667fc08bbf3a95085a8c6af155ca735d1a029718683c99"
+    },
+    "libcomponents_performance_manager_scenario_api.dylib": {
+      "bytes": 88416,
+      "sha256": "9454490d2f210bd09db4fc300dbf564d1745dcd87173c311a40a04ece27c1dad"
+    },
+    "libcomponents_persistent_cache.dylib": {
+      "bytes": 141248,
+      "sha256": "09a102e072f618756e7af26309624704695ba9823c82a1b243ea7d91b4555b03"
+    },
+    "libcomponents_persistent_cache_mojom_mojom_traits.dylib": {
+      "bytes": 34704,
+      "sha256": "8265f4e52fb462449ac9a6583a9db0e40fc194cf4a4d3dff48f141388619f913"
+    },
+    "libcomponents_policy_cloud_policy_proto_generated_compile.dylib": {
+      "bytes": 337472,
+      "sha256": "58945a5840093476765d7e18c751e98c2093b13b006ce50c2c591e88732ffb13"
+    },
+    "libcomponents_pref_registry.dylib": {
+      "bytes": 40848,
+      "sha256": "38e94fae0119167a8a8e19b10d1f65e1cb77b1cc299e0b68cf654f1fedbecc4f"
+    },
+    "libcomponents_prefs.dylib": {
+      "bytes": 284256,
+      "sha256": "a8799abc803c67261069d714138b511f68f82acfe55c35644679cca4c9b62fa9"
+    },
+    "libcomponents_proxy_config.dylib": {
+      "bytes": 157968,
+      "sha256": "dd918ef1fd58f18e261293d9468a404286e4f636c482aeec050a7dac22104f12"
+    },
+    "libcomponents_remote_cocoa_app_shim.dylib": {
+      "bytes": 925984,
+      "sha256": "fe9e13dbb12446ab0eea79670060186765af2de0326e845b0554f218a8e57182"
+    },
+    "libcomponents_remote_cocoa_app_shim_features.dylib": {
+      "bytes": 52768,
+      "sha256": "b465e07651811058b427ac4d9b9e13a1012a98533b8df67eecccb8bd57b925ca"
+    },
+    "libcomponents_remote_cocoa_browser.dylib": {
+      "bytes": 114016,
+      "sha256": "734dc15b63cb35b548b3b05959d338f9a76f6a1e4cd7d65e75675adc2ba1a91d"
+    },
+    "libcomponents_server_certificate_database.dylib": {
+      "bytes": 125856,
+      "sha256": "be7495c62a6099b38b90bada2d896168a2495163295f42c8d48845f47f481b35"
+    },
+    "libcomponents_services_storage_filesystem_proxy_factory.dylib": {
+      "bytes": 37856,
+      "sha256": "ad235aae85e562a8769781cb96620cb883e8fb2efaf9543df538edd9c539cb29"
+    },
+    "libcomponents_services_storage_storage_features.dylib": {
+      "bytes": 58304,
+      "sha256": "63e6b2827e8b5f1a3986cc707d9c5b0cb63e31974838bd2667cdf0e465e60f84"
+    },
+    "libcomponents_services_storage_test_api_stubs.dylib": {
+      "bytes": 34608,
+      "sha256": "3360e4f9de7cd87e46ea35b7f974cdd6332e931396edf61b7931222b6cf670ca"
+    },
+    "libcomponents_sessions.dylib": {
+      "bytes": 443360,
+      "sha256": "4b943d2a3ddc2385a578799243a5750bdde877487990f1087f3e98c05421cd7a"
+    },
+    "libcomponents_sessions_session_id.dylib": {
+      "bytes": 57456,
+      "sha256": "e4ec9f7204d1c9ca48ef6be11a54de6a9b8782114129d7bd444bd784b1ead6fb"
+    },
+    "libcomponents_soda.dylib": {
+      "bytes": 79248,
+      "sha256": "dca645454faaa60d4f475172331286a65a37cd96b3bc02c64f5bf349798a42ab"
+    },
+    "libcomponents_sqlite_vfs.dylib": {
+      "bytes": 107552,
+      "sha256": "60c5d1b39265648fbef19870930356a6a876cb5cb1d97e4dc2d948b16db2f9cd"
+    },
+    "libcomponents_sqlite_vfs_mojom_mojom_traits.dylib": {
+      "bytes": 35328,
+      "sha256": "e35f852b4a2f1559f4950baa777ecbc32b7f36bc3aa85431157081f101cada17"
+    },
+    "libcomponents_sqlite_vfs_pending_file_set.dylib": {
+      "bytes": 34960,
+      "sha256": "cd8bad631288ffbf953350e00024b418381fa4ccb2d3670e13a475376b32ddee"
+    },
+    "libcomponents_startup_metric_utils.dylib": {
+      "bytes": 93856,
+      "sha256": "9e28bf66fb8330a15a62edbc69c94e1df9bc566e5cb6d24eb7bae9afc53e4146"
+    },
+    "libcomponents_storage_monitor.dylib": {
+      "bytes": 135376,
+      "sha256": "38229ac121184cbfcffd7720fe2bb7c1c4dd523a915231d6ddbb572a7026779e"
+    },
+    "libcomponents_surface_embed_common.dylib": {
+      "bytes": 52416,
+      "sha256": "f2a3a342c4cfcfa5f16f4f0a26c67a30cd7926fb9b0c9d39a8cc915adf408ada"
+    },
+    "libcomponents_surface_embed_renderer.dylib": {
+      "bytes": 232112,
+      "sha256": "9a6604e51899076bcdbe86f17695ed0542b4567c269c384c39ff04237666e5b6"
+    },
+    "libcomponents_system_media_controls.dylib": {
+      "bytes": 183376,
+      "sha256": "fdbca423032cbae65c33b46345f88941fc737322966e716d0755bac04ed609d0"
+    },
+    "libcomponents_tab_groups.dylib": {
+      "bytes": 82960,
+      "sha256": "3a168e15db9b914f290ff1bfaafa5983ccc77c99bb467f0788331679f9de04d8"
+    },
+    "libcomponents_tracing_background_tracing_utils.dylib": {
+      "bytes": 49568,
+      "sha256": "21a6097d139f35f3175f2d615d98635d04e96a4bfb68b1ba606dd71e29fced79"
+    },
+    "libcomponents_tracing_tracing_config.dylib": {
+      "bytes": 92240,
+      "sha256": "6e2f90b3fca59c8a9a48962cf9d750c59717f0a76cd07406252dec1cb558a931"
+    },
+    "libcomponents_tracing_tracing_metrics.dylib": {
+      "bytes": 243536,
+      "sha256": "6709c4ed4e831e959a4a7d121e431a7e79aefc9ddfdc8c4734a178e2cac3da7b"
+    },
+    "libcomponents_ui_devtools.dylib": {
+      "bytes": 418128,
+      "sha256": "f88364d19cd15bad28b73de40991a1739d1cb87791408b81384f7895836baeea"
+    },
+    "libcomponents_unexportable_keys.dylib": {
+      "bytes": 454880,
+      "sha256": "63f2afa5fdeb16919994ace796b8167a0dda2b60d0eb244a377483a88abc8a33"
+    },
+    "libcomponents_ungoogled_ungoogled_switches.dylib": {
+      "bytes": 17184,
+      "sha256": "8cfa2934e766216967ad52698e7176e0686d94d777b17fda17aab365a692ee1a"
+    },
+    "libcomponents_update_client_background_downloader_delegate.dylib": {
+      "bytes": 82688,
+      "sha256": "26c17ece174199565be825a1fa8b2c3abeb6bea6b70fa34d4118774df9f366c4"
+    },
+    "libcomponents_url_matcher.dylib": {
+      "bytes": 719568,
+      "sha256": "0189c39f1677f8795457e9bc8ddd3ff159e9d72cb0fc6253382fe8382ab0afd2"
+    },
+    "libcomponents_user_manager.dylib": {
+      "bytes": 39120,
+      "sha256": "c6603f3b4e6e15409948e3d2c1cb14cb27a0cfc8d0f1c502c2130252809ec0ca"
+    },
+    "libcomponents_user_manager_common.dylib": {
+      "bytes": 33728,
+      "sha256": "36497954292e07130d60cf3bf8f2518ba3af08ca45f4f966473e031afa1989eb"
+    },
+    "libcomponents_user_prefs.dylib": {
+      "bytes": 36096,
+      "sha256": "832c7b2a2f5f64bf57af78dcadfba38896e4bf709517da0377df918a9018e7a0"
+    },
+    "libcomponents_variations.dylib": {
+      "bytes": 1025872,
+      "sha256": "6cc6b894759705dd0b30551a0247cb89388d88a2e07355a6150504bd0fff2acd"
+    },
+    "libcomponents_viz_client.dylib": {
+      "bytes": 150608,
+      "sha256": "291ced4a2479f77428dfe4d752ed66c7eb517751541db7efd81a31c4534e244a"
+    },
+    "libcomponents_viz_host.dylib": {
+      "bytes": 858576,
+      "sha256": "dc98a8f948a02551f379a32616f4e3b54e4880e00a88c09d0b8e658ca497468a"
+    },
+    "libcomponents_viz_service.dylib": {
+      "bytes": 3823120,
+      "sha256": "f3070de89c5fb99e96bb2d2cddc1aa32297517d3b295779a0994e1b63120cc64"
+    },
+    "libcomponents_vrp_flags.dylib": {
+      "bytes": 54528,
+      "sha256": "9c8a33d2c58c44b1161cc01aa4b87c087f6ab17097e8f580b3c7573e9b5acf5a"
+    },
+    "libcomponents_web_modal.dylib": {
+      "bytes": 109968,
+      "sha256": "7e6beab53eec4e0bc13a9b56e2165491ad61c72ab85adced4efa2b6dc357b064"
+    },
+    "libcomponents_webrtc_features.dylib": {
+      "bytes": 52400,
+      "sha256": "6d586aefa48147f37107f9f52188dbe936c19d33c72e1ef4b3e982315c0d6ecb"
+    },
+    "libcomponents_wifi.dylib": {
+      "bytes": 111184,
+      "sha256": "fc2ac9f438f7ef620b506c691fd414adfb2e6c58b82ca1433b4dc3bd756a3b0a"
+    },
+    "libcontent.dylib": {
+      "bytes": 50298784,
+      "sha256": "1df1f2a7bb5172110bd496d3ee1a895d32887e2588693025414ea7c0d919e5a3"
+    },
+    "libcontent_browser_aggregation_service_mojo_bindings_shared.dylib": {
+      "bytes": 49056,
+      "sha256": "57955503eb6d3b07ec59ce0e30b59911ba141cbd42c077fdc031946fa3b6ce69"
+    },
+    "libcontent_browser_memory_coordinator_mojom.dylib": {
+      "bytes": 84768,
+      "sha256": "02fb2c72dcbe0028e7d0965d3ff893dd63d23a4e5c991f0c5e90766533e832e3"
+    },
+    "libcontent_browser_memory_coordinator_mojom_shared.dylib": {
+      "bytes": 41568,
+      "sha256": "39016e5f4100794eda16d495768b1c72b48d4fa923216855ea438d8f8ac22248"
+    },
+    "libcontent_common_main_frame_counter.dylib": {
+      "bytes": 17568,
+      "sha256": "aac881b5822fb447a33eb6d6372ac9953236c16655f676883eb2c9c4c16bd2e3"
+    },
+    "libcontent_common_mojo_bindings_shared.dylib": {
+      "bytes": 391504,
+      "sha256": "1e603865139d94d9cc97e84b33a2116355e5f67e7ab389bf149d5f0a203a7e53"
+    },
+    "libcontent_extraction_shared.dylib": {
+      "bytes": 38080,
+      "sha256": "ea78491420260ece89b5d6612cdd6b063e5bef16176af36214d4e7f8238ca2f1"
+    },
+    "libcontent_public_common_main_function_params.dylib": {
+      "bytes": 34576,
+      "sha256": "4ecdeb86ae5d37f328957ea1f63e1960564f04e36aef2c5023ee96baf368d771"
+    },
+    "libcontent_public_common_mojo_bindings_shared.dylib": {
+      "bytes": 42512,
+      "sha256": "ce51cf242a1041c304b7ee80ac375397d04c427cd4950ae9be104e06ef317ca8"
+    },
+    "libcontent_public_common_result_codes.dylib": {
+      "bytes": 36688,
+      "sha256": "3453e644b526ef898ef4319febbc9432455101836acaa96dc282f536a38159d0"
+    },
+    "libcontent_services_auction_worklet_public_mojo_bindings_shared.dylib": {
+      "bytes": 231056,
+      "sha256": "ac14dbda6252aec448ce71252ee7f7d6a4c544b79b388865fc1924eb0ae2afd8"
+    },
+    "libcontent_settings_features.dylib": {
+      "bytes": 55152,
+      "sha256": "de3f58d12265ef54e03ac0bf01132396ca0055b6cf13daec97e5e54ca21822ce"
+    },
+    "libcppgc.dylib": {
+      "bytes": 362960,
+      "sha256": "f7fd58a77c9e80bfcfdc73a7398632a0599895ae14af2dafbb6f28952ff98e98"
+    },
+    "libcrcrypto.dylib": {
+      "bytes": 842368,
+      "sha256": "15b338291164a67346fbdc6ebdb0df239f74d125884b4de6feaffc2e8dcfb3d4"
+    },
+    "libcredentialmanagement_mojom.dylib": {
+      "bytes": 87776,
+      "sha256": "c776d5ae0c1dfcee37b65d82ab5e04a3ee0a431bc38dc0c9e9fa18855238aea4"
+    },
+    "libcredentialmanagement_mojom_shared.dylib": {
+      "bytes": 46208,
+      "sha256": "27fe39a1c525ce7879d2b52656c7a7396181b3a8d7db617d211ca56a3d9c192f"
+    },
+    "libdawn_native.dylib": {
+      "bytes": 8902832,
+      "sha256": "95fcd39499a14620a3769065de80d1cfb6586f445fa22dd8f076aee776f3a5e3"
+    },
+    "libdawn_platform.dylib": {
+      "bytes": 49904,
+      "sha256": "b68d66167cdc9aa87fa79c21386f85a0dc3c00400c2a0f76ac17f1f1bebb59ae"
+    },
+    "libdawn_proc.dylib": {
+      "bytes": 136176,
+      "sha256": "8300de774e2b6ead8491b751e1df2cce856e7ff35ece0df9cbc3de79376291be"
+    },
+    "libdawn_wire.dylib": {
+      "bytes": 702160,
+      "sha256": "7f049540c2b2d7c0639eff767711d3f4363357afd47359e2984d2d12754c9275"
+    },
+    "libdevice_base.dylib": {
+      "bytes": 35568,
+      "sha256": "eb4f1e3f8380a4b244c792d0a7ea390fd82dba34e32661ddae032b70352facfd"
+    },
+    "libdevice_bluetooth.dylib": {
+      "bytes": 657328,
+      "sha256": "4f0307cdd3f301ec5877975e0e30a5f04471493e2864b8d5a75f6c2c29e17542"
+    },
+    "libdevice_bluetooth_public_cpp_features.dylib": {
+      "bytes": 52704,
+      "sha256": "7c502b6d5149605719218440941bb98cb4ba4e7eabed67fff9f03388348fc1b7"
+    },
+    "libdevice_fido.dylib": {
+      "bytes": 2615712,
+      "sha256": "8f553b78709f50b1b1e07a90291afc4e87d8830c1f1d0f79b98b56a068102045"
+    },
+    "libdevice_fido_public.dylib": {
+      "bytes": 108592,
+      "sha256": "c812d82010df0b38ec5e40406cb40139a9fe27e25ee33523b26c607f01959135"
+    },
+    "libdevice_gamepad.dylib": {
+      "bytes": 488720,
+      "sha256": "2bd15b55cb3b145857976feaa19e861153447228c57566747cbb235785d0530e"
+    },
+    "libdevice_gamepad_public_cpp_shared_with_blink.dylib": {
+      "bytes": 16928,
+      "sha256": "f53ce152a0330eadde50998f9e8f2b69058a00a30c5f3a8dc804d4ecc82d1d28"
+    },
+    "libdevice_gamepad_public_cpp_switches.dylib": {
+      "bytes": 54016,
+      "sha256": "c4458ea7890bca496978e92e4a4a7889c2e2532c30373d45a82f1d73154143a9"
+    },
+    "libdevice_service_binder_overrides.dylib": {
+      "bytes": 37504,
+      "sha256": "945fb577cb4aa08a5d7f4edde8b5a8f1ee42bc098c9c9cfa13f5e70c17f2d782"
+    },
+    "libdevice_vr_isolated_xr_service_mojo_bindings.dylib": {
+      "bytes": 309328,
+      "sha256": "6cf692677cb33f6c144346b3da12ed485a85d846ba0b27fda359d65022bc974f"
+    },
+    "libdevice_vr_isolated_xr_service_mojo_bindings_shared.dylib": {
+      "bytes": 55456,
+      "sha256": "877a5357e696a739c0aec69632aeeef4390d83e6454d310f149cbf63df9a59f3"
+    },
+    "libdevice_vr_public_test_typemaps.dylib": {
+      "bytes": 52656,
+      "sha256": "c7ccb64dea05964dd88dfc1189e44f219e462f8768260ff89c529e72eb00314c"
+    },
+    "libdevice_vr_public_typemaps.dylib": {
+      "bytes": 37936,
+      "sha256": "8d2c999651de56e2fc8427bcef2acc2cf9eb426f7c8d247c73b8a687f302956f"
+    },
+    "libdevice_vr_service_mojo_bindings.dylib": {
+      "bytes": 653088,
+      "sha256": "68f536ece1aad33752a8fe66f0a0615204b2d03d72a1d1fb3a814d8b08688838"
+    },
+    "libdevice_vr_service_mojo_bindings_blink.dylib": {
+      "bytes": 824944,
+      "sha256": "86f16dbe29d2b6bf0763b7ea052403cd47e211e719f881db327f4d18b130dcc5"
+    },
+    "libdevice_vr_service_mojo_bindings_shared.dylib": {
+      "bytes": 168800,
+      "sha256": "2e33f68e3d4d72e6e824f4d00a7d6584c47f5f649a2cf50e2f8bff217f1c04e5"
+    },
+    "libdevice_xr_common_mojo_bindings.dylib": {
+      "bytes": 52224,
+      "sha256": "69debbfa560715c7e7a63c3bce0a307a33e0cea02450a9dcc38b2c132683afe5"
+    },
+    "libdevice_xr_common_mojo_bindings_blink.dylib": {
+      "bytes": 72416,
+      "sha256": "2ea2a1f9c2b4c2ef5bc0fd820f2e7d138c373779b83e844860dd6dfb43aa6013"
+    },
+    "libdevice_xr_common_mojo_bindings_shared.dylib": {
+      "bytes": 49920,
+      "sha256": "e1a241149fd36acb3bb84da9a2206da72838428c9be43af505b29dc4a8412a6c"
+    },
+    "libdiscardable_memory_client.dylib": {
+      "bytes": 122256,
+      "sha256": "14c0665e1ceabd1488f83010a4c9fd9ea28a407793a0d03225dfe218d8b9667e"
+    },
+    "libdiscardable_memory_common.dylib": {
+      "bytes": 54592,
+      "sha256": "c28b8aec5e39dc6981434b367ccf5609571503d8d7ec18e63bb0f2efcf92771c"
+    },
+    "libdiscardable_memory_service.dylib": {
+      "bytes": 144992,
+      "sha256": "3198252e9eeeeb3eefa1f0716e9b0d82e11346ca1765471f4ca7d67295f279ba"
+    },
+    "libdisplay_features.dylib": {
+      "bytes": 57008,
+      "sha256": "dc8e821f544ea0a3b76ae599019d0eb4a0c60f6b674f239f665ed9acf90cc75d"
+    },
+    "libdisplay_shared_mojom_traits.dylib": {
+      "bytes": 39104,
+      "sha256": "ec702b515f666712a20f0907111e92579043c59991109541b746a10c44ed462d"
+    },
+    "libdisplay_types.dylib": {
+      "bytes": 137248,
+      "sha256": "6d655593abd9f4cce4693d37d48aa8d426fdf0a3f01f721faa336db46de0ce07"
+    },
+    "libdisplay_util.dylib": {
+      "bytes": 66496,
+      "sha256": "83aaf535357e47d8de224f968d8f31c632f6fda84be8c8609b57aba585b2a084"
+    },
+    "libextensions.dylib": {
+      "bytes": 35200,
+      "sha256": "0e210f9e3f9593f93b777d6a7a9a2b22758723c141790e22d30b1470bde9196a"
+    },
+    "libffmpeg.dylib": {
+      "bytes": 2965024,
+      "sha256": "8e30e2882751f4ab8453c25b4ce8218e48511defa2bca32a43a573e9341ac6c5"
+    },
+    "libfile_access_lib.dylib": {
+      "bytes": 49280,
+      "sha256": "6aebd374cd95e6cc5d7b31adc1a6d996d516ff1c4dd858a60524363895495458"
+    },
+    "libfingerprinting_protection_shared.dylib": {
+      "bytes": 34384,
+      "sha256": "8c5ab751275b62066609c99642ebda3e16cdb1057b2354057bc36da5d7a4ad68"
+    },
+    "libgamepad_mojom.dylib": {
+      "bytes": 176768,
+      "sha256": "5697ae8f21b2b44463a0f31dabc0dbcfbff09ba389ac340048d9adacee4f1fa7"
+    },
+    "libgamepad_mojom_blink.dylib": {
+      "bytes": 179664,
+      "sha256": "bbd5250fa6a0b30736f353592f979c9f882b35527e61608f5405b290c2e7301c"
+    },
+    "libgamepad_mojom_shared.dylib": {
+      "bytes": 53152,
+      "sha256": "3efb94985d6136a174a509130a7b50a06fe1a5750b948306131935b3dd2763b1"
+    },
+    "libgamepad_shared_typemap_traits.dylib": {
+      "bytes": 42992,
+      "sha256": "5c96a0bcc2fab22bb839170f9d5c9ba92bc982d965076033e1314088699b5aaf"
+    },
+    "libgeolocation_service.dylib": {
+      "bytes": 129504,
+      "sha256": "0754ab8a8ad9fbddf7987cb975ebfdacdb310719b8995c02e50e8deccf3fb455"
+    },
+    "libgfx_ipc.dylib": {
+      "bytes": 39520,
+      "sha256": "ec937d9a5d91c0b7d7161727c8f291fca00e90e6770d85ba1c4b02ba1b566283"
+    },
+    "libgfx_ipc_geometry.dylib": {
+      "bytes": 36944,
+      "sha256": "4271040918447ac3a55ae47ad6fababe8f6b0b0c859fcb6427bc75e47d8cbba2"
+    },
+    "libgfx_native_types_shared_mojom_traits.dylib": {
+      "bytes": 38640,
+      "sha256": "a8033e5c7ffe436e70cc85d8cd2f660f467dbe85a3a1966d55cfb5b4304d26b8"
+    },
+    "libgfx_shared_mojom_traits.dylib": {
+      "bytes": 43552,
+      "sha256": "f0a09020baec353b09ef802aff5642bf877b2814b80d93c9ed6abf69f2fe7c1a"
+    },
+    "libgin.dylib": {
+      "bytes": 225744,
+      "sha256": "b62b0c846dfa7c72e4f71f111736a13e490dd79689fa52bcfb9fa4a0d39bb43d"
+    },
+    "libgl_init.dylib": {
+      "bytes": 136080,
+      "sha256": "904915fdc69ceeaade2d4d4058898e7eae859573c8b8429b4fd3248cb7c8d486"
+    },
+    "libgl_mojom.dylib": {
+      "bytes": 40544,
+      "sha256": "1473f5c20651808f318b550b1cc7ecea230cf2751c426698902e18773a7966af"
+    },
+    "libgl_mojom_blink.dylib": {
+      "bytes": 53696,
+      "sha256": "316f2e678214107f23bf05dad35e053f22d44e6c2fc9894a9f36ca5cd1e64e50"
+    },
+    "libgl_mojom_shared.dylib": {
+      "bytes": 39008,
+      "sha256": "d4c1433ef24712dbe9d5b9e1792ca7a2b1b47aaaccf3da8a1cb3bdd1dbdb8cda"
+    },
+    "libgl_wrapper.dylib": {
+      "bytes": 926160,
+      "sha256": "beb4a6846076c333308f8579fd1e6f511a8311eb3dd8cdd9a467f0faa2b47a97"
+    },
+    "libgoogle_apis.dylib": {
+      "bytes": 499392,
+      "sha256": "1b7a6a436b62666ca1affa5776a581c66beb2037ff1def0893cf7831019805d5"
+    },
+    "libgoogle_apis_gcm.dylib": {
+      "bytes": 540144,
+      "sha256": "7d9fd0783ee5d8000245132b12cc725c6855f188b6f39ee83275b3af5f7f6791"
+    },
+    "libgpu.dylib": {
+      "bytes": 502560,
+      "sha256": "7acecba96baf17b2be107306bb072b72597a1f3c41b58b7552a57c5ae087dbaa"
+    },
+    "libgpu_channel_mojom_shared.dylib": {
+      "bytes": 90416,
+      "sha256": "4e441bd6d1afc033ad70a96d645804dcc2b2204b55958377307367b7d433996d"
+    },
+    "libgpu_command_buffer_client.dylib": {
+      "bytes": 252368,
+      "sha256": "2b74f706f5b5fbed2c6495aa31172312631992382a2e3b71c306d0b82c236e93"
+    },
+    "libgpu_command_buffer_client_gles2_implementation.dylib": {
+      "bytes": 658176,
+      "sha256": "b0bd749fd1d099c22814bb8c4954668304784cad0264aad994536f1ded1edf54"
+    },
+    "libgpu_command_buffer_client_internal.dylib": {
+      "bytes": 71280,
+      "sha256": "38c2c325aad2f8052642430209539714f8a85bb97d70f5ed3948ab2d0ea82b5c"
+    },
+    "libgpu_command_buffer_common.dylib": {
+      "bytes": 98016,
+      "sha256": "c6b22d3eb4050205810b3fd366229aaa3ec54e918016a3c031007a05844516a2"
+    },
+    "libgpu_command_buffer_common_gles2_utils.dylib": {
+      "bytes": 94592,
+      "sha256": "b97f35890638415b7e2a07174272efe703143c4680c82ed35eaf202ae6adcee2"
+    },
+    "libgpu_command_buffer_service.dylib": {
+      "bytes": 336960,
+      "sha256": "e2ac2f5695d11c29488a59e510eb77b58a124631f2d3b566f6c40bbf8f12cb1a"
+    },
+    "libgpu_common_interfaces_shared.dylib": {
+      "bytes": 87200,
+      "sha256": "e0947d264fece2a0192ef638f9c31bec3a680b5825dcadf158c7c0d561bd9825"
+    },
+    "libgpu_config.dylib": {
+      "bytes": 634944,
+      "sha256": "54dfc1fa282bcb08ab575771e255447fc998b779fe209776f096df26e41bf8db"
+    },
+    "libgpu_gles2.dylib": {
+      "bytes": 5380432,
+      "sha256": "b332d8a54a4f4f4052c73178c797df52b386bd9966f58e2b48d7408cc6c9662c"
+    },
+    "libgpu_ipc_client.dylib": {
+      "bytes": 294800,
+      "sha256": "2b5cf2f13a6147c49b504c3feda258ac306b38d9b706a0afcb70536a93ae01e6"
+    },
+    "libgpu_ipc_gl_in_process_context.dylib": {
+      "bytes": 177536,
+      "sha256": "3744f1da9816d59a3baa574f94abfaa478512ca41bc09d749ccec81d0ff3ca0d"
+    },
+    "libgpu_ipc_gpu_thread_holder.dylib": {
+      "bytes": 73232,
+      "sha256": "6c5caeedfdc94c09c40e63e923d9c27a9b05eb8c1c0bc44f775e866c48a8d9ef"
+    },
+    "libgpu_ipc_service.dylib": {
+      "bytes": 478160,
+      "sha256": "119ac216b8d693a65de271ae1b8040f1d7f2221c52ad2f8ce18be84e336a2cb6"
+    },
+    "libgpu_mailbox.dylib": {
+      "bytes": 36096,
+      "sha256": "be79edb9be7142eac758b34cecd222d1ac8de97009c9faf33fb570a7144f81c5"
+    },
+    "libgpu_raster.dylib": {
+      "bytes": 204928,
+      "sha256": "9e3377a02fe05581d89d14c277339f7a075bff0aac7fef3bcb11a863e9a014c2"
+    },
+    "libgpu_webgpu.dylib": {
+      "bytes": 115232,
+      "sha256": "da71c96e84430d2da375d65cf2fd2dd3aac31e1f3eaa55ec9b18fe50e5df2bab"
+    },
+    "libgwp_asan_client.dylib": {
+      "bytes": 164624,
+      "sha256": "9a1ae263aa0435748d907029d19d00dfa98b2c6ecca4d42d2d8c1e775c535da5"
+    },
+    "libhelium_noise_shared.dylib": {
+      "bytes": 37584,
+      "sha256": "0d6d4b58dc77ced76d9276e659fd8e6ad133d3b8d7a11a921776d8e94d74671c"
+    },
+    "libicuuc.dylib": {
+      "bytes": 2031008,
+      "sha256": "0a156d32c7041c53b0035f7ab4b385de742d187e16d3c229dc9d6e3093cdd0fb"
+    },
+    "libicuuc_hidden_visibility.dylib": {
+      "bytes": 2034496,
+      "sha256": "98e8dcfc31bb92e8ffcda450fbf424600e37ad41ac99f0e710b198c91b888100"
+    },
+    "libimage_decoders.dylib": {
+      "bytes": 4559040,
+      "sha256": "5f5cca75d67fa805321186507f9d260e3768433ceee06f9f84c255b18c23612e"
+    },
+    "libime_shared_mojom_traits.dylib": {
+      "bytes": 38320,
+      "sha256": "8ad50018ad524c77284dc08291910fd9747289532e4c64c81c67cb19e00a60f3"
+    },
+    "libinterfaces_shared.dylib": {
+      "bytes": 38816,
+      "sha256": "5d84c9a75dd36fe340445069cfee4443a4dd1eeac3dbe813b43e7bb9c292333f"
+    },
+    "libipc.dylib": {
+      "bytes": 278848,
+      "sha256": "e4512d5e7246edda6ff3f090d16a23396458472d24ad754e922c2aa557cb9a40"
+    },
+    "libipc_message_support.dylib": {
+      "bytes": 50432,
+      "sha256": "24b7adcaf6e7b258ce484d0be00854a740c96b49beef370680b181b4fc1bc9ed"
+    },
+    "libipc_mojom.dylib": {
+      "bytes": 54464,
+      "sha256": "a3e8416346816f2c9c1fc87a5a18fd0a0ce225c239f852791acb69e2db0019e0"
+    },
+    "libipc_mojom_shared.dylib": {
+      "bytes": 37664,
+      "sha256": "f2ec22abc7aac5728fa17ce99742f1fadf474a8762561451e89f42bde82e8460"
+    },
+    "libkeyed_service_content.dylib": {
+      "bytes": 102576,
+      "sha256": "e24b2bdd8023c45167f3c1132bc08b80eacbab0e2eed3b52518051179d2ab69c"
+    },
+    "libkeyed_service_core.dylib": {
+      "bytes": 175200,
+      "sha256": "c711ab704e0389826bea5730b05b4f1a9d26f4717d3d4a6e44f88b3217e0fc9b"
+    },
+    "liblatency_shared_mojom_traits.dylib": {
+      "bytes": 38368,
+      "sha256": "4989d585f17b0154d0028a7bed3cf373ed835000ae29ba7b751e7a061af05590"
+    },
+    "liblens_features.dylib": {
+      "bytes": 121904,
+      "sha256": "d71019da7091379a3455493b8d72d618b6a035345bb0ae880477e0372038f430"
+    },
+    "libmedia.dylib": {
+      "bytes": 13928080,
+      "sha256": "8c29365cae0318af0c75b2f68e4d7bad32267cf8153e646d0363e7c77a093228"
+    },
+    "libmedia_capture_capture_base.dylib": {
+      "bytes": 48720,
+      "sha256": "511b8eaa1ecbe974fcb3666f2e2ba21a81142f313bd0908737d8fe18c523a82e"
+    },
+    "libmedia_capture_capture_lib.dylib": {
+      "bytes": 1020384,
+      "sha256": "3c5449b3c1cab0d873b29164317cdf51b0c3205487e360ad6119e13e7c303693"
+    },
+    "libmedia_capture_capture_switches.dylib": {
+      "bytes": 53040,
+      "sha256": "5c8b3949201ce8cc67cf04316474ad5e770d2dd53b9937370a60ec088cb9fbce"
+    },
+    "libmedia_capture_mojom_video_capture_mojom_support.dylib": {
+      "bytes": 60528,
+      "sha256": "0ca2252d0328376a31ff5c82d5f76351e0ea64b21e614f821c33589e82b5c46a"
+    },
+    "libmedia_gpu.dylib": {
+      "bytes": 654800,
+      "sha256": "ed3a12fe6d36992dc6a9364a84eecb131230fed7bbe9bb99beaed44d2a28b602"
+    },
+    "libmedia_midi.dylib": {
+      "bytes": 126240,
+      "sha256": "70b65ec34a40f5f9bf8102787db4269419f87b34960ffec9cc2794d2ea067c32"
+    },
+    "libmedia_mojo_services.dylib": {
+      "bytes": 1304832,
+      "sha256": "d0f316fc04b055ddd6d2cb8f641812aa33803bdb6b91e27bfc6b73029f06f133"
+    },
+    "libmedia_session_base_cpp.dylib": {
+      "bytes": 44608,
+      "sha256": "4508c640a6352061da1ddbd602c87cb55d7df1865b577345689e4250c723540e"
+    },
+    "libmedia_session_cpp.dylib": {
+      "bytes": 70912,
+      "sha256": "1e50e1322729875e8cd5e8986b0001a2af6fd596c48e61d69c37f2b005d9bcc4"
+    },
+    "libmedia_session_test_support_cpp.dylib": {
+      "bytes": 737024,
+      "sha256": "8f094d6cbfa58f83370536a546cc8342cc55dff8001d378d173a631968ef33ba"
+    },
+    "libmedia_webrtc.dylib": {
+      "bytes": 3545920,
+      "sha256": "aa68d1fdb2cc49ebe6a1eb8eb254c8ec6ad0b9d4f771e07b40645ee61e32d79e"
+    },
+    "libmetal.dylib": {
+      "bytes": 147056,
+      "sha256": "89eeb2f617c43bbd12604f792abea0a8696fd8510bd9943a9826fd07c4ad8872"
+    },
+    "libmetrics_structured.dylib": {
+      "bytes": 46368,
+      "sha256": "21f413eec89ce1dd65335b21d671fc0f4f59ad8a61836e20df2bc6123e7ce302"
+    },
+    "libmock_failing_translate_kit_lib.dylib": {
+      "bytes": 35568,
+      "sha256": "61ff2ec172b6e83a72ec6afd5b6714b271a849a3fec0c1398495648113e5201c"
+    },
+    "libmock_invalid_function_pointer_lib.dylib": {
+      "bytes": 17216,
+      "sha256": "851b5d0892afdc32de921c4f0c0568966efca4f7ca56258637b333211e834415"
+    },
+    "libmock_translate_kit_lib.dylib": {
+      "bytes": 70192,
+      "sha256": "03c39f952f010808da8f4fe7de1c09f9214054b17f1c1b7b12a32666c90941b2"
+    },
+    "libmock_translate_kit_without_split_sentences_lib.dylib": {
+      "bytes": 69872,
+      "sha256": "6eb3233b3942e471adef69eccc902532bc4b77bbec16f217bda1280fdc9fae1b"
+    },
+    "libmojo_base_lib.dylib": {
+      "bytes": 54064,
+      "sha256": "dc1341cba3fccc4181ed7f0bd1789a748a17c0bd56d6aeefcced6931bc43a0d7"
+    },
+    "libmojo_base_mojom.dylib": {
+      "bytes": 170368,
+      "sha256": "27bf7ea19b333b7443f40fd75f6279b7fe33f8b8a11ddee7fc4f26509cdc99bd"
+    },
+    "libmojo_base_mojom_blink.dylib": {
+      "bytes": 192176,
+      "sha256": "3a558e963bf04ede52e9e8cf1efd100866537475cf751d6cc16b84e9d4daeed8"
+    },
+    "libmojo_base_mojom_protobuf_support.dylib": {
+      "bytes": 37952,
+      "sha256": "eb51879fcec9fb206b90bc88c0918d459a3ca8ef5383b14422e7b5325394a850"
+    },
+    "libmojo_base_mojom_protobuf_support_blink.dylib": {
+      "bytes": 55296,
+      "sha256": "697a9bddfa5e7413d076ba04aafd00e9d99be008dcc986dcda7e007ebac7cf22"
+    },
+    "libmojo_base_mojom_protobuf_support_shared.dylib": {
+      "bytes": 35696,
+      "sha256": "dac57cbc7bcf8f36aa4f634069c5e87a5b22b8f0d10fd62fce2a3ac23f9fb255"
+    },
+    "libmojo_base_mojom_shared.dylib": {
+      "bytes": 105648,
+      "sha256": "cc35b2a16dfab545bb96136a4f8066f144808359084b681f13aa7a9539fa6f97"
+    },
+    "libmojo_base_protobuf_support.dylib": {
+      "bytes": 40704,
+      "sha256": "af8cb79759b24df3ca9d32e731d21f29235b57de5cd3abbc367428f26cab5d11"
+    },
+    "libmojo_base_protobuf_support_traits.dylib": {
+      "bytes": 35952,
+      "sha256": "4245031e85a4ddfa64b121d36709bc2054270450b9d034cc695aac875e6c603f"
+    },
+    "libmojo_base_shared_typemap_traits.dylib": {
+      "bytes": 70656,
+      "sha256": "6262d58a65325daaccf1b25e78f7f3c4cdc92bcb9ce00ef25f1db1a6914d9536"
+    },
+    "libmojo_base_typemap_traits.dylib": {
+      "bytes": 47168,
+      "sha256": "c21b8a93e72cb5d4eec6d3119d7aa74c87b60f2bda6882b358fd3a1334cc579d"
+    },
+    "libmojo_core_embedder.dylib": {
+      "bytes": 42288,
+      "sha256": "55e3ea3c4957c9eb13a54b5a5caea2e5446a412d4dd8a9ccd4334abe4468c2e6"
+    },
+    "libmojo_core_embedder_features.dylib": {
+      "bytes": 52576,
+      "sha256": "3bb42c17d655f8989d1da1223897add696d256b43edff356bde8cd3413ce56e3"
+    },
+    "libmojo_core_embedder_internal.dylib": {
+      "bytes": 626448,
+      "sha256": "5705db2e761772693095d0b35054d1be3e13595f79860887e2e0b4d623d40ed7"
+    },
+    "libmojo_cpp_platform.dylib": {
+      "bytes": 65696,
+      "sha256": "d330052df562a2ba5d52b6075734f1de3451e6ef64ddb2471e30256f425f8982"
+    },
+    "libmojo_mojom_bindings.dylib": {
+      "bytes": 104464,
+      "sha256": "aba4013346535ddf0ac3d0fbea67b1f0354ec56a2ad8ef258cde9e13a6617700"
+    },
+    "libmojo_mojom_bindings_shared.dylib": {
+      "bytes": 49600,
+      "sha256": "29094a9343c1d8630af37a8a209dbd24b7aeca7417dcc637d36c2a0f03d57069"
+    },
+    "libmojo_public_cpp_bindings.dylib": {
+      "bytes": 453024,
+      "sha256": "7b97bb0a806d231baf4b27c014954de52b556435859bf0bd3c5b153e19b4e0c4"
+    },
+    "libmojo_public_cpp_bindings_bindings_base.dylib": {
+      "bytes": 191072,
+      "sha256": "c02b4584cf0a8980493ee72165cc0a25906577c72c0bfe77c039505a4f9c9d5e"
+    },
+    "libmojo_public_cpp_bindings_wtf_support.dylib": {
+      "bytes": 53504,
+      "sha256": "8c0b4b05e8e7266a9d09056450fa2e538cadf9b2f5cf53f9f6c129cc0c83434d"
+    },
+    "libmojo_public_system.dylib": {
+      "bytes": 59424,
+      "sha256": "f55924bdac052b1b2de2846eae3f8ce225d4412ae87f4981d41d300586a18d7a"
+    },
+    "libmojo_public_system_cpp.dylib": {
+      "bytes": 189664,
+      "sha256": "d3e74e0eeaef2bdb7a48eeb47121deb22e6bd809868d5361e015498fc3feb7e9"
+    },
+    "libmojom_core_shared.dylib": {
+      "bytes": 630704,
+      "sha256": "0418e7703a2db9418c6b9359d80263d50100845a1792c71e6bd6676082f67794"
+    },
+    "libmojom_mhtml_load_result_shared.dylib": {
+      "bytes": 36880,
+      "sha256": "b68ca67b6c3bbaab23bf738a70a39f7ed6f6e4fbe5cab794327139c92ec62b65"
+    },
+    "libmojom_modules_shared.dylib": {
+      "bytes": 188304,
+      "sha256": "dde951fdedcb3e6826fb7643a4142c32fe03dbb27d0130014237db36df38fa6f"
+    },
+    "libmojom_platform_shared.dylib": {
+      "bytes": 1780592,
+      "sha256": "6a251bf8d927bd57a6ca4258c0e9805d90eca34bda87b665faf97a10c26228c2"
+    },
+    "libnative_theme_features.dylib": {
+      "bytes": 53632,
+      "sha256": "10c98cdb50af81548459c766deb25a1e015d71bde0a82a326b22bf0887fafa3a"
+    },
+    "libnet.dylib": {
+      "bytes": 12307152,
+      "sha256": "2152baf380d136eb2b644b914b635b68da4c7a99b6b6a449b532760ae4df3f0d"
+    },
+    "libnet_extras.dylib": {
+      "bytes": 340416,
+      "sha256": "1ae18398b6eb3ff573ae37aa73631de904b72c148fbba3414e2c73b637ac4bdd"
+    },
+    "libnet_shared_dictionary_info.dylib": {
+      "bytes": 37744,
+      "sha256": "e2e6e1df8f94ef960d9454ddb2db4909ab8606988f786b6572c91d56a8a743d9"
+    },
+    "libnet_third_party_quiche.dylib": {
+      "bytes": 3676432,
+      "sha256": "25cc0107dae1b86cb1abec5189e472aaa4a51439de194555e8bb79016da217dd"
+    },
+    "libnet_third_party_quiche_blind_sign_auth.dylib": {
+      "bytes": 308528,
+      "sha256": "b2ce1102a39cae87702beb8ce3971b8bf97b0342262f222ac0e6a1ac99145d2c"
+    },
+    "libnet_third_party_uri_template.dylib": {
+      "bytes": 38176,
+      "sha256": "080df47d3e9e3f872609d82cba2ca485f4c96b5a0bd3ad5d7d4d0e47558e3af0"
+    },
+    "libnetwork_cpp.dylib": {
+      "bytes": 1382272,
+      "sha256": "596b8bf529972dfa0921abf985e296cceb7bda39a049cf8ff0d9260da6c2c25c"
+    },
+    "libnetwork_cpp_base.dylib": {
+      "bytes": 447296,
+      "sha256": "8ccc573e7e43b20b8093911cc423b1ffe502c8bf2134594eb9a30fe9cd5bdc0b"
+    },
+    "libnetwork_cpp_p2p.dylib": {
+      "bytes": 40064,
+      "sha256": "d82bdc24f65321e2064b1b799deaa4f03c639171cb1a3aee04949fc408df2418"
+    },
+    "libnetwork_session_configurator.dylib": {
+      "bytes": 36080,
+      "sha256": "3e8e35b19ba8cda7277848df9a1edfb14475469dc5239a9cdf42ac34e3e9c614"
+    },
+    "libon_device_model_cpp.dylib": {
+      "bytes": 109744,
+      "sha256": "3987610e7e7e55e54220b7549a1f79af9e0137cd7c400aa1234db3103d565287"
+    },
+    "liborigin_trial_feature_shared.dylib": {
+      "bytes": 36928,
+      "sha256": "e14582131fa1bfb43065288fb63672f47a5f2551c21d11d10deaf2c8fa958ccb"
+    },
+    "liborigin_trial_state_shared.dylib": {
+      "bytes": 41136,
+      "sha256": "e51b0b14086f956e83c350e389ee4575678a9beedf4c769544ee04c2da4ca44d"
+    },
+    "libpdfium.dylib": {
+      "bytes": 8906160,
+      "sha256": "c89030a031c9e458472a20af7b701c84dae2806069f9b236ea1dcebad6f1adb7"
+    },
+    "libperformance_manager_public_mojom.dylib": {
+      "bytes": 225760,
+      "sha256": "23a481f8919827876548d15ed49b0e3de7aadba3e8b02bb8c9f6e26b9047a145"
+    },
+    "libperformance_manager_public_mojom_blink.dylib": {
+      "bytes": 246944,
+      "sha256": "94288bb22a69010e8a4d7148ecef435261d9edf650859fc526f29b4000be9505"
+    },
+    "libperformance_manager_public_mojom_shared.dylib": {
+      "bytes": 60256,
+      "sha256": "2d8a40d189cdf4f6209c4856b5863616ea32c29ca0a3b5b36ba9b420bd14a903"
+    },
+    "libplatform_runtime_test_lib.dylib": {
+      "bytes": 33968,
+      "sha256": "8d90dc7b76f2bba32abff8885d7200f34f2ef6a5870ce67f76e2f94367ed0746"
+    },
+    "libplus_addresses_features.dylib": {
+      "bytes": 54944,
+      "sha256": "9a6f34bb71b1ae6d6b83d329d4c2019a231ad617e7f022c405ea2421fb279712"
+    },
+    "libpolicy_component.dylib": {
+      "bytes": 3203424,
+      "sha256": "f7bbf6ca1bf0ed213ae828e021a146586e24b5ebd91f442affff3d336833630c"
+    },
+    "libpolicy_proto.dylib": {
+      "bytes": 1221696,
+      "sha256": "8d213a645e2083a6d29545eab9d6141baa8e824b3ba9e12080b7912d0169221c"
+    },
+    "libprinting.dylib": {
+      "bytes": 161392,
+      "sha256": "4638f6f4d7547c712f6aa870f54fd209abe0922fdbe427ccedcec6fbce11ffea"
+    },
+    "libprinting_backend.dylib": {
+      "bytes": 157584,
+      "sha256": "de0397c93e92b961ec0f3aa920fdb74827ef76a7fcf57ea89023509cca32051d"
+    },
+    "libprinting_metafile.dylib": {
+      "bytes": 106896,
+      "sha256": "d8378b9da90a3ccfd63fc38c400df9e79c1934822cdc42f96320497a12f04b8f"
+    },
+    "libprinting_printing_base.dylib": {
+      "bytes": 74448,
+      "sha256": "ac4ea3f254284e5db2c5d4881fd652079f22a5efa872b4a781c1af9e30ef4f17"
+    },
+    "libprinting_settings.dylib": {
+      "bytes": 67568,
+      "sha256": "66052d0bbfc1feb1bfd06b815465c2f915bdf3c947adec9b47aea213d0c4a699"
+    },
+    "libprivacy_sandbox_features.dylib": {
+      "bytes": 57168,
+      "sha256": "eca0489e8851b2e2aad4746034146b50071c5c175ecf0a5676406145a979c521"
+    },
+    "libquota_shared.dylib": {
+      "bytes": 40000,
+      "sha256": "c3d08ebf559f1d696f2c52b2ca91d4ea4fe2d5ba6e2bf8467f559cccdf2e9b22"
+    },
+    "libresource_coordinator_public_mojom.dylib": {
+      "bytes": 282384,
+      "sha256": "0af5be5d9ec6ac8e850b95e67c2edb0598918714910d06de89b6a7cf48bc5ff3"
+    },
+    "libresource_coordinator_public_mojom_blink.dylib": {
+      "bytes": 313296,
+      "sha256": "75c91a6b3b0cfabb74f8f4709a29a1597d61344cd0a965692ccb615db91c6206"
+    },
+    "libresource_coordinator_public_mojom_shared.dylib": {
+      "bytes": 89056,
+      "sha256": "728d4e80837e9b5c07f6e229a7c58e740f01efb461fcc8c61a77a9a664d6a072"
+    },
+    "libruntime_feature_state_shared.dylib": {
+      "bytes": 36912,
+      "sha256": "db065d01c9cd0854865f82bfc6e06e702097f9fa7fc952256e0392d2bdb2dc1b"
+    },
+    "libsandbox_mac_seatbelt.dylib": {
+      "bytes": 66800,
+      "sha256": "f548880608a25f5e3bb6a6d9e1db02dde54bed85251a82cc3ea76eaa3779e977"
+    },
+    "libsandbox_mac_seatbelt_extension.dylib": {
+      "bytes": 38528,
+      "sha256": "ea851d7140bdd699ee37d000482358add1ec5e570d095e66df057a2cb8272a0d"
+    },
+    "libsandbox_mac_system_services.dylib": {
+      "bytes": 36256,
+      "sha256": "47f241d88a410e14750395e4f6384f9ec076d352d6bb4ea6abe38a994d10f214"
+    },
+    "libsandbox_policy.dylib": {
+      "bytes": 84832,
+      "sha256": "c062fbc407ffc51052cd2ce3c4ca005beb26abfc13267b7171f34d26e43da870"
+    },
+    "libscript_type_mojom.dylib": {
+      "bytes": 16784,
+      "sha256": "d1c8c8905e57b1c8791c462bb14fb8cec31ae99740bfbe525932beb5830f7cc2"
+    },
+    "libscript_type_mojom_shared.dylib": {
+      "bytes": 39888,
+      "sha256": "07e5b1116b0922a96d4ed13daa3e98dbc971d055e822228563ff5cef0ab86a03"
+    },
+    "libsearch_engine_choice_switches.dylib": {
+      "bytes": 52768,
+      "sha256": "442304db46e1d4ebae11d592184d9e5a838758bea565b43d02724a963006c08d"
+    },
+    "libsearch_engines_switches.dylib": {
+      "bytes": 55632,
+      "sha256": "42c949a3af332340843b7e1654864f2d1b3cdd1c81eed38816565da670a915d1"
+    },
+    "libservice_manager_cpp.dylib": {
+      "bytes": 140896,
+      "sha256": "e3149c6be2e565cb1960351ef054702207a50fab2d90b6af3f77c2d8a6b07f86"
+    },
+    "libservice_manager_cpp_types.dylib": {
+      "bytes": 47744,
+      "sha256": "632203fd353c7cdcce19942294b09400afa4191925db341e82411c87ffd0aa41"
+    },
+    "libservice_manager_mojom.dylib": {
+      "bytes": 174800,
+      "sha256": "a58f6df4403608134008f98699becd403e98a7a3598165c96758ed1e21ad6e21"
+    },
+    "libservice_manager_mojom_blink.dylib": {
+      "bytes": 197936,
+      "sha256": "de6490802c8740b1c2f503a8eba6b3910509d660ac6108dbb58d2e742f58e1f4"
+    },
+    "libservice_manager_mojom_constants.dylib": {
+      "bytes": 35616,
+      "sha256": "1292afefe6af7a728718e0baf92ff2c0be982090440850b53f152251320f8da6"
+    },
+    "libservice_manager_mojom_constants_blink.dylib": {
+      "bytes": 35712,
+      "sha256": "2b4deed5232317775642e4696e20cbfc9600e21f4fdaea376ef91e571ecfa1fc"
+    },
+    "libservice_manager_mojom_constants_shared.dylib": {
+      "bytes": 34448,
+      "sha256": "69fd1ed7e261bfa52dd9861b943a80a0e6f5c6a833a8831c274d3d49805c9958"
+    },
+    "libservice_manager_mojom_shared.dylib": {
+      "bytes": 63152,
+      "sha256": "f6942c857a7ee7b72a0b29917a0c836f7bcbc33c6be3e1c0adb208ef0df36104"
+    },
+    "libservice_manager_mojom_traits.dylib": {
+      "bytes": 35904,
+      "sha256": "600f066f11bca35707db93d3cf967527f9cbdbb25f30264dc1cdc841525c3013"
+    },
+    "libservice_worker_storage_mojom.dylib": {
+      "bytes": 40960,
+      "sha256": "cc323d200056ee6e5b78b265769ae3ce3c3fd2c0d9e4109cc40ae90be9c3f06e"
+    },
+    "libservice_worker_storage_mojom_shared.dylib": {
+      "bytes": 40064,
+      "sha256": "7d1e64291fd7ff59d0c7718e77f6c84629d122a188498063f7342afd9026928f"
+    },
+    "libservices_audio_testing_api_support.dylib": {
+      "bytes": 36592,
+      "sha256": "02208d38751d3415854a151088aea96d3319324a6240ef4f275cee016413cbda"
+    },
+    "libservices_cert_verifier_cert_net_url_loader.dylib": {
+      "bytes": 125232,
+      "sha256": "d1cb0b9e0c8e11908709e6610500390c57a49965d22278c99332d1289db5aedf"
+    },
+    "libservices_data_decoder_public_cpp_service_provider.dylib": {
+      "bytes": 17424,
+      "sha256": "d7b0df505a5ffc597eafef21140631a294321517767be2b8b6c5d7b604b69783"
+    },
+    "libservices_device_fingerprint.dylib": {
+      "bytes": 36128,
+      "sha256": "5ce874ef2c2a13da29f94cf10c43b2656f0ff5c2705e167af9971a4cda3c15c0"
+    },
+    "libservices_device_public_cpp_bluetooth.dylib": {
+      "bytes": 37008,
+      "sha256": "76bf7bee40d6e2610d7705d37cdc8e42b86edf339fd8dc3a984f773930737e32"
+    },
+    "libservices_device_public_cpp_device_features.dylib": {
+      "bytes": 56112,
+      "sha256": "81fc13a2b9388dd152b34fce69a0a01dbd76524fb42c1f8ffbf8e9d98cb8b91b"
+    },
+    "libservices_metrics_public_cpp_metrics_cpp.dylib": {
+      "bytes": 181936,
+      "sha256": "cab616fbc8c0a7f33d68f2e250e23d6daac9744469d8c2d253355da68f92f11a"
+    },
+    "libservices_network_network_service.dylib": {
+      "bytes": 5601248,
+      "sha256": "69bd40b0323642600a7e1fd816ef040b8625ebb56a95609c5dec0540799e953a"
+    },
+    "libservices_network_public_cpp_ad_auction_support.dylib": {
+      "bytes": 40240,
+      "sha256": "82306bf79583b4e3c6d14337db739dd82861c75b49f18950590ba13fe38f6ef0"
+    },
+    "libservices_network_public_cpp_connection_allowlist.dylib": {
+      "bytes": 360848,
+      "sha256": "eef7e7d77af104fb31474f804d926862c2d4fbfea9cb8f97e188e030a3f2e567"
+    },
+    "libservices_network_public_cpp_cookies_mojom_support.dylib": {
+      "bytes": 36944,
+      "sha256": "081410c048771da038cddcc51355364f3665d6cbdc0e5c91833ca40eadf5bb23"
+    },
+    "libservices_network_public_cpp_crash_keys.dylib": {
+      "bytes": 34896,
+      "sha256": "519e70dde00a83ca2995e75ad9df2278c3aac25408de2945d273c96444648208"
+    },
+    "libservices_network_public_cpp_cross_origin_embedder_policy.dylib": {
+      "bytes": 37792,
+      "sha256": "72969ff4007c73361a042ae9142d97bc5085f48eab7808a5732b428821e834cf"
+    },
+    "libservices_network_public_cpp_document_isolation_policy.dylib": {
+      "bytes": 37712,
+      "sha256": "797dfc50a32afc0e1b94961b2fef136184f7b1023581e0cb06167fb4aa603d9a"
+    },
+    "libservices_network_public_cpp_fetch_retry_options.dylib": {
+      "bytes": 34704,
+      "sha256": "c2cebc12e6d74326856be8c25f04f637e5c9a6888cf9802ad0186901111e6570"
+    },
+    "libservices_network_public_cpp_first_party_sets_mojom_support.dylib": {
+      "bytes": 46592,
+      "sha256": "fb3de912309b000fc3ea2dbc8ae0cfb0f0e65a3fbaf773c6b74e7a97c67d8072"
+    },
+    "libservices_network_public_cpp_flags_and_switches.dylib": {
+      "bytes": 126448,
+      "sha256": "552a4b27d4d7422a44d464cbae4f06935092cf5923254b97140e3ac478a9292c"
+    },
+    "libservices_network_public_cpp_host_resolver_mojom_support.dylib": {
+      "bytes": 45008,
+      "sha256": "5b3d7d2b8c67d2381b2b627d39106d40a6f17b005e0f4e8be842e1883dd8227f"
+    },
+    "libservices_network_public_cpp_integrity_metadata_mojom_support.dylib": {
+      "bytes": 38160,
+      "sha256": "5d1af74df0aee0ea40df02ef1084a162a6d327ae9929c45864a6a0f798adbcd3"
+    },
+    "libservices_network_public_cpp_integrity_policy.dylib": {
+      "bytes": 46240,
+      "sha256": "5123bdb33ae7d0f8582bf99221d5c3ff8e9b87a821a3b6a26f744085d6b4cd15"
+    },
+    "libservices_network_public_cpp_ip_address_mojom_support.dylib": {
+      "bytes": 44048,
+      "sha256": "518583371a55ff3de6616ea34853f58635b7fbc4f1c6109d5d365289e813202c"
+    },
+    "libservices_network_public_cpp_is_potentially_trustworthy.dylib": {
+      "bytes": 65152,
+      "sha256": "b95d2978cedf72423f0f30e56ae1a42cd5027c943ea6442baf952d5ae145c5e6"
+    },
+    "libservices_network_public_cpp_network_param_mojom_support.dylib": {
+      "bytes": 90032,
+      "sha256": "6de1370a86c87658d51c8bc3c25ec7c6348a9456319aaa3722fae5d1610f5eeb"
+    },
+    "libservices_network_public_cpp_proxy_config_mojom_support.dylib": {
+      "bytes": 44288,
+      "sha256": "53c23e0fb041cb9470f50a74fb097de6cdfa37d96f8a1449a9b509dea73a4eb3"
+    },
+    "libservices_network_public_cpp_schemeful_site_mojom_support.dylib": {
+      "bytes": 34384,
+      "sha256": "181fdafc345c6a6bf1b25e10a43f015fa6a388d00bee5c7def7c7a9ccca1fe21"
+    },
+    "libservices_network_public_cpp_shared_storage_support.dylib": {
+      "bytes": 43792,
+      "sha256": "eea68a8ce9739418c36683862264d7bce8344d4aa75f6d8c46731fa9fabb9530"
+    },
+    "libservices_network_public_cpp_storage_access_api_mojom_support.dylib": {
+      "bytes": 34528,
+      "sha256": "ae9a86a84e8d800cd223ff43581d161f18da311397142d9f1c841eb41eea9125"
+    },
+    "libservices_network_public_cpp_structured_headers_mojom_support.dylib": {
+      "bytes": 46192,
+      "sha256": "9ab36abbb2b40ce428d939a49c9dc16b804a446af7d0c1cf009210494da6bfe0"
+    },
+    "libservices_network_public_cpp_web_platform.dylib": {
+      "bytes": 304320,
+      "sha256": "204a7acd5606dce545bc7f7bb1aefba745509ff321d80b1b95d046117de3496d"
+    },
+    "libservices_on_device_model_backend_interfaces.dylib": {
+      "bytes": 35008,
+      "sha256": "78c0c436e10270931fd1ed9855630f428d0b7cc3b435e5a9de0a5d4b770c26de"
+    },
+    "libservices_on_device_model_fake.dylib": {
+      "bytes": 63216,
+      "sha256": "943cf6995e72613585698a6e636858aa67d9e15fc9c3023302640139fbe4f12c"
+    },
+    "libservices_on_device_model_ml_ml_no_internal.dylib": {
+      "bytes": 4587392,
+      "sha256": "2808edaaaafd33e8fad2931da1805cb10b674873ab1dfe377a053436d215170a"
+    },
+    "libservices_on_device_model_on_device_model_service.dylib": {
+      "bytes": 268304,
+      "sha256": "f377373237846deddc8cce495188335a886e550509ac887e43f1f11447e41eb8"
+    },
+    "libservices_on_device_model_public_cpp_types.dylib": {
+      "bytes": 89664,
+      "sha256": "db3ebec7bbec7bd819ebdbfa30c7689f1f90f6c753825831f9da2d8288025896"
+    },
+    "libservices_proxy_resolver_mac.dylib": {
+      "bytes": 74992,
+      "sha256": "74be9da076637d9a35bf2e1a24834b045568747d5d0cbc64226057070d6b8b16"
+    },
+    "libservices_proxy_resolver_public_cpp_proxy_resolver_mojom_support.dylib": {
+      "bytes": 36816,
+      "sha256": "5324177a127a746c30be98414b2c438dc3570db181dd82e971a2137e478f7fd5"
+    },
+    "libservices_resource_coordinator_public_cpp_memory_instrumentation.dylib": {
+      "bytes": 152656,
+      "sha256": "de901f5a54ba369dad2d2d87fa6a27e7843aa3a46c8032b8e1affcb1c12860bc"
+    },
+    "libservices_tracing_public_cpp_background_tracing.dylib": {
+      "bytes": 351584,
+      "sha256": "b5172b72df7d6fd90e54f3c2864d490ce239f62593e7f4750dd0326521705cb3"
+    },
+    "libservices_viz_privileged_features_mojom.dylib": {
+      "bytes": 35648,
+      "sha256": "06b8c708595251da82d3a0379f5f8778130428540e01b40abb95e53a07e156ef"
+    },
+    "libservices_viz_privileged_features_mojom_shared.dylib": {
+      "bytes": 52400,
+      "sha256": "14e6a6191c685494cfa0b6a35a7d1d728d450cbd92718514941597065dd19b10"
+    },
+    "libservices_webnn_host.dylib": {
+      "bytes": 48432,
+      "sha256": "29a4b9ba23b1670bb380487f839fbfd8ef457c6f6cb0c794d2181b22a2b2bc5c"
+    },
+    "libservices_webnn_public_cpp.dylib": {
+      "bytes": 251472,
+      "sha256": "5cbbda77e0ed73b26bcb0021323eaeb25b73d59c6d6c6b3027bf93e24712a070"
+    },
+    "libservices_webnn_public_mojom_webnn_mojom_traits.dylib": {
+      "bytes": 35840,
+      "sha256": "0ce3708661a3c57856944cfda3b3f8e7b45c074933d657fb06570cad098a6e5f"
+    },
+    "libservices_webnn_webnn_service.dylib": {
+      "bytes": 7956112,
+      "sha256": "23018db469bbfee821d94bfd2111b8ec8427b3f3f6614b4b5285ff855484373c"
+    },
+    "libshared_image_pool_client_interface_shared.dylib": {
+      "bytes": 34512,
+      "sha256": "84cab0261b2091e2eb42ea5eb71c934a7fba78e2f7775e9c09322c18605357b4"
+    },
+    "libsignin_switches.dylib": {
+      "bytes": 90528,
+      "sha256": "d4254b6d28d23e763d18233c1e3e332f3213494f67da7e34a3910c5e114e4796"
+    },
+    "libskia.dylib": {
+      "bytes": 11829280,
+      "sha256": "6abd73abf68602569ad312152fe27b4ae2048dc465dffc098bcfaf6988c4526b"
+    },
+    "libskia_shared_typemap_traits.dylib": {
+      "bytes": 111744,
+      "sha256": "149b13b4cbcc82520a7aebb8ed16c5b5dd20587dee4bc3b8324c8f73ee4c02df"
+    },
+    "libskia_skia_switches.dylib": {
+      "bytes": 16944,
+      "sha256": "752dd051b632539f3887870a173bd97c01c8aa3ae107ea73e5b53e15d8ac50b1"
+    },
+    "libsql.dylib": {
+      "bytes": 299856,
+      "sha256": "b4cf745d796f47ab2eace64633e3839886cab39a50343df78e4e2c9bd8102de0"
+    },
+    "libstorage_browser.dylib": {
+      "bytes": 2449216,
+      "sha256": "a7c7d9760cd51a0ec3f11b359b48fef122c4532193e4d513cfe5fd2bd0ac1a27"
+    },
+    "libstorage_browser_interfaces.dylib": {
+      "bytes": 136496,
+      "sha256": "3290d8395081afd356fbb623a465755a6dbc57e2ea3db014190680975a07f9d6"
+    },
+    "libstorage_browser_interfaces_shared.dylib": {
+      "bytes": 47904,
+      "sha256": "4892898277b4c741dc52608150feaa33e6e07aa5f16c30421343b5b8492796d5"
+    },
+    "libstorage_common.dylib": {
+      "bytes": 89184,
+      "sha256": "8b64353ae714e1ee758c94d812f416d5dddfc59a089e7a16065e1f5bfb1e7f1e"
+    },
+    "libstorage_key_shared.dylib": {
+      "bytes": 40480,
+      "sha256": "e628e68fad53929047d4fe7c07efe989a48b57539f67d15abe59500a94ebabaf"
+    },
+    "libstorage_service_buckets_support.dylib": {
+      "bytes": 60528,
+      "sha256": "c3becb4714751759e22cac3ce2dacfbb2d07537610f5e2d437c2ada00e0d5175"
+    },
+    "libstorage_service_filesystem_mojom.dylib": {
+      "bytes": 164784,
+      "sha256": "5a663e9c50d9535b4cd7753cf27a488a88e969ce3e0f2752dee6b0e3ed93034c"
+    },
+    "libstorage_service_filesystem_mojom_shared.dylib": {
+      "bytes": 52272,
+      "sha256": "e66d3495c71841c3439066988da7e215852f40d775171438461be8efe1e53326"
+    },
+    "libstorage_service_filesystem_support.dylib": {
+      "bytes": 91712,
+      "sha256": "cc83254202986346c0ffddf914e6da003869ad8c2007c922f0f97d80f0fa82c5"
+    },
+    "libstorage_service_public.dylib": {
+      "bytes": 569904,
+      "sha256": "f1c28001d347e98fdf6e7e305256629a01457342556bd4170be17d277978a08c"
+    },
+    "libstorage_service_typemap_traits.dylib": {
+      "bytes": 34576,
+      "sha256": "a53b969a04b90527f5bf060870ca8b1b621a565cdb0007e9311b09a178a2554a"
+    },
+    "libstrike_database_features.dylib": {
+      "bytes": 52368,
+      "sha256": "f5a271a84ae48e9fb687b54c5c096e8519bede56fb7b331ed8a728c2e05c89a7"
+    },
+    "libtest_trace_processor.dylib": {
+      "bytes": 11922848,
+      "sha256": "37c70eedd00a21322f5b0ed6ff1e55c3779969c4157e9222544cb21ef8e6ee4d"
+    },
+    "libthird_party_abseil-cpp_absl.dylib": {
+      "bytes": 1069232,
+      "sha256": "8c75c0802c464f3614ad1dc8dafec53f77f396f6d553f192f76c1c84a563f35a"
+    },
+    "libthird_party_blink_public_mojom_tokens_tokens_traits.dylib": {
+      "bytes": 48896,
+      "sha256": "9df787cac36470d5a18db905db8a620e1a7601c6fd000eeae708718a60f7a5b6"
+    },
+    "libthird_party_boringssl.dylib": {
+      "bytes": 2748000,
+      "sha256": "ff3edf54a9661b01c95fd2fbbaf9056cfb81d7ae182d88fe221e757e4e9d7b75"
+    },
+    "libthird_party_freetype.dylib": {
+      "bytes": 609120,
+      "sha256": "e2b325e9050c46d0a3ce2367d4da54a05f4933c491f7cf33e44a1b55c4cbe526"
+    },
+    "libthird_party_google_benchmark.dylib": {
+      "bytes": 316432,
+      "sha256": "10c20d5d6027f9efc96ea33e443064380ea02e03db1be93a97b6340b8da85620"
+    },
+    "libthird_party_harfbuzz.dylib": {
+      "bytes": 4161104,
+      "sha256": "83e6a9a1b90195ca61e8361251f2260c1c9dff08e93a13f03b1c3f29fb9b62af"
+    },
+    "libthird_party_icu_icui18n.dylib": {
+      "bytes": 3342064,
+      "sha256": "6cd9eb70be0805a281856c21c220644a8c344f271c6eb5499a2d79a923e564e3"
+    },
+    "libthird_party_icu_icui18n_hidden_visibility.dylib": {
+      "bytes": 3346624,
+      "sha256": "305ca9a6cd66efd12ea7b4a8a22ff241203d3063fdb1a94a331766f463f7373e"
+    },
+    "libthird_party_inspector_protocol_crdtp.dylib": {
+      "bytes": 199568,
+      "sha256": "3b0641edb3b83d1ba6df04280ae3c2a6d1571815b63fe60259658407e2d013ea"
+    },
+    "libthird_party_leveldatabase.dylib": {
+      "bytes": 683984,
+      "sha256": "a22e3ab8513c6f844719a145e761d6387d2effb298e309f884bb0ae349b3dba0"
+    },
+    "libthird_party_liburlpattern.dylib": {
+      "bytes": 92448,
+      "sha256": "53a4c0317e25a67d205200889f63235aac2d38d21cd51e5d71293f38ad0798f3"
+    },
+    "libthird_party_perfetto_libperfetto.dylib": {
+      "bytes": 4227808,
+      "sha256": "bafd709c438b50391d19688f77ae198b00dc34ebc1ea30bcda6326cbb937c51f"
+    },
+    "libthird_party_perfetto_perfetto_test_support.dylib": {
+      "bytes": 5313440,
+      "sha256": "9d93ba2416c8ed46dc02a08321dcc75e9bdac567e15b7a9d227f7562be9f59ad"
+    },
+    "libthird_party_private-join-and-compute_src_ec_commutative_cipher.dylib": {
+      "bytes": 109232,
+      "sha256": "fc24716781e1d56bb6a76155ae19af4d8c428ed04b7194d745c5aa09a3113c9e"
+    },
+    "libthird_party_protobuf_protobuf_full_and_lite_library.dylib": {
+      "bytes": 2480592,
+      "sha256": "e1669be3a456d5f6634e71c81b85ecb7c19e55fed94fc7f74ce16aef64eb97d3"
+    },
+    "libthird_party_sqlite_chromium_sqlite3.dylib": {
+      "bytes": 1095952,
+      "sha256": "b34ec890eab7ee761a82d71da750c14418c24b0d6e7214373c0c1ed7d11391b8"
+    },
+    "libthird_party_webrtc_overrides_webrtc_component.dylib": {
+      "bytes": 15988208,
+      "sha256": "9b1f9f45e113819f5853d76a510b0307bb8ba62c84537e42bb9393974b42ea0f"
+    },
+    "libtokens_mojom_shared.dylib": {
+      "bytes": 45136,
+      "sha256": "efa9b6c448d2b0f368286b9cbce9b42eace2f267abf9c4c9568d9e1b21e1ccbc"
+    },
+    "libtracing_cpp.dylib": {
+      "bytes": 505760,
+      "sha256": "5cb11711fff782c30ab6f3cff8a7c5939f873d028b38cb826291dfe19a32d4cc"
+    },
+    "libtracing_mojom.dylib": {
+      "bytes": 279248,
+      "sha256": "5b5cd0d1a07ca5679b7acb273b22491175a048b82fd2f503254698b66f55ec94"
+    },
+    "libtracing_mojom_shared.dylib": {
+      "bytes": 92560,
+      "sha256": "8f2166cbe953618ec6d51eb05adf267442a5a5c2f5ddc00c12bcc09c815a4f2b"
+    },
+    "libui_accelerated_widget_mac.dylib": {
+      "bytes": 232864,
+      "sha256": "d6556fe7ef9307b994e4905a6593e712bf5ec1d647996dd105a001d1f46839b2"
+    },
+    "libui_accessibility_accessibility_internal.dylib": {
+      "bytes": 1250384,
+      "sha256": "c01bd68c58b1ff111c0a03e08c29d1e6ea8d5ca736ffaec96c04961ae50713f7"
+    },
+    "libui_accessibility_ax_base.dylib": {
+      "bytes": 288640,
+      "sha256": "e42d97b32c5f642cd94ebdc765d32122841250674318755c4f601de1dc1a1a87"
+    },
+    "libui_accessibility_ax_features_mojom.dylib": {
+      "bytes": 35616,
+      "sha256": "e3a904134b84df628b92c5cc3888a4264e2ebb6a00d99c465bc4ab2c3b9e16b6"
+    },
+    "libui_accessibility_ax_features_mojom_shared.dylib": {
+      "bytes": 52720,
+      "sha256": "a323cd881aaa262c4ff78d46ea0f1e2b8176e14917fffde991d8c3cb6a136cd8"
+    },
+    "libui_accessibility_ax_mojom.dylib": {
+      "bytes": 16800,
+      "sha256": "a55ade070bcca32fbc4ef59f6a98b275b284d0387a7f2d9914dac90c189605b0"
+    },
+    "libui_accessibility_ax_mojom_blink.dylib": {
+      "bytes": 16800,
+      "sha256": "8b8ffa6b73d7360da2cfcc0180b194dfb05cf5e299cfebcac3f0badb83a1e7f4"
+    },
+    "libui_accessibility_ax_mojom_shared.dylib": {
+      "bytes": 90688,
+      "sha256": "a0bd0f50dcd8f1e5d409ca2b4e0bd15b5a03858b27fdf0c8f37cfa5e334f90cf"
+    },
+    "libui_actions.dylib": {
+      "bytes": 171488,
+      "sha256": "17161bd0e9f674479a6d43388cabd7ebba6fb85fb576800c403020288a686156"
+    },
+    "libui_base.dylib": {
+      "bytes": 898352,
+      "sha256": "3c023adf8e3d5f9eeb22829ac09cf0e752357bdf7181542a58749df3d00add1d"
+    },
+    "libui_base_clipboard.dylib": {
+      "bytes": 327552,
+      "sha256": "c88f72b2560856d81dedb612f4242ac7062fe79a9c78214646961e3c8553f543"
+    },
+    "libui_base_clipboard_types.dylib": {
+      "bytes": 60400,
+      "sha256": "03ed3c177397388ddee94e0e903ebca1286f2621b6b08081269486cabbeeadfc"
+    },
+    "libui_base_cursor_base.dylib": {
+      "bytes": 48176,
+      "sha256": "4b274708a523cecf4c4e0d6a1db71a97ac0732ea25c74c34aca3ee826ed1ba4b"
+    },
+    "libui_base_data_exchange.dylib": {
+      "bytes": 34992,
+      "sha256": "e65da9b88dd611486256479d8d3aa2ed58ddab100832ea68d2a186e7d9a02709"
+    },
+    "libui_base_data_transfer_policy.dylib": {
+      "bytes": 37360,
+      "sha256": "8c91f8a643bbb625f9d95867d49629c47562dbc0bb5406702a0e038d63c3520b"
+    },
+    "libui_base_dragdrop_mojom.dylib": {
+      "bytes": 16784,
+      "sha256": "1a4300b42ddf209fb31924351d1ea2a0964699466e76b79cbb0f9936607cbe65"
+    },
+    "libui_base_dragdrop_mojom_blink.dylib": {
+      "bytes": 16800,
+      "sha256": "a2e1c6911783fd21ffa27ac37f848c38300c5b00b6d16df353fb42adeab79de7"
+    },
+    "libui_base_dragdrop_mojom_shared.dylib": {
+      "bytes": 37312,
+      "sha256": "cc80484194225853ff553f9f93ac3d50a53c12e2c3bd87f71e99191ffc635976"
+    },
+    "libui_base_dragdrop_types.dylib": {
+      "bytes": 34176,
+      "sha256": "c5654e1cd196517d9a181b2c972b1e48facefc2f9ac5ab07ad41817af20cd457"
+    },
+    "libui_base_emoji.dylib": {
+      "bytes": 52528,
+      "sha256": "b19041757f81f0d5718a11adcea2f3916f960eed535ad9e7c2fa23987d8b39b9"
+    },
+    "libui_base_features.dylib": {
+      "bytes": 70720,
+      "sha256": "f3cfb4a544b32b878c0ee47c8e73146e17163e2b7353f81796b6e2db76acaf22"
+    },
+    "libui_base_file_info.dylib": {
+      "bytes": 38928,
+      "sha256": "56ef8768ccd9796d800aab1617fc714e1b32052b65060c89b0dd8de07dfb50d9"
+    },
+    "libui_base_identifier.dylib": {
+      "bytes": 38624,
+      "sha256": "ddc1f2489460a6ef9eca7a6ccd5e54a6f169814f592b7d933efb96986b6df17c"
+    },
+    "libui_base_idle.dylib": {
+      "bytes": 89280,
+      "sha256": "549d7ea0b3f9e8f7c8f0247a71f12f0b9c09257bee43d635a3e9a88418691dae"
+    },
+    "libui_base_ime.dylib": {
+      "bytes": 109024,
+      "sha256": "9b340600277b6a5f85bcc29fdae732d54a28ce0542c170eac869c5aa09f51b59"
+    },
+    "libui_base_ime_init.dylib": {
+      "bytes": 65968,
+      "sha256": "963598751c3078ea337099dcbdd335f0a763f94c07eba74e6fe7183032a4125a"
+    },
+    "libui_base_ime_mac.dylib": {
+      "bytes": 54768,
+      "sha256": "3fb49663f01333479851f8ba0e70991642185099c6488d7c0e49f05ab91c2e36"
+    },
+    "libui_base_ime_types.dylib": {
+      "bytes": 43520,
+      "sha256": "338446adaf71eba64144d833714ad340191b66ed5a71c80238ae879c5866e42b"
+    },
+    "libui_base_interaction.dylib": {
+      "bytes": 196976,
+      "sha256": "3987000d1901bc2daf92b2e954aafcdd7db0e4fa6901b5d5987937f827219e5e"
+    },
+    "libui_base_metadata.dylib": {
+      "bytes": 369712,
+      "sha256": "85fb1b6a3f58214bc901bf793ee6e60b5855d1b64ae648cb1036ea906f9c8e21"
+    },
+    "libui_base_prediction.dylib": {
+      "bytes": 145232,
+      "sha256": "cce503ea1d53b29339414a08ba670897d0a33c9315185658f0547500c2ae4e15"
+    },
+    "libui_base_ui_data_pack.dylib": {
+      "bytes": 74880,
+      "sha256": "4f87fe044262ca922715b741b8f6dfc4d2d55e8acf42c010890325473dd69d20"
+    },
+    "libui_base_unowned_user_data.dylib": {
+      "bytes": 44912,
+      "sha256": "4450067a3d6c40419f11394c25195a08a7e6c2b45c59b73e15a0023ffa291691"
+    },
+    "libui_color.dylib": {
+      "bytes": 163616,
+      "sha256": "efd7513babcb9a581d16d8321fecb697f84cc509a10b365b27752e837058044e"
+    },
+    "libui_color_color_provider_key.dylib": {
+      "bytes": 36496,
+      "sha256": "ddc01a252b2e0f3c3c44d01b64b29530d0194200482454a7f26a3d3495ecf5d1"
+    },
+    "libui_color_dynamic_color.dylib": {
+      "bytes": 60080,
+      "sha256": "789bc0ee796ef71b89e7c02a8ff9bc683812c30b96160b35b88a9093906d168d"
+    },
+    "libui_color_mixers.dylib": {
+      "bytes": 143584,
+      "sha256": "b5dca92d53c0689e515e4e344c4592b59c70c0df3608cd793906aeb20959120d"
+    },
+    "libui_compositor.dylib": {
+      "bytes": 750384,
+      "sha256": "a78cb1354994abd318563cf5c244dd179886c9f6f475ba0e6e219cff2431ed96"
+    },
+    "libui_devtools_features.dylib": {
+      "bytes": 52352,
+      "sha256": "cff78cdb8249ad380134c23473a58f65a99cde399302ab827590c34ff1114aec"
+    },
+    "libui_display.dylib": {
+      "bytes": 651264,
+      "sha256": "577756c083f2ba6a7b1ba65154d1664e51ca1321952f3d269697f416805361d0"
+    },
+    "libui_events.dylib": {
+      "bytes": 270432,
+      "sha256": "0cfff11c2cfd5fe6abe56cf63f3afa70ba75e51ea6e9cfe5e0ce66a99f5985cb"
+    },
+    "libui_events_blink_blink_features.dylib": {
+      "bytes": 52384,
+      "sha256": "7935280bba240b4050d7348817af10505fc9e7d1d612f63b84362814222f4db2"
+    },
+    "libui_events_devices.dylib": {
+      "bytes": 100624,
+      "sha256": "ae4eb5d5ddd78e2ebf9ad90c19e39f881018e4c5fef2741c5ac5f2a2e9ccf690"
+    },
+    "libui_events_events_base.dylib": {
+      "bytes": 113808,
+      "sha256": "09b71561a8e0828b9c7fbc77eb2cacfb7ee768396aa178803a9c5b0f8b16dc64"
+    },
+    "libui_events_gesture_detection.dylib": {
+      "bytes": 198512,
+      "sha256": "6f3af43b111bc949e20356eecd8e4dcc47e3ce338648163d4f8504ae9a8eaaf6"
+    },
+    "libui_events_ipc.dylib": {
+      "bytes": 34576,
+      "sha256": "bc80c4273f15210de81fce1566dd66eae0784dcb6bafc71169c5bc6eab0b4ef5"
+    },
+    "libui_events_keyboard_hook.dylib": {
+      "bytes": 34400,
+      "sha256": "631acf36ad099b5bd54d28873de8ac8c26c918cff27214a069ad972f4fe0b0df"
+    },
+    "libui_events_platform.dylib": {
+      "bytes": 61040,
+      "sha256": "99f0b4691b0785539ed94b477bffd595cb8ebd83e34730b3d749098c3538da6a"
+    },
+    "libui_events_velocity_tracker.dylib": {
+      "bytes": 70016,
+      "sha256": "5852d01104b27acd342b48e14ec0478cb83e7f0d31482d849a5da25a60ddabb7"
+    },
+    "libui_gfx.dylib": {
+      "bytes": 869360,
+      "sha256": "b917907da6996ca6f6f02844104561597152bf46f9777d15e2b158afc9f764cd"
+    },
+    "libui_gfx_animation.dylib": {
+      "bytes": 100544,
+      "sha256": "acf0d34ac050fea9fc53d278861c0f05a48a5afaed9e837ab9b97199a541e2af"
+    },
+    "libui_gfx_animation_keyframe.dylib": {
+      "bytes": 134480,
+      "sha256": "c63f78f59030e09bfc33111116cd0dd5a14f5e13a19b4ed78abb1cee361867dd"
+    },
+    "libui_gfx_animation_scale.dylib": {
+      "bytes": 34704,
+      "sha256": "62061a064bd17aa56745a71806ad508ff470ad282b66f299c2f86c70ce70b55e"
+    },
+    "libui_gfx_codec.dylib": {
+      "bytes": 66960,
+      "sha256": "cc28cc941bd3c8736adc0184146ce3615e21b7849c689976ec9f7f4ea9fbbccd"
+    },
+    "libui_gfx_color_space.dylib": {
+      "bytes": 225936,
+      "sha256": "e172e27efebcb0d8f7c942d2f1be685874e352f64a824f932813b55fcdeeff0e"
+    },
+    "libui_gfx_color_utils.dylib": {
+      "bytes": 77920,
+      "sha256": "565e5522cebec7238498404942cfe336d14437e4884acaad631f585ac55f4c92"
+    },
+    "libui_gfx_geometry.dylib": {
+      "bytes": 111504,
+      "sha256": "a1cb5f5963d27af2b7fcdf863dd3954627644ae1e8fe42cad2d669c4b6f769e1"
+    },
+    "libui_gfx_geometry_geometry_skia.dylib": {
+      "bytes": 127168,
+      "sha256": "5ed62cfd6e03f93c607c9a1f498a6df0cb494e03011cdd1cff7436d0eed0c4b6"
+    },
+    "libui_gfx_gfx_skia.dylib": {
+      "bytes": 38320,
+      "sha256": "eaae7ea4f8adcd89d39097d5601587a6f8503de2b0c64ef08126d0c43dc62d4f"
+    },
+    "libui_gfx_gfx_switches.dylib": {
+      "bytes": 53952,
+      "sha256": "e99fabad465e9f65f006a6cec4686d3c2b16e28924861f70e8a2a46bc25a4e1a"
+    },
+    "libui_gfx_range.dylib": {
+      "bytes": 38208,
+      "sha256": "65fa5fbb4fcdb18996845c2559396814db001842d18911b2b24c15e829c498ee"
+    },
+    "libui_gl_gl_enums.dylib": {
+      "bytes": 119248,
+      "sha256": "98d20c82a4ff35a94087df8824cf6736cbf555c4ec43d6e3e2960003f4123f24"
+    },
+    "libui_lottie.dylib": {
+      "bytes": 100624,
+      "sha256": "f20b83932a16cd20c3540fab8e3198ad9accc4a8b1a8e525540d597a7d894588"
+    },
+    "libui_menus.dylib": {
+      "bytes": 144928,
+      "sha256": "780980d45fbcafbfc451a4af8907bc6c50ba4e73999b7e16ff0d5e889204b6d6"
+    },
+    "libui_message_center.dylib": {
+      "bytes": 835872,
+      "sha256": "9f9547c3bb8b5db8df45480c703103b11c968ff7a143fd17ad0ddd05caec834c"
+    },
+    "libui_message_center_cpp.dylib": {
+      "bytes": 81040,
+      "sha256": "5bfe5660a6aed4431ff7d452f5e8e8b4828838e0c831b2e1dede41feffbf1922"
+    },
+    "libui_native_theme.dylib": {
+      "bytes": 237840,
+      "sha256": "808526b98cbcaf4ff3cc5aa6a9b2f01e2e9a65b32002596ead3d0cc49689afab"
+    },
+    "libui_native_theme_test_support.dylib": {
+      "bytes": 38992,
+      "sha256": "701fd217744aeb11de718b159419a3629ee85229f72956ca5a51e49c5006a428"
+    },
+    "libui_native_window_tracker.dylib": {
+      "bytes": 54608,
+      "sha256": "4eecdd9e3a1a22d72374e7ae94f16b4ee46530a49407bbda9b68e970f9c1dd5c"
+    },
+    "libui_platform_window.dylib": {
+      "bytes": 49760,
+      "sha256": "458d9c4f148c13dbfd5090897a0f4aede8a1c53dad0dcaed33bdc4556ca87842"
+    },
+    "libui_shell_dialogs.dylib": {
+      "bytes": 145520,
+      "sha256": "24e743597dcc93af7328e0ca3820378cb05b94e11dbf47a1556df91565fa8542"
+    },
+    "libui_snapshot.dylib": {
+      "bytes": 94720,
+      "sha256": "8292afb26381b170b835cd02d87c52b9371c90bc0ec60375454fc04d271146cb"
+    },
+    "libui_touch_selection.dylib": {
+      "bytes": 73936,
+      "sha256": "b598be276e7ab1f8549506d922d6c1d6439e12c138873c43aebdc84a275bcdfb"
+    },
+    "libui_views.dylib": {
+      "bytes": 4758576,
+      "sha256": "29134b7e5c354d84cbc1f5670bf26290a50adcc01f059cd324d08b51d3b66694"
+    },
+    "libui_views_controls_webview.dylib": {
+      "bytes": 254048,
+      "sha256": "43815c5ccf281024a6d6b137e8ea064c5f45f652b072b59877e7da4471ef5481"
+    },
+    "libui_web_dialogs.dylib": {
+      "bytes": 98320,
+      "sha256": "810408dd4cdd9b79532d01b1db0e582dd6a930246ca4c91e1fb2b1a2c6a1d5e6"
+    },
+    "libukm_recorder.dylib": {
+      "bytes": 880288,
+      "sha256": "89f24a1d5e3b1ae98ac59147e4c36be9abbe797016eacf8fa8db93d051b881c0"
+    },
+    "liburl.dylib": {
+      "bytes": 314160,
+      "sha256": "42d522b8a9aa7af5b193be0b763a6e691ea204305786db9da82fccfb927b6f6b"
+    },
+    "liburl_ipc_url_ipc.dylib": {
+      "bytes": 34704,
+      "sha256": "4578c0765f0116cf0ce37997196c625c917771dfd0a3c80e678917bde413ed29"
+    },
+    "liburl_mojom_traits.dylib": {
+      "bytes": 36672,
+      "sha256": "ea9d6305f195abd0770b0aaa5a4d5614915fc00d5b4f642f1f945a571a565192"
+    },
+    "libusb_shared.dylib": {
+      "bytes": 46448,
+      "sha256": "911b2a13ec2cfbe08529031ff70f238958169e2ee48b0fb96748d85fba15bfa6"
+    },
+    "libuser_education_common_events.dylib": {
+      "bytes": 33616,
+      "sha256": "f3ba84d79b4a79c8f9559c9fcb26fad7c122f1a057bc7fd94782e2a33744461e"
+    },
+    "libv8.dylib": {
+      "bytes": 47071312,
+      "sha256": "6bb61899a36cd3fda39ef8337d09694d99784852a8cfc6b804db575d2caeab01"
+    },
+    "libv8_libbase.dylib": {
+      "bytes": 350544,
+      "sha256": "e457b8507b5a9f43a8bc963446d969290468be5de619e63adccdeaf7a1e33317"
+    },
+    "libv8_libplatform.dylib": {
+      "bytes": 130240,
+      "sha256": "1747dc189e42cf0ba4ce1669be693bd0f26923f5617f9c0db0b4b7472f80c33f"
+    },
+    "libvariations_features.dylib": {
+      "bytes": 35616,
+      "sha256": "aeb2b3d5b2aa4e0b127b9fa89bf54f64de8788f0e84e8d892b7e87d7fdb015a8"
+    },
+    "libviz_common.dylib": {
+      "bytes": 575200,
+      "sha256": "3c7322dd12fede94f612b2f35eb94e29cf646e7f81a92d6a94095abaad57403e"
+    },
+    "libviz_shared_image_format.dylib": {
+      "bytes": 44464,
+      "sha256": "8e20a3e69dce640233455fb335f55a22f4dc617c2a119c73868c8b16a09a635e"
+    },
+    "libvk_swiftshader.dylib": {
+      "bytes": 22795856,
+      "sha256": "b82a57bd77fa894b262b2f64134b1eebf2d23239f07366478b13f638b93306d8"
+    },
+    "libvrp_flags_mojom.dylib": {
+      "bytes": 64800,
+      "sha256": "cbb11b7f7030dd17af335331d4a7ef4730a843b3f99e0acc15903e0be8da1417"
+    },
+    "libvrp_flags_mojom_blink.dylib": {
+      "bytes": 82816,
+      "sha256": "e7b70661ad1b92e41a0c7e24f07d0b917cacc128c99faad8e54c5ccabfe0c6b7"
+    },
+    "libvrp_flags_mojom_shared.dylib": {
+      "bytes": 40992,
+      "sha256": "2de356ff007fd1a042d093ddd888209e2be692b0824809b79af11f8bb92888e9"
+    },
+    "libvulkan.dylib": {
+      "bytes": 547072,
+      "sha256": "0a190d55dc0dfe077130233ad039e113e87ad0dd15f0a2f045c6adbcccda92b9"
+    },
+    "libweb_bluetooth_mojo_bindings_shared.dylib": {
+      "bytes": 90144,
+      "sha256": "3432a4260af001a87b7fa01fb6591fa6801917f660b100a6894baab55693e64c"
+    },
+    "libweb_feature_mojo_bindings_mojom.dylib": {
+      "bytes": 16800,
+      "sha256": "8c54699e5aa8641e0ff8bc27ee3b25cb21cbaad6cc7c42bec46b0e354b06e707"
+    },
+    "libweb_feature_mojo_bindings_mojom_blink.dylib": {
+      "bytes": 16800,
+      "sha256": "5c08f348b9c69f8e561028f4f90858266c7e6c4ab28a86ccb53ee22dd4674505"
+    },
+    "libweb_feature_mojo_bindings_mojom_shared.dylib": {
+      "bytes": 286224,
+      "sha256": "f8c78501f479582768514d17934fb773f4cf2cc23182a708bf3a204980eba666"
+    },
+    "libwebdata_common.dylib": {
+      "bytes": 112144,
+      "sha256": "ae3247543d989e01a263d813b71ee78c1465267c8ebc13e8b3575609518e40a0"
+    },
+    "libwebnn_mojom.dylib": {
+      "bytes": 849920,
+      "sha256": "293545df4db0e142cbe7585c50bb9f04b803c0d36d3156484541170696f68d7d"
+    },
+    "libwebnn_mojom_blink.dylib": {
+      "bytes": 1007456,
+      "sha256": "f2f0df7d4a4601de5f11ebef95ad9380508ab4b8f2e22e650fdbbb08e109aafd"
+    },
+    "libwebnn_mojom_device.dylib": {
+      "bytes": 16784,
+      "sha256": "f1d3494d18d95e45e02db3d087a7b97fe1084819393048b5b66b1c30771aa3a8"
+    },
+    "libwebnn_mojom_device_blink.dylib": {
+      "bytes": 16800,
+      "sha256": "479a49416a246b4b508bb8920a7de8179ae6ae1ef448edbe3d70719f53191a57"
+    },
+    "libwebnn_mojom_device_shared.dylib": {
+      "bytes": 36784,
+      "sha256": "1072e2e044eadb25fe068dfb859a04ef5750439ab06e39ee5cf051fd343d26a3"
+    },
+    "libwebnn_mojom_features.dylib": {
+      "bytes": 35616,
+      "sha256": "811942cbf9b052dcfbf1026bc5018019cc85b1e9f3392f54ea12128c4247584f"
+    },
+    "libwebnn_mojom_features_blink.dylib": {
+      "bytes": 35648,
+      "sha256": "2f0e688e8e0e4ce21de09f1625e3a4df512285312ab616fbd87a11473c7a6396"
+    },
+    "libwebnn_mojom_features_shared.dylib": {
+      "bytes": 53024,
+      "sha256": "2bd572aa8625c8fa3cf63e251b512cdd1afba3838386ca0600eeeb28b4216652"
+    },
+    "libwebnn_mojom_shared.dylib": {
+      "bytes": 161936,
+      "sha256": "9e157e964bb70da374ccce40a196087ea78b87beba6e36f21bfa46f63f3a8076"
+    },
+    "libwebnn_mojom_webnn_service_introspection.dylib": {
+      "bytes": 92960,
+      "sha256": "dd68839b9eb918604eaa7c9cf011bf6a2d060d0adc39afa3b8bd58eb9afd1267"
+    },
+    "libwebnn_mojom_webnn_service_introspection_blink.dylib": {
+      "bytes": 111520,
+      "sha256": "bd36b0b785bd13175b6a7bbdb1f42d188d9cb552b870436de14121ccf1724085"
+    },
+    "libwebnn_mojom_webnn_service_introspection_shared.dylib": {
+      "bytes": 42400,
+      "sha256": "337ffc18cd71078ccc5b10e06ae30b392b72a727d18bbe38cbc60524991b331e"
+    }
+  },
+  "macho_images_verified": 554,
+  "dependency_issues": [],
+  "created": 1793072437.288082,
+  "signature_verified": true
+}

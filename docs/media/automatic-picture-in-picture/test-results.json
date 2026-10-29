@@ -1,0 +1,37 @@
+{
+  "core_commit": "942f9fa4b7a067ecd05b2cae7b4c6bc13a5eb07c",
+  "macos_build_commit": "fcf07b3f2d98e46d37fa06f003396298443aa602",
+  "build_mode": "daily",
+  "retry_limit": 0,
+  "suites": {
+    "arcium_feature_settings_browser_tests": {
+      "returncode": 0,
+      "filter": "ArciumAutomaticPictureInPictureBrowserTest.*:BrowserInitiatedAutoPictureInPictureBrowserTest.*:AutoPictureInPictureWithVideoPlaybackBrowserTest.PromptResultRecorded_VideoPlaybackAllowOnce:AutoPictureInPictureWithVideoPlaybackBrowserTest.DoesNotAutopipIfNotRegistered",
+      "statuses": {
+        "SUCCESS": 23
+      }
+    },
+    "arcium_media_session_impl_unittests": {
+      "returncode": 0,
+      "filter": "MediaSessionImplTest.*BrowserInitiatedAutoPip*:*MediaSessionController*.*",
+      "statuses": {
+        "SUCCESS": 48
+      }
+    },
+    "arcium_feature_settings_unit_tests": {
+      "returncode": 0,
+      "filter": "VideoOverlayWindowViewsTest.*-VideoOverlayWindowViewsTest.LiveCaption*",
+      "statuses": {
+        "SUCCESS": 46
+      }
+    },
+    "arcium_web_media_player_unittests": {
+      "returncode": 0,
+      "filter": "WebMediaPlayerImplAutomaticPipTest.*",
+      "statuses": {
+        "SUCCESS": 9
+      }
+    }
+  },
+  "total_passed": 126
+}
