@@ -1,5 +1,10 @@
 # PiP motion lab
 
+Before porting lab changes into the browser, satisfy the multi-display
+integration gate in [the candidate comparison](../pip-motion-candidates/README.md#required-before-browser-integration).
+The lab currently captures the built-in display's work area once at startup;
+moving its window to a larger display leaves stale movement boundaries.
+
 A standalone AppKit experiment for tuning floating-window movement. It draws a
 320 × 180 example in an `NSPanel`. There is no video, audio, browser connection,
 Chromium checkout or Chromium build dependency.

@@ -37,6 +37,23 @@ Open one app at a time from its candidate's `.build/` directory, or append
 `--run` to its build command. Quit before rebuilding. Each app uses the built-in
 MacBook display; changing monitors is outside these experiments.
 
+## Required before browser integration
+
+Daniel reported that moving the lab to a larger display leaves it using the
+smaller display's dimensions. Source review confirms that the baseline and both
+candidates select the built-in display's work area once at startup. They do not
+update it when the floating window moves to another display.
+
+This is an integration blocker. Do not carry that screen-selection behavior
+into the browser. Before accepting a port, verify that moving the PiP between
+the MacBook and a larger external display updates its work area, snap targets,
+preview and tuck/restore boundaries. Also verify display disconnects, resolution
+and scaling changes, and that tucking uses an exterior edge rather than the
+shared edge between adjacent displays. Following Spaces remains required.
+
+These checks need native runtime evidence; passing the current single-display
+motion checks does not satisfy this gate.
+
 For a fair comparison, use the same motion parameters in each candidate. Try a
 slow interior placement, approach to a corner, paused drag, fast flick, tuck on
 each side and pull-to-restore. Check whether the cue predicts the actual release,
