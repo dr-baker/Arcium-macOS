@@ -47,6 +47,16 @@ and update landing assertions. Regressions cover all three.
 Standalone checks: 158 motion cases and 18 settings cases pass; these include
 2.4% engagement on all four edges, display seams, display-area changes, physical
 Dock insets and exact free-position restore. The independent lab compiles.
-The browser build, hidden native tests, final Astra recheck and visible evidence
-remain pending until their recorded validation completes. The feature scenario
-is `devutils/scenarios/automatic-picture-in-picture.json`.
+The Chromium 151 candidate at outer `256f5cb1` compiled `chrome` and the focused
+feature-settings unit runner. Its 54 hidden native/geometry tests passed without
+retries, and Astra accepted the final cross-display restore fix at source level.
+An independent signed package contains 540 hash-matched component libraries;
+554 Mach-O images passed static dependency-candidate checks. Live loader,
+Spaces, full-screen and visual/feel evidence remain pending.
+
+The final integration also contains the latest published outer and core main
+branches on Chromium 156.0.8078.47. The full 589-patch series replayed without
+fuzz, followed by a strict reapplication of the final native-target dependency
+change. Compilation and runtime results for that combined app are recorded
+separately from the Chromium 151 evidence. The feature scenario is
+`devutils/scenarios/automatic-picture-in-picture.json`.

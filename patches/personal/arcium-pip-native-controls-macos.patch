@@ -1,18 +1,3 @@
-Index: src/chrome/browser/ui/BUILD.gn
-===================================================================
---- src.orig/chrome/browser/ui/BUILD.gn
-+++ src/chrome/browser/ui/BUILD.gn
-@@ -5436,6 +5436,10 @@ static_library("ui") {
-         "views/apps/chrome_native_app_window_views_mac.h",
-         "views/apps/chrome_native_app_window_views_mac.mm",
-         "views/chrome_views_delegate_mac.cc",
-+        "views/overlay/arcium_pip_geometry.h",
-+        "views/overlay/arcium_pip_motion.h",
-+        "views/overlay/arcium_pip_native_controls.h",
-+        "views/overlay/arcium_pip_native_controls.mm",
-         "views/overlay/video_overlay_window_native_widget_mac.h",
-         "views/overlay/video_overlay_window_native_widget_mac.mm",
-         "views/permissions/permission_prompt_notifications_mac.cc",
 Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 ===================================================================
 --- /dev/null
@@ -316,7 +301,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1909 @@
+@@ -0,0 +1,1911 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1609,10 +1594,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  // Chromium's native window bridge reports integral point rectangles. Round
 +  // once here rather than letting a fractional inset truncate toward an edge.
-+  frame.origin.x = std::round(frame.origin.x);
-+  frame.origin.y = std::round(frame.origin.y);
-+  frame.size.width = std::round(frame.size.width);
-+  frame.size.height = std::round(frame.size.height);
++  const double right = std::round(NSMaxX(frame));
++  const double top = std::round(NSMaxY(frame));
++  frame.origin.x = std::round(NSMinX(frame));
++  frame.origin.y = std::round(NSMinY(frame));
++  frame.size.width = right - frame.origin.x;
++  frame.size.height = top - frame.origin.y;
 +  _adjusting = YES;
 +  [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
 +  _adjusting = NO;
@@ -2658,12 +2645,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
-@@ -6,10 +6,12 @@
+@@ -6,6 +6,7 @@
  
  #include <memory>
  #include <string>
 +#include <utility>
  
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+@@ -17,6 +18,7 @@
  #include "base/check.h"
  #include "base/feature_list.h"
  #include "base/functional/bind.h"
@@ -2671,7 +2661,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "base/memory/ptr_util.h"
  #include "base/memory/raw_ptr.h"
  #include "base/notreached.h"
-@@ -63,6 +65,9 @@
+@@ -65,6 +67,9 @@
  #include "services/media_session/public/cpp/media_image_manager.h"
  #include "third_party/blink/public/mojom/picture_in_picture/picture_in_picture.mojom.h"
  #include "ui/base/hit_test.h"
@@ -2681,7 +2671,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_header_macros.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
-@@ -213,6 +218,28 @@ class GradientBackground : public views:
+@@ -215,6 +220,28 @@ class GradientBackground : public views:
  }  // namespace
  
  // OverlayWindow implementation of FrameView.
@@ -2710,7 +2700,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  class OverlayWindowFrameView : public views::FrameView {
    METADATA_HEADER(OverlayWindowFrameView, views::FrameView)
  
-@@ -236,6 +263,10 @@ class OverlayWindowFrameView : public vi
+@@ -238,6 +265,10 @@ class OverlayWindowFrameView : public vi
        return HTNOWHERE;
      }
  
@@ -2721,7 +2711,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
      constexpr int kResizeAreaCornerSize = 16;
      int window_component = GetHTComponentForFrame(
          point, gfx::Insets(kOverlayBorderThickness), kResizeAreaCornerSize,
-@@ -392,8 +423,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+@@ -394,8 +425,9 @@ std::unique_ptr<VideoOverlayWindowViews>
    // On Mac, we override the default native widget with our own subclass, which
    // allows us to get the default window styling (e.g. corner radius) even
    // though we're using `views::Widget::InitParams::remove_standard_frame`.
@@ -2732,7 +2722,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #endif  // BUILDFLAG(IS_MAC)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -483,6 +515,9 @@ VideoOverlayWindowViews::VideoOverlayWin
+@@ -486,6 +518,9 @@ VideoOverlayWindowViews::VideoOverlayWin
  }
  
  VideoOverlayWindowViews::~VideoOverlayWindowViews() {
@@ -2742,7 +2732,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (overlay_view_) {
      overlay_view_->RemoveObserver(this);
    }
-@@ -573,6 +608,9 @@ void VideoOverlayWindowViews::OnNativeFo
+@@ -576,6 +611,9 @@ void VideoOverlayWindowViews::OnNativeFo
  }
  
  void VideoOverlayWindowViews::OnNativeBlur() {
@@ -2752,7 +2742,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Controls should be hidden when there is no more focus on the window. This
    // is used for tabbing and touch interactions. For mouse interactions, the
    // window cannot be blurred before the ui::EventType::kMouseExited event is
-@@ -627,6 +665,10 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -630,6 +668,10 @@ void VideoOverlayWindowViews::OnNativeWi
  
  void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
      const gfx::Size& new_size) {
@@ -2763,7 +2753,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Hide the controls when the window is being resized. The controls will
    // reappear when the user interacts with the window again.
    UpdateControlsVisibility(false);
-@@ -638,6 +680,15 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -641,6 +683,15 @@ void VideoOverlayWindowViews::OnNativeWi
  }
  
  void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
@@ -2779,7 +2769,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Every time a user uses a keyboard to interact on the window, restart the
    // timer to automatically hide the controls.
    hide_controls_timer_.Reset();
-@@ -669,11 +720,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+@@ -672,11 +723,11 @@ void VideoOverlayWindowViews::OnKeyEvent
        TogglePlayPause();
        event->SetHandled();
      } else if (event->key_code() == ui::VKEY_LEFT &&
@@ -2793,7 +2783,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
        Forward15Seconds();
        event->SetHandled();
      }
-@@ -801,6 +852,11 @@ void VideoOverlayWindowViews::FireEnable
+@@ -804,6 +855,11 @@ void VideoOverlayWindowViews::FireEnable
  }
  
  bool VideoOverlayWindowViews::AreControlsVisible() const {
@@ -2805,7 +2795,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If we're animating to a visibility state, then we'll act as if we're in
    // that state.
    if (fade_animation_) {
-@@ -862,6 +918,14 @@ void VideoOverlayWindowViews::UpdateCont
+@@ -865,6 +921,14 @@ void VideoOverlayWindowViews::UpdateCont
            : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
                  !can_hide_title_and_scrim;
  
@@ -2820,7 +2810,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (should_animate) {
      // Animate the title and top scrim.
      if (title_is_visible != AreTitleAndScrimVisible()) {
-@@ -959,6 +1023,9 @@ void VideoOverlayWindowViews::OnViewVisi
+@@ -962,6 +1026,9 @@ void VideoOverlayWindowViews::OnViewVisi
  
    // The visibility of `overlay_view_` affects our minimum size.
    OnSizeConstraintsChanged();
@@ -2830,7 +2820,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
-@@ -974,6 +1041,63 @@ void VideoOverlayWindowViews::SetForcedT
+@@ -977,6 +1044,63 @@ void VideoOverlayWindowViews::SetForcedT
  }
  
  #if BUILDFLAG(IS_MAC)
@@ -2894,7 +2884,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
    MoveToActiveFullscreenSpace();
  }
-@@ -1454,6 +1578,19 @@ void VideoOverlayWindowViews::OnRootView
+@@ -1462,6 +1586,19 @@ void VideoOverlayWindowViews::OnRootView
    }
    view_holder_.clear();
  
@@ -2914,7 +2904,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Don't show the controls until the mouse hovers over the window.
    UpdateControlsVisibility(false, /*should_animate=*/false);
  }
-@@ -1517,6 +1654,12 @@ void VideoOverlayWindowViews::UpdateLaye
+@@ -1523,6 +1660,12 @@ void VideoOverlayWindowViews::UpdateLaye
  }
  
  void VideoOverlayWindowViews::OnUpdateControlsBounds() {
@@ -2927,7 +2917,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    controls_container_view_->SetSize(GetBounds().size());
  
    // Adding an extra pixel to width/height makes sure the scrim covers the
-@@ -1766,6 +1909,11 @@ bool VideoOverlayWindowViews::IsActive()
+@@ -1772,6 +1915,11 @@ bool VideoOverlayWindowViews::IsActive()
  }
  
  void VideoOverlayWindowViews::Close() {
@@ -2939,7 +2929,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1814,6 +1962,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1820,6 +1968,11 @@ void VideoOverlayWindowViews::ShowInacti
      overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
      overlay_view_->ShowBubble(GetNativeView());
      SetBounds(CalculateAndUpdateWindowBounds());
@@ -2951,7 +2941,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    }
  
    // When the window is first shown, make the title and top controls
-@@ -1847,6 +2000,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1853,6 +2006,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -2963,7 +2953,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1880,6 +2038,15 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1886,6 +2044,15 @@ void VideoOverlayWindowViews::UpdateNatu
    // Update the views::Widget bounds to adhere to sizing spec. This will also
    // update the layout of the controls.
    SetBounds(CalculateAndUpdateWindowBounds());
@@ -2979,7 +2969,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (is_tucking_forced_) {
      tucker_->Tuck();
    }
-@@ -1888,6 +2055,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1894,6 +2061,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -2989,7 +2979,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1958,6 +2128,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1964,6 +2134,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -2999,7 +2989,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1993,11 +2166,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1999,11 +2172,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -3017,7 +3007,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2230,7 +2409,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2237,7 +2416,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -3026,7 +3016,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2408,6 +2587,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2415,6 +2594,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -3036,7 +3026,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2513,6 +2695,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2520,6 +2702,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
@@ -3303,7 +3293,7 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -11607,6 +11607,8 @@ if (!is_android && toolkit_views) {
+@@ -10048,6 +10048,8 @@ if (!is_android && toolkit_views) {
          "../browser/ui/browser_shortcuts/arcium_shortcut_presets_unittest.cc",
          "../browser/ui/browser_shortcuts/browser_shortcut_platform_mac_unittest.mm",
          "../browser/ui/cocoa/arcium_widevine_installer_unittest.cc",
@@ -3312,7 +3302,7 @@ Index: src/chrome/test/BUILD.gn
        ]
        deps += [
          "//chrome/browser/ui/cocoa:arcium_widevine_installer",
-@@ -11615,6 +11617,7 @@ if (!is_android && toolkit_views) {
+@@ -10056,6 +10058,7 @@ if (!is_android && toolkit_views) {
          "//media",
          "//media/cdm:cdm_api",
          "//media/cdm:cdm_paths",
@@ -4247,7 +4237,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.cc
-@@ -135,8 +135,8 @@ class TestVideoPictureInPictureWindowCon
+@@ -136,8 +136,8 @@ class TestVideoPictureInPictureWindowCon
    content::WebContents* GetWebContents() override { return web_contents_; }
    content::WebContents* GetChildWebContents() override { return nullptr; }
    MOCK_METHOD(bool, TogglePlayPause, (), (override));
@@ -4258,7 +4248,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
    void SkipAd() override {}
    void NextTrack() override {}
    void PreviousTrack() override {}
-@@ -177,6 +177,7 @@ class TestVideoPictureInPictureWindowCon
+@@ -178,6 +178,7 @@ class TestVideoPictureInPictureWindowCon
  class VideoOverlayWindowViewsTest : public ChromeViewsTestBase {
   public:
    VideoOverlayWindowViewsTest() = default;
@@ -4266,9 +4256,9 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
    // ChromeViewsTestBase:
    void SetUp() override {
      enabled_features_.push_back(media::kPictureInPictureOcclusionTracking);
-@@ -206,6 +207,11 @@ class VideoOverlayWindowViewsTest : publ
-     SetDisplayWorkArea({0, 0, 1000, 1000});
- 
+@@ -253,6 +254,11 @@ class VideoOverlayWindowViewsTest : publ
+     web_contents_ = web_contents_factory_.CreateWebContents(profile);
+     pip_window_controller_.set_web_contents(web_contents_);
      overlay_window_ = VideoOverlayWindowViews::Create(&pip_window_controller_);
 +#if BUILDFLAG(IS_MAC)
 +    // The native AppKit presentation has its own behavioral suite. This suite
@@ -4278,7 +4268,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
      overlay_window_->set_overlay_view_cb_for_testing(
          base::BindRepeating(&VideoOverlayWindowViewsTest::GetOverlayViewImpl,
                              base::Unretained(this)));
-@@ -270,6 +276,10 @@ class VideoOverlayWindowViewsTest : publ
+@@ -277,6 +283,10 @@ class VideoOverlayWindowViewsTest : publ
  
    TestingProfile& profile() { return profile_; }
  
@@ -4289,7 +4279,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views_unittest.c
   private:
    std::unique_ptr<AutoPipSettingOverlayView> GetOverlayViewImpl() {
      return std::move(overlay_view_);
-@@ -1927,3 +1937,153 @@ TEST_F(VideoOverlayWindowWithMuteControl
+@@ -1969,3 +1979,153 @@ TEST_F(VideoOverlayWindowWithMuteControl
    EXPECT_TRUE(overlay_window().ControlsHitTestContainsPoint(
        mute_button_bounds.CenterPoint()));
  }
@@ -4456,9 +4446,9 @@ Index: src/chrome/browser/ui/browser_ui_prefs.cc
 +#endif
 +
  #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
+ #include "chrome/browser/ui/helium/arcium_content_frame.h"
  #if defined(TOOLKIT_VIEWS)
- #include "chrome/browser/ui/helium/arcium_settings_prefs.h"
-@@ -174,6 +178,9 @@ void RegisterBrowserUserPrefs(user_prefs
+@@ -184,6 +188,9 @@ void RegisterBrowserUserPrefs(user_prefs
    registry->RegisterBooleanPref(prefs::kArciumAutoPictureInPictureEnabled,
                                  true);
  
@@ -5076,3 +5066,40 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +};
 +
 +}  // namespace pip_motion
+Index: src/chrome/browser/ui/views/overlay/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/views/overlay/BUILD.gn
++++ src/chrome/browser/ui/views/overlay/BUILD.gn
+@@ -42,7 +42,12 @@ source_set("overlay") {
+   ]
+ 
+   if (is_mac) {
+-    public += [ "video_overlay_window_native_widget_mac.h" ]
++    public += [
++      "arcium_pip_geometry.h",
++      "arcium_pip_motion.h",
++      "arcium_pip_native_controls.h",
++      "video_overlay_window_native_widget_mac.h",
++    ]
+   }
+ 
+   if (is_chromeos) {
+@@ -91,9 +96,15 @@ source_set("impl") {
+   public_deps = [ "//chrome/browser:browser_public_dependencies" ]
+ 
+   if (is_mac) {
+-    sources += [ "video_overlay_window_native_widget_mac.mm" ]
+-    deps += [ "//components/remote_cocoa/common:mojo" ]
+-    frameworks = [ "Cocoa.framework" ]
++    sources += [
++      "arcium_pip_native_controls.mm",
++      "video_overlay_window_native_widget_mac.mm",
++    ]
++    deps += [
++      "//components/remote_cocoa/app_shim",
++      "//components/remote_cocoa/common:mojo",
++    ]
++    frameworks = [ "Cocoa.framework", "QuartzCore.framework" ]
+   }
+ 
+   if (is_win) {
