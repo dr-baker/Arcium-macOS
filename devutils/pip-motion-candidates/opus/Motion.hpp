@@ -224,12 +224,12 @@ class Motion {
     last_throw_.reset();
   }
 
-  void resetSettings() {
+  void resetSettings(const Settings& defaults = {}) {
     if (phase == Phase::Resting) {
-      settings = Settings{};
+      settings = defaults;
       settle(clampVisible(position), {}, Goal::Free);
     } else {
-      retune(Settings{});
+      retune(defaults);
     }
   }
 

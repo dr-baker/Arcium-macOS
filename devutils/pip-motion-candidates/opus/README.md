@@ -86,17 +86,28 @@ migration are not accepted solely from those checks.
   contact shadow fades, so it reads as lifted off the desktop. One slightly underdamped spring drives both
   the card scale and its centered shadows. The card grows by about 2.1% at the
   default Lift value, or 3% at Lift 1, before a small pickup overshoot. The
-  shadows stay centered except for the directional dock cue. Spring response
-  is .26 seconds while rising and .32 while falling; these are response
-  parameters, not fixed animation durations.
+  shadows are offset only by the light cast and the directional dock cue.
+  Spring response is .26 seconds while rising and .32 while falling; these are
+  response parameters, not fixed animation durations.
+- **Light cast.** Light comes from a box over the middle of the work area,
+  **Shadow box** (default 70% of it). Over the box the shadow falls straight
+  down; outside it, the shadow falls away from the box's nearest point, scaled by
+  how far out the window is and how high it is lifted, up to 26 points (30% of
+  that at rest). The contact shadow follows at a fifth of that. **Shadow
+  intensity** (default 1, range 0–2) scales both shadows' opacity.
 - **Set down.** After release it stays lifted while it travels and sets down as
   it arrives. A drop that stays put sets down right away. A snap, tuck or
   restore lands at its destination. A small scale dip confirms landing; the
   Press control adjusts it.
-- **Stay here.** While letting go would leave the window where it is, its
-  broad shadow spread contracts partway and its tight contact shadow returns.
-  The held size and lifted look remain throughout the drag. Settle tunes this
-  independent cue. The former corner marks and Anchors
+- **Stay here.** Settling preempts release: while letting go would leave the
+  window where it is, it sets itself down while still held. The card shrinks
+  back toward resting size and its shadows return toward their resting look;
+  Settle sets the fraction (1 settles fully). After release the settle holds
+  until the lift spring lands, so a settled card does not rise again. It waits until the hand has stayed slow for **Settle delay**
+  (default 0.18 s), then deepens as the smoothed hand speed falls below
+  leave-here speed, on a critically damped spring with response **Settle ease**
+  (default 0.45 s). Speeding up cancels the wait and lifts back at under half
+  that response. The card reads “settle waiting” during the delay. The former corner marks and Anchors
   control have been removed. Hold glow remains available for comparison, with a default
   of zero; existing saved glow values are preserved.
 - **Dock.** The window leans toward the dock a gentle release would select as
@@ -146,7 +157,10 @@ lab diagnostics; their appearance and timing still need native validation.
 Haptics are enabled by default and can be switched off independently. The app
 requests alignment-pattern taps on pickup, debounced release-outcome changes
 and landing, with at least 0.15 seconds between requests. Tuck and restore use
-the same pattern as other outcomes.
+the same pattern as other outcomes. Stay here instead taps once when the settle
+animation completes (settle progress reaches 95%), rearming after the card
+lifts back below 50% or the outcome changes; with Settle at zero it taps on the
+outcome change as before.
 Hardware delivery and feel remain unverified; a requested tap is not proof that
 the user felt one.
 
@@ -158,7 +172,7 @@ reports the unscaled card's frame.
 
 ## Feedback controls
 
-The tuning window is now 760 points tall. Its **Presets** menu contains Daniel’s tuning, Grounded,
+The tuning window is now 896 points tall. Its **Presets** menu contains Daniel’s tuning, Grounded,
 iOS-like baseline, Snappy, Soft spring, Position only and Reset everything.
 The **Snaps to** and **A drop** segmented controls choose docking and placement;
 a sentence below them describes the current combination. **Feel**, **Edges**
@@ -175,11 +189,11 @@ if those had custom values.
 
 The preset enables feedback and haptics, sets Lift 0.60, Settle 0.75, Press 0.40,
 Hold glow 0, Edge shade 0.50, Dock lean 12 and Dock shadow 0.90, and schedules a
-JSON save. **Presets → Reset everything** restores the compiled defaults; it does not
+JSON save. **Presets → Reset everything** restores the lab defaults (Daniel’s tuning); it does not
 undo the preset or restore previous custom tuning. Preset interaction has not
 been independently validated.
 
-The **Cues** tab has Release feedback, Haptics and eight numeric cue controls,
+The **Cues** tab has Release feedback, Haptics and twelve numeric cue controls,
 each with hover help. Motion values live in Feel and Edges. Throw/replay,
 tuck/restore, Reset position, JSON and status controls stay below the tabs.
 
@@ -187,18 +201,24 @@ tuck/restore, Reset position, JSON and status controls stay below the tabs.
 | --- | --- |
 | Release feedback | Turns every cue off to compare with plain motion. The resting shadow and the tucked chevron remain. |
 | Haptics | Requests pickup, outcome-change and landing taps. Default on. |
-| Lift | How much the shadow grows when picked up. Default 0.70. |
-| Pickup shadow | Softens (+1), preserves (0) or sharpens (−1) the lifted shadow. Default +1. |
-| Settle | Contact-shadow cue while release would keep it in place, retaining the pickup look. Default 0.60. |
-| Press | Landing dip strength. Default 0.60. |
+| Lift | How much the card grows and the shadow changes when picked up. Default 0.75. |
+| Pickup shadow | Softens (+1), preserves (0) or sharpens (−1) the lifted shadow. Default −0.44. |
+| Shadow box | Light box over the middle of the work area that shadows fall away from. Default 0.20. |
+| Shadow intensity | Opacity scale for both shadows. Default 1.10. |
+| Settle | Fraction of the lift undone before release while it would stay put. Default 0.62. |
+| Settle delay | Seconds slow before settling starts. Default 0.08. |
+| Settle ease | Spring response of settling in. Default 0.28. |
+| Press | Landing dip strength. Default 0.40. |
 | Hold glow | Border glow strength while release would keep the window in place. Default 0. |
-| Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
-| Dock lean | Maximum lean toward the dock, in points, also limited to 60% of remaining distance. Default 14; adjustable from 0 to 40. |
-| Dock shadow | Directional shadow-travel strength. Default 0.80; range 0–1, with travel capped at 110 points before scaling. |
+| Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.80. |
+| Dock lean | Maximum lean toward the dock, in points, also limited to 60% of remaining distance. Default 40; adjustable from 0 to 40. |
+| Dock shadow | Directional shadow-travel strength. Default 0.90; range 0–1, with travel capped at 110 points before scaling. |
 
 These save to `settings.json` as `feedback`, `feedback_haptics`,
-`feedback_lift`, `feedback_pickup_shadow`, `feedback_settle`, `feedback_press`,
-`feedback_glow`, `feedback_edge`, `feedback_lean` and `feedback_dock_shadow`.
+`feedback_lift`, `feedback_pickup_shadow`, `feedback_shadow_box`,
+`feedback_shadow_intensity`, `feedback_settle`, `feedback_settle_delay`,
+`feedback_settle_ease`, `feedback_press`, `feedback_glow`, `feedback_edge`,
+`feedback_lean` and `feedback_dock_shadow`.
 They're optional, so a baseline settings
 file still loads. **Presets → Reset everything** resets them too. Spring-only
 presets leave feedback and unrelated motion values alone. Grounded and Daniel’s
@@ -216,10 +236,13 @@ text. The builder runs 138 motion checks and 18 Foundation settings-schema
 checks before compiling and signing the app. These cover model behavior and
 in-memory migration, not native gestures or filesystem timing.
 
-Daniel’s tuning is a compiled complete preset, including Press any edge / Smart,
-response .752, damping 1.195, projection .197, resistance .631, free speed 800,
-inset 21.93, dock depth 2%, tuck depth 26.23%, Lift 1 and Settle 1. It is opt-in
-and survives settings resets. The Pickup shadow control defaults to softening.
+Daniel’s tuning is now the lab default: the app starts with it when no
+settings file exists, and Reset everything and the Daniel’s tuning preset both
+apply it. It includes Press any edge / Smart, response .625, damping .759,
+projection .266, resistance .631, free speed 800, inset 21.93, dock depth 2%,
+tuck depth 24.7%, plus the feedback defaults above. The motion model's own
+`Settings{}` defaults are unchanged; its checks and the iOS-like spring presets
+still use them. Grounded pins its own shadow and settle values.
 
 The running user-test app was left untouched during root's review fixes. Native
 layout, cue feel, haptic delivery, display crossing and input-region acceptance

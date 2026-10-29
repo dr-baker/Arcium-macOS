@@ -76,15 +76,30 @@ static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[
 struct Feedback {
   bool enabled = true;
   bool haptics = true;
-  double lift = .70;
-  double pickupShadow = 1;
-  double settle = .60;
-  double press = .60;
+  double lift = .75;
+  double pickupShadow = -.44;
+  double shadowBox = .20;
+  double shadowIntensity = 1.10;
+  double settle = .62;
+  double settleDelay = .08;
+  double settleEase = .28;
+  double press = .40;
   double glow = 0;
-  double edge = .60;
-  double lean = 14;
-  double dockShadow = .80;
+  double edge = .80;
+  double lean = 40;
+  double dockShadow = .90;
 };
+// The lab's starting and Reset values: Daniel's tuning. The model's own defaults stay as the
+// iOS-like baseline its checks and spring presets use.
+static Settings labDefaults() {
+  Settings s;
+  s.response = .625; s.damping = .759; s.projection = .266; s.margin = 21.93;
+  s.stash_percent = 30; s.stash_velocity = 1009; s.restore_distance = 29.86;
+  s.handle = 26.35; s.resistance = .631; s.free_speed = 800; s.snap_distance = 64;
+  s.press_dock = 2; s.press_tuck = 24.7;
+  s.docking = Docking::AllEdges; s.placement = Placement::Smart;
+  return s;
+}
 struct FeedbackParameter {
   const char *key, *label;
   double low, high;
@@ -101,10 +116,25 @@ static const FeedbackParameter feedbackParameters[] = {
     "+1 softens: the shadow spreads wider and blurrier, like an object rising away from the desk under room light.\n\n"
     "0 keeps its spread and edge unchanged. −1 sharpens: the shadow tightens and darkens, like a spotlight overhead.\n\n"
     "Lift sets how strong the change is."},
+  {"feedback_shadow_box", "Shadow box", .2, .95, &Feedback::shadowBox,
+    "Size of the light over the middle of the screen, as a fraction of the work area.\n\n"
+    "Over the light, the window casts its shadow straight down. Outside it, the shadow falls away from the light toward the screen edges, longer the farther out and the higher the window is lifted, up to 26 points.\n\n"
+    "A box rather than a single point keeps windows near the middle from casting far. Lower: shadows angle outward sooner. Higher: only windows near the edges cast outward."},
+  {"feedback_shadow_intensity", "Shadow intensity", 0, 2, &Feedback::shadowIntensity,
+    "How dark both shadows are, resting and lifted.\n\n"
+    "1 is the designed darkness. Zero removes the shadows; 2 doubles them."},
   {"feedback_settle", "Settle", 0, 1, &Feedback::settle,
-    "While letting go would leave the window where it is, it hovers closer to the desk without losing its held look.\n\n"
-    "The broad shadow pulls partway back in and the tight contact shadow returns, while the window keeps its held size. Releasing finishes setting it down.\n\n"
-    "Zero keeps the full held look until release."},
+    "Preempts release: while letting go would leave the window where it is, it sets itself down before you let go.\n\n"
+    "The window shrinks back to its resting size and its shadows return to their resting look. It deepens as you slow and is full once you hold still; speeding up lifts it again.\n\n"
+    "1 settles fully. Zero keeps the full held look until release."},
+  {"feedback_settle_delay", "Settle delay", 0, .6, &Feedback::settleDelay,
+    "Seconds the hand must stay slow before the window starts settling.\n\n"
+    "Speeding up again cancels the wait and lifts the window straight back, so brief slowdowns mid-drag do not flicker.\n\n"
+    "Higher: calmer, settles only on a real pause. Zero: settles the moment you slow down."},
+  {"feedback_settle_ease", "Settle ease", .1, 1, &Feedback::settleEase,
+    "Spring response, in seconds, of the settle animation once the delay has passed.\n\n"
+    "Higher: a slower, softer glide toward the desk. Lower: a quicker drop.\n\n"
+    "Lifting back when you speed up always uses a faster response, under half of this value."},
   {"feedback_press", "Press", 0, 1, &Feedback::press,
     "How much the window dips and springs back when it lands after you let go, like setting a cup on a table.\n\n"
     "Applies when it stays put and when it arrives at a dock, tuck or restore. Zero turns it off."},
@@ -203,9 +233,9 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSButton *feedbackToggle, *hapticsToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
-  double lift, liftVelocity, settleAmount, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
+  double lift, liftVelocity, castX, castY, settleAmount, settleVelocity, handSpeed, slowSince, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
   Side chevronSide;
-  BOOL leaning, awaitingLanding, moving;
+  BOOL leaning, awaitingLanding, moving, settleTapped;
   double pressStart, lastHaptic, pendingSince;
   int hapticKey, pendingKey;
   Outcome stableOutcome;
@@ -309,8 +339,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   NSData *previousData = [NSData dataWithContentsOfFile:statePath];
   id previousState = previousData ? [NSJSONSerialization JSONObjectWithData:previousData options:0 error:nil] : nil;
   motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
+  motion->settings = labDefaults();
   // Tuning window: behavior choices on top, grouped values in tabs, try-it actions below.
-  const CGFloat W = 536, H = 760;
+  const CGFloat W = 536, H = 896;
   controls = [[NSWindow alloc] initWithContentRect:NSMakeRect(area.origin.x + 28,
       std::max(area.origin.y, NSMaxY(area) - H - 28), W, H)
       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
@@ -335,7 +366,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   presetMenu.target = self; presetMenu.action = @selector(presetChanged:);
   [content addSubview:presetMenu];
   addHelp(content, NSMakeRect(494, H - 42, 18, 18), @"Presets",
-      @"Daniel’s tuning: the values saved from your session on Oct 28, with Press any edge and Smart drops: response 0.75, damping 1.19, projection 0.20, resistance 0.63, leave-here speed 800, inset 22, press to dock 2% and tuck 26%; lift 1, settle 1, press 0.40, edge shade 0.50, dock lean 12, dock shadow 0.90.\n\n"
+      @"Daniel’s tuning: the lab defaults, saved from your Oct 28 session, with Press any edge and Smart drops: response 0.62, damping 0.76, projection 0.27, resistance 0.63, leave-here speed 800, inset 22, press to dock 2% and tuck 25%; lift 0.75, pickup shadow −0.44, shadow box 0.20, shadow intensity 1.10, settle 0.62 after 0.08 s with ease 0.28, press 0.40, edge shade 0.80, dock lean 40, dock shadow 0.90.\n\n"
       "Grounded: a calm, natural tuning for every value, with corner snapping and Smart drops. "
       "Leave-here speed 180, snap distance 64, projection 0.40, response 0.44 with no bounce, inset 16, tuck at 30% or 1000 pt/s, restore after 24 pt; "
       "lift 0.60, settle 0.75, press 0.40, edge shade 0.50, dock lean 12, dock shadow 0.90, no glow, haptics on.\n\n"
@@ -432,6 +463,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [cues addSubview:hapticsToggle];
   addHelp(cues, NSMakeRect(272, pageTop + 5, 18, 18), @"Haptics",
       @"Force Touch trackpad taps for every event: pickup, each change in what letting go would do, and landing.\n\n"
+      "Stay here taps when the settle animation finishes, not when the outcome changes. With Settle at zero it taps on the change.\n\n"
       "Every tap uses the lightest alignment pattern, at most one every 0.15 seconds.\n\n"
       "macOS only plays haptics while a finger is on the trackpad, so a landing after a long flight may be silent. Mice have no haptics.");
   feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array; feedbackHeadings = NSMutableArray.array;
@@ -703,17 +735,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)reset:(id)sender { releaseDistance = 0; awaitingLanding = NO; motion->reset(); [self showPosition]; [self stopAnimation]; }
 - (void)danielsTuning {
   [controls makeFirstResponder:nil];
-  Settings next;
-  next.response = .752; next.damping = 1.195; next.projection = .197; next.margin = 21.93;
-  next.stash_percent = 30; next.stash_velocity = 1009; next.restore_distance = 29.86;
-  next.handle = 26.35; next.resistance = .631; next.free_speed = 800; next.snap_distance = 64;
-  next.press_dock = 2; next.press_tuck = 26.23;
-  next.docking = Docking::AllEdges; next.placement = Placement::Smart;
-  Feedback tuned;
-  tuned.lift = 1; tuned.pickupShadow = 1; tuned.settle = 1; tuned.press = .40; tuned.glow = 0;
-  tuned.edge = .50; tuned.lean = 12; tuned.dockShadow = .90;
-  feedback = tuned;
-  [self apply:next save:YES];
+  feedback = Feedback{};
+  [self apply:labDefaults() save:YES];
   fileStatus.stringValue = @"Applied Daniel’s tuning · saved";
 }
 - (void)grounded:(id)sender {
@@ -724,7 +747,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   next.handle = 28; next.resistance = .35; next.free_speed = 180; next.snap_distance = 64;
   next.docking = Docking::Corners; next.placement = Placement::Smart;
   Feedback tuned;
-  tuned.lift = .60; tuned.settle = .75; tuned.press = .40; tuned.glow = 0;
+  tuned.lift = .60; tuned.pickupShadow = 1; tuned.shadowBox = .70; tuned.shadowIntensity = 1;
+  tuned.settle = .75; tuned.settleDelay = .18; tuned.settleEase = .45; tuned.press = .40; tuned.glow = 0;
   tuned.edge = .50; tuned.lean = 12; tuned.dockShadow = .90;
   feedback = tuned;
   [self apply:next save:YES];
@@ -733,7 +757,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)resetVariables:(id)sender {
   [controls makeFirstResponder:nil];
   [saveTimer invalidate]; saveTimer = nil;
-  motion->resetSettings();
+  motion->resetSettings(labDefaults());
   feedback = Feedback{};
   [self syncControls];
   [self startAnimation]; [self saveSettings];
@@ -753,7 +777,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)begin:(NSEvent *)event {
   [self stopAnimation]; [self noteEvent:event];
-  awaitingLanding = NO; hapticKey = pendingKey = -1;
+  awaitingLanding = NO; hapticKey = pendingKey = -1; slowSince = -1; settleTapped = NO;
   motion->begin([self point:event], event.timestamp);
   [self haptic:NSHapticFeedbackPatternAlignment];
   [self showPosition];
@@ -858,7 +882,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     if (hapticKey < 0) { hapticKey = pendingKey = key; stableOutcome = cue; }
     if (key != pendingKey) { pendingKey = key; pendingSince = now; }
     else if (key != hapticKey && now - pendingSince >= .1) {
-      if (cue.decision != Decision::None) [self haptic:NSHapticFeedbackPatternAlignment];
+      // With a settle animation, the stay-here tap waits until the card has finished settling.
+      const bool settleTaps = cue.decision == Decision::Keep && on && feedback.settle > 0;
+      if (cue.decision != Decision::None && !settleTaps) [self haptic:NSHapticFeedbackPatternAlignment];
       hapticKey = key;
     }
     if (key == hapticKey) stableOutcome = cue;
@@ -866,7 +892,13 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     if (shown.decision == cue.decision) { shown.target = cue.target; shown.side = cue.side; }
   }
   const bool keep = moved && shown.decision == Decision::Keep;
-  const double settleTarget = keep ? 1 : 0;
+  // Hand speed rises quickly but eases down, so a slowing drag reads as a glide rather than a step.
+  approach(handSpeed, dragging ? cue.speed : 0, .04, .12, dt);
+  // Settling waits until the hand has stayed slow for the delay, then deepens as it slows further.
+  if (!keep) slowSince = -1;
+  else if (slowSince < 0) slowSince = now;
+  const bool settleReady = keep && now - slowSince >= feedback.settleDelay;
+  const double settleTarget = settleReady ? 1 - smoothstep(handSpeed / std::max(1.0, gate)) : 0;
   double liftTarget = 0;
   // The held look (lift and shrink) lasts the whole drag; settling toward the desk is a separate cue.
   if (dragging) liftTarget = 1;
@@ -915,7 +947,20 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const double liftGoal = on ? liftTarget : 0;
   pip_motion::spring(lift, liftVelocity, liftGoal, liftGoal > lift ? .26 : .32, .78, dt);
   if (std::abs(lift - liftGoal) < 1e-3 && std::abs(liftVelocity) < 1e-2) { lift = liftGoal; liftVelocity = 0; }
-  approach(settleAmount, on ? settleTarget : 0, .12, .12, dt);
+  // Settling in follows the tunable ease; lifting back out uses a faster response. After
+  // release the settle holds, so a pre-settled card does not rise again while lift falls.
+  double settleGoal = on ? settleTarget : 0;
+  if (on && !dragging) {
+    settleGoal = lift > 1e-3 || liftVelocity != 0 ? settleAmount : 0;
+    settleAmount = settleGoal; settleVelocity = 0;
+  }
+  pip_motion::spring(settleAmount, settleVelocity, settleGoal,
+      settleGoal > settleAmount ? feedback.settleEase : std::max(.12, .45 * feedback.settleEase), 1, dt);
+  if (std::abs(settleAmount - settleGoal) < 1e-3 && std::abs(settleVelocity) < 1e-2) { settleAmount = settleGoal; settleVelocity = 0; }
+  // One tap when the settle animation completes; it rearms once the card lifts well back up.
+  if (dragging && keep && on && feedback.settle > 0 && !settleTapped && settleAmount >= .95) {
+    settleTapped = YES; [self haptic:NSHapticFeedbackPatternAlignment];
+  } else if (!keep || settleAmount < .5) settleTapped = NO;
   approach(glow, on ? glowTarget : 0, .09, .14, dt);
   approach(edgeAmount, on ? edgeTarget : 0, .12, .14, dt);
   approach(leanX, leanTarget.x, .08, .10, dt);
@@ -927,8 +972,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [CATransaction setDisableActions:YES];
   const CGRect card = CGRectMake(kPad + leanX, kPad + leanY, w, h);
   if (!NSEqualPoints(example.frame.origin, NSPointFromCGPoint(card.origin))) [example setFrameOrigin:card.origin];
-  // The same lift spring drives the card scale and centered shadow spread.
-  const double l = std::clamp(lift, -.15, 1.2) * feedback.lift;
+  // The same lift spring drives the card scale and shadow spread. Settling preempts release:
+  // it lowers the card back toward resting size and resting shadows while still held.
+  const double settled = std::clamp(settleAmount, 0.0, 1.0) * feedback.settle;
+  const double l = std::clamp(lift, -.15, 1.2) * feedback.lift * (1 - settled);
   // A landing dips the card once and springs back.
   const double pressAge = now - pressStart, pressTime = .24;
   const bool pressing = on && pressAge >= 0 && pressAge < pressTime;
@@ -939,16 +986,26 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
   // Pickup shadow: +1 spreads and softens as it lifts, -1 tightens and darkens.
   const double k = std::clamp(feedback.pickupShadow, -1.0, 1.0);
-  const double settled = settleAmount * feedback.settle;
-  // Shadows sit centered under the card; height reads through spread, not offset. Settling
-  // pulls the spread partway back in while the card keeps its held size.
-  const double spread = l * (1 - .4 * settled);
-  ambientShadow.shadowRadius = 18 + spread * (k >= 0 ? 14 * k : 12 * k);
-  ambientShadow.shadowOpacity = .30 + spread * (k >= 0 ? .06 * k : -.16 * k);
-  ambientShadow.shadowOffset = CGSizeMake(shadowX, shadowY);
+  // Light comes from a box over the middle of the work area. A window over the box casts
+  // straight down; outside it, the shadow falls away from the nearest point of the box, longer
+  // the farther out and the higher the window. A box rather than a point keeps windows near the
+  // center from casting far.
+  const double b = feedback.shadowBox;
+  const double cx = position.x + leanX + w / 2 - (area.x + area.width / 2);
+  const double cy = position.y + leanY + h / 2 - (area.y + area.height / 2);
+  auto away = [&](double offset, double half) {
+    const double inner = half * b, outer = std::max(1.0, half - inner);
+    return std::clamp((offset - std::clamp(offset, -inner, inner)) / outer, -1.0, 1.0);
+  };
+  const double cast = 26 * (.3 + .7 * std::max(l, 0.0));
+  castX = away(cx, area.width / 2) * cast; castY = away(cy, area.height / 2) * cast;
+  const double intensity = feedback.shadowIntensity;
+  ambientShadow.shadowRadius = 18 + l * (k >= 0 ? 14 * k : 12 * k);
+  ambientShadow.shadowOpacity = std::min(1.0, intensity * (.30 + l * (k >= 0 ? .06 * k : -.16 * k)));
+  ambientShadow.shadowOffset = CGSizeMake(shadowX + castX, shadowY + castY);
   contactShadow.shadowRadius = 4 + 3 * l;
-  contactShadow.shadowOpacity = .16 * (1 - .75 * l * std::max(k, 0.0)) + .14 * settled;
-  contactShadow.shadowOffset = CGSizeMake(leanX * .5, leanY * .5);
+  contactShadow.shadowOpacity = std::min(1.0, intensity * .16 * (1 - .75 * l * std::max(k, 0.0)));
+  contactShadow.shadowOffset = CGSizeMake(leanX * .5 + castX * .2, leanY * .5 + castY * .2);
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
@@ -1008,8 +1065,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (!on) [cues addObject:@"Feedback off"];
   if (l > .01) [cues addObject:[NSString stringWithFormat:@"lift %.0f%%", l * 100]];
   if (settled > .01) [cues addObject:[NSString stringWithFormat:@"settle %.0f%%", settled * 100]];
+  else if (on && keep && !settleReady && feedback.settle > 0) [cues addObject:@"settle waiting"];
   if (std::hypot(leanX, leanY) > .5) [cues addObject:[NSString stringWithFormat:@"lean %.0f pt", std::hypot(leanX, leanY)]];
   if (std::hypot(shadowX, shadowY) > .5) [cues addObject:[NSString stringWithFormat:@"shadow → %.0f pt", std::hypot(shadowX, shadowY)]];
+  if (std::hypot(castX, castY) > .5) [cues addObject:[NSString stringWithFormat:@"cast %.0f pt", std::hypot(castX, castY)]];
   if (dragging && length(motion->pressed) > .5) {
     const pip_motion::Point in = motion->depth();
     [cues addObject:[NSString stringWithFormat:@"depth %.1f%%", std::max(std::abs(in.x), std::abs(in.y))]];
@@ -1037,7 +1096,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       case Decision::None: break;
     }
   }
-  return !pressing && lift == liftGoal && liftVelocity == 0 && settleAmount == (on ? settleTarget : 0) && glow == (on ? glowTarget : 0) &&
+  return !pressing && lift == liftGoal && liftVelocity == 0 && settleAmount == settleGoal && settleVelocity == 0 && glow == (on ? glowTarget : 0) &&
       edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y &&
       shadowX == shadowTarget.x && shadowY == shadowTarget.y;
 }
@@ -1130,7 +1189,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       migratedTuckDistance = YES;
     }
   }
-  Settings next;
+  Settings next = labDefaults();
   for (const auto& parameter : parameters) {
     id value = dict[@(parameter.key)];
     if (!value && parameter.optional) continue;
