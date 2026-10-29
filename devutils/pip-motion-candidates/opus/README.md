@@ -28,10 +28,8 @@ app before rebuilding.
   Press control adjusts it.
 - **Stay here.** While letting go would leave the window where it is, its
   shadow tightens and the pickup shrink eases off as it lowers partway toward
-  rest. Four corner ticks mark the release target, independently of the card's
-  lean and scale; a clamped target can stay inside the screen as the card moves
-  past it. Settle and Anchors tune these
-  independently. Hold glow remains available for comparison, with a default
+  rest. Settle tunes how far it lowers. The former corner marks and Anchors
+  control have been removed. Hold glow remains available for comparison, with a default
   of zero; existing saved glow values are preserved.
 - **Dock.** The window leans toward the dock release would select. The pull
   builds with proximity at any speed and is fully engaged while moving slowly
@@ -54,12 +52,20 @@ classification as release. Pickup and landing cues follow the interaction and
 motion phase. A randomized model test checks prediction against release; it
 does not validate visual appearance or haptic feel.
 
-After the initial drag outcome, a different decision or selected dock must
-remain stable for 100 ms before the visual cues and haptics adopt it. The
-“Release now” line and actual release still use the immediate prediction.
+After the initial drag outcome, outcome identity changes are filtered for
+100 ms. If the confirmed and immediate predictions have the same decision
+type, the visual cues use the current target and side immediately; they do not
+hold an old landing location while a selected dock changes. Haptics retain the
+debounced identity. The “Release now” line in the tuning window and actual
+release still use the immediate prediction.
 This trades brief cue lag for less threshold chatter; it is not proof that the
 reported jitter is resolved. Before browser integration, test rapid reversals
 and releases within that interval, as well as repeated near-edge drags.
+
+Two live lines on the card replace its fixed instructions. The first shows the
+confirmed release outcome while held, then settling or resting/tucked state.
+The second lists active cue amounts, or “no cues” / “Feedback off”. These are
+lab diagnostics; their appearance and timing still need native validation.
 
 Haptics are enabled by default and can be switched off independently. The app
 requests taps on pickup, debounced release-outcome changes and landing, using
@@ -84,13 +90,12 @@ The **Release feedback** row in the tuning window has its own hover help.
 | Lift | How much the shadow grows when picked up. Default 0.70. |
 | Settle | How far it lowers while release would keep it in place. Default 0.60. |
 | Press | Landing dip strength. Default 0.60. |
-| Anchors | Corner-mark visibility while release would keep it in place. Default 0.60. |
 | Hold glow | Border glow strength while release would keep the window in place. Default 0. |
 | Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
 | Dock lean | Maximum lean toward the dock, in points. Default 8; adjustable from 0 to 16. |
 
 These save to `settings.json` as `feedback`, `feedback_haptics`,
-`feedback_lift`, `feedback_settle`, `feedback_press`, `feedback_anchors`,
+`feedback_lift`, `feedback_settle`, `feedback_press`,
 `feedback_glow`, `feedback_edge` and `feedback_lean`. They're optional, so a baseline settings
 file still loads. **Reset all variables** resets them too. Presets leave them
 alone. While you drag, the line under the controls reads "Release now: …", so

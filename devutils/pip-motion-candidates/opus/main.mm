@@ -69,7 +69,6 @@ struct Feedback {
   double lift = .70;
   double settle = .60;
   double press = .60;
-  double anchors = .60;
   double glow = 0;
   double edge = .60;
   double lean = 8;
@@ -92,9 +91,6 @@ static const FeedbackParameter feedbackParameters[] = {
   {"feedback_press", "Press", 0, 1, &Feedback::press,
     "How much the window dips and springs back when it lands after you let go, like setting a cup on a table.\n\n"
     "Applies when it stays put and when it arrives at a dock, tuck or restore. Zero turns it off."},
-  {"feedback_anchors", "Anchors", 0, 1, &Feedback::anchors,
-    "How visible the four corner marks are while letting go would leave the window where it is.\n\n"
-    "They mark the spot it will rest on. Zero hides them."},
   {"feedback_glow", "Hold glow", 0, 1, &Feedback::glow,
     "How brightly the border glows while letting go would leave the window where it is.\n\n"
     "In Smart mode it appears as you slow down away from a dock. Zero turns it off."},
@@ -177,7 +173,8 @@ static void approach(double& value, double target, double rise, double fall, dou
   Feedback feedback;
   CALayer *stage, *ambientShadow, *contactShadow, *glowShadow, *overlay;
   CAGradientLayer *rimShade;
-  CAShapeLayer *chevron, *rimLight, *anchorMarks;
+  CAShapeLayer *chevron, *rimLight;
+  CATextLayer *intentText, *cueText;
   NSButton *feedbackToggle, *hapticsToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
@@ -187,7 +184,6 @@ static void approach(double& value, double target, double rise, double fall, dou
   double pressStart, lastHaptic, pendingSince;
   int hapticKey, pendingKey;
   Outcome stableOutcome;
-  double anchorX, anchorY;
   double lastEventTimestamp, lastEventUptime;
 }
 - (instancetype)initWithSettingsPath:(NSString *)path;
@@ -216,12 +212,6 @@ static void drawCard(NSRect bounds) {
   [@"Opus PiP Lab" drawAtPoint:NSMakePoint(22, 118) withAttributes:@{
     NSFontAttributeName:[NSFont systemFontOfSize:21 weight:NSFontWeightSemibold],
     NSForegroundColorAttributeName:NSColor.whiteColor}];
-  [@"Drag · flick · interrupt · tuck" drawAtPoint:NSMakePoint(22, 91) withAttributes:@{
-    NSFontAttributeName:[NSFont systemFontOfSize:13],
-    NSForegroundColorAttributeName:[NSColor colorWithWhite:1 alpha:.65]}];
-  [@"Native window · no video · no Chromium" drawAtPoint:NSMakePoint(22, 20) withAttributes:@{
-    NSFontAttributeName:[NSFont systemFontOfSize:11],
-    NSForegroundColorAttributeName:[NSColor colorWithWhite:1 alpha:.45]}];
 }
 
 static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
@@ -367,7 +357,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   addHelp(content, NSMakeRect(160, 269, 18, 18), @"Release feedback",
       @"Physical cues for holding and letting go.\n\n"
       "Picking the window up deepens and softens its shadow and shrinks it slightly. After release it stays lifted while it travels, sets down where it comes to rest, and dips once as it lands.\n\n"
-      "While letting go would leave it where it is, it lowers toward the desk and corner marks show where it will rest. Near a dock it would snap to, it leans toward the dock and casts its shadow that way.\n\n"
+      "While letting go would leave it where it is, it lowers toward the desk. Near a dock it would snap to, it leans toward the dock and casts its shadow that way.\n\n"
       "Pushed into a side, the screen's rim casts a shadow on the part going in, and the chevron fades in with depth. The shadow deepens once letting go would tuck.\n\n"
       "Turn off to compare with no added feedback. The tucked chevron still appears.");
   feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array;
@@ -427,25 +417,6 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   stage = [CALayer layer];
   stage.bounds = CGRectMake(0, 0, w, h);
   stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
-  // Corner marks on the desktop where a kept window will rest.
-  anchorMarks = [CAShapeLayer layer];
-  anchorMarks.frame = CGRectInset(card, -7, -7); anchorMarks.contentsScale = scale;
-  CGMutablePathRef marks = CGPathCreateMutable();
-  const CGFloat mw = w + 14, mh = h + 14, arm = 12;
-  for (int corner = 0; corner < 4; ++corner) {
-    const CGFloat x = corner % 2 ? mw : 0, y = corner < 2 ? 0 : mh;
-    const CGFloat dx = corner % 2 ? -arm : arm, dy = corner < 2 ? arm : -arm;
-    CGPathMoveToPoint(marks, nullptr, x + dx, y);
-    CGPathAddLineToPoint(marks, nullptr, x, y);
-    CGPathAddLineToPoint(marks, nullptr, x, y + dy);
-  }
-  anchorMarks.path = marks; CGPathRelease(marks);
-  anchorMarks.fillColor = nil; anchorMarks.strokeColor = gray(1, .95);
-  anchorMarks.lineWidth = 1.5; anchorMarks.lineCap = kCALineCapRound; anchorMarks.lineJoin = kCALineJoinRound;
-  anchorMarks.shadowColor = gray(0, 1); anchorMarks.shadowOpacity = .55;
-  anchorMarks.shadowRadius = 1.5; anchorMarks.shadowOffset = CGSizeZero;
-  anchorMarks.opacity = 0;
-  [host.layer addSublayer:anchorMarks];
   [host.layer addSublayer:stage];
   CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, 16, 16, nullptr);
   auto shadowLayer = [&](CGColorRef color) {
@@ -467,6 +438,19 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   cardLayer.frame = stage.bounds; cardLayer.contentsScale = scale;
   cardLayer.contents = [artwork layerContentsForContentsScale:scale];
   [stage addSublayer:cardLayer];
+
+  // Live readout on the card: what release would do, and which cues are animating.
+  auto textLayer = [&](CGRect frame, NSFont *font, CGFloat alpha) {
+    CATextLayer *text = [CATextLayer layer];
+    text.frame = frame; text.contentsScale = scale;
+    text.font = (__bridge CFTypeRef)font; text.fontSize = font.pointSize;
+    text.foregroundColor = gray(1, alpha); text.truncationMode = kCATruncationEnd;
+    text.string = @"";
+    [stage addSublayer:text];
+    return text;
+  };
+  intentText = textLayer(CGRectMake(22, 86, w - 44, 20), [NSFont systemFontOfSize:13 weight:NSFontWeightMedium], .8);
+  cueText = textLayer(CGRectMake(22, 16, w - 44, 16), [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular], .55);
 
   // Overlay on the card: the screen rim's shadow, the chevron and the glowing border.
   overlay = [CALayer layer];
@@ -732,10 +716,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     }
     if (key == hapticKey) stableOutcome = outcome;
     shown = stableOutcome;
+    if (shown.decision == outcome.decision) { shown.target = outcome.target; shown.side = outcome.side; }
   }
   const bool keep = moved && shown.decision == Decision::Keep;
-  // Anchors sit on the desk at the spot a kept window will rest, which can differ near an edge.
-  if (keep) { anchorX = shown.target.x; anchorY = shown.target.y; }
   double liftTarget = 0;
   // Held where it will stay, the window lowers toward the desk; release finishes setting it down.
   if (dragging) liftTarget = keep ? 1 - feedback.settle : 1;
@@ -797,8 +780,6 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   contactShadow.shadowRadius = 4 + 3 * l;
   contactShadow.shadowOpacity = .16 * (1 - .75 * l);
   contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(2 + 2 * l) + leanY * .5);
-  anchorMarks.position = CGPointMake(anchorX - position.x + kPad + w / 2, anchorY - position.y + kPad + h / 2);
-  anchorMarks.opacity = glow * feedback.anchors;
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
@@ -837,6 +818,33 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   }
   chevron.position = CGPointMake(chevronX, 90);
   chevron.opacity = chevronAlpha;
+
+  NSString *intent;
+  auto describe = [&](Decision decision, Side tuckSide, pip_motion::Point target, NSString *prefix) {
+    switch (decision) {
+      case Decision::Keep: return [prefix stringByAppendingString:@"stay here"];
+      case Decision::Dock: return [prefix stringByAppendingFormat:@"snap to the %@", [self dockName:target]];
+      case Decision::Tuck: return [prefix stringByAppendingString:tuckSide == Side::Left ? @"tuck left" : @"tuck right"];
+      case Decision::Restore: return [prefix stringByAppendingString:@"restore"];
+      case Decision::None: return prefix;
+    }
+  };
+  if (dragging) intent = moved ? describe(shown.decision, shown.side, shown.target, @"Release → ") : @"Picked up";
+  else if (motion->phase == Phase::Settling)
+    intent = describe(motion->decision, motion->tucked, motion->target, @"Settling → ");
+  else if (motion->phase == Phase::Tucked) intent = motion->tucked == Side::Left ? @"Tucked left" : @"Tucked right";
+  else intent = pressing ? @"Landed" : @"Resting";
+  NSMutableArray<NSString *> *cues = NSMutableArray.array;
+  if (!on) [cues addObject:@"Feedback off"];
+  if (l > .01) [cues addObject:[NSString stringWithFormat:@"lift %.0f%%", l * 100]];
+  if (keep && feedback.settle > 0) [cues addObject:@"lowered"];
+  if (std::hypot(leanX, leanY) > .5) [cues addObject:[NSString stringWithFormat:@"lean %.0f pt", std::hypot(leanX, leanY)]];
+  if (edgeAmount > .01 && feedback.edge > 0) [cues addObject:[NSString stringWithFormat:@"rim %.0f%%", edgeAmount * 100]];
+  if (glow > .01 && feedback.glow > 0) [cues addObject:@"glow"];
+  if (dip > 0) [cues addObject:@"press"];
+  NSString *cueLine = cues.count ? [cues componentsJoinedByString:@" · "] : @"no cues";
+  if (![intentText.string isEqual:intent]) intentText.string = intent;
+  if (![cueText.string isEqual:cueLine]) cueText.string = cueLine;
   [CATransaction commit];
 
   if (dragging) {

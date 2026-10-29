@@ -16,9 +16,9 @@ window-motion spring still runs in both.
 | Feedback | Small label and directional arrow inside the dragged window | Pickup/set-down shadow, hold glow, progressive rim shade and chevron |
 | Slow docking | Names the decision and destination direction | Proximity-based pull toward the selected dock, with directional shadow; Reduce Motion disables the lean |
 | Fast flick | Continues predicting the release | Stays lifted during travel and sets down at the destination |
-| Deliberate placement | Says “Stay here” or “Place inside” | Lowers toward rest with corner marks; optional hold glow |
+| Deliberate placement | Says “Stay here” or “Place inside” | Lowers toward rest; optional hold glow |
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
-| Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, anchors, hold glow, edge shade and dock lean |
+| Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade and dock lean |
 | Release prediction | Runs the existing release on a model copy | Shares classification between prediction and release |
 | Verification | Root: 93 model checks and strict app signature verification | Author rebuilt the revised app with 82 model checks passing; root verified its strict signature and new feedback settings in the runtime checkpoint |
 
@@ -27,21 +27,23 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 71938.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 75854.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
-falloff. It now also lowers during deliberate placement, shows anchor marks,
-dips on landing and requests haptic feedback. Root verified the signed bundle
-and a runtime checkpoint with Lift 0.70, Hold glow 0.50, Edge shade 0.60, Dock
-lean 16, Settle/Press/Anchors 0.60 and Haptics enabled. The saved glow and lean
-values were preserved; the new glow default is zero. Native appearance,
+falloff. It lowers during deliberate placement, dips on landing and requests
+haptic feedback. Corner marks and their control have been removed; two live
+lines on the card now show its confirmed outcome and active cues. Root verified
+the signed bundle and a runtime checkpoint with Lift 0.70, Hold glow 0, Edge
+shade 0.60, Dock lean 16, Settle/Press 0.60 and Haptics enabled. Saved tuning was
+preserved. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
-The current cue revision filters decision/dock changes for 100 ms and positions
-anchor marks at the release target independently of the card's visual lean.
-The diagnostic line and actual release remain immediate. Near-edge jitter and
-rapid release during the cue delay still need native acceptance; the motion
-model checks do not cover this visual filter.
+The current cue revision filters outcome identity changes for 100 ms, while
+updating the visual target and side immediately when the confirmed and current
+decision types match. Haptics retain the debounced identity. The tuning-window
+diagnostic line and actual release remain immediate. Near-edge jitter, moving
+targets within one decision type and rapid release during the cue delay still
+need native acceptance; the motion model checks do not cover this visual filter.
 
 Build without launching, from the worktree root:
 
