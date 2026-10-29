@@ -213,10 +213,12 @@ class Motion {
     throwFrom(position, release, true);
   }
 
-  // Side-effect-free preview of end(time), using the same classification.
-  Outcome predict(double time) const {
+  // Side-effect-free preview of end(time), using the same classification. A gentle preview
+  // classifies as if released without momentum, while still reporting the current speed.
+  Outcome predict(double time, bool gentle = false) const {
     if (phase != Phase::Dragging) return {};
-    const Point release = tracker_.value(time);
+    const Point measured = tracker_.value(time);
+    const Point release = gentle ? Point{} : measured;
     Outcome outcome;
     if (drag_side_ != Side::None) {
       outcome = restoresOnRelease(release) ?
@@ -226,6 +228,7 @@ class Motion {
       outcome = unmovedGrab(release) ? unmovedOutcome() : classify(position, release, true);
     }
     outcome.moved = length(position - start_position_) >= 2;
+    outcome.speed = length(measured);
     return outcome;
   }
 

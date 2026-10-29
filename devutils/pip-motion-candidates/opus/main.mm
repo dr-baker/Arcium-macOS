@@ -185,7 +185,7 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSMutableArray<NSTextField *> *feedbackFields;
   double lift, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
   Side chevronSide;
-  BOOL leaning, awaitingLanding;
+  BOOL leaning, awaitingLanding, moving;
   double pressStart, lastHaptic, pendingSince;
   int hapticKey, pendingKey;
   Outcome stableOutcome;
@@ -699,6 +699,13 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const bool on = feedback.enabled;
   const bool dragging = motion->phase == Phase::Dragging;
   const Outcome outcome = dragging ? motion->predict([self dragTime]) : Outcome{};
+  // Cues preview a gentle release from here. Mid-drag velocity says nothing about the eventual
+  // release, so while the hand moves fast, stay and dock cues go neutral instead of chasing a
+  // momentum-projected dock. Tuck and restore depend on position and still show.
+  Outcome cue = dragging ? motion->predict([self dragTime], true) : Outcome{};
+  const double gate = motion->settings.free_speed;
+  moving = dragging && cue.speed > (moving ? gate : gate + std::max(60.0, gate / 2));
+  if (moving && (cue.decision == Decision::Keep || cue.decision == Decision::Dock)) cue.decision = Decision::None;
   // A press that has not moved the window is a click: it lifts, but previews nothing.
   const bool moved = dragging && outcome.moved;
   const auto area = motion->area();
@@ -707,18 +714,18 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 
   // Cues and haptics follow a debounced outcome so threshold chatter (speed hovering at the
   // deliberate limit, or position at a snap or tuck boundary) does not flicker the window.
-  Outcome shown = outcome;
+  Outcome shown = cue;
   if (moved) {
-    const int key = [self hapticKeyFor:outcome];
-    if (hapticKey < 0) { hapticKey = pendingKey = key; stableOutcome = outcome; }
+    const int key = [self hapticKeyFor:cue];
+    if (hapticKey < 0) { hapticKey = pendingKey = key; stableOutcome = cue; }
     if (key != pendingKey) { pendingKey = key; pendingSince = now; }
     else if (key != hapticKey && now - pendingSince >= .1) {
-      [self haptic:NSHapticFeedbackPatternAlignment];
+      if (cue.decision != Decision::None) [self haptic:NSHapticFeedbackPatternAlignment];
       hapticKey = key;
     }
-    if (key == hapticKey) stableOutcome = outcome;
+    if (key == hapticKey) stableOutcome = cue;
     shown = stableOutcome;
-    if (shown.decision == outcome.decision) { shown.target = outcome.target; shown.side = outcome.side; }
+    if (shown.decision == cue.decision) { shown.target = cue.target; shown.side = cue.side; }
   }
   const bool keep = moved && shown.decision == Decision::Keep;
   double liftTarget = 0;
@@ -728,10 +735,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     liftTarget = std::sqrt(std::clamp(length(motion->target - position) / releaseDistance, 0.0, 1.0));
   const double glowTarget = keep ? 1 : 0;
 
-  // Magnetic pull toward the dock release would snap to: it builds with proximity, and is full
-  // whenever the drag is slow enough to snap. Hysteresis steadies the slow-speed gate.
-  const double gate = motion->settings.free_speed;
-  const bool slow = outcome.speed <= (leaning ? gate + std::max(60.0, gate / 2) : gate);
+  // Magnetic pull toward the dock a gentle release would snap to: full within the snap
+  // distance, fading out by twice that (relevant in Always snap mode).
   pip_motion::Point leanTarget{}, shadowTarget{};
   leaning = false;
   if (on && moved && shown.decision == Decision::Dock &&
@@ -739,7 +744,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     const pip_motion::Point toward = shown.target - position;
     const double distance = length(toward);
     const double reach = 2 * std::max(motion->settings.snap_distance, 48.0);
-    const double engage = std::max(slow ? 1.0 : 0.0, smoothstep(1 - distance / reach));
+    const double engage = smoothstep((reach - distance) / (reach / 2));
     if (engage > 0 && distance > .5) {
       leaning = true;
       leanTarget = toward * (engage * std::min(feedback.lean, distance * .6) / distance);
@@ -835,7 +840,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       case Decision::None: return prefix;
     }
   };
-  if (dragging) intent = moved ? describe(shown.decision, shown.side, shown.target, @"Release → ") : @"Picked up";
+  if (dragging) intent = !moved ? @"Picked up" : shown.decision == Decision::None ? @"Moving · release throws" :
+      describe(shown.decision, shown.side, shown.target, @"Release → ");
   else if (motion->phase == Phase::Settling)
     intent = describe(motion->decision, motion->tucked, motion->target, @"Settling → ");
   else if (motion->phase == Phase::Tucked) intent = motion->tucked == Side::Left ? @"Tucked left" : @"Tucked right";

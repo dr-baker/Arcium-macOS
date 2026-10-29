@@ -361,5 +361,13 @@ int main() {
   m.throwFrom({300, 100}, {900, 900}, false);
   check(m.velocity.x > 0 && m.velocity.y > 0,
         "momentum toward the dock is preserved");
+  // A gentle preview ignores mid-drag momentum but still reports the measured speed.
+  m = Motion{}; m.settings.docking = Docking::SideEdges;
+  m.placeAt({340, 260});
+  m.begin({400, 300}, 50); m.drag({400, 340}, 50.02); m.drag({400, 380}, 50.04);
+  const Outcome thrown = m.predict(50.04), gentle = m.predict(50.04, true);
+  check(thrown.decision == Decision::Dock && gentle.decision == Decision::Keep &&
+        near(gentle.speed, thrown.speed) && gentle.speed > 1000,
+        "a fast vertical drag previews a gentle stay instead of a projected edge corner");
   std::cout << checks << " checks passed\n";
 }

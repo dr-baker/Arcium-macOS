@@ -1,7 +1,8 @@
 # Opus PiP Lab
 
-A release-feedback candidate built on the PiP motion lab at `b279760`. Motion,
-tuning, presets, JSON reload, and hover help are unchanged. The window behaves
+A release-feedback candidate built on the PiP motion lab at `b279760`. Tuning,
+presets, JSON reload, and hover help are retained. Motion changes are described
+below. The window behaves
 like a physical card: it lifts when you pick it up and sets down where it comes
 to rest. It has no video, audio, browser connection, or Chromium dependency.
 
@@ -26,8 +27,17 @@ before settling toward the target; it does not remove the spring or guarantee
 that forward momentum can never overshoot.
 
 This changes only Opus's copied motion model. The original lab, Terra and the
-browser implementation have not received this change. Root reran all 85 model
+browser implementation have not received this change. Root reran all 86 model
 checks, including the original motion cases and the new release-direction cases.
+
+The card's cues now use a separate gentle prediction, with zero release
+momentum, while preserving the measured speed for the cue gate. Stay and snap
+cues become neutral during fast movement, with hysteresis around the deliberate
+placement speed. Position-based tuck and restore cues remain available. The
+card then reads “Moving · release throws”. Entering neutral requests no haptic.
+The actual release and the tuning window's “Release now” line still use the
+momentum-aware prediction; the card is not an exact fast-flick destination
+preview.
 
 ## The cues
 
@@ -44,9 +54,10 @@ checks, including the original motion cases and the new release-direction cases.
   rest. Settle tunes how far it lowers. The former corner marks and Anchors
   control have been removed. Hold glow remains available for comparison, with a default
   of zero; existing saved glow values are preserved.
-- **Dock.** The window leans toward the dock release would select. The pull
-  builds with proximity at any speed and is fully engaged while moving slowly
-  enough to snap. A separate Dock shadow control moves the broad shadow toward
+- **Dock.** The window leans toward the dock a gentle release would select as
+  you slow down. The pull is full within the attraction distance and fades out
+  by twice that distance, with a minimum 48-point full-strength zone. A separate
+  Dock shadow control moves the broad shadow toward
   that target, while the contact shadow stays close. Its requested travel is
   capped at 110 points before strength and proximity scaling: strength 1 reaches
   the destination only when it is within that range. Reduce Motion disables
@@ -64,12 +75,13 @@ checks, including the original motion cases and the new release-direction cases.
   back on screen.
 
 A press that hasn't moved the window still lifts, but previews nothing.
-Placement previews come from `Motion::predict()`, which uses the same
-classification as release. Pickup and landing cues follow the interaction and
+Placement cues use `Motion::predict(time, true)` for a gentle release; the
+default prediction remains the actual release classification. Pickup and
+landing cues follow the interaction and
 motion phase. A randomized model test checks prediction against release; it
 does not validate visual appearance or haptic feel.
 
-After the initial drag outcome, outcome identity changes are filtered for
+After the initial drag outcome, cue identity changes are filtered for
 100 ms. If the confirmed and immediate predictions have the same decision
 type, the visual cues use the current target and side immediately; they do not
 hold an old landing location while a selected dock changes. Haptics retain the

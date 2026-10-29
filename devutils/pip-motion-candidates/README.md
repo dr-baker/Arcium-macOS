@@ -19,26 +19,25 @@ window-motion spring still runs in both.
 | Deliberate placement | Says “Stay here” or “Place inside” | Lowers toward rest; optional hold glow |
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
 | Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
-| Release prediction | Runs the existing release on a model copy | Shares classification between prediction and release |
-| Verification | Root: 93 model checks and strict app signature verification | Root: 85 model checks, strict app signature verification and runtime-settings checkpoint |
+| Release prediction | Runs the existing release on a model copy | Card cues preview gentle placement; fast-flick release remains momentum-aware |
+| Verification | Root: 93 model checks and strict app signature verification | Root: 86 model checks, strict app signature verification and runtime checkpoint |
 
 Terra makes the decision explicit but adds text. Opus's revised design follows
 Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 82416.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 83377.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It lowers during deliberate placement, dips on landing and requests
 haptic feedback. Corner marks and their control have been removed; two live
 lines on the card now show its confirmed outcome and active cues. Root verified
-the signed bundle and a runtime checkpoint with Lift 0.70, Hold glow 0, Edge
-shade 0.60, Dock lean 8, Dock shadow 0.80, Settle/Press 0.60 and Haptics enabled. Saved tuning was
-preserved. Native appearance,
+the signed bundle and runtime checkpoint, and reran the 86 model checks.
+Root left saved tuning untouched. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
-The current cue revision filters outcome identity changes for 100 ms, while
+The current cue revision filters gentle-outcome identity changes for 100 ms, while
 updating the visual target and side immediately when the confirmed and current
 decision types match. Haptics retain the debounced identity. The tuning-window
 diagnostic line and actual release remain immediate. Near-edge jitter, moving
@@ -52,12 +51,20 @@ away. The card's readout includes the current shadow offset. Its perceived
 clarity and its behavior during release remain unverified on screen.
 
 Opus now retains only release momentum toward its selected snap, tuck or
-restore destination. This changes Opus's motion model, with 85 model checks
+restore destination. This changes Opus's motion model, with 86 model checks
 passing; the original lab, Terra and browser behavior are unchanged. It removes
 the initial wrong-way component, while forward spring overshoot remains
 possible. The cue revision also raises the fresh-settings lean default to 14
 points (range 0–40), slows the shadow's outward response and requests only
 alignment-pattern haptics at least 0.15 seconds apart. Hardware feel is unverified.
+
+Visual cues now preview a gentle, zero-momentum release from the current
+position. Fast motion suppresses stay/snap cues and displays “Moving · release
+throws”; position-based tuck/restore cues remain available. The tuning-window
+readout and actual fast-flick release keep momentum projection. Entering the
+neutral cue state requests no haptic. Native tests must check both predictions
+and the transition between them; the card does not promise an exact fast-flick
+destination.
 
 Build without launching, from the worktree root:
 
