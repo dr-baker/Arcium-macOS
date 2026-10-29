@@ -66,7 +66,7 @@ message additions as well as product-name substitutions; taking the upstream
 generated JSON alone loses Arc import, Spaces, and onboarding text. Run the
 repository's catalog generator and inspect its changes before committing them.
 
-Run the same catalog checks as CI before the expensive build, from macOS:
+Run the same catalog and tooling checks as CI before the expensive build, from macOS:
 
 ```sh
 python3 helium-chromium/devutils/lint.py
@@ -74,12 +74,18 @@ python3 helium-chromium/devutils/lint.py -t .
 python3 helium-chromium/devutils/i18n.py generate -o /tmp/arcium-source.gen.json
 cmp helium-chromium/i18n/source.gen.json /tmp/arcium-source.gen.json
 python3 helium-chromium/devutils/i18n_lint.py
+python3 -m unittest discover --start-directory devutils/tests --pattern 'test*.py'
+python3 -m unittest devutils.test_import_arc_spaces
 ```
 
 `check_patch_files.py` warnings are not a substitute for the stricter linter.
 Remove retired patch files as well as their series entries. The 156 port reached
 a passing browser build with a trailing space, an unused Seatbelt patch file,
 and stale generated translation entries; these checks catch all three earlier.
+Run the complete tooling suite after merging published changes, too. The 156
+integration retained tests for the former ambient remote-build opt-in and GN
+bootstrap path. Check failures against the current documented behavior before
+changing production code to satisfy an obsolete expectation.
 
 ## Replay and build
 
@@ -340,7 +346,11 @@ Open `http://127.0.0.1:8765/tab-lifecycle.html?page=A` in the named Dev profile.
 The links provide a second page for Peek and split checks. Record its instance
 token and draft before promoting Little Arc or cancelling a close; both should
 remain unchanged. Arm the before-unload checkbox through the UI before testing
-cancellation. The color-scheme witness updates live for native Settings checks.
+cancellation. Verify the fixture reports both `User interaction: received` and
+`Close confirmation: armed`. Chromium suppresses that prompt when the document
+has never received user activation; setting an accessibility value alone is
+not proof that the prompt is eligible. The color-scheme witness updates live
+for native Settings checks.
 Use the existing Pin/split contracts for restart persistence; this fixture's
 unsaved DOM state is only a live-content identity witness. Stop the server when
 testing ends.
@@ -371,6 +381,10 @@ In a separate CUA call, emit the stored image or report that it is still pending
 Start each subsequent native action in its own active tool call; chaining another
 native API from `.then` failed with `node_repl exec context not found`.
 This is a tested workaround, not an established explanation of the stall.
+It does not enforce a deadline: later inventory and AX calls still took
+69 and 85 seconds despite returning a stored promise from the script. Keep
+feature checkpoints short, and recover the last completed action before
+retrying. An interrupted test script may already have changed the browser.
 If app control still fails, record the blocker and leave the behavior gates
 incomplete rather than repeatedly starting blind attachments.
 A rendered screenshot, clean launch log, and passing model tests do not prove

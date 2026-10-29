@@ -14,6 +14,8 @@
 <p>Page color scheme: <span id="scheme"></span></p>
 <label>Draft text <textarea id="draft"></textarea></label>
 <label><input id="confirm-close" type="checkbox"> Ask before leaving this page</label>
+<p>User interaction: <span id="activation">not received</span>.
+Close confirmation: <span id="close-state">off</span>.</p>
 <p><a id="other-page">Open the other page</a></p>
 <p><a id="new-tab" target="_blank" rel="noopener">Open the other page in a new tab</a></p>
 <p>The instance and draft should survive live-tab promotion and cancelled close.
@@ -24,7 +26,7 @@ Reloading creates a new instance. Unsaved drafts are not a restart-persistence c
   document.querySelector('#heading').textContent = document.title;
   document.querySelector('#instance').textContent = crypto.randomUUID();
   const other = new URL(location.href);
-  other.search = new URLSearchParams({page: page === 'A' ? 'B' : 'A'});
+  other.searchParams.set('page', page === 'A' ? 'B' : 'A');
   document.querySelector('#other-page').href = other;
   document.querySelector('#new-tab').href = other;
   const scheme = matchMedia('(prefers-color-scheme: dark)');
@@ -33,6 +35,16 @@ Reloading creates a new instance. Unsaved drafts are not a restart-persistence c
   };
   scheme.addEventListener('change', updateScheme);
   updateScheme();
+  const updateCloseState = () => {
+    document.querySelector('#activation').textContent =
+      navigator.userActivation.hasBeenActive ? 'received' : 'not received';
+    document.querySelector('#close-state').textContent =
+      document.querySelector('#confirm-close').checked ? 'armed' : 'off';
+  };
+  for (const type of ['click', 'input', 'change', 'keydown', 'focusin']) {
+    addEventListener(type, () => queueMicrotask(updateCloseState));
+  }
+  updateCloseState();
   addEventListener('beforeunload', event => {
     if (document.querySelector('#confirm-close').checked) {
       event.preventDefault();
