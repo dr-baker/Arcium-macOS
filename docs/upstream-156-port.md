@@ -5,10 +5,12 @@ Chromium 156 builds with the published Arcium features on
 All 76 focused native tests pass. Native checks found and repaired sidebar
 layout and HTTP-navigation failures; creating a Space then exposed a label
 painting crash. Its reviewed repair builds and passes the native suites.
-Delivery remains a draft. Native control failed after the Space/profile and
-live split-pinning checks, blocking the remaining interaction and persistence
-checks. Do not advance canonical main
-or install over the daily browser.
+Delivery remains a draft. Native checks now verify Space/profile ownership,
+split close/reopen and stacked-order persistence, Peek cancellation/promotion,
+and native Settings artwork and independent material controls. Native control
+timed out during final settings restoration, leaving manual checks and media
+export incomplete. Earlier intermittent blank-page observations remain unisolated. Do not
+advance canonical main or install over the daily browser.
 
 ## Native layout repairs
 
@@ -29,7 +31,7 @@ that compilation and the native model tests had missed:
 Independent Astra source review accepted these repairs. Native screenshots of
 `d5ec540f` confirmed normal navigation controls and a single-row address field;
 its next interaction exposed the toggle bug. The current build includes that
-additional correction. Full native acceptance remains in progress.
+additional correction. The remaining native acceptance gaps are listed below.
 
 ## Command-bar navigation crash
 
@@ -66,96 +68,107 @@ crash report appears at that milestone.
 
 ## Delivery proof gates
 
-- Inspected: upstream changes, both published fork histories, patch ownership,
-  lifecycle changes, component linkage, and the native layout regressions.
-  Final independent Astra review at core `9782f5e7` / macOS `b6224ef` found
-  no new source blocker, including analogous transparent-label paths.
-  A separate Git merge audit found no lost published change.
-- Replayed: all 587 combined patches with zero fuzz. Final preflight reports
-  587 applied patches and no problems. Core patch lint passes.
+- Inspected: upstream and published fork changes, patch ownership, lifecycle
+  changes, component linkage, and native regressions. Independent Astra reviewed
+  core `9782f5e7` / macOS `b6224ef`, including analogous transparent-label paths.
+  A separate merge audit found no lost published changes. Astra also accepted
+  the subsequent CI shutdown and isolated-launcher repairs.
+- Replayed: all 587 combined patches with zero fuzz. Final preflight has
+  587 applied patches, no pending timestamp snapshot, and no problems.
 - Compiled: `chrome`, `arcium_optional_navigation_tests`,
   `helium_persistent_item_model_tests`, and `arcium_dmg_unit_tests` at macOS
-  `61c7a35` and core `9782f5e7ae4757871d86592a0cf2a2664d58f690`.
+  `61c7a35` / core `9782f5e7ae4757871d86592a0cf2a2664d58f690`.
   Trace `21a56d8633ec4afab00f55b7a190237c` records success, complete evidence,
-  and no capture errors. All ten recorded native artifact hashes and sizes match.
-  The earlier production-object inventory covered all 242 configured personal
-  objects; subsequent browser builds include the changed production sources.
-- Tested: navigation 3/3, persistent items 65/65, DMG defaults 8/8. Earlier native
-  Settings artwork/contracts pass 83 tests, packaging 20, Studio 21, release
-  entrypoints 4, and the selected `he` workflow tests 36.
-- Packaged: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app` under
-  the build directory below. All eight command-style SVG resources are present.
-  This Dev bundle does not exercise release packaging's `initial_preferences`.
-- Launched: that labeled Diagnostics app, PID 26946, using only
-  `~/Library/Application Support/Helium Development/profiles/isolated/helium-156-upstream`.
-  Its initial log segment has neither duplicate Objective-C class warning nor
-  a fatal or GPU-process-failure signature. Cross-volume clone and quarantine
-  cleanup errors remain; no resulting failure was established.
-- Behavior-tested: preceding builds exercised Cmd-L and repeated Cmd-T/Escape.
-  Cmd-T creates one tab per invocation and Escape retains it, as intended by
-  the published command-bar behavior. Toolbar geometry was visibly repaired.
-  On the preceding `37c5ecf2` build, explicit expansion persists after pointer exit, collapse
-  hides the sidebar, Cmd-S restores it, and Classic/Vertical settings roundtrip
-  retains the collapse preference. Pure hover remains unverified through the
-  available native-control API. The repaired `0a5c0b32` build passes Cmd-L
-  HTTP navigation to fixture A and B, rendering both titles and instance tokens
-  without a duplicate tab or fatal. A read-only check after that app stopped
-  confirmed the fixture and WebGL URLs in its shortcut database. WebGL 2 renders green with RGBA
-  `0, 191, 64, 255` and GL error 0. GPU Internals reports hardware-accelerated
-  Canvas, compositing, rasterization, video, WebGL, and WebGPU through ANGLE
-  Metal on Apple M3 Max, with GPU crash count 0. The integrator inspected
-  the repaired native window directly. On core `9782f5e7`, Personal and Work
-  retain distinct themes and profile-owned Favorites while switching in both
-  directions. Pinning an A/B split creates one durable row and preserves both
-  live instance tokens and the second pane's draft. Native control then failed
-  with `Sky Computer Use native pipe startup failed`. Parent and worker
-  connections, inventory, exact-app attachment, and a fresh tool session all
-  reproduced that error. The browser remained alive with no new fatal or
-  crash report. Remaining lifecycle acceptance is blocked by native control.
-- Persistence-tested: not reached. Native control failed before normal quit.
-  Native model tests do not substitute for quitting and relaunching through
-  the browser UI.
-- Teardown-tested: preceding iterations stopped through `he agent stop`.
-  The preceding app crashed on its first HTTP navigation; PID 73092 is gone.
-  PID 95009 later crashed when New Space opened. The owned fixture server
-  on port 8766 remains available for the next repair retry.
-  PID 26946 remains open with the acceptance state intact. Normal UI quit,
-  window close, and Dock reopen are blocked by the native-control failure.
-- Manual-only: pure hover lacks a documented native-control action, and
-  coordinate drags failed with `windowNotFoundAtPosition`. The split divider
-  accepted AX Increment, but changed geometry was not proved. Native screenshots
-  were inspected in the transcript; screenshot/video file export was not reached.
-  Full browser-backed tests need the omitted Chromium 156 fixtures
-  and test source. Release first-run packaging and non-macOS validation remain
-  separate checks. The daily app and real data were not used.
+  and no capture errors. All ten recorded artifact hashes and sizes match.
+  Earlier inventory covered all 242 configured personal production objects.
+- Tested: navigation 3/3, persistent items 65/65, and DMG defaults 8/8.
+  Earlier runs passed native Settings artwork/contracts 83, packaging 20,
+  Studio 21, release entrypoints 4, and selected `he` workflow tests 36.
+  The latest complete local CI command passes 333 tooling tests and seven
+  import tests. A later four-test remote configuration run also passes,
+  including the added explicit policy opt-in case.
+- Packaged: `src/out/Diagnostics/Helium Dev - helium-156-upstream.app` in
+  the build directory below, including all eight command-style SVG resources.
+  The Dev bundle does not exercise release `initial_preferences` packaging.
+- Launched: the same labeled Diagnostics app and isolated
+  `~/Library/Application Support/Helium Development/profiles/isolated/helium-156-upstream`
+  throughout acceptance. Final PID 24303 used the expected user-data directory
+  without a forced subprofile. No daily installation or real data was used.
+- Behavior-tested: native HTTP navigation after command-bar closure, immediate
+  Cmd-T creation and Escape retention, repaired sidebar geometry and explicit
+  collapse/expansion, Classic/Vertical settings roundtrip, Pin home navigation,
+  Favorite promotion, Space create/edit/delete-cancel, empty icon searches,
+  and separate-profile ownership. Split pinning preserves live page tokens
+  and draft in one durable row. Two close/reopen cycles preserve one row;
+  stacking, reversing, and re-pinning preserve the then-live documents.
+  Peek and Little Arc close/cancel preserve the document and draft. Promotion
+  preserves both in exactly one ordinary tab without an unload prompt.
+  The final Little Arc test visibly confirms user activation and an armed
+  guard before closing. External URL ingress opens Little Arc in the intended
+  profile; the opt-in preference is restored off.
+  Moving the sole live Pin to Personal preserves its document, draft, and
+  armed guard without prompting, retains the unrelated destination tab, and
+  reduces the native Window menu from two windows to one before revisiting
+  the source. Current-build WebGL 2 readback passes with RGBA `0, 191, 64, 255`
+  and GL error 0. GPU Internals reports Metal acceleration on Apple M3 Max
+  and zero GPU crashes. Native Settings renders all four command-style
+  illustrations and independently changes text/container materials.
+- Persistence-tested: normal UI quit/relaunch preserves Space icons/themes,
+  folded Pins and order, the original-profile B Favorite, and one saved split.
+  The corrected launcher restores saved Work profile selection. The final
+  restart preserves B above A with approximately equal pane heights and
+  expected new document tokens. Both pages render in the actual screenshot,
+  independently inspected by the integrator. Personal retains Dark browser,
+  Light pages, and Glass. Full post-restart material/editor rechecks are partial.
+- Teardown-tested: PIDs 26946, 52864, and 63611 quit through the native app
+  menu without new crash evidence. Final native control timed out while
+  restoring page-edge settings. `he agent stop --profile helium-156-upstream`
+  then stopped PID 24303 successfully. The task-owned fixture server was also
+  stopped; both PIDs are absent and port 8766 has no listener. This final
+  managed stop is not a normal UI-quit or Dock-reopen proof.
+- Manual-only: pure hover, coordinate drag and divider resize geometry,
+  close-all-windows/Dock reopen, automation-infobar drag regions, complete
+  single/split page-edge effects, and screenshot/video file export. Native
+  screenshots were inspected in the transcript; no hosted media is claimed.
+  Full browser-backed tests need omitted Chromium 156 fixtures/test source.
+  Release first-run packaging and non-macOS validation remain separate gates.
 
-Before marking the PRs ready, use the same isolated profile and existing
-scenario contracts to check:
+## Remaining native-control limits
 
-1. Initial window geometry, collapse/hover/expand, animation reversal, resizing,
-   and horizontal/sidebar mode changes.
-2. Pin/Favorite identity and home navigation, sidebar scale, Space/profile
-   ownership, and split resize/reopen/order.
-3. Immediate Cmd-T creation, repeated Cmd-T, Escape retention, and Cmd-L/current
-   tab navigation without duplicate tabs.
-4. Peek close cancellation, Little Arc promotion, and sole-Pin Space transfer,
-   preserving the fixture's live instance token and draft.
-5. Native Settings window reuse, style artwork, page borders/shadows,
-   material/tint controls, and window dragging without stealing content input.
-6. `/webgl.html` framebuffer readback and `chrome://gpu` acceleration separately.
-7. Normal quit/relaunch persistence, close-all-windows/Dock reopen, and teardown.
+Earlier saved pages appeared blank in both a split and an ordinary Favorite.
+They rendered after a later launch and window raise. The cause remains
+unisolated; no browser fix is claimed. An earlier Little Arc close without a
+measured activation state did not establish an eligible prompt. The final
+measured close/cancel and promotion pass.
 
-Resume on the same isolated app and profile after native control recovers.
-Acceptance-owned state includes Personal with house/Orange/Dark browser and
-Light pages, Work with briefcase/Blue in a separate profile, the original-profile
-B Favorite, and one saved A-left/B-right split. The live B draft is
-`split-B-live`; no beforeunload prompt is armed. Record layout before normal
-quit; split order/reopen, Peek, Little Arc, sole-Pin transfer, wider native
-Settings, media export, persistence, and normal teardown remain unfinished.
+The final timeout affected both worker and integrator connections, accessibility,
+screenshot capture, and a fresh exact-bundle attachment. Inventory still worked.
+A three-second sample found the browser main thread waiting normally in
+`NSApplication` / `CFRunLoop` in all 2,333 samples. The final launch added no
+Helium crash report, fatal, duplicate Objective-C class, or GPU-failure signature.
+This does not establish a browser deadlock. Cross-volume clone/quarantine cleanup
+errors remain in launch logs without an established resulting failure.
 
-Use `devutils/scenarios/fixtures/tab-lifecycle.html` and `webgl.html` with an
-owned local server. Capture native screenshots and a short interaction video.
-Do not restore omitted Chromium 156 test fixtures from Chromium 151.
+Page-edge controls accepted Border 6 and Shadow None. A single-page screenshot
+retained its document token, text wrapping, and content placement; the decorative
+border change was not clear enough to claim a rendering pass. Custom shadow
+values were restored to opacity 12, blur 48, offsets 0/0, spread 4, and `#F89D74`.
+The final Default/close action timed out. A read-only check after stopping the
+app confirms persisted `shadowMode=default` and `borderWidth=6`. Border 0 is the
+remaining baseline restoration. No preference file was edited to make a test pass.
+
+The named synthetic profile is preserved for reproduction. It retains Personal,
+Work, the saved B-above-A split, B Favorite, empty Transfer Source, and the moved
+Pin in Personal. External-link opt-in is off. Fixture guards were disarmed before
+the final timeout. To finish, restore Border 0 through native Settings, complete
+the manual gates above, and export actual native screenshots and a short video.
+Use the same isolated profile and the existing scenario contracts; do not copy
+omitted Chromium 156 test fixtures from Chromium 151.
+
+Local evidence is under `/tmp/arcium-156-runtime`: `acceptance-space-label.md`,
+`launch-final-persistence.json`, `runtime-final-persistence-verification.json`,
+`final-settings-timeout.sample.txt`, `final-managed-stop.log`, and
+`final-teardown.json`. The fixture server must be started again for another run.
 
 ## CI corrections after draft publication
 
@@ -186,8 +199,19 @@ nested under that lock. Validation still rejects planning-only timeouts,
 unfinished evidence, and hard kills. A regression with a real GNU timer and
 delayed shutdown failed before this repair and passes afterward. All 14
 release-entrypoint and CI tests pass, the build-entrypoint checker passes,
-and independent Astra review accepted the repair. The hosted rerun is pending;
-this shell-only change does not alter the browser binary or its native gates.
+and independent Astra review accepted the repair. Both hosted sanity runs on
+`8cd1d1f` pass. This shell-only change does not alter the browser binary or its
+native gates.
+
+The full tooling suite then exposed seven obsolete expectations retained by the
+published-feature merge. Tests now require a complete Ninja plan before counting
+edges, reject builds with pending timestamps or strict check problems using the
+current diagnostic, and keep ambient remote endpoint variables from enabling
+remote builds. Sparkle setup tests stub Chromium 156's `buildtools/mac/gn`
+instead of the removed bootstrapped output. The focused 16-test run passes.
+The complete CI command passes 333 tooling tests and seven import tests.
+A subsequent four-test remote configuration run also passes, including the added explicit policy opt-in case. Repair `04b577d`
+is pushed; its hosted checks remain pending.
 
 ## Revisions
 
@@ -335,6 +359,9 @@ The prepared archive still prevents compilation of those browser-backed tests.
   formatting changes. All seven plist metadata tests pass.
 
 ## Earlier validation and repair record
+
+These chronological checkpoints predate the delivery proof gates above. Their
+patch counts, revisions, and pending checks describe those earlier builds.
 
 The entries below record intermediate revisions. The delivery proof gates
 above describe the final combined build and remaining acceptance work.
@@ -496,3 +523,27 @@ duplicate-class warning; behavior acceptance remains pending. The first build
 attempt stopped before compilation because its dry run only described GN
 regeneration. Explicit configuration regenerated the graph, after which the
 guarded build succeeded.
+
+## Isolated profile selection repair
+
+The first normal restart exposed a test-launcher constraint: `he run` appended
+`--profile-directory=Default` even when its caller omitted that option. The
+launcher now fixes only the isolated user-data directory and lets Chromium
+restore its saved subprofile selection. It still rejects caller-supplied
+profile-directory and user-data-dir overrides.
+
+Commit `8cd1d1f` contains the repair, an actual stub-process argument test, and
+workflow guidance. All four focused launch tests pass; independent Astra
+review accepted the change. The test preserves a synthetic Local State file
+with Profile 1 selected and verifies that the process receives no forced
+subprofile argument. It does not substitute for Chromium persistence testing.
+
+The same-root native retry launches PID 63611 without that argument. Work
+opens directly with its separate profile, Blue briefcase theme, and no
+original-profile Favorites or profile selector. A fresh local HTTP page renders
+in Work, and B Favorite renders in the original profile. Native Sol and the
+integrator inspected actual page contents. The fresh log segment has no fatal,
+duplicate class, GPU failure, or new Helium crash report. The saved split
+renders and reopens twice; stacking and reversing retain the then-live pages.
+The later delivery proof gates above record Peek, Little Arc, sole-Pin transfer,
+Settings, final restart, and managed teardown results.
