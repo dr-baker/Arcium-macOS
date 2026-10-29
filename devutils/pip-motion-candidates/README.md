@@ -20,20 +20,20 @@ window-motion spring still runs in both.
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
 | Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
 | Release prediction | Runs the existing release on a model copy | Card cues preview gentle placement; fast-flick release remains momentum-aware |
-| Verification | Root: 93 model checks and strict app signature verification | Root: 86 model checks, strict app signature verification and runtime checkpoint |
+| Verification | Root: 93 model checks and strict app signature verification | Root: 100 model checks in current source; signed running bundle is the author's earlier 96-check build |
 
 Terra makes the decision explicit but adds text. Opus's revised design follows
 Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 85821.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 88517.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It lowers during deliberate placement, dips on landing and requests
 haptic feedback. Corner marks and their control have been removed; two live
 lines on the card now show its confirmed outcome and active cues. Root verified
-the signed bundle and runtime checkpoint, and reran the 86 model checks.
+the signed bundle and runtime checkpoint, and ran the 100 current-source model checks.
 Root left saved tuning untouched. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
@@ -51,7 +51,7 @@ away. The card's readout includes the current shadow offset. Its perceived
 clarity and its behavior during release remain unverified on screen.
 
 Opus now retains only release momentum toward its selected snap, tuck or
-restore destination. This changes Opus's motion model, with 86 model checks
+restore destination. This changes Opus's motion model, with 100 model checks
 passing; the original lab, Terra and browser behavior are unchanged. It removes
 the initial wrong-way component, while forward spring overshoot remains
 possible. The cue revision also raises the fresh-settings lean default to 14
@@ -72,6 +72,14 @@ action, including corner docking, Smart placement, a 28-point tucked strip and
 0.35 boundary resistance. It enables feedback and haptics. Reset restores
 compiled defaults rather than previous custom settings. Root verified the new
 bundle signature and runtime checkpoint; preset interaction remains unverified.
+
+The third mode, Press into any edge, adds resistance at every inset edge,
+pointer-distance thresholds for docking and side tucking, and corner placement
+when two edges are pressed. Root reproduced and fixed two new boundary cases:
+an 8-point fast press bypassed the 110-point tuck threshold through the legacy
+velocity rule, and a zero dock threshold snapped an interior drop with no press.
+All 100 model checks now pass, including four new regressions. The two source
+fixes are not in the running PID 88517; native acceptance is pending.
 
 Build without launching, from the worktree root:
 
@@ -97,6 +105,10 @@ the MacBook and a larger external display updates its work area, snap targets,
 preview and tuck/restore boundaries. Also verify display disconnects, resolution
 and scaling changes, and that tucking uses an exterior edge rather than the
 shared edge between adjacent displays. Following Spaces remains required.
+
+The press mode extends that gate: shared display boundaries must not resist
+dragging, dock or tuck. Verify crossing between the MacBook and external display
+in both directions, including diagonal movement and re-grabbing near a seam.
 
 These checks need native runtime evidence; passing the current single-display
 motion checks does not satisfy this gate.

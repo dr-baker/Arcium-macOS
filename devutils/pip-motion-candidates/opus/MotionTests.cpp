@@ -312,7 +312,10 @@ int main() {
   for (int trial = 0; trial < 4000; ++trial) {
     m = Motion{};
     m.settings.placement = static_cast<Placement>(trial % 3);
-    m.settings.docking = trial % 7 < 4 ? Docking::Corners : Docking::SideEdges;
+    m.settings.docking = trial % 7 < 3 ? Docking::Corners :
+        trial % 7 < 5 ? Docking::SideEdges : Docking::AllEdges;
+    m.settings.press_dock = uniform(2, 40);
+    m.settings.press_tuck = uniform(60, 200);
     m.settings.free_speed = uniform(0, 800);
     m.settings.snap_distance = uniform(0, 180);
     m.settings.stash_percent = uniform(0, 75);
@@ -369,5 +372,59 @@ int main() {
   check(thrown.decision == Decision::Dock && gentle.decision == Decision::Keep &&
         near(gentle.speed, thrown.speed) && gentle.speed > 1000,
         "a fast vertical drag previews a gentle stay instead of a projected edge corner");
+  // Press into any edge: a little push docks on that edge, a long side push tucks.
+  m = Motion{}; m.settings.docking = Docking::AllEdges;
+  m.placeAt({300, 490});
+  m.begin({400, 550}, 60); m.drag({400, 560}, 60.1);
+  check(m.predict(60.3, true).decision == Decision::Keep && m.pressed.y == 0,
+        "press mode keeps a slow drop near an edge until it is pressed");
+  m.drag({400, 590}, 60.4);
+  check(near(m.pressed.y, 22) && m.position.y > 508 && m.position.y < 530,
+        "pressing past the top is resisted and measured as pointer travel");
+  preview = m.predict(60.6);
+  check(preview.decision == Decision::Dock && preview.target.x == 300 && preview.target.y == 508,
+        "a small press docks on the top edge at the same horizontal position");
+  m.end(60.6);
+  check(m.target.x == 300 && m.target.y == 508, "the top-edge press preview matches release");
+
+  m.placeAt({600, 300});
+  m.begin({700, 350}, 61); m.drag({798, 350}, 61.1);
+  check(near(m.pressed.x, 30) && m.position.x > 668 && m.position.x < 698,
+        "press mode resists the sides too");
+  preview = m.predict(61.3);
+  check(preview.decision == Decision::Dock && preview.target.x == 668 && preview.target.y == 300,
+        "a small side press docks on that side at the same height");
+  m.drag({888, 350}, 61.4);
+  preview = m.predict(61.6);
+  check(preview.decision == Decision::Tuck && preview.side == Side::Right,
+        "a long side press tucks");
+  m.end(61.6); finish(m);
+  check(m.phase == Phase::Tucked && m.tucked == Side::Right, "the long press tuck matches release");
+
+  m.placeAt({600, 450});
+  m.begin({700, 500}, 62); m.drag({798, 588}, 62.1);
+  preview = m.predict(62.3);
+  check(preview.decision == Decision::Dock && preview.target.x == 668 && preview.target.y == 508,
+        "pressing into two edges docks in that corner");
+  m.end(62.3);
+  m.placeAt({320, 230});
+  m.throwFrom({320, 230}, {0, 1200}, false);
+  check(m.target.x == 320 && m.target.y == 508,
+        "a flick in press mode lands on the nearest edge point it projects to");
+  m = Motion{}; m.settings.docking = Docking::AllEdges;
+  m.placeAt({668, 300}); m.begin({700, 350}, 70); m.drag({708, 350}, 70.005);
+  check(near(m.pressed.x, 8) && m.predict(70.005).decision == Decision::Dock &&
+        m.predict(70.005, true).decision == Decision::Keep,
+        "a short fast press throws without triggering the legacy velocity tuck");
+  m.end(70.005);
+  check(m.decision == Decision::Dock && m.tucked == Side::None,
+        "a short fast press releases to a visible edge instead of tucking");
+  m = Motion{}; m.settings.docking = Docking::AllEdges; m.settings.press_dock = 0;
+  m.placeAt({300, 260}); m.begin({400, 300}, 71); m.drag({420, 310}, 71.1);
+  check(m.predict(71.3, true).decision == Decision::Keep,
+        "a zero dock threshold still requires positive edge pressure");
+  m.placeAt({668, 300}); m.begin({700, 350}, 72); m.drag({708, 350}, 72.1);
+  check(m.predict(72.3, true).decision == Decision::Dock,
+        "positive edge pressure docks with a zero threshold");
   std::cout << checks << " checks passed\n";
 }

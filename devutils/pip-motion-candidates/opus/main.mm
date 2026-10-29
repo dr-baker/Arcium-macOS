@@ -58,7 +58,16 @@ static const Parameter parameters[] = {
   {"snap_distance", "Snap attraction distance (points)", 0, 180, &Settings::snap_distance,
     "In Smart mode, how close a slow drop must be to the nearest allowed dock to snap there.\n\n"
     "Higher: a larger attraction zone. Lower: more freedom to leave the window near a dock. Zero requires exact alignment.\n\n"
-    "Measured from the window's dropped position to the nearest corner or side-edge dock. Faster flicks use momentum projection instead.", true},
+    "Measured from the window's dropped position to the nearest corner or side-edge dock. Faster flicks use momentum projection instead.\n\n"
+    "Not used by Press into any edge, where only pressing docks.", true},
+  {"press_dock", "Press to dock (points)", 0, 60, &Settings::press_dock,
+    "Press into any edge mode: how far your pointer must push past the screen inset before letting go docks on that edge.\n\n"
+    "The window resists the push, so it moves less than your pointer. Pushing into two edges docks in that corner.\n\n"
+    "Lower: a lighter push docks. Higher: a firmer push is needed, leaving more room to place near an edge.", true},
+  {"press_tuck", "Press to tuck (points)", 40, 300, &Settings::press_tuck,
+    "Press into any edge mode: how far your pointer must push past the left or right inset before letting go tucks.\n\n"
+    "Between the dock and tuck distances, letting go docks on that side. The top and bottom never tuck.\n\n"
+    "Lower: a shorter push tucks. Higher: tucking needs a longer, more deliberate push.", true},
 };
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
 
@@ -290,46 +299,47 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   id previousState = previousData ? [NSJSONSerialization JSONObjectWithData:previousData options:0 error:nil] : nil;
   motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
   controls = [[NSWindow alloc] initWithContentRect:NSMakeRect(area.origin.x + 28,
-      std::max(area.origin.y, NSMaxY(area) - 928), 536, 900)
+      std::max(area.origin.y, NSMaxY(area) - 1008), 536, 980)
       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
       backing:NSBackingStoreBuffered defer:NO];
   controls.title = @"Opus PiP Lab — live tuning";
   controls.delegate = self;
   controls.releasedWhenClosed = NO;
   NSView *content = controls.contentView;
-  [content addSubview:label(@"Tune the movement", NSMakeRect(24, 856, 480, 28), 22)];
+  [content addSubview:label(@"Tune the movement", NSMakeRect(24, 936, 480, 28), 22)];
   NSTextField *intro = label(@"Drop slowly to leave it there; flick to dock. Push past a side to tuck.\nClick the exposed strip to restore. Re-grab an animation to interrupt it.",
-      NSMakeRect(24, 805, 490, 44), 12);
+      NSMakeRect(24, 885, 490, 44), 12);
   intro.textColor = NSColor.secondaryLabelColor;
   [content addSubview:intro];
-  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 769, 210, 28) pullsDown:NO];
+  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 849, 210, 28) pullsDown:NO];
   [presetMenu addItemsWithTitles:@[@"iOS-like baseline", @"Snappy", @"Soft spring", @"Position only", @"Custom"]];
   presetMenu.target = self; presetMenu.action = @selector(presetChanged:);
   [content addSubview:presetMenu];
-  addHelp(content, NSMakeRect(238, 774, 18, 18), @"Presets",
+  addHelp(content, NSMakeRect(238, 854, 18, 18), @"Presets",
       @"Loads a set of numeric tuning values while preserving your docking and placement modes.\n\n"
       "iOS-like baseline uses the defaults. Snappy uses a faster spring and shorter projection. Soft spring is slower with some bounce. Position only sets projection to zero. Custom means values were changed individually.\n\n"
       "Reset all variables also resets the docking and placement modes.");
-  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 769, 214, 28) pullsDown:NO];
-  [dockMenu addItemsWithTitles:@[@"Dock at four corners", @"Dock anywhere on side edges"]];
+  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 849, 214, 28) pullsDown:NO];
+  [dockMenu addItemsWithTitles:@[@"Dock at four corners", @"Dock anywhere on side edges", @"Press into any edge"]];
   dockMenu.target = self; dockMenu.action = @selector(dockingChanged:);
   [content addSubview:dockMenu];
-  addHelp(content, NSMakeRect(494, 774, 18, 18), @"Docking mode",
+  addHelp(content, NSMakeRect(494, 854, 18, 18), @"Docking mode",
       @"Chooses the allowed resting destinations when a release snaps.\n\n"
       "Four corners: docks at a corner of the visible work area. Side edges: docks on the left or right while allowing any height.\n\n"
-      "Momentum projection can choose a farther destination. Slow deliberate attraction uses the nearest dock.");
-  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 731, 288, 28) pullsDown:NO];
+      "Press into any edge: every edge resists like the top and bottom. A little push past an edge docks flush on it, wherever you are along it; pushing into two edges docks in that corner. A long push into the left or right tucks. Nearness alone never snaps a slow drop.\n\n"
+      "Momentum projection can choose a farther destination for fast flicks. Slow deliberate attraction uses the nearest dock.");
+  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 811, 288, 28) pullsDown:NO];
   [placementMenu addItemsWithTitles:@[@"Smart · slow drop stays, flick snaps", @"Always snap to dock", @"Always leave where dropped"]];
   placementMenu.target = self; placementMenu.action = @selector(placementChanged:);
   [content addSubview:placementMenu];
-  addHelp(content, NSMakeRect(318, 736, 18, 18), @"Placement mode",
+  addHelp(content, NSMakeRect(318, 816, 18, 18), @"Placement mode",
       @"Smart: slow releases stay where dropped unless near a dock; faster flicks snap using momentum.\n\n"
       "Always snap: every release docks. Always leave: releases stop where dropped, within the visible inset.\n\n"
       "Side tucking still works in every mode. The two attraction controls below tune Smart mode.");
-  [self button:@"Reset all variables" frame:NSMakeRect(348, 731, 164, 28) action:@selector(resetVariables:) tag:0];
+  [self button:@"Reset all variables" frame:NSMakeRect(348, 811, 164, 28) action:@selector(resetVariables:) tag:0];
   sliders = NSMutableArray.array; fields = NSMutableArray.array;
   for (size_t i = 0; i < parameterCount; ++i) {
-    CGFloat y = 686 - i * 38;
+    CGFloat y = 766 - i * 38;
     NSTextField *heading = label(@(parameters[i].label), NSMakeRect(24, y + 16, 370, 18), 11);
     [heading sizeToFit]; [content addSubview:heading];
     addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 6, y + 15, 18, 18),
@@ -523,7 +533,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     sliders[i].doubleValue = value;
     fields[i].stringValue = [NSString stringWithFormat:parameters[i].high > 10 ? @"%.0f" : @"%.3f", value];
   }
-  [dockMenu selectItemAtIndex:motion->settings.docking == Docking::Corners ? 0 : 1];
+  [dockMenu selectItemAtIndex:static_cast<NSInteger>(motion->settings.docking)];
   [placementMenu selectItemAtIndex:static_cast<NSInteger>(motion->settings.placement)];
   feedbackToggle.state = feedback.enabled ? NSControlStateValueOn : NSControlStateValueOff;
   hapticsToggle.state = feedback.haptics ? NSControlStateValueOn : NSControlStateValueOff;
@@ -588,7 +598,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)dockingChanged:(NSPopUpButton *)sender {
   Settings next = motion->settings;
-  next.docking = sender.indexOfSelectedItem == 0 ? Docking::Corners : Docking::SideEdges;
+  next.docking = static_cast<Docking>(sender.indexOfSelectedItem);
   [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
 }
 - (void)placementChanged:(NSPopUpButton *)sender {
@@ -678,9 +688,20 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [NSHapticFeedbackManager.defaultPerformer performFeedbackPattern:pattern
       performanceTime:NSHapticFeedbackPerformanceTimeNow];
 }
+// Bit mask of the inset edges a dock target sits on: left 1, right 2, bottom 4, top 8.
+- (int)edgesFor:(pip_motion::Point)target {
+  const auto area = motion->area();
+  const double margin = motion->settings.margin;
+  const double left = area.x + margin, right = area.x + area.width - motion->size.width - margin;
+  const double bottom = area.y + margin, top = area.y + area.height - motion->size.height - margin;
+  return (std::abs(target.x - left) < .5) | (std::abs(target.x - right) < .5) << 1 |
+      (std::abs(target.y - bottom) < .5) << 2 | (std::abs(target.y - top) < .5) << 3;
+}
 // Identity of a release outcome for haptics: decision, side and which dock.
 - (int)hapticKeyFor:(const Outcome &)outcome {
   int key = static_cast<int>(outcome.decision) * 100 + static_cast<int>(outcome.side) * 10;
+  if (outcome.decision == Decision::Dock && motion->settings.docking == Docking::AllEdges)
+    return key + 20 + [self edgesFor:outcome.target];
   if (outcome.decision == Decision::Dock) {
     const auto area = motion->area();
     key += outcome.target.x + motion->size.width / 2 < area.x + area.width / 2;
@@ -699,6 +720,13 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const auto area = motion->area();
   const bool left = target.x + motion->size.width / 2 < area.x + area.width / 2;
   if (motion->settings.docking == Docking::SideEdges) return left ? @"left edge" : @"right edge";
+  if (motion->settings.docking == Docking::AllEdges) {
+    const int edges = [self edgesFor:target];
+    NSString *across = edges & 1 ? @"left" : edges & 2 ? @"right" : nil;
+    NSString *along = edges & 8 ? @"top" : edges & 4 ? @"bottom" : nil;
+    if (across && along) return [NSString stringWithFormat:@"%@-%@ corner", along, across];
+    return [NSString stringWithFormat:@"%@ edge", along ?: across ?: @"nearest"];
+  }
   const bool top = target.y + motion->size.height / 2 > area.y + area.height / 2;
   return [NSString stringWithFormat:@"%@-%@ corner", top ? @"top" : @"bottom", left ? @"left" : @"right"];
 }
@@ -785,7 +813,14 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const double depth = std::clamp(over / std::max(1.0, w - handle), 0.0, 1.0);
   const double tuckDistance = std::max(1.0, w * motion->settings.stash_percent / 100);
   const bool committed = moved ? shown.decision == Decision::Tuck : motion->tucked != Side::None;
-  const double edgeTarget = committed ? .7 + .3 * depth : .28 * smoothstep(over / tuckDistance);
+  // In press mode the sides resist, so approach progress is the press toward the tuck distance.
+  const bool pressingEdge = motion->settings.docking == Docking::AllEdges && dragging &&
+      motion->tucked == Side::None && motion->pressed.x != 0;
+  if (pressingEdge && !committed) side = motion->pressed.x < 0 ? Side::Left : Side::Right;
+  const double approachLevel = pressingEdge ?
+      .28 * smoothstep(std::abs(motion->pressed.x) / std::max(1.0, motion->settings.press_tuck)) :
+      .28 * smoothstep(over / tuckDistance);
+  const double edgeTarget = committed ? .7 + .3 * depth : approachLevel;
 
   approach(lift, on ? liftTarget : 0, .07, .14, dt);
   approach(glow, on ? glowTarget : 0, .09, .14, dt);
@@ -875,6 +910,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (keep && feedback.settle > 0) [cues addObject:@"lowered"];
   if (std::hypot(leanX, leanY) > .5) [cues addObject:[NSString stringWithFormat:@"lean %.0f pt", std::hypot(leanX, leanY)]];
   if (std::hypot(shadowX, shadowY) > .5) [cues addObject:[NSString stringWithFormat:@"shadow → %.0f pt", std::hypot(shadowX, shadowY)]];
+  if (dragging && length(motion->pressed) > .5)
+    [cues addObject:[NSString stringWithFormat:@"press %.0f pt", length(motion->pressed)]];
   if (edgeAmount > .01 && feedback.edge > 0) [cues addObject:[NSString stringWithFormat:@"rim %.0f%%", edgeAmount * 100]];
   if (glow > .01 && feedback.glow > 0) [cues addObject:@"glow"];
   if (dip > 0) [cues addObject:@"press"];
@@ -935,7 +972,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging) [self writeState];
 }
 - (NSDictionary *)settingsDictionary {
-  NSMutableDictionary *dict = [@{@"version":@1, @"docking":motion->settings.docking == Docking::Corners ? @"corners" : @"edges"} mutableCopy];
+  NSMutableDictionary *dict = [@{@"version":@1, @"docking":@[@"corners", @"edges", @"all-edges"][static_cast<NSInteger>(motion->settings.docking)]} mutableCopy];
   dict[@"placement"] = @[@"smart", @"always-dock", @"free"][static_cast<NSInteger>(motion->settings.placement)];
   for (const auto& parameter : parameters) dict[@(parameter.key)] = @(motion->settings.*parameter.member);
   dict[@"feedback"] = feedback.enabled ? @YES : @NO;
@@ -973,7 +1010,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   BOOL valid = [object isKindOfClass:NSDictionary.class];
   NSDictionary *dict = valid ? object : @{};
   valid = valid && [dict[@"version"] isEqual:@1] &&
-      ([dict[@"docking"] isEqual:@"corners"] || [dict[@"docking"] isEqual:@"edges"]);
+      [@[@"corners", @"edges", @"all-edges"] containsObject:dict[@"docking"]];
   BOOL migratedTuckDistance = NO;
   if (valid && !dict[@"stash_percent"] && dict[@"stash_distance"]) {
     id legacy = dict[@"stash_distance"];
@@ -1022,7 +1059,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (!valid) {
     fileStatus.stringValue = @"Invalid settings file · keeping the last valid values"; return;
   }
-  next.docking = [dict[@"docking"] isEqual:@"corners"] ? Docking::Corners : Docking::SideEdges;
+  next.docking = static_cast<Docking>([@[@"corners", @"edges", @"all-edges"] indexOfObject:dict[@"docking"]]);
   [saveTimer invalidate]; saveTimer = nil;
   feedback = nextFeedback;
   [presetMenu selectItemAtIndex:4]; [self apply:next save:NO];

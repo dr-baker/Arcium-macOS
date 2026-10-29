@@ -27,7 +27,7 @@ inline Point toward(Point velocity, Point from, Point to) {
 }
 struct Size { double width = 320, height = 180; };
 struct Rect { double x = 0, y = 0, width = 1000, height = 700; };
-enum class Docking { Corners, SideEdges };
+enum class Docking { Corners, SideEdges, AllEdges };
 enum class Placement { Smart, AlwaysDock, Free };
 enum class Side { None, Left, Right };
 enum class Phase { Resting, Dragging, Settling, Tucked };
@@ -54,6 +54,9 @@ struct Settings {
   double resistance = 0.35;
   double free_speed = 140;
   double snap_distance = 48;
+  // Press into any edge: pointer travel past the inset needed to dock, and to tuck at a side.
+  double press_dock = 10;
+  double press_tuck = 110;
   Docking docking = Docking::Corners;
   Placement placement = Placement::Smart;
 };
@@ -125,10 +128,24 @@ class Motion {
   Side tucked = Side::None;
   Decision decision = Decision::None;
   double release_speed = 0, dock_distance = 0;
+  // Pointer travel past the inset bounds during this drag, before resistance (press mode).
+  Point pressed;
 
   Point dockTarget(Point origin, Point release_velocity) const {
     const Point projected = origin + release_velocity * settings.projection;
     const auto points = corners();
+    if (settings.docking == Docking::AllEdges) {
+      Point p{std::clamp(projected.x, points[0].x, points[1].x),
+              std::clamp(projected.y, points[0].y, points[2].y)};
+      const double left = p.x - points[0].x, right = points[1].x - p.x;
+      const double bottom = p.y - points[0].y, top = points[2].y - p.y;
+      const double nearest = std::min({left, right, bottom, top});
+      if (nearest == left) p.x = points[0].x;
+      else if (nearest == right) p.x = points[1].x;
+      else if (nearest == bottom) p.y = points[0].y;
+      else p.y = points[2].y;
+      return p;
+    }
     if (settings.docking == Docking::SideEdges) {
       return {projected.x < (points[0].x + points[1].x) / 2 ? points[0].x : points[1].x,
               std::clamp(projected.y, points[0].y, points[2].y)};
@@ -155,6 +172,7 @@ class Motion {
     start_position_ = position;
     offset_ = pointer - position;
     drag_side_ = tucked;
+    pressed = {};
     phase = Phase::Dragging;
     velocity = {};
     tracker_.reset();
@@ -188,10 +206,29 @@ class Motion {
     const double low = std::min(area_.y + settings.margin, start_position_.y);
     const double high = std::max(area_.y + area_.height - size.height - settings.margin,
                                  start_position_.y);
-    if (next.y < low)
+    pressed = {};
+    if (next.y < low) {
+      pressed.y = next.y - low;
       next.y = low + rubber(next.y - low, size.height, settings.resistance);
-    if (next.y > high)
+    }
+    if (next.y > high) {
+      pressed.y = next.y - high;
       next.y = high + rubber(next.y - high, size.height, settings.resistance);
+    }
+    // Press mode resists the sides too, so a little push docks and a long push tucks.
+    if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
+      const double left = std::min(area_.x + settings.margin, start_position_.x);
+      const double right = std::max(area_.x + area_.width - size.width - settings.margin,
+                                    start_position_.x);
+      if (next.x < left) {
+        pressed.x = next.x - left;
+        next.x = left + rubber(next.x - left, size.width, settings.resistance);
+      }
+      if (next.x > right) {
+        pressed.x = next.x - right;
+        next.x = right + rubber(next.x - right, size.width, settings.resistance);
+      }
+    }
     position = next;
     constrainPresentation();
     tracker_.add(pointer, time);
@@ -210,7 +247,7 @@ class Motion {
       settleUnmovedGrab();
       return;
     }
-    throwFrom(position, release, true);
+    throwFrom(position, release, true, pressed);
   }
 
   // Side-effect-free preview of end(time), using the same classification. A gentle preview
@@ -225,15 +262,30 @@ class Motion {
           Outcome{Decision::Restore, restore_side_, restoreTarget(), length(release)} :
           Outcome{Decision::Tuck, drag_side_, tuckTarget(drag_side_, position.y), length(release)};
     } else {
-      outcome = unmovedGrab(release) ? unmovedOutcome() : classify(position, release, true);
+      outcome = unmovedGrab(release) ? unmovedOutcome() : classify(position, release, true, pressed);
     }
     outcome.moved = length(position - start_position_) >= 2;
     outcome.speed = length(measured);
     return outcome;
   }
 
-  Outcome classify(Point origin, Point release, bool allow_stash) const {
+  Outcome classify(Point origin, Point release, bool allow_stash, Point press = {}) const {
     const double speed = length(release);
+    if (settings.docking == Docking::AllEdges) {
+      const bool side = std::abs(press.x) > 0 && std::abs(press.x) >= settings.press_dock;
+      const bool end = std::abs(press.y) > 0 && std::abs(press.y) >= settings.press_dock;
+      if (allow_stash && std::abs(press.x) > 0 && std::abs(press.x) >= settings.press_tuck) {
+        const Side tuck_side = press.x < 0 ? Side::Left : Side::Right;
+        return {Decision::Tuck, tuck_side, tuckTarget(tuck_side, origin.y), speed};
+      }
+      if (side || end) {
+        const auto points = corners();
+        Point target = clampVisible(origin);
+        if (side) target.x = press.x < 0 ? points[0].x : points[1].x;
+        if (end) target.y = press.y < 0 ? points[0].y : points[2].y;
+        return {Decision::Dock, Side::None, target, speed};
+      }
+    }
     const double left_overlap = area_.x - origin.x;
     const double right_overlap = origin.x + size.width - area_.x - area_.width;
     const bool horizontal = std::abs(release.x) > 1.6 * std::abs(release.y);
@@ -242,12 +294,16 @@ class Motion {
     const bool fling_right = origin.x + size.width > area_.x + area_.width - 32 &&
         release.x > settings.stash_velocity && horizontal;
     const double tuck_distance = size.width * settings.stash_percent / 100;
-    if (allow_stash && ((left_overlap > 0 && left_overlap >= tuck_distance) || fling_left))
+    if (settings.docking != Docking::AllEdges && allow_stash &&
+        ((left_overlap > 0 && left_overlap >= tuck_distance) || fling_left))
       return {Decision::Tuck, Side::Left, tuckTarget(Side::Left, origin.y), speed};
-    if (allow_stash && ((right_overlap > 0 && right_overlap >= tuck_distance) || fling_right))
+    if (settings.docking != Docking::AllEdges && allow_stash &&
+        ((right_overlap > 0 && right_overlap >= tuck_distance) || fling_right))
       return {Decision::Tuck, Side::Right, tuckTarget(Side::Right, origin.y), speed};
     const bool deliberate = speed <= settings.free_speed;
-    const bool near_dock = length(origin - dockTarget(origin, {})) <= settings.snap_distance;
+    // Press mode docks only by pressing; nearness alone never snaps a slow drop.
+    const bool near_dock = settings.docking != Docking::AllEdges &&
+        length(origin - dockTarget(origin, {})) <= settings.snap_distance;
     if (settings.placement == Placement::Free ||
         (settings.placement == Placement::Smart && deliberate && !near_dock))
       return {Decision::Keep, Side::None, clampVisible(origin), speed};
@@ -261,14 +317,14 @@ class Motion {
     else settleUnmovedGrab();
   }
 
-  void throwFrom(Point origin, Point release, bool allow_stash) {
+  void throwFrom(Point origin, Point release, bool allow_stash, Point press = {}) {
     position = origin;
     velocity = release;
-    last_throw_ = Throw{origin, release, allow_stash};
+    last_throw_ = Throw{origin, release, allow_stash, press};
     release_speed = length(release);
     dock_distance = length(origin - dockTarget(origin, {}));
     tucked = Side::None;
-    const Outcome outcome = classify(origin, release, allow_stash);
+    const Outcome outcome = classify(origin, release, allow_stash, press);
     if (outcome.decision == Decision::Tuck) {
       tuck(outcome.side);
     } else {
@@ -303,7 +359,7 @@ class Motion {
   void replay() {
     if (!last_throw_) return;
     const auto sample = *last_throw_;
-    throwFrom(sample.origin, sample.velocity, sample.allow_stash);
+    throwFrom(sample.origin, sample.velocity, sample.allow_stash, sample.press);
   }
   bool canReplay() const { return last_throw_.has_value(); }
 
@@ -319,8 +375,12 @@ class Motion {
       settle(clampVisible(target), velocity, Goal::Free);
     } else {
       Point next_target = dockTarget(position, {});
-      if (phase == Phase::Settling && last_throw_)
-        next_target = dockDestination(last_throw_->origin, last_throw_->velocity);
+      if (phase == Phase::Settling && last_throw_) {
+        const Outcome thrown = classify(last_throw_->origin, last_throw_->velocity,
+                                        last_throw_->allow_stash, last_throw_->press);
+        next_target = settings.docking == Docking::AllEdges && thrown.decision == Decision::Dock ?
+            thrown.target : dockDestination(last_throw_->origin, last_throw_->velocity);
+      }
       settle(next_target, velocity, Goal::Dock);
     }
   }
@@ -423,7 +483,7 @@ class Motion {
     phase = Phase::Settling;
     goal_ = goal;
   }
-  struct Throw { Point origin, velocity; bool allow_stash; };
+  struct Throw { Point origin, velocity; bool allow_stash; Point press; };
   Rect area_;
   Point offset_, start_position_, restore_point_;
   Side drag_side_ = Side::None;

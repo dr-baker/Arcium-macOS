@@ -27,7 +27,7 @@ before settling toward the target; it does not remove the spring or guarantee
 that forward momentum can never overshoot.
 
 This changes only Opus's copied motion model. The original lab, Terra and the
-browser implementation have not received this change. Root reran all 86 model
+browser implementation have not received this change. Root reran all 100 model
 checks, including the original motion cases and the new release-direction cases.
 
 The card's cues now use a separate gentle prediction, with zero release
@@ -38,6 +38,33 @@ card then reads “Moving · release throws”. Entering neutral requests no hap
 The actual release and the tuning window's “Release now” line still use the
 momentum-aware prediction; the card is not an exact fast-flick destination
 preview.
+
+## Press into any edge
+
+The third docking mode resists dragging past all four inset boundaries. In
+Smart placement, nearness alone does not snap a slow drop. Positive pointer
+travel past a boundary selects that edge once it reaches **Press to dock**
+(default 10 points). Pressing two boundaries selects their corner. A horizontal
+press reaching **Press to tuck** (default 110 points) tucks into that side;
+top and bottom do not tuck. These are pointer distances before resistance,
+rather than the card's visible displacement.
+
+Fast releases without a qualifying press can still project toward the nearest
+point on an edge. The old overlap and velocity tuck rules are excluded in this
+mode. A zero dock threshold still requires a positive press. The card's readout
+includes the current press amount. The settings use `docking: "all-edges"`,
+`press_dock` and `press_tuck`; older files can omit the two numeric keys.
+
+Grounded defaults and Reset continue to select corner docking. The tuning
+window is 80 points taller to fit the new controls. Press-mode native feel,
+settings persistence and re-grab transitions remain unverified. During browser
+integration, resistance and press docking must apply only to exterior display
+edges, allowing free movement across a shared boundary between screens.
+
+The author launched the initial 96-check build as PID 88517. Root subsequently
+fixed two boundary cases in source: a short fast press reaching the legacy
+tuck path, and a zero threshold snapping with no press. All 100 model checks
+pass. Those two fixes need a rebuilt bundle; they are not present in PID 88517.
 
 ## The cues
 
