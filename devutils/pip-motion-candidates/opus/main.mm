@@ -68,7 +68,7 @@ struct Feedback {
   double lift = .70;
   double glow = .50;
   double edge = .60;
-  double lean = 4;
+  double lean = 8;
 };
 struct FeedbackParameter {
   const char *key, *label;
@@ -87,8 +87,9 @@ static const FeedbackParameter feedbackParameters[] = {
   {"feedback_edge", "Edge shade", 0, 1, &Feedback::edge,
     "How dark the shadow cast by the screen's rim gets on the part of the window going into a side.\n\n"
     "It starts faint as you push in, deepens once letting go would tuck, and stays while tucked. Zero leaves only the chevron."},
-  {"feedback_lean", "Dock lean", 0, 10, &Feedback::lean,
-    "How far, in points, the window leans toward the dock it would snap to while you hold it slowly near one.\n\n"
+  {"feedback_lean", "Dock lean", 0, 16, &Feedback::lean,
+    "How far, in points, the window leans toward the dock it would snap to, with its shadow cast further toward it.\n\n"
+    "The pull builds as you get close to a dock, or anywhere while you move slowly enough to snap.\n\n"
     "Zero turns the lean off. Reduce Motion also turns it off."},
 };
 static constexpr size_t feedbackParameterCount = sizeof(feedbackParameters) / sizeof(feedbackParameters[0]);
@@ -160,7 +161,7 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSString *settingsPath, *statePath;
   NSData *lastSettingsData;
   Feedback feedback;
-  CALayer *ambientShadow, *contactShadow, *glowShadow, *overlay;
+  CALayer *stage, *ambientShadow, *contactShadow, *glowShadow, *overlay;
   CAGradientLayer *rimShade;
   CAShapeLayer *chevron, *rimLight;
   NSButton *feedbackToggle;
@@ -183,8 +184,10 @@ static void approach(double& value, double target, double rise, double fall, dou
 - (void)mouseDown:(NSEvent *)event { [self.lab begin:event]; }
 - (void)mouseDragged:(NSEvent *)event { [self.lab drag:event]; }
 - (void)mouseUp:(NSEvent *)event { [self.lab end:event]; }
-- (void)drawRect:(NSRect)dirty {
-  NSRect bounds = self.bounds;
+@end
+
+// The card artwork, rendered once into a layer so the whole card can scale with its shadow.
+static void drawCard(NSRect bounds) {
   [[NSBezierPath bezierPathWithRoundedRect:bounds xRadius:16 yRadius:16] addClip];
   NSGradient *gradient = [[NSGradient alloc] initWithStartingColor:
       [NSColor colorWithSRGBRed:.12 green:.30 blue:.38 alpha:1]
@@ -202,7 +205,6 @@ static void approach(double& value, double target, double rise, double fall, dou
     NSFontAttributeName:[NSFont systemFontOfSize:11],
     NSForegroundColorAttributeName:[NSColor colorWithWhite:1 alpha:.45]}];
 }
-@end
 
 static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
   NSTextField *view = [NSTextField labelWithString:text];
@@ -393,21 +395,20 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   RootView *root = [[RootView alloc] initWithFrame:NSMakeRect(0, 0, w + 2 * kPad, h + 2 * kPad)];
   root.wantsLayer = YES; panel.contentView = root;
   const CGFloat scale = screen.backingScaleFactor;
-  auto host = [&]() {
-    PassView *view = [[PassView alloc] initWithFrame:root.bounds];
-    view.layer = [CALayer layer]; view.wantsLayer = YES;
-    view.layer.contentsScale = scale;
-    return view;
-  };
-
-  // Shadow stack under the card: a wide ambient shadow, a tight contact shadow and the hold glow.
-  PassView *shadows = host();
-  CGPathRef shape = CGPathCreateWithRoundedRect(CGRectMake(0, 0, w, h), 16, 16, nullptr);
+  // One stage holds the shadows, card and overlay so they lift and scale together.
+  PassView *host = [[PassView alloc] initWithFrame:root.bounds];
+  host.layer = [CALayer layer]; host.wantsLayer = YES;
+  [root addSubview:host];
+  stage = [CALayer layer];
+  stage.bounds = CGRectMake(0, 0, w, h);
+  stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
+  [host.layer addSublayer:stage];
+  CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, 16, 16, nullptr);
   auto shadowLayer = [&](CGColorRef color) {
     CALayer *layer = [CALayer layer];
-    layer.frame = card; layer.shadowPath = shape; layer.shadowColor = color;
+    layer.frame = stage.bounds; layer.shadowPath = shape; layer.shadowColor = color;
     layer.shadowOpacity = 0;
-    [shadows.layer addSublayer:layer];
+    [stage addSublayer:layer];
     return layer;
   };
   glowShadow = shadowLayer(gray(1, 1));
@@ -415,17 +416,18 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   contactShadow = shadowLayer(gray(0, 1));
   glowShadow.shadowOffset = CGSizeZero; glowShadow.shadowRadius = 8;
   CGPathRelease(shape);
-  [root addSubview:shadows];
-
-  example = [[ExampleView alloc] initWithFrame:NSRectFromCGRect(card)];
-  example.lab = self; example.wantsLayer = YES;
-  [root addSubview:example];
+  NSImage *artwork = [NSImage imageWithSize:NSMakeSize(w, h) flipped:NO drawingHandler:^BOOL(NSRect rect) {
+    drawCard(rect); return YES;
+  }];
+  CALayer *cardLayer = [CALayer layer];
+  cardLayer.frame = stage.bounds; cardLayer.contentsScale = scale;
+  cardLayer.contents = [artwork layerContentsForContentsScale:scale];
+  [stage addSublayer:cardLayer];
 
   // Overlay on the card: the screen rim's shadow, the chevron and the glowing border.
-  PassView *overlayHost = host();
   overlay = [CALayer layer];
-  overlay.frame = card; overlay.cornerRadius = 16; overlay.masksToBounds = YES;
-  [overlayHost.layer addSublayer:overlay];
+  overlay.frame = stage.bounds; overlay.cornerRadius = 16; overlay.masksToBounds = YES;
+  [stage addSublayer:overlay];
   rimShade = [CAGradientLayer layer];
   rimShade.opacity = 0; rimShade.locations = @[@0, @.4, @1];
   [overlay addSublayer:rimShade];
@@ -442,7 +444,11 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   rimLight.fillColor = nil; rimLight.strokeColor = gray(1, .9); rimLight.lineWidth = 1.5;
   rimLight.opacity = 0;
   [overlay addSublayer:rimLight];
-  [root addSubview:overlayHost];
+
+  // Transparent, unscaled event target over the card.
+  example = [[ExampleView alloc] initWithFrame:NSRectFromCGRect(card)];
+  example.lab = self;
+  [root addSubview:example];
   [self syncControls];
   if ([NSFileManager.defaultManager fileExistsAtPath:settingsPath]) [self reloadSettings];
   else [self saveSettings];
@@ -634,16 +640,22 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     liftTarget = std::sqrt(std::clamp(length(motion->target - position) / releaseDistance, 0.0, 1.0));
   const double glowTarget = moved && outcome.decision == Decision::Keep ? 1 : 0;
 
-  // Hysteresis keeps the lean steady while speed hovers around the deliberate threshold.
+  // Magnetic pull toward the dock release would snap to: it builds with proximity, and is full
+  // whenever the drag is slow enough to snap. Hysteresis steadies the slow-speed gate.
   const double gate = motion->settings.free_speed;
-  leaning = on && moved && outcome.decision == Decision::Dock && feedback.lean > 0 &&
-      !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion &&
-      outcome.speed <= (leaning ? gate + std::max(60.0, gate / 2) : gate);
+  const bool slow = outcome.speed <= (leaning ? gate + std::max(60.0, gate / 2) : gate);
   pip_motion::Point leanTarget{};
-  if (leaning) {
+  leaning = false;
+  if (on && moved && outcome.decision == Decision::Dock && feedback.lean > 0 &&
+      !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
     const pip_motion::Point toward = outcome.target - position;
     const double distance = length(toward);
-    if (distance > .5) leanTarget = toward * (std::min(feedback.lean, distance * .15) / distance);
+    const double reach = 2 * std::max(motion->settings.snap_distance, 48.0);
+    const double engage = std::max(slow ? 1.0 : 0.0, smoothstep(1 - distance / reach));
+    if (engage > 0 && distance > .5) {
+      leaning = true;
+      leanTarget = toward * (engage * std::min(feedback.lean, distance * .5) / distance);
+    }
   }
 
   // The screen rim casts a shadow on the part of the window going into a side.
@@ -667,18 +679,23 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [CATransaction setDisableActions:YES];
   const CGRect card = CGRectMake(kPad + leanX, kPad + leanY, w, h);
   if (!NSEqualPoints(example.frame.origin, NSPointFromCGPoint(card.origin))) [example setFrameOrigin:card.origin];
-  ambientShadow.frame = contactShadow.frame = glowShadow.frame = overlay.frame = card;
+  // Lifting grows and softens the shadow while the card shrinks slightly with it.
   const double l = lift * feedback.lift;
-  ambientShadow.shadowRadius = 10 + 18 * l;
-  ambientShadow.shadowOpacity = .30 + .12 * l;
-  ambientShadow.shadowOffset = CGSizeMake(0, -(5 + 11 * l));
-  contactShadow.shadowRadius = 2 + 2 * l;
-  contactShadow.shadowOpacity = .24 * (1 - .8 * l);
-  contactShadow.shadowOffset = CGSizeMake(0, -(1 + 2 * l));
+  const double cardScale = 1 - .025 * l;
+  stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
+  stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
+  ambientShadow.shadowRadius = 14 + 14 * l;
+  ambientShadow.shadowOpacity = .36 + .08 * l;
+  ambientShadow.shadowOffset = CGSizeMake(leanX * 1.5, -(7 + 9 * l) + leanY * 1.5);
+  contactShadow.shadowRadius = 2.5 + 2 * l;
+  contactShadow.shadowOpacity = .28 * (1 - .75 * l);
+  contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(1.5 + 2 * l) + leanY * .5);
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
-  const double rim = (side == Side::Left ? area.x : area.x + area.width) - position.x - leanX;
+  // Screen edge in card coordinates, accounting for lean and the lift scale about the card's center.
+  const double rimScreen = side == Side::Left ? area.x : area.x + area.width;
+  const double rim = w / 2 + (rimScreen - (position.x + leanX + w / 2)) / cardScale;
   const double reach = std::max(56.0, handle * 2);
   if (rimShadeStrength != feedback.edge || !rimShade.colors) {
     rimShadeStrength = feedback.edge;
@@ -690,11 +707,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   rimShade.endPoint = CGPointMake(side == Side::Left ? 1 : 0, .5);
   rimShade.opacity = edgeAmount;
 
-  // The chevron sits in the strip that stays visible and fades in with depth.
+  // The chevron stays where it rests once tucked, centered in the visible strip, and only fades in.
   Side chevronTarget = on ? side : motion->tucked;
   double chevronAlpha = on ? std::pow(edgeAmount, 1.3) : motion->tucked != Side::None;
-  double chevronX = on ? (side == Side::Left ? rim + handle / 2 : rim - handle / 2) :
-      (motion->tucked == Side::Left ? w - 14 : 14);
+  double chevronX = (chevronTarget == Side::Left ? w - handle / 2 : handle / 2);
   if (chevronTarget != Side::None && chevronTarget != chevronSide) {
     chevronSide = chevronTarget;
     CGMutablePathRef path = CGPathCreateMutable();
@@ -704,9 +720,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     CGPathAddLineToPoint(path, nullptr, left ? 2 : 8, 16);
     chevron.path = path; CGPathRelease(path);
   }
-  chevron.position = CGPointMake(std::clamp(chevronX, 8.0, w - 8), 90);
-  const double chevronScale = on ? .85 + .15 * edgeAmount : 1;
-  chevron.transform = CATransform3DMakeScale(chevronScale, chevronScale, 1);
+  chevron.position = CGPointMake(chevronX, 90);
   chevron.opacity = chevronAlpha;
   [CATransaction commit];
 

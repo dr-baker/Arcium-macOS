@@ -14,7 +14,7 @@ window-motion spring still runs in both.
 | | Terra | Opus |
 | --- | --- | --- |
 | Feedback | Small label and directional arrow inside the dragged window | Pickup/set-down shadow, hold glow, progressive rim shade and chevron |
-| Slow docking | Names the decision and destination direction | Leans toward the selected dock; Reduce Motion disables the lean |
+| Slow docking | Names the decision and destination direction | Proximity-based pull toward the selected dock, with directional shadow; Reduce Motion disables the lean |
 | Fast flick | Continues predicting the release | Stays lifted during travel and sets down at the destination |
 | Deliberate placement | Says “Stay here” or “Place inside” | Faint border glow while held |
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
@@ -27,9 +27,10 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 57925.
-Root verified the signed bundle and a runtime checkpoint from that PID with
-Lift 0.70, Hold glow 0.50, Edge shade 0.60 and Dock lean 4. Native appearance,
+validation. The author rebuilt and relaunched the revised Opus UI as PID 60043.
+The current revision adds a stronger proximity-based lean, pickup shrink and a
+fixed-position chevron. Root verified the signed bundle and a runtime checkpoint
+with Lift 0.70, Hold glow 0.50, Edge shade 0.60 and Dock lean 8. Native appearance,
 interaction and input-region acceptance remain open.
 
 Build without launching, from the worktree root:
