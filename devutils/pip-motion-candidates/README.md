@@ -27,8 +27,8 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 3351 (author-reported checkpoint).
-The current revision includes a proximity-based lean, pickup shrink, a
+validation. The author rebuilt and relaunched the revised Opus UI as PID 9104 (author-reported checkpoint).
+The current revision includes a proximity-based lean, pickup growth on a shared lift/shadow spring, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It retains its held look with a contact-shadow cue during deliberate placement,
 dips on landing and requests

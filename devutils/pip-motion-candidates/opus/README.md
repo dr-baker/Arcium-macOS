@@ -83,16 +83,19 @@ migration are not accepted solely from those checks.
 ## The cues
 
 - **Pickup.** Pressing the window grows and softens its shadow, and the tight
-  contact shadow fades, so it reads as lifted off the desktop. The card and its
-  shadows shrink together by about 1.75% at the default Lift value. The resting
-  and picked-up shadows are broad and light, with a softer contact shadow.
+  contact shadow fades, so it reads as lifted off the desktop. One slightly underdamped spring drives both
+  the card scale and its centered shadows. The card grows by about 2.1% at the
+  default Lift value, or 3% at Lift 1, before a small pickup overshoot. The
+  shadows stay centered except for the directional dock cue. Spring response
+  is .26 seconds while rising and .32 while falling; these are response
+  parameters, not fixed animation durations.
 - **Set down.** After release it stays lifted while it travels and sets down as
   it arrives. A drop that stays put sets down right away. A snap, tuck or
   restore lands at its destination. A small scale dip confirms landing; the
   Press control adjusts it.
 - **Stay here.** While letting go would leave the window where it is, its
-  broad shadow moves inward and its tight contact shadow returns. Pickup
-  shrink and the lifted look remain throughout the drag. Settle tunes this
+  broad shadow spread contracts partway and its tight contact shadow returns.
+  The held size and lifted look remain throughout the drag. Settle tunes this
   independent cue. The former corner marks and Anchors
   control have been removed. Hold glow remains available for comparison, with a default
   of zero; existing saved glow values are preserved.
@@ -185,7 +188,7 @@ tuck/restore, Reset position, JSON and status controls stay below the tabs.
 | Release feedback | Turns every cue off to compare with plain motion. The resting shadow and the tucked chevron remain. |
 | Haptics | Requests pickup, outcome-change and landing taps. Default on. |
 | Lift | How much the shadow grows when picked up. Default 0.70. |
-| Pickup shadow | Softens (+1), translates (0) or sharpens (−1) the lifted shadow. Default +1. |
+| Pickup shadow | Softens (+1), preserves (0) or sharpens (−1) the lifted shadow. Default +1. |
 | Settle | Contact-shadow cue while release would keep it in place, retaining the pickup look. Default 0.60. |
 | Press | Landing dip strength. Default 0.60. |
 | Hold glow | Border glow strength while release would keep the window in place. Default 0. |
@@ -221,3 +224,7 @@ and survives settings resets. The Pickup shadow control defaults to softening.
 The running user-test app was left untouched during root's review fixes. Native
 layout, cue feel, haptic delivery, display crossing and input-region acceptance
 remain open; these changes have not been integrated into Chromium.
+
+The centered-shadow and shared lift-spring revision compiles and passes the
+existing model/schema suites. Those suites do not assert its visual timing,
+shadow appearance or enlarged card hit region; native acceptance remains open.

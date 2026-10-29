@@ -93,17 +93,17 @@ struct FeedbackParameter {
 };
 static const FeedbackParameter feedbackParameters[] = {
   {"feedback_lift", "Lift", 0, 1, &Feedback::lift,
-    "How much the shadow grows and softens when you pick the window up.\n\n"
+    "How much the window rises when you pick it up: it grows slightly toward you and its centered shadow spreads, both on one spring.\n\n"
     "After release, the window stays lifted while it travels and sets down as it arrives.\n\n"
     "Zero keeps the resting shadow."},
   {"feedback_pickup_shadow", "Pickup shadow", -1, 1, &Feedback::pickupShadow,
     "How the shadow changes as the window lifts, from sharpening to softening.\n\n"
     "+1 softens: the shadow spreads wider and blurrier, like an object rising away from the desk under room light.\n\n"
-    "0 keeps its edge and only moves it down. −1 sharpens: the shadow tightens and darkens, like a spotlight overhead.\n\n"
+    "0 keeps its spread and edge unchanged. −1 sharpens: the shadow tightens and darkens, like a spotlight overhead.\n\n"
     "Lift sets how strong the change is."},
   {"feedback_settle", "Settle", 0, 1, &Feedback::settle,
     "While letting go would leave the window where it is, it hovers closer to the desk without losing its held look.\n\n"
-    "The broad shadow moves in toward the window and the tight contact shadow returns, while the window stays slightly shrunk and its shadow stays lifted. Releasing finishes setting it down.\n\n"
+    "The broad shadow pulls partway back in and the tight contact shadow returns, while the window keeps its held size. Releasing finishes setting it down.\n\n"
     "Zero keeps the full held look until release."},
   {"feedback_press", "Press", 0, 1, &Feedback::press,
     "How much the window dips and springs back when it lands after you let go, like setting a cup on a table.\n\n"
@@ -203,7 +203,7 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSButton *feedbackToggle, *hapticsToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
-  double lift, settleAmount, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
+  double lift, liftVelocity, settleAmount, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
   Side chevronSide;
   BOOL leaning, awaitingLanding, moving;
   double pressStart, lastHaptic, pendingSince;
@@ -910,7 +910,11 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       .28 * smoothstep(over / tuckDistance);
   const double edgeTarget = committed ? .7 + .3 * depth : approachLevel;
 
-  approach(lift, on ? liftTarget : 0, .07, .14, dt);
+  // One slightly underdamped spring drives the card's rise and its shadow together, so pickup
+  // pops up a touch past held height and set-down lands with a faint give.
+  const double liftGoal = on ? liftTarget : 0;
+  pip_motion::spring(lift, liftVelocity, liftGoal, liftGoal > lift ? .26 : .32, .78, dt);
+  if (std::abs(lift - liftGoal) < 1e-3 && std::abs(liftVelocity) < 1e-2) { lift = liftGoal; liftVelocity = 0; }
   approach(settleAmount, on ? settleTarget : 0, .12, .12, dt);
   approach(glow, on ? glowTarget : 0, .09, .14, dt);
   approach(edgeAmount, on ? edgeTarget : 0, .12, .14, dt);
@@ -923,24 +927,28 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [CATransaction setDisableActions:YES];
   const CGRect card = CGRectMake(kPad + leanX, kPad + leanY, w, h);
   if (!NSEqualPoints(example.frame.origin, NSPointFromCGPoint(card.origin))) [example setFrameOrigin:card.origin];
-  // Lifting grows and softens the shadow while the card shrinks slightly with it.
-  const double l = lift * feedback.lift;
+  // The same lift spring drives the card scale and centered shadow spread.
+  const double l = std::clamp(lift, -.15, 1.2) * feedback.lift;
   // A landing dips the card once and springs back.
   const double pressAge = now - pressStart, pressTime = .24;
   const bool pressing = on && pressAge >= 0 && pressAge < pressTime;
   const double dip = pressing ? .02 * feedback.press * (1 - std::cos(2 * M_PI * pressAge / pressTime)) / 2 : 0;
-  const double cardScale = (1 - .025 * l) * (1 - dip);
+  // Lifting brings the card toward you: it grows slightly as its shadow spreads.
+  const double cardScale = (1 + .03 * l) * (1 - dip);
   stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
   stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
   // Pickup shadow: +1 spreads and softens as it lifts, -1 tightens and darkens.
   const double k = std::clamp(feedback.pickupShadow, -1.0, 1.0);
   const double settled = settleAmount * feedback.settle;
-  ambientShadow.shadowRadius = 18 + l * (k >= 0 ? 14 * k : 12 * k);
-  ambientShadow.shadowOpacity = .30 + l * (k >= 0 ? .06 * k : -.16 * k);
-  ambientShadow.shadowOffset = CGSizeMake(shadowX, -(8 + 10 * l * (1 - .4 * settled)) + shadowY);
+  // Shadows sit centered under the card; height reads through spread, not offset. Settling
+  // pulls the spread partway back in while the card keeps its held size.
+  const double spread = l * (1 - .4 * settled);
+  ambientShadow.shadowRadius = 18 + spread * (k >= 0 ? 14 * k : 12 * k);
+  ambientShadow.shadowOpacity = .30 + spread * (k >= 0 ? .06 * k : -.16 * k);
+  ambientShadow.shadowOffset = CGSizeMake(shadowX, shadowY);
   contactShadow.shadowRadius = 4 + 3 * l;
   contactShadow.shadowOpacity = .16 * (1 - .75 * l * std::max(k, 0.0)) + .14 * settled;
-  contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(2 + 2 * l) + leanY * .5);
+  contactShadow.shadowOffset = CGSizeMake(leanX * .5, leanY * .5);
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
@@ -1029,7 +1037,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       case Decision::None: break;
     }
   }
-  return !pressing && lift == (on ? liftTarget : 0) && settleAmount == (on ? settleTarget : 0) && glow == (on ? glowTarget : 0) &&
+  return !pressing && lift == liftGoal && liftVelocity == 0 && settleAmount == (on ? settleTarget : 0) && glow == (on ? glowTarget : 0) &&
       edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y &&
       shadowX == shadowTarget.x && shadowY == shadowTarget.y;
 }
