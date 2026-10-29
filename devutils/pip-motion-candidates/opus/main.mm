@@ -65,9 +65,10 @@ static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[
 // Release feedback lives in the lab, not the motion model; it only reads predictions.
 struct Feedback {
   bool enabled = true;
-  double outline = .50;
-  double dim = .22;
-  double fade = 0;
+  double lift = .70;
+  double glow = .50;
+  double edge = .60;
+  double lean = 4;
 };
 struct FeedbackParameter {
   const char *key, *label;
@@ -76,16 +77,19 @@ struct FeedbackParameter {
   const char *help;
 };
 static const FeedbackParameter feedbackParameters[] = {
-  {"feedback_outline", "Landing outline", 0, 1, &Feedback::outline,
-    "How visible the landing outline is while you drag.\n\n"
-    "Higher: easier to spot on busy backgrounds. Lower: quieter. Zero hides it.\n\n"
-    "The outline only appears where letting go would snap or restore the window."},
-  {"feedback_dim", "Tuck dim", 0, .6, &Feedback::dim,
-    "How much the window darkens once letting go would tuck it, and while it stays tucked.\n\n"
-    "Higher: the tucked state is more obvious. Zero keeps only the chevron."},
-  {"feedback_fade", "Fade (s)", 0, .3, &Feedback::fade,
-    "How long the hints take to appear and disappear, in seconds.\n\n"
-    "Zero switches instantly. A short fade keeps hints calm when you hover near a threshold."},
+  {"feedback_lift", "Lift", 0, 1, &Feedback::lift,
+    "How much the shadow grows and softens when you pick the window up.\n\n"
+    "After release, the window stays lifted while it travels and sets down as it arrives.\n\n"
+    "Zero keeps the resting shadow."},
+  {"feedback_glow", "Hold glow", 0, 1, &Feedback::glow,
+    "How brightly the border glows while letting go would leave the window where it is.\n\n"
+    "In Smart mode it appears as you slow down away from a dock. Zero turns it off."},
+  {"feedback_edge", "Edge shade", 0, 1, &Feedback::edge,
+    "How dark the shadow cast by the screen's rim gets on the part of the window going into a side.\n\n"
+    "It starts faint as you push in, deepens once letting go would tuck, and stays while tucked. Zero leaves only the chevron."},
+  {"feedback_lean", "Dock lean", 0, 10, &Feedback::lean,
+    "How far, in points, the window leans toward the dock it would snap to while you hold it slowly near one.\n\n"
+    "Zero turns the lean off. Reduce Motion also turns it off."},
 };
 static constexpr size_t feedbackParameterCount = sizeof(feedbackParameters) / sizeof(feedbackParameters[0]);
 
@@ -103,66 +107,36 @@ static NSString *phaseName(Phase phase) {
 @property(nonatomic, weak) MotionLab *lab;
 @end
 
-// Tucked look: optional dim plus the chevron on the edge that stays onscreen.
-@interface ShadeView : NSView
-@property(nonatomic) Side side;
-@property(nonatomic) CGFloat dim;
+// The panel is padded so the window can draw its own shadow; only the card takes clicks.
+static constexpr CGFloat kPad = 48;
+
+@interface PassView : NSView
 @end
-@implementation ShadeView
+@implementation PassView
 - (NSView *)hitTest:(NSPoint)point { return nil; }
-- (void)drawRect:(NSRect)dirty {
-  NSRect bounds = self.bounds;
-  [[NSBezierPath bezierPathWithRoundedRect:bounds xRadius:16 yRadius:16] addClip];
-  if (self.dim > 0) {
-    [[NSColor colorWithWhite:0 alpha:self.dim] setFill];
-    NSRectFillUsingOperation(bounds, NSCompositingOperationSourceOver);
-  }
-  if (self.side == Side::None) return;
-  CGFloat x = self.side == Side::Left ? bounds.size.width - 14 : 14;
-  CGFloat sign = self.side == Side::Left ? 1 : -1;
-  NSBezierPath *chevron = NSBezierPath.bezierPath;
-  [chevron moveToPoint:NSMakePoint(x - sign * 3, 83)];
-  [chevron lineToPoint:NSMakePoint(x + sign * 3, 90)];
-  [chevron lineToPoint:NSMakePoint(x - sign * 3, 97)];
-  chevron.lineWidth = 2;
-  [NSColor.whiteColor setStroke]; [chevron stroke];
+@end
+
+@interface RootView : NSView
+@end
+@implementation RootView
+- (NSView *)hitTest:(NSPoint)point {
+  NSView *hit = [super hitTest:point];
+  return hit == self ? nil : hit;
 }
 @end
 
-@interface GhostOutline : NSView
-@end
-@implementation GhostOutline
-- (NSView *)hitTest:(NSPoint)point { return nil; }
-- (void)drawRect:(NSRect)dirty {
-  NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, .5, .5)
-      xRadius:15.5 yRadius:15.5];
-  path.lineWidth = 1;
-  [[NSColor.labelColor colorWithAlphaComponent:.22] setStroke]; [path stroke];
+static CGColorRef gray(CGFloat white, CGFloat alpha) {
+  return [NSColor colorWithWhite:white alpha:alpha].CGColor;
 }
-@end
-
-static NSImage *roundedMask(CGFloat radius) {
-  NSImage *image = [NSImage imageWithSize:NSMakeSize(radius * 2 + 1, radius * 2 + 1) flipped:NO
-      drawingHandler:^BOOL(NSRect rect) {
-    [NSColor.blackColor setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius] fill];
-    return YES;
-  }];
-  image.capInsets = NSEdgeInsetsMake(radius, radius, radius, radius);
-  image.resizingMode = NSImageResizingModeStretch;
-  return image;
+static double smoothstep(double x) {
+  x = std::clamp(x, 0.0, 1.0);
+  return x * x * (3 - 2 * x);
 }
-
-static void fadeTo(id object, CGFloat alpha, double duration) {
-  if (duration <= 0) {
-    [object setAlphaValue:alpha];
-    return;
-  }
-  [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-    context.duration = duration;
-    context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
-    [[object animator] setAlphaValue:alpha];
-  }];
+// Frame-rate independent exponential approach with separate rise and fall times.
+static void approach(double& value, double target, double rise, double fall, double dt) {
+  const double tau = target > value ? rise : fall;
+  value = target + (value - target) * std::exp(-dt / tau);
+  if (std::abs(value - target) < 1e-3) value = target;
 }
 
 @interface ExamplePanel : NSPanel
@@ -181,18 +155,20 @@ static void fadeTo(id object, CGFloat alpha, double duration) {
   NSMutableArray<NSTextField *> *fields;
   NSPopUpButton *dockMenu, *presetMenu, *placementMenu;
   NSTextField *status, *fileStatus, *explanation;
-  NSTimer *animationTimer, *fileTimer, *saveTimer, *dragTimer;
+  NSTimer *animationTimer, *fileTimer, *saveTimer, *visualTimer;
   double lastTick;
   NSString *settingsPath, *statePath;
   NSData *lastSettingsData;
   Feedback feedback;
-  ShadeView *shade;
-  ExamplePanel *ghost;
+  CALayer *ambientShadow, *contactShadow, *glowShadow, *overlay;
+  CAGradientLayer *rimShade;
+  CAShapeLayer *chevron, *rimLight;
   NSButton *feedbackToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
-  BOOL shadeShown, ghostShown;
-  CGFloat ghostAlpha;
+  double lift, glow, edgeAmount, leanX, leanY, lastVisualTime, releaseDistance, rimShadeStrength;
+  Side chevronSide;
+  BOOL leaning;
   double lastEventTimestamp, lastEventUptime;
 }
 - (instancetype)initWithSettingsPath:(NSString *)path;
@@ -362,19 +338,19 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   feedbackToggle.frame = NSMakeRect(22, 242, 150, 20);
   [content addSubview:feedbackToggle];
   addHelp(content, NSMakeRect(160, 243, 18, 18), @"Release feedback",
-      @"Quiet hints while you drag that show what letting go would do.\n\n"
-      "A faint outline marks where the window will come to rest when it would snap or restore. No outline means it stays where you drop it. "
-      "Outlines appear only while you move at or below “Leave here below speed”, so flicks stay uncluttered.\n\n"
-      "Once letting go would tuck the window, it dims and shows its chevron. Pull it far enough to restore and it brightens again.\n\n"
+      @"Physical cues for holding and letting go.\n\n"
+      "Picking the window up deepens and softens its shadow. After release it stays lifted while it travels and sets down where it comes to rest.\n\n"
+      "While letting go would leave it where it is, its border glows faintly. Held slowly near a dock, it leans a few points toward where it would snap.\n\n"
+      "Pushed into a side, the screen's rim casts a shadow on the part going in, and the chevron fades in with depth. The shadow deepens once letting go would tuck.\n\n"
       "Turn off to compare with no added feedback. The tucked chevron still appears.");
   feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array;
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
     const auto& parameter = feedbackParameters[i];
-    CGFloat x = 24 + i * 166;
+    CGFloat x = 24 + i * 124;
     NSTextField *heading = label(@(parameter.label), NSMakeRect(x, 213, 100, 18), 11);
     [heading sizeToFit]; [content addSubview:heading];
     addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 4, 212, 18, 18), @(parameter.label), @(parameter.help));
-    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(x + 104, 211, 50, 22)];
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(x + 72, 186, 42, 22)];
     field.tag = i; field.target = self; field.action = @selector(feedbackFieldChanged:);
     field.alignment = NSTextAlignmentRight;
     field.accessibilityLabel = [@(parameter.label) stringByAppendingString:@" value"];
@@ -382,7 +358,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     [feedbackFields addObject:field]; [content addSubview:field];
     NSSlider *slider = [NSSlider sliderWithValue:feedback.*parameter.member minValue:parameter.low
         maxValue:parameter.high target:self action:@selector(feedbackSliderChanged:)];
-    slider.frame = NSMakeRect(x, 186, 154, 22); slider.tag = i; slider.continuous = YES;
+    slider.frame = NSMakeRect(x, 186, 66, 22); slider.tag = i; slider.continuous = YES;
     slider.accessibilityLabel = @(parameter.label);
     slider.accessibilityHelp = @(parameter.help);
     [feedbackSliders addObject:slider]; [content addSubview:slider];
@@ -402,41 +378,71 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   fileStatus.textColor = NSColor.secondaryLabelColor; [content addSubview:fileStatus];
   [self button:@"JSON…" frame:NSMakeRect(446, 17, 70, 25) action:@selector(reveal:) tag:0];
 
-  panel = [[ExamplePanel alloc] initWithContentRect:NSMakeRect(motion->position.x,
-      motion->position.y, motion->size.width, motion->size.height)
+  const CGFloat w = motion->size.width, h = motion->size.height;
+  const CGRect card = CGRectMake(kPad, kPad, w, h);
+  panel = [[ExamplePanel alloc] initWithContentRect:NSMakeRect(motion->position.x - kPad,
+      motion->position.y - kPad, w + 2 * kPad, h + 2 * kPad)
       styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
       backing:NSBackingStoreBuffered defer:NO];
   panel.title = @"Opus PiP example";
   panel.opaque = NO; panel.backgroundColor = NSColor.clearColor;
-  panel.hasShadow = YES; panel.hidesOnDeactivate = NO;
+  panel.hasShadow = NO; panel.hidesOnDeactivate = NO;
   panel.level = NSFloatingWindowLevel;
   panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
       NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorStationary;
-  example = [[ExampleView alloc] initWithFrame:NSMakeRect(0, 0, 320, 180)];
-  example.lab = self; example.wantsLayer = YES; panel.contentView = example;
-  shade = [[ShadeView alloc] initWithFrame:example.bounds];
-  shade.wantsLayer = YES; shade.alphaValue = 0;
-  [example addSubview:shade];
+  RootView *root = [[RootView alloc] initWithFrame:NSMakeRect(0, 0, w + 2 * kPad, h + 2 * kPad)];
+  root.wantsLayer = YES; panel.contentView = root;
+  const CGFloat scale = screen.backingScaleFactor;
+  auto host = [&]() {
+    PassView *view = [[PassView alloc] initWithFrame:root.bounds];
+    view.layer = [CALayer layer]; view.wantsLayer = YES;
+    view.layer.contentsScale = scale;
+    return view;
+  };
 
-  // Landing outline: a click-through frosted shape kept just below the PiP window.
-  ghost = [[ExamplePanel alloc] initWithContentRect:panel.frame
-      styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
-      backing:NSBackingStoreBuffered defer:NO];
-  ghost.opaque = NO; ghost.backgroundColor = NSColor.clearColor;
-  ghost.hasShadow = NO; ghost.hidesOnDeactivate = NO; ghost.ignoresMouseEvents = YES;
-  ghost.excludedFromWindowsMenu = YES; ghost.alphaValue = 0;
-  ghost.level = NSFloatingWindowLevel;
-  ghost.collectionBehavior = panel.collectionBehavior | NSWindowCollectionBehaviorIgnoresCycle |
-      NSWindowCollectionBehaviorTransient;
-  NSVisualEffectView *frost = [[NSVisualEffectView alloc] initWithFrame:example.bounds];
-  frost.material = NSVisualEffectMaterialPopover;
-  frost.blendingMode = NSVisualEffectBlendingModeBehindWindow;
-  frost.state = NSVisualEffectStateActive;
-  frost.maskImage = roundedMask(16);
-  GhostOutline *outline = [[GhostOutline alloc] initWithFrame:frost.bounds];
-  outline.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-  [frost addSubview:outline];
-  ghost.contentView = frost;
+  // Shadow stack under the card: a wide ambient shadow, a tight contact shadow and the hold glow.
+  PassView *shadows = host();
+  CGPathRef shape = CGPathCreateWithRoundedRect(CGRectMake(0, 0, w, h), 16, 16, nullptr);
+  auto shadowLayer = [&](CGColorRef color) {
+    CALayer *layer = [CALayer layer];
+    layer.frame = card; layer.shadowPath = shape; layer.shadowColor = color;
+    layer.shadowOpacity = 0;
+    [shadows.layer addSublayer:layer];
+    return layer;
+  };
+  glowShadow = shadowLayer(gray(1, 1));
+  ambientShadow = shadowLayer(gray(0, 1));
+  contactShadow = shadowLayer(gray(0, 1));
+  glowShadow.shadowOffset = CGSizeZero; glowShadow.shadowRadius = 8;
+  CGPathRelease(shape);
+  [root addSubview:shadows];
+
+  example = [[ExampleView alloc] initWithFrame:NSRectFromCGRect(card)];
+  example.lab = self; example.wantsLayer = YES;
+  [root addSubview:example];
+
+  // Overlay on the card: the screen rim's shadow, the chevron and the glowing border.
+  PassView *overlayHost = host();
+  overlay = [CALayer layer];
+  overlay.frame = card; overlay.cornerRadius = 16; overlay.masksToBounds = YES;
+  [overlayHost.layer addSublayer:overlay];
+  rimShade = [CAGradientLayer layer];
+  rimShade.opacity = 0; rimShade.locations = @[@0, @.4, @1];
+  [overlay addSublayer:rimShade];
+  chevron = [CAShapeLayer layer];
+  chevron.bounds = CGRectMake(0, 0, 10, 18); chevron.contentsScale = scale;
+  chevron.fillColor = nil; chevron.strokeColor = gray(1, 1);
+  chevron.lineWidth = 2; chevron.lineCap = kCALineCapRound; chevron.lineJoin = kCALineJoinRound;
+  chevron.opacity = 0;
+  [overlay addSublayer:chevron];
+  rimLight = [CAShapeLayer layer];
+  rimLight.frame = overlay.bounds; rimLight.contentsScale = scale;
+  CGPathRef rim = CGPathCreateWithRoundedRect(CGRectInset(overlay.bounds, .75, .75), 15.25, 15.25, nullptr);
+  rimLight.path = rim; CGPathRelease(rim);
+  rimLight.fillColor = nil; rimLight.strokeColor = gray(1, .9); rimLight.lineWidth = 1.5;
+  rimLight.opacity = 0;
+  [overlay addSublayer:rimLight];
+  [root addSubview:overlayHost];
   [self syncControls];
   if ([NSFileManager.defaultManager fileExistsAtPath:settingsPath]) [self reloadSettings];
   else [self saveSettings];
@@ -452,7 +458,6 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     }
   }
   [controls makeKeyAndOrderFront:nil]; [panel orderFrontRegardless];
-  [ghost orderWindow:NSWindowBelow relativeTo:panel.windowNumber];
   [NSApp activateIgnoringOtherApps:YES];
   [self showPosition];
   fileTimer = [NSTimer timerWithTimeInterval:.5 target:self selector:@selector(checkFile:) userInfo:nil repeats:YES];
@@ -474,7 +479,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
     double value = feedback.*feedbackParameters[i].member;
     feedbackSliders[i].doubleValue = value; feedbackSliders[i].enabled = feedback.enabled;
-    feedbackFields[i].stringValue = [NSString stringWithFormat:@"%.2f", value];
+    feedbackFields[i].stringValue = [NSString stringWithFormat:feedbackParameters[i].high > 1 ? @"%.1f" : @"%.2f", value];
     feedbackFields[i].enabled = feedback.enabled;
   }
 }
@@ -488,7 +493,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)applyFeedback:(Feedback)next {
   feedback = next; [self syncControls]; [self scheduleSave];
-  [self updateFeedback];
+  [self wakeVisuals]; [self updateVisuals];
 }
 - (void)feedbackToggled:(NSButton *)sender {
   Feedback next = feedback; next.enabled = sender.state == NSControlStateValueOn;
@@ -546,14 +551,16 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)sampleThrow:(NSButton *)sender {
   pip_motion::Point v{sender.tag % 2 == 0 ? -1100.0 : 1100.0, sender.tag < 2 ? 600.0 : -600.0};
+  releaseDistance = 0;
   motion->throwFrom(motion->centerOrigin(), v, false); [self startAnimation];
 }
-- (void)replay:(id)sender { motion->replay(); [self startAnimation]; }
+- (void)replay:(id)sender { releaseDistance = 0; motion->replay(); [self startAnimation]; }
 - (void)toggleTuck:(id)sender {
+  releaseDistance = 0;
   if (motion->tucked != Side::None) motion->restore(); else motion->tuck(Side::None);
   [self startAnimation];
 }
-- (void)reset:(id)sender { motion->reset(); [self showPosition]; [self stopAnimation]; }
+- (void)reset:(id)sender { releaseDistance = 0; motion->reset(); [self showPosition]; [self stopAnimation]; }
 - (void)resetVariables:(id)sender {
   [controls makeFirstResponder:nil];
   [saveTimer invalidate]; saveTimer = nil;
@@ -578,21 +585,15 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)begin:(NSEvent *)event {
   [self stopAnimation]; [self noteEvent:event];
   motion->begin([self point:event], event.timestamp); [self showPosition];
-  [dragTimer invalidate];
-  dragTimer = [NSTimer timerWithTimeInterval:1.0/60 target:self selector:@selector(dragTick:) userInfo:nil repeats:YES];
-  [NSRunLoop.mainRunLoop addTimer:dragTimer forMode:NSRunLoopCommonModes];
 }
 - (void)drag:(NSEvent *)event {
   [self noteEvent:event];
   motion->drag([self point:event], event.timestamp); [self showPosition];
 }
 - (void)end:(NSEvent *)event {
-  [dragTimer invalidate]; dragTimer = nil;
-  motion->end(event.timestamp); [self startAnimation];
-}
-- (void)dragTick:(NSTimer *)timer {
-  if (motion->phase != Phase::Dragging) { [dragTimer invalidate]; dragTimer = nil; }
-  [self updateFeedback];
+  motion->end(event.timestamp);
+  releaseDistance = length(motion->target - motion->position);
+  [self startAnimation];
 }
 - (NSString *)dockName:(pip_motion::Point)target {
   const auto area = motion->area();
@@ -601,49 +602,131 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const bool top = target.y + motion->size.height / 2 > area.y + area.height / 2;
   return [NSString stringWithFormat:@"%@-%@ corner", top ? @"top" : @"bottom", left ? @"left" : @"right"];
 }
-- (void)updateFeedback {
+- (void)wakeVisuals {
+  if (visualTimer) return;
+  lastVisualTime = NSProcessInfo.processInfo.systemUptime;
+  visualTimer = [NSTimer timerWithTimeInterval:1.0/120 target:self selector:@selector(visualTick:) userInfo:nil repeats:YES];
+  [NSRunLoop.mainRunLoop addTimer:visualTimer forMode:NSRunLoopCommonModes];
+}
+- (void)visualTick:(NSTimer *)timer {
+  if ([self updateVisuals] && motion->phase != Phase::Dragging && motion->phase != Phase::Settling) {
+    [visualTimer invalidate]; visualTimer = nil;
+  }
+}
+// Physical cues derived from the release prediction: lift, hold glow, rim shadow and dock lean.
+// Returns YES once every smoothed value has reached its target.
+- (BOOL)updateVisuals {
+  const double now = NSProcessInfo.processInfo.systemUptime;
+  const double dt = std::clamp(now - lastVisualTime, 0.0, .05);
+  lastVisualTime = now;
+  const bool on = feedback.enabled;
   const bool dragging = motion->phase == Phase::Dragging;
   const Outcome outcome = dragging ? motion->predict([self dragTime]) : Outcome{};
-  bool tuckLook = motion->tucked != Side::None;
-  Side side = motion->tucked;
-  bool showGhost = false;
-  // A press that has not moved the window is a click; its release is feedback enough.
-  if (feedback.enabled && dragging && outcome.moved) {
-    tuckLook = outcome.decision == Decision::Tuck;
-    side = outcome.side;
-    // Hysteresis keeps the outline steady while speed hovers around the threshold.
-    const double gate = motion->settings.free_speed;
-    const double hide = gate + std::max(60.0, gate / 2);
-    showGhost = (outcome.decision == Decision::Dock || outcome.decision == Decision::Restore) &&
-        outcome.speed <= (ghostShown ? hide : gate) && feedback.outline > 0;
+  // A press that has not moved the window is a click: it lifts, but previews nothing.
+  const bool moved = dragging && outcome.moved;
+  const auto area = motion->area();
+  const pip_motion::Point position = motion->position;
+  const double w = motion->size.width, h = motion->size.height, handle = motion->settings.handle;
+
+  double liftTarget = 0;
+  if (dragging) liftTarget = 1;
+  else if (motion->phase == Phase::Settling && releaseDistance > 1)
+    liftTarget = std::sqrt(std::clamp(length(motion->target - position) / releaseDistance, 0.0, 1.0));
+  const double glowTarget = moved && outcome.decision == Decision::Keep ? 1 : 0;
+
+  // Hysteresis keeps the lean steady while speed hovers around the deliberate threshold.
+  const double gate = motion->settings.free_speed;
+  leaning = on && moved && outcome.decision == Decision::Dock && feedback.lean > 0 &&
+      !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion &&
+      outcome.speed <= (leaning ? gate + std::max(60.0, gate / 2) : gate);
+  pip_motion::Point leanTarget{};
+  if (leaning) {
+    const pip_motion::Point toward = outcome.target - position;
+    const double distance = length(toward);
+    if (distance > .5) leanTarget = toward * (std::min(feedback.lean, distance * .15) / distance);
   }
-  const double fade = feedback.enabled ? feedback.fade : 0;
-  const CGFloat dim = feedback.enabled ? feedback.dim : 0;
-  if (dim != shade.dim) { shade.dim = dim; shade.needsDisplay = YES; }
-  if (tuckLook && side != shade.side) { shade.side = side; shade.needsDisplay = YES; }
-  if (tuckLook != shadeShown) { shadeShown = tuckLook; fadeTo(shade, tuckLook ? 1 : 0, fade); }
-  if (showGhost) {
-    NSRect frame = NSMakeRect(outcome.target.x, outcome.target.y, motion->size.width, motion->size.height);
-    if (!NSEqualRects(frame, ghost.frame)) [ghost setFrame:frame display:YES];
-    if (!ghostShown) [ghost orderWindow:NSWindowBelow relativeTo:panel.windowNumber];
+
+  // The screen rim casts a shadow on the part of the window going into a side.
+  const double leftOver = area.x - position.x;
+  const double rightOver = position.x + w - area.x - area.width;
+  Side side = moved && outcome.decision == Decision::Tuck ? outcome.side :
+      motion->tucked != Side::None ? motion->tucked : leftOver > rightOver ? Side::Left : Side::Right;
+  const double over = side == Side::Left ? leftOver : rightOver;
+  const double depth = std::clamp(over / std::max(1.0, w - handle), 0.0, 1.0);
+  const double tuckDistance = std::max(1.0, w * motion->settings.stash_percent / 100);
+  const bool committed = moved ? outcome.decision == Decision::Tuck : motion->tucked != Side::None;
+  const double edgeTarget = committed ? .7 + .3 * depth : .28 * smoothstep(over / tuckDistance);
+
+  approach(lift, on ? liftTarget : 0, .07, .14, dt);
+  approach(glow, on ? glowTarget : 0, .09, .14, dt);
+  approach(edgeAmount, on ? edgeTarget : 0, .05, .08, dt);
+  approach(leanX, leanTarget.x, .08, .10, dt);
+  approach(leanY, leanTarget.y, .08, .10, dt);
+
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  const CGRect card = CGRectMake(kPad + leanX, kPad + leanY, w, h);
+  if (!NSEqualPoints(example.frame.origin, NSPointFromCGPoint(card.origin))) [example setFrameOrigin:card.origin];
+  ambientShadow.frame = contactShadow.frame = glowShadow.frame = overlay.frame = card;
+  const double l = lift * feedback.lift;
+  ambientShadow.shadowRadius = 10 + 18 * l;
+  ambientShadow.shadowOpacity = .30 + .12 * l;
+  ambientShadow.shadowOffset = CGSizeMake(0, -(5 + 11 * l));
+  contactShadow.shadowRadius = 2 + 2 * l;
+  contactShadow.shadowOpacity = .24 * (1 - .8 * l);
+  contactShadow.shadowOffset = CGSizeMake(0, -(1 + 2 * l));
+  glowShadow.shadowOpacity = .45 * glow * feedback.glow;
+  rimLight.opacity = .6 * glow * feedback.glow;
+
+  const double rim = (side == Side::Left ? area.x : area.x + area.width) - position.x - leanX;
+  const double reach = std::max(56.0, handle * 2);
+  if (rimShadeStrength != feedback.edge || !rimShade.colors) {
+    rimShadeStrength = feedback.edge;
+    rimShade.colors = @[(__bridge id)gray(0, feedback.edge), (__bridge id)gray(0, feedback.edge * .35),
+                        (__bridge id)gray(0, 0)];
   }
-  ghostShown = showGhost;
-  const CGFloat alpha = showGhost ? feedback.outline : 0;
-  if (alpha != ghostAlpha) { ghostAlpha = alpha; fadeTo(ghost, alpha, fade); }
-  if (!dragging) return;
-  switch (outcome.decision) {
-    case Decision::Keep:
-      explanation.stringValue = [NSString stringWithFormat:@"Release now: stays here · moving %.0f pt/s", outcome.speed]; break;
-    case Decision::Dock:
-      explanation.stringValue = [NSString stringWithFormat:@"Release now: snaps to the %@ · moving %.0f pt/s%@",
-          [self dockName:outcome.target], outcome.speed, showGhost ? @" · outline shown" : @""]; break;
-    case Decision::Tuck:
-      explanation.stringValue = outcome.side == Side::Left ? @"Release now: tucks into the left edge" :
-          @"Release now: tucks into the right edge"; break;
-    case Decision::Restore:
-      explanation.stringValue = @"Release now: restores to the side"; break;
-    case Decision::None: break;
+  rimShade.frame = side == Side::Left ? CGRectMake(rim, 0, reach, h) : CGRectMake(rim - reach, 0, reach, h);
+  rimShade.startPoint = CGPointMake(side == Side::Left ? 0 : 1, .5);
+  rimShade.endPoint = CGPointMake(side == Side::Left ? 1 : 0, .5);
+  rimShade.opacity = edgeAmount;
+
+  // The chevron sits in the strip that stays visible and fades in with depth.
+  Side chevronTarget = on ? side : motion->tucked;
+  double chevronAlpha = on ? std::pow(edgeAmount, 1.3) : motion->tucked != Side::None;
+  double chevronX = on ? (side == Side::Left ? rim + handle / 2 : rim - handle / 2) :
+      (motion->tucked == Side::Left ? w - 14 : 14);
+  if (chevronTarget != Side::None && chevronTarget != chevronSide) {
+    chevronSide = chevronTarget;
+    CGMutablePathRef path = CGPathCreateMutable();
+    const bool left = chevronSide == Side::Left;
+    CGPathMoveToPoint(path, nullptr, left ? 2 : 8, 2);
+    CGPathAddLineToPoint(path, nullptr, left ? 8 : 2, 9);
+    CGPathAddLineToPoint(path, nullptr, left ? 2 : 8, 16);
+    chevron.path = path; CGPathRelease(path);
   }
+  chevron.position = CGPointMake(std::clamp(chevronX, 8.0, w - 8), 90);
+  const double chevronScale = on ? .85 + .15 * edgeAmount : 1;
+  chevron.transform = CATransform3DMakeScale(chevronScale, chevronScale, 1);
+  chevron.opacity = chevronAlpha;
+  [CATransaction commit];
+
+  if (dragging) {
+    switch (outcome.decision) {
+      case Decision::Keep:
+        explanation.stringValue = [NSString stringWithFormat:@"Release now: stays here · moving %.0f pt/s", outcome.speed]; break;
+      case Decision::Dock:
+        explanation.stringValue = [NSString stringWithFormat:@"Release now: snaps to the %@ · moving %.0f pt/s%@",
+            [self dockName:outcome.target], outcome.speed, leaning ? @" · leaning" : @""]; break;
+      case Decision::Tuck:
+        explanation.stringValue = outcome.side == Side::Left ? @"Release now: tucks into the left edge" :
+            @"Release now: tucks into the right edge"; break;
+      case Decision::Restore:
+        explanation.stringValue = @"Release now: restores to the side"; break;
+      case Decision::None: break;
+    }
+  }
+  return lift == (on ? liftTarget : 0) && glow == (on ? glowTarget : 0) &&
+      edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y;
 }
 - (void)startAnimation {
   [self showPosition];
@@ -660,7 +743,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (motion->phase != Phase::Settling) [self stopAnimation];
 }
 - (void)showPosition {
-  [panel setFrameOrigin:NSMakePoint(motion->position.x, motion->position.y)];
+  [panel setFrameOrigin:NSMakePoint(motion->position.x - kPad, motion->position.y - kPad)];
   status.stringValue = [NSString stringWithFormat:@"%@  ·  x %.0f  y %.0f  →  %.0f, %.0f",
       phaseName(motion->phase), motion->position.x, motion->position.y, motion->target.x, motion->target.y];
   if (motion->decision == Decision::Keep || motion->decision == Decision::Dock) {
@@ -672,7 +755,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
         motion->phase == Phase::Dragging ? @"Grabbed during restore · release to continue or drag to place" :
         @"Restoring to the side at the same height";
   else explanation.stringValue = @"Smart mode leaves slow drops away from a dock where you put them";
-  [self updateFeedback];
+  [self wakeVisuals]; [self updateVisuals];
   // The state file is an observable checkpoint, not a frame-by-frame trace.
   if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging) [self writeState];
 }
@@ -685,11 +768,12 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   return dict;
 }
 - (void)writeState {
+  const NSRect cardFrame = NSInsetRect(panel.frame, kPad, kPad);
   NSDictionary *state = @{@"pid":@(NSProcessInfo.processInfo.processIdentifier),
     @"phase":phaseName(motion->phase), @"x":@(motion->position.x), @"y":@(motion->position.y),
     @"target_x":@(motion->target.x), @"target_y":@(motion->target.y),
     @"tucked":@(motion->tucked != Side::None), @"settings":[self settingsDictionary],
-    @"native_frame":@[@(panel.frame.origin.x), @(panel.frame.origin.y), @(panel.frame.size.width), @(panel.frame.size.height)],
+    @"native_frame":@[@(NSMinX(cardFrame)), @(NSMinY(cardFrame)), @(NSWidth(cardFrame)), @(NSHeight(cardFrame))],
     @"decision":explanation.stringValue,
     @"work_area":@[@(motion->area().x), @(motion->area().y), @(motion->area().width), @(motion->area().height)]};
   NSData *data = [NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
@@ -770,7 +854,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)windowWillClose:(NSNotification *)notification { [NSApp terminate:nil]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
-  [self stopAnimation]; [fileTimer invalidate]; [saveTimer invalidate]; [dragTimer invalidate];
+  [self stopAnimation]; [fileTimer invalidate]; [saveTimer invalidate]; [visualTimer invalidate];
 }
 @end
 

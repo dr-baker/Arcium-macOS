@@ -1,9 +1,9 @@
 # Opus PiP Lab
 
 A release-feedback candidate built on the PiP motion lab at `b279760`. Motion,
-tuning, presets, JSON reload, and hover help are unchanged. The candidate adds
-two quiet cues that show, while you drag, what letting go would do. It has no
-video, audio, browser connection, or Chromium dependency.
+tuning, presets, JSON reload, and hover help are unchanged. The window behaves
+like a physical card: it lifts when you pick it up and sets down where it comes
+to rest. It has no video, audio, browser connection, or Chromium dependency.
 
 From the Arcium-macOS repository:
 
@@ -18,27 +18,32 @@ app before rebuilding.
 
 ## The cues
 
-Both cues answer one question: if I let go now, what happens?
+- **Pickup.** Pressing the window grows and softens its shadow, and the tight
+  contact shadow fades, so it reads as lifted off the desktop.
+- **Set down.** After release it stays lifted while it travels and sets down as
+  it arrives. A drop that stays put sets down right away. A snap, tuck or
+  restore lands at its destination.
+- **Stay here.** While letting go would leave the window where it is, its
+  border glows faintly. In Smart mode the glow appears as you slow down away
+  from a dock, and fades when speed or proximity means it would snap.
+- **Dock.** Held slowly near a dock it would snap to, the window leans a few
+  points toward that dock, like a magnet pulling on it. Reduce Motion turns the
+  lean off.
+- **Tuck.** Pushing the window into a side makes the screen's rim cast a shadow
+  on the part going in. The shadow is faint while approaching the tuck
+  threshold, deepens once letting go would tuck, and stays while tucked. The
+  chevron sits in the strip that stays visible and fades in with that depth.
+- **Restore.** Pulling a tucked window out past the restore distance eases the
+  rim shadow back to its faint level, and it clears once the window is fully
+  back on screen.
 
-- **Landing outline.** A faint frosted rounded rectangle, the size of the
-  window and just behind it, marks where the window will come to rest when
-  release would snap it to a dock or restore it from a tuck. No outline means
-  it stays where you drop it. The outline appears only while you move at or
-  below *Leave here below speed*, so it shows up as you slow down to decide and
-  stays out of the way during flicks. In Smart mode, an outline appearing as
-  you ease toward a corner shows the attraction zone. Holding still away from
-  docks shows nothing, which means you're placing it deliberately.
-- **Tucked look.** Once release would tuck the window, it dims slightly and
-  shows its chevron on the edge that stays onscreen, which is how it will look
-  once tucked. It stays like that while tucked. Pull it out past the restore
-  distance and it brightens again, while the outline marks where it will
-  return.
+A press that hasn't moved the window still lifts, but previews nothing. Every
+cue comes from `Motion::predict()`, which uses the same classification as
+release. A randomized test checks that the prediction always matches what
+release does.
 
-A press that hasn't moved the window gets no cue, because a click's result
-shows straight away. After release the cues disappear and the spring motion
-takes over. Every cue comes from `Motion::predict()`, which uses the same
-classification as release. A randomized test checks that the prediction
-always matches what release does.
+The panel is padded by 48 points so it can draw its own shadow. Only the card
+takes clicks. `state.json`'s `native_frame` still reports the card's frame.
 
 ## Feedback controls
 
@@ -46,15 +51,16 @@ The **Release feedback** row in the tuning window has its own hover help.
 
 | Control | Effect |
 | --- | --- |
-| Release feedback | Turns both cues off to compare against plain motion. The tucked chevron still appears, as in the baseline. |
-| Landing outline | Opacity of the outline. 0 hides it. Default 0.50. |
-| Tuck dim | How much the window darkens when release would tuck it, and while it stays tucked. 0 keeps only the chevron. Default 0.22. |
-| Fade (s) | How long the cues take to appear and disappear. Default 0 switches instantly, with no added feedback animation. |
+| Release feedback | Turns every cue off to compare with plain motion. The resting shadow and the tucked chevron remain. |
+| Lift | How much the shadow grows when picked up. Default 0.70. |
+| Hold glow | Border glow strength while release would keep the window in place. Default 0.50. |
+| Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
+| Dock lean | Maximum lean toward the dock, in points. Default 4. |
 
-These save to `settings.json` as `feedback`, `feedback_outline`,
-`feedback_dim` and `feedback_fade`. They're optional, so a baseline settings
+These save to `settings.json` as `feedback`, `feedback_lift`, `feedback_glow`,
+`feedback_edge` and `feedback_lean`. They're optional, so a baseline settings
 file still loads. **Reset all variables** resets them too. Presets leave them
-alone. While you drag, the line under the controls reads "Release now: …",
-so you can check what each cue is claiming.
+alone. While you drag, the line under the controls reads "Release now: …", so
+you can check what each cue is claiming.
 
 See `../../pip-motion-lab/README.md` for the motion controls and references.
