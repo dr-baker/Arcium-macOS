@@ -1,0 +1,52 @@
+{
+  "outer": "9f0688a4ddf92f25b3542d68ce0d2907efef343e",
+  "core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "chromium": "156.0.8078.47",
+  "included_published_main": {
+    "macos": "9ee47eb2794e5379a108a1c4c778bc65e438cedb",
+    "core": "8ee8d05551a660cf9858e73cbb7deed2ce082208"
+  },
+  "build_mode": "Diagnostics; optimized component build with DCHECKs",
+  "build_evidence_id": "ee58a88a85db4ce5a04aa364c34c4115",
+  "built_targets": [
+    "chrome",
+    "arcium_feature_settings_unit_tests",
+    "arcium_feature_settings_browser_tests",
+    "arcium_media_session_impl_unittests",
+    "arcium_web_media_player_unittests",
+    "arcium_optional_navigation_tests",
+    "helium_persistent_item_model_tests",
+    "arcium_dmg_unit_tests"
+  ],
+  "build_status": "success",
+  "replayed": {
+    "applied": 590,
+    "series": 590,
+    "top": "personal/arcium-pip-native-controls-macos.patch"
+  },
+  "problems": [],
+  "timestamp_snapshot_pending": false,
+  "final_replay_log_sha256": "142ffc7d8ed95cc14044adeb6dfaf6c282a753a97ba4f45c0b326ac23bedb9b2",
+  "artifact_sha256": {
+    "unit60.json": "0d6efe5b4dc9377ce06a29999e0b1b280c256a81a34d056d8d3477f7e91a72f9",
+    "media5.json": "dc6a3bf2f097c02a53115eef1b8265389751fa6e0638c611b267e93c11927b0b",
+    "renderer9.json": "bffae87e2cf7bd29a39d5288f3be20c4bb5c1351925914a99da8cf7b486d8de9",
+    "browser18-before-mock-fix.json": "ea3bc037e46c5d2d62e0de50c3997af6ba71cd7a24572a233eff431754c8f0c6",
+    "browser2-after-mock-fix.json": "a1dfb84fa5f57ab3edad27dd48b654c7f5070ca7b4e30488b4ea3a000ecf1a15",
+    "runtime-byte-comparison.json": "6f6ed64a564837137665aed3b46f78e30e9047bec208543d551b381e1589d7d2",
+    "native-observations.jsonl": "3a7128a588c794381f95100407614fae6c969fcc00860c36b1399cd3a0a84887",
+    "free-drop.json": "172d5a6329efdcb2d3e5cb60773f348638a8b6d033ab378e4799353ca3f1795a",
+    "right-dock.json": "f33b0edb268d3f523abf6218f83e6b812c344a382eb1bbaa473d01365a0e2321",
+    "tucked-right.json": "ded667f3ba054c2d4b76903fa179930773dfeabbf99cc053703bacd4187fcde2",
+    "foreign-fullscreen.json": "7a8adcb4514ced5d2d314cb8f4f9fe2f9f8413136691d3860417e0b1f7ba38f0",
+    "normal-quit.json": "9518943bfd2ab216fc991ab25e6b4ce0f8e7656078d3791982ad18ef018aa363",
+    "placement-after-relaunch.json": "22a8dadd0e7f2d45c2a1e61945714d7eb5387a79c3d1ddc244b5f15fd2518177",
+    "reopened-pip.json": "841d7c37e4ce457f63fafb9515038cac06f461bc6e5bb3d6817633c0879a1d32",
+    "loaded-paths.json": "c8383515512a21379f593be2f40cc188a654b434996d5c8bdc6751f8f14006ab",
+    "astra-review.md": "cc8abfe56a7fc208182f07ac25abb3fb8c2263543351afe1529b1de9af082b8d",
+    "normal-quit-audit.md": "fda52995541746d6182e16c77a9535aeffbfcf6b112ff68a12e0239ce541c475",
+    "package-snapshot.json": "b14b4a36818cafc4082519b19b888f682a056bb2979b4979bcdc0ed6dde8c941",
+    "source-byte-proof.json": "af11db8722492643b4ba97778bc505072d44a240c599e8648f374c7e99cf1837"
+  },
+  "main_app_installed": false
+}

@@ -39,24 +39,51 @@ saved free position through mouse, keyboard and accessibility paths.
 
 ## Review and proof
 
-Astra's first source pass found unreachable tuck targets with a side Dock,
-inconsistent mouse-handle restore, and stale test margins. The fixes separate
-physical bounds from work areas, preserve the saved restore point in the model,
-and update landing assertions. Regressions cover all three.
+The final implementation is outer `9f0688a4`, core `fd7c9080`, on Chromium
+156.0.8078.47. It includes published macOS main `9ee47eb2` and core main
+`8ee8d055`. The [delivery packet](media/automatic-picture-in-picture/press-any-edge-156/README.md)
+contains exact revisions, original test results, native observations and Astra's
+source GO. The full 590-patch series replayed with zero fuzz. The final source
+check has no problems or pending timestamp snapshot.
 
-Standalone checks: 158 motion cases and 18 settings cases pass; these include
-2.4% engagement on all four edges, display seams, display-area changes, physical
-Dock insets and exact free-position restore. The independent lab compiles.
-The Chromium 151 candidate at outer `256f5cb1` compiled `chrome` and the focused
-feature-settings unit runner. Its 54 hidden native/geometry tests passed without
-retries, and Astra accepted the final cross-display restore fix at source level.
-An independent signed package contains 540 hash-matched component libraries;
-554 Mach-O images passed static dependency-candidate checks. Live loader,
-Spaces, full-screen and visual/feel evidence remain pending.
+Chrome and seven focused runners compiled in the optimized Diagnostics component
+configuration with diagnostic assertions enabled. There are 74 focused passing
+cases: 54 hidden native/geometry, six first-run, five media-session and nine
+renderer cases. All 18 migrated browser cases also have passing evidence, from
+16 passes followed by the two repaired mock-scope cases. These are separate
+runs, with zero test-launcher retries. Earlier fixture failures remain documented.
+Standalone motion and settings checks previously passed 158 and 18 cases.
 
-The final integration also contains the latest published outer and core main
-branches on Chromium 156.0.8078.47. The full 589-patch series replayed without
-fuzz, followed by a strict reapplication of the final native-target dependency
-change. Compilation and runtime results for that combined app are recorded
-separately from the Chromium 151 evidence. The feature scenario is
-`devutils/scenarios/automatic-picture-in-picture.json`.
+The independent signed final package contains 530 copied, hash-matched component
+libraries. Static dependency-candidate checks cover 549 Mach-O images. Every
+app file, directory and symlink, plus all 530 library records, matches both
+native-tested candidates. The live candidate log contains 521 intact,
+filesystem-verified candidate paths and no mutable `src/out` reference;
+interleaved records prevent a complete helper dependency-closure claim.
+
+On the MacBook display, user-activated muted YouTube playback entered automatic
+PiP. Native Pause held playback throughout repeated free drops, right-edge
+docking, a deeper tuck leaving 26 points visible, and restoration. Paused
+backward and forward 15-second seeks worked. Return to tab restored the paused
+inline video, and a later paused departure did not open automatic PiP.
+
+PiP remained on screen in a blank TextEdit full-screen Space while its browser
+window was off screen. Native menu Quit then exited the owned browser and
+released its profile lock without a matching browser crash. Relaunching the
+same isolated profile retained the exact placement preference. Manual paused
+PiP reopened at the saved x=1322, y=839, width=384, height=216. The temporary
+blank TextEdit document was closed; the user's existing document was preserved.
+
+Manual gates remain: ordinary Desktop transitions, live external displays,
+physical gestures and haptics, native resize and scrub dragging, sustained
+playback through transitions, and motion/shadow feel. Pointer resize and scrub
+attempts produced no change through Computer Use; an earlier plain AppKit
+control reproduced an automation limitation, so no product defect is established.
+Fresh autoplay alone did not establish automatic-entry eligibility.
+
+Clean current media is also pending. Full-screen captures contain a pending
+macOS Desktop-access prompt. Automatic approval rejected inspecting the system
+alert app because it could expose unrelated private notifications. No access
+was granted and the rejection was not bypassed. Historical control screenshots
+and frame-sampled video remain labeled as earlier evidence. No main-app
+installation or merge was performed.
