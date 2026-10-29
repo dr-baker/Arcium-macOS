@@ -5,12 +5,33 @@ Chromium 156 builds with the published Arcium features on
 All 76 focused native tests pass. Native checks found and repaired sidebar
 layout and HTTP-navigation failures; creating a Space then exposed a label
 painting crash. Its reviewed repair builds and passes the native suites.
-Delivery remains a draft. Native checks now verify Space/profile ownership,
+Native checks verify Space/profile ownership,
 split close/reopen and stacked-order persistence, Peek cancellation/promotion,
 and native Settings artwork and independent material controls. Native control
 timed out during final settings restoration, leaving manual checks and media
 export incomplete. Earlier intermittent blank-page observations remain unisolated. Do not
-advance canonical main or install over the daily browser.
+install over the daily browser. Daniel accepted the remaining manual checks
+and authorized merging after the final Astra review.
+
+## Final fundamentals review
+
+Astra reviewed core `9782f5e7` and macOS `bf48848` for ownership, asynchronous
+lifetimes, state invariants, performance costs, and unnecessary complexity.
+It found no production blocker or required architectural refactor. Its twelve
+focused helper tests pass. The sole finding was a Little Arc browser test that
+still called three removed Browser methods through BrowserWindowInterface.
+The migration patch now includes BrowserInitState, asserts its presence, and
+uses its session-restore accessors plus BrowserWindowInterface::GetType().
+This changes test source only and preserves the existing assertions. All 587
+patches replayed with zero fuzz after the correction, patch lint passes, and
+the preflight reports no problems or pending timestamp snapshot. The targeted
+`app_controller_mac_browsertest.o` attempt stops before compilation because
+`chrome/test/data/webui/chai_assert.ts` is absent from the prepared archive.
+That existing fixture limitation remains; no object-compile pass is claimed.
+
+The remaining manual gates below are accepted deferrals, not passing results.
+Core PR 19 merged as `8ee8d055`. macOS retains the exact tested core pin
+`9782f5e7`, now reachable from core main.
 
 ## Native layout repairs
 
@@ -173,7 +194,7 @@ Local evidence is under `/tmp/arcium-156-runtime`: `acceptance-space-label.md`,
 ## CI corrections after draft publication
 
 Core [PR 19](https://github.com/dr-baker/Arcium/pull/19) and macOS
-[PR 21](https://github.com/dr-baker/Arcium-macOS/pull/21) remain drafts.
+[PR 21](https://github.com/dr-baker/Arcium-macOS/pull/21) were initially published as drafts.
 The first CI run caught one trailing space, two whitespace-only Safety Hub test
 hunks, an unused Seatbelt patch already included upstream, and a stale generated
 translation catalog. The stricter patch linter catches cases that the earlier
@@ -211,7 +232,7 @@ remote builds. Sparkle setup tests stub Chromium 156's `buildtools/mac/gn`
 instead of the removed bootstrapped output. The focused 16-test run passes.
 The complete CI command passes 333 tooling tests and seven import tests.
 A subsequent four-test remote configuration run also passes, including the added explicit policy opt-in case. Repair `04b577d`
-is pushed; its hosted checks remain pending.
+and subsequent macOS head `bf48848` passed all executed hosted checks.
 
 ## Revisions
 
