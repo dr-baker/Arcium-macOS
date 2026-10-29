@@ -6,25 +6,29 @@ Two independent native AppKit experiments start from the clean motion lab at
 
 Both candidates retain live motion tuning, reset, control explanations and
 percentage-based tucking. They use separate app identities, settings and build
-directories. Neither needs Chromium, video or audio. Added feedback animation
-is off by default in both; the original window-motion spring still runs.
+directories. Neither needs Chromium, video or audio. Terra uses static hints.
+Following Daniel's later feedback in the Opus thread, Opus now uses a pickup
+shadow, hold glow, progressive rim shade and dock lean. The original
+window-motion spring still runs in both.
 
 | | Terra | Opus |
 | --- | --- | --- |
-| Feedback | Small label and directional arrow inside the dragged window | Frosted landing preview behind the window; dim and chevron for tuck |
-| Slow docking | Names the decision and destination direction | Shows the destination's size and location |
-| Fast flick | Continues predicting the release | Suppresses the landing preview at high speed |
-| Deliberate placement | Says “Stay here” or “Place inside” | No landing preview |
-| Tuck / restore | Label or symbol on the visible portion | Previews the tucked appearance; shows the restore destination |
-| Live feedback tuning | Enable and strength | Enable, landing opacity, tuck dim, optional fade |
+| Feedback | Small label and directional arrow inside the dragged window | Pickup/set-down shadow, hold glow, progressive rim shade and chevron |
+| Slow docking | Names the decision and destination direction | Leans toward the selected dock; Reduce Motion disables the lean |
+| Fast flick | Continues predicting the release | Stays lifted during travel and sets down at the destination |
+| Deliberate placement | Says “Stay here” or “Place inside” | Faint border glow while held |
+| Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
+| Live feedback tuning | Enable and strength | Enable, lift, hold glow, edge shade and dock lean |
 | Release prediction | Runs the existing release on a model copy | Shares classification between prediction and release |
-| Root verification | 93 model checks; strict app signature verification | 82 model checks, including 4,000 randomized predictions; strict app signature verification |
+| Verification | Root: 93 model checks and strict app signature verification | Root verified the earlier bundle and unchanged 82-check model; the author compiled the revised UI separately without warnings |
 
-Opus is closer to the original spatial-feedback idea on paper. Terra makes the
-decision explicit but adds text. This is a source-level comparison, not a
-visual acceptance result. Neither candidate has completed native interaction,
-appearance or persistence validation. The Mac showed recent user input during
-preparation, so root left both candidates stopped for an idle-time comparison.
+Terra makes the decision explicit but adds text. Opus's revised design follows
+Daniel's requested pickup, hold and tuck cues. This is a source-level
+comparison, not a visual acceptance result. The earlier app bundles were
+launched for Daniel and their tuning windows moved to Desktop 3. Neither
+candidate has completed native interaction, appearance or persistence
+validation. The running Opus app still contains the earlier outline design;
+the revised UI needs a rebuild after that app quits.
 
 Build without launching, from the worktree root:
 
@@ -54,11 +58,18 @@ shared edge between adjacent displays. Following Spaces remains required.
 These checks need native runtime evidence; passing the current single-display
 motion checks does not satisfy this gate.
 
+The revised Opus panel also includes 48 points of transparent shadow padding.
+Its author reports that clicks there do not reach the app behind it. Resolve
+that input region and prove clicks outside the visible card reach the underlying
+window before browser integration. The shadow must not enlarge the PiP's
+interactive footprint.
+
 For a fair comparison, use the same motion parameters in each candidate. Try a
 slow interior placement, approach to a corner, paused drag, fast flick, tuck on
 each side and pull-to-restore. Check whether the cue predicts the actual release,
 whether it remains quiet on a busy background, and whether disabling feedback
-returns the baseline feel. Test Opus with Fade at zero first.
+returns the baseline feel. The revised Opus design replaces the old Fade control
+with individual lift, glow, shade and lean controls.
 
 The original lab's settings and position are preserved. No browser app,
 profile, shared build output or existing PiP patch was changed by these
