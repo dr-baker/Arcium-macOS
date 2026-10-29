@@ -16,6 +16,19 @@ Output goes to this directory's ignored `.build/`: `Opus PiP Lab.app`
 (`dev.arcium.pip-motion-lab.opus`), `settings.json`, and `state.json`. Quit the
 app before rebuilding.
 
+## Release momentum
+
+The Opus candidate now projects the release velocity onto the direction toward
+the selected snap, tuck or restore destination and discards components pointing
+away from it. Destination selection still uses the existing placement rules
+and momentum projection. This removes the initial wrong-way or sideways travel
+before settling toward the target; it does not remove the spring or guarantee
+that forward momentum can never overshoot.
+
+This changes only Opus's copied motion model. The original lab, Terra and the
+browser implementation have not received this change. Root reran all 85 model
+checks, including the original motion cases and the new release-direction cases.
+
 ## The cues
 
 - **Pickup.** Pressing the window grows and softens its shadow, and the tight

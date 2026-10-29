@@ -348,5 +348,18 @@ int main() {
   }
   check(previews[1] && previews[2] && previews[3] && previews[4],
         "randomized release previews matched for keep, dock, tuck and restore");
+  // Release momentum away from the destination is dropped instead of overshooting backward.
+  m = Motion{}; m.settings.placement = Placement::AlwaysDock; m.settings.projection = 0;
+  m.throwFrom({600, 400}, {-1200, 0}, false);
+  check(m.target.x == 668 && m.target.y == 508 && m.velocity.x == 0 && m.velocity.y == 0,
+        "a throw away from its dock keeps no momentum heading away");
+  double farthest = 600;
+  for (int i = 0; i < 1200; ++i) { m.step(1.0 / 120); farthest = std::min(farthest, m.position.x); }
+  check(farthest >= 600 - 1e-9 && m.position.x == 668,
+        "a settle never shoots in the drag direction before returning");
+  m.settings.projection = Settings{}.projection;
+  m.throwFrom({300, 100}, {900, 900}, false);
+  check(m.velocity.x > 0 && m.velocity.y > 0,
+        "momentum toward the dock is preserved");
   std::cout << checks << " checks passed\n";
 }

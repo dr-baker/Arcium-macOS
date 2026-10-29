@@ -15,6 +15,16 @@ struct Point {
   Point operator*(double n) const { return {x * n, y * n}; }
 };
 inline double length(Point p) { return std::hypot(p.x, p.y); }
+// Keeps only the part of a release velocity that heads toward the destination, so a
+// settle never shoots away in the drag direction before turning back.
+inline Point toward(Point velocity, Point from, Point to) {
+  const Point direction = to - from;
+  const double distance = length(direction);
+  if (distance < 1e-6) return {};
+  const Point unit = direction * (1 / distance);
+  const double speed = velocity.x * unit.x + velocity.y * unit.y;
+  return speed > 0 ? unit * speed : Point{};
+}
 struct Size { double width = 320, height = 180; };
 struct Rect { double x = 0, y = 0, width = 1000, height = 700; };
 enum class Docking { Corners, SideEdges };
@@ -261,7 +271,8 @@ class Motion {
     } else {
       decision = outcome.decision;
       const bool dock = outcome.decision == Decision::Dock;
-      settle(outcome.target, dock ? release : Point{}, dock ? Goal::Dock : Goal::Free);
+      settle(outcome.target, dock ? toward(release, origin, outcome.target) : Point{},
+             dock ? Goal::Dock : Goal::Free);
     }
   }
 
@@ -276,14 +287,14 @@ class Motion {
     }
     restore_side_ = side;
     tucked = side;
-    settle(destination, velocity, Goal::Stash);
+    settle(destination, toward(velocity, position, destination), Goal::Stash);
   }
 
   void restore() {
     decision = Decision::Restore;
     tucked = Side::None;
     restore_point_ = restoreTarget();
-    settle(restore_point_, velocity, Goal::Restore);
+    settle(restore_point_, toward(velocity, position, restore_point_), Goal::Restore);
   }
 
   void replay() {
