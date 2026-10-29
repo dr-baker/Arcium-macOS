@@ -59,8 +59,7 @@ The current migration replaces both legacy pointer thresholds with percentage
 defaults when `press_tuck` exceeds 40. There is no explicit units marker; legacy
 values at or below that cutoff need migration review before acceptance.
 
-Grounded defaults and Reset continue to select corner docking. The tuning
-window is 80 points taller to fit the new controls. Press-mode native feel,
+Grounded and Reset everything continue to select corner docking. Press-mode native feel,
 settings persistence and re-grab transitions remain unverified. During browser
 integration, resistance and press docking must apply only to exterior display
 edges, allowing free movement across a shared boundary between screens.
@@ -142,7 +141,15 @@ reports the unscaled card's frame.
 
 ## Feedback controls
 
-**Grounded defaults** applies a complete preset only when clicked; launching
+The tuning window is now 716 points tall. Its **Presets** menu contains Grounded,
+iOS-like baseline, Snappy, Soft spring, Position only and Reset everything.
+The **Snaps to** and **A drop** segmented controls choose docking and placement;
+a sentence below them describes the current combination. **Feel**, **Edges**
+and **Cues** tabs group the controls. Mode-dependent values are dimmed or
+disabled, and every value keeps its information button. Native layout,
+relevance rules and tab interactions remain unverified.
+
+**Presets → Grounded** applies a complete preset only when selected; launching
 the app leaves saved tuning alone. It selects corner docking and Smart
 placement, response 0.44, damping 1, projection 0.40, inset 16, tuck threshold
 30%, outward tuck speed 1000, restore distance 24, deliberate speed 180 and snap
@@ -151,11 +158,13 @@ if those had custom values.
 
 The preset enables feedback and haptics, sets Lift 0.60, Settle 0.75, Press 0.40,
 Hold glow 0, Edge shade 0.50, Dock lean 12 and Dock shadow 0.90, and schedules a
-JSON save. **Reset all variables** restores the compiled defaults; it does not
-undo the preset or restore previous custom tuning. The new preset's native
-button interaction has not been independently validated.
+JSON save. **Presets → Reset everything** restores the compiled defaults; it does not
+undo the preset or restore previous custom tuning. Preset interaction has not
+been independently validated.
 
-The **Release feedback** row in the tuning window has its own hover help.
+The **Cues** tab has Release feedback, Haptics and seven numeric cue controls,
+each with hover help. Motion values live in Feel and Edges. Throw/replay,
+tuck/restore, Reset position, JSON and status controls stay below the tabs.
 
 | Control | Effect |
 | --- | --- |

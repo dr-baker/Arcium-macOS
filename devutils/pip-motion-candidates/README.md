@@ -20,20 +20,20 @@ window-motion spring still runs in both.
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
 | Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
 | Release prediction | Runs the existing release on a model copy | Card cues preview gentle placement; fast-flick release remains momentum-aware |
-| Verification | Root: 93 model checks and strict app signature verification | Root: 100 model checks in current source; signed running bundle is the author's earlier 96-check build |
+| Verification | Root: 93 model checks and strict app signature verification | Root: 103 model checks, strict app signature verification and runtime checkpoint |
 
 Terra makes the decision explicit but adds text. Opus's revised design follows
 Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 88517.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 92117.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It lowers during deliberate placement, dips on landing and requests
 haptic feedback. Corner marks and their control have been removed; two live
 lines on the card now show its confirmed outcome and active cues. Root verified
-the signed bundle and runtime checkpoint, and ran the 100 current-source model checks.
+the signed bundle and runtime checkpoint, and ran the 103 current-source model checks.
 Root left saved tuning untouched. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
@@ -51,7 +51,7 @@ away. The card's readout includes the current shadow offset. Its perceived
 clarity and its behavior during release remain unverified on screen.
 
 Opus now retains only release momentum toward its selected snap, tuck or
-restore destination. This changes Opus's motion model, with 100 model checks
+restore destination. This changes Opus's motion model, with 103 model checks
 passing; the original lab, Terra and browser behavior are unchanged. It removes
 the initial wrong-way component, while forward spring overshoot remains
 possible. The cue revision also raises the fresh-settings lean default to 14
@@ -66,27 +66,35 @@ neutral cue state requests no haptic. Native tests must check both predictions
 and the transition between them; the card does not promise an exact fast-flick
 destination.
 
-Opus also offers an opt-in Grounded defaults button. Source review confirms
-that it applies a complete motion/feedback preset only through its button
+Opus also offers an opt-in Presets → Grounded action. Source review confirms
+that it applies a complete motion/feedback preset only through its menu
 action, including corner docking, Smart placement, a 28-point tucked strip and
 0.35 boundary resistance. It enables feedback and haptics. Reset restores
 compiled defaults rather than previous custom settings. Root verified the new
 bundle signature and runtime checkpoint; preset interaction remains unverified.
 
-The third mode, Press into any edge, adds resistance at every inset edge,
-pointer-distance thresholds for docking and side tucking, and corner placement
+The third mode, Press any edge, adds resistance at every inset edge,
+depth-percentage thresholds for docking and side tucking, and corner placement
 when two edges are pressed. Root reproduced and fixed two new boundary cases:
 an 8-point fast press bypassed the 110-point tuck threshold through the legacy
 velocity rule, and a zero dock threshold snapped an interior drop with no press.
-All 100 model checks now pass, including four new regressions. The two source
-fixes are not in the running PID 88517; native acceptance is pending.
+Those fixes remain covered after the switch to depth percentages. All 103 model
+checks now pass. Native acceptance is pending.
 
 Root built a separate signed review bundle from immutable source commit
 `b58161ee4feba61ee508dfe9e9d593bf991b5d93`, without replacing or launching the
 open app. Its 100 model checks and strict signature verification pass. Source
 hashes, executable hash and bundle path are recorded in
-`opus/.build/press-review-b58161e/validation.json`. Later uncommitted motion edits
-from the cancelled run are preserved and are outside that review snapshot.
+`opus/.build/press-review-b58161e/validation.json`. This historical snapshot and
+its review were superseded by the percentage-depth model and new tuning UI.
+
+Press thresholds are now 2% and 12% of resisted displacement normalized by the
+window size on each axis. The readout shows depth, and resistance changes the
+pointer travel needed to reach it. Legacy `press_tuck` values above 40 reset
+both thresholds to the new defaults; units migration at the cutoff needs review.
+The 716-point tuning window uses a Presets menu, Snaps to/A drop segmented
+controls and Feel/Edges/Cues tabs. Root has not validated their appearance or
+native interactions.
 
 Build without launching, from the worktree root:
 

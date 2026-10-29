@@ -2,6 +2,7 @@
 #import <QuartzCore/QuartzCore.h>
 #include "Motion.hpp"
 #include <memory>
+#include <vector>
 
 using namespace pip_motion;
 
@@ -178,7 +179,10 @@ static void approach(double& value, double target, double rise, double fall, dou
   ExampleView *example;
   NSMutableArray<NSSlider *> *sliders;
   NSMutableArray<NSTextField *> *fields;
-  NSPopUpButton *dockMenu, *presetMenu, *placementMenu;
+  NSPopUpButton *presetMenu;
+  NSSegmentedControl *dockControl, *placementControl;
+  NSTextField *hint;
+  NSMutableArray<NSTextField *> *headings, *feedbackHeadings;
   NSTextField *status, *fileStatus, *explanation;
   NSTimer *animationTimer, *fileTimer, *saveTimer, *visualTimer;
   double lastTick;
@@ -298,125 +302,155 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   NSData *previousData = [NSData dataWithContentsOfFile:statePath];
   id previousState = previousData ? [NSJSONSerialization JSONObjectWithData:previousData options:0 error:nil] : nil;
   motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
+  // Tuning window: behavior choices on top, grouped values in tabs, try-it actions below.
+  const CGFloat W = 536, H = 716;
   controls = [[NSWindow alloc] initWithContentRect:NSMakeRect(area.origin.x + 28,
-      std::max(area.origin.y, NSMaxY(area) - 1008), 536, 980)
+      std::max(area.origin.y, NSMaxY(area) - H - 28), W, H)
       styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
       backing:NSBackingStoreBuffered defer:NO];
-  controls.title = @"Opus PiP Lab — live tuning";
+  controls.title = @"Opus PiP Lab";
   controls.delegate = self;
   controls.releasedWhenClosed = NO;
   NSView *content = controls.contentView;
-  [content addSubview:label(@"Tune the movement", NSMakeRect(24, 936, 480, 28), 22)];
-  NSTextField *intro = label(@"Drop slowly to leave it there; flick to dock. Push past a side to tuck.\nClick the exposed strip to restore. Re-grab an animation to interrupt it.",
-      NSMakeRect(24, 885, 490, 44), 12);
-  intro.textColor = NSColor.secondaryLabelColor;
-  [content addSubview:intro];
-  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 849, 210, 28) pullsDown:NO];
-  [presetMenu addItemsWithTitles:@[@"iOS-like baseline", @"Snappy", @"Soft spring", @"Position only", @"Custom"]];
+
+  NSTextField *title = label(@"Tune the PiP window", NSMakeRect(24, H - 46, 300, 26), 20);
+  title.font = [NSFont systemFontOfSize:20 weight:NSFontWeightSemibold];
+  [content addSubview:title];
+  presetMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(338, H - 46, 150, 26) pullsDown:YES];
+  [presetMenu addItemWithTitle:@"Presets"]; presetMenu.lastItem.tag = -1;
+  NSArray *presetTitles = @[@"Grounded", @"iOS-like baseline", @"Snappy", @"Soft spring", @"Position only"];
+  for (NSUInteger i = 0; i < presetTitles.count; ++i) {
+    [presetMenu addItemWithTitle:presetTitles[i]]; presetMenu.lastItem.tag = i + 1;
+  }
+  [presetMenu.menu addItem:NSMenuItem.separatorItem];
+  [presetMenu addItemWithTitle:@"Reset everything"]; presetMenu.lastItem.tag = 9;
   presetMenu.target = self; presetMenu.action = @selector(presetChanged:);
   [content addSubview:presetMenu];
-  addHelp(content, NSMakeRect(238, 854, 18, 18), @"Presets",
-      @"Loads a set of numeric tuning values while preserving your docking and placement modes.\n\n"
-      "iOS-like baseline uses the defaults. Snappy uses a faster spring and shorter projection. Soft spring is slower with some bounce. Position only sets projection to zero. Custom means values were changed individually.\n\n"
-      "Reset all variables also resets the docking and placement modes.");
-  dockMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(274, 849, 214, 28) pullsDown:NO];
-  [dockMenu addItemsWithTitles:@[@"Dock at four corners", @"Dock anywhere on side edges", @"Press into any edge"]];
-  dockMenu.target = self; dockMenu.action = @selector(dockingChanged:);
-  [content addSubview:dockMenu];
-  addHelp(content, NSMakeRect(494, 854, 18, 18), @"Docking mode",
-      @"Chooses the allowed resting destinations when a release snaps.\n\n"
-      "Four corners: docks at a corner of the visible work area. Side edges: docks on the left or right while allowing any height.\n\n"
-      "Press into any edge: every edge resists like the top and bottom. A little push past an edge docks flush on it, wherever you are along it; pushing into two edges docks in that corner. A long push into the left or right tucks. Nearness alone never snaps a slow drop.\n\n"
-      "Momentum projection can choose a farther destination for fast flicks. Slow deliberate attraction uses the nearest dock.");
-  placementMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 811, 288, 28) pullsDown:NO];
-  [placementMenu addItemsWithTitles:@[@"Smart · slow drop stays, flick snaps", @"Always snap to dock", @"Always leave where dropped"]];
-  placementMenu.target = self; placementMenu.action = @selector(placementChanged:);
-  [content addSubview:placementMenu];
-  addHelp(content, NSMakeRect(318, 816, 18, 18), @"Placement mode",
-      @"Smart: slow releases stay where dropped unless near a dock; faster flicks snap using momentum.\n\n"
-      "Always snap: every release docks. Always leave: releases stop where dropped, within the visible inset.\n\n"
-      "Side tucking still works in every mode. The two attraction controls below tune Smart mode.");
-  [self button:@"Reset all variables" frame:NSMakeRect(348, 811, 164, 28) action:@selector(resetVariables:) tag:0];
-  sliders = NSMutableArray.array; fields = NSMutableArray.array;
-  for (size_t i = 0; i < parameterCount; ++i) {
-    CGFloat y = 766 - i * 38;
-    NSTextField *heading = label(@(parameters[i].label), NSMakeRect(24, y + 16, 370, 18), 11);
-    [heading sizeToFit]; [content addSubview:heading];
-    addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 6, y + 15, 18, 18),
-        @(parameters[i].label), @(parameters[i].help));
-    NSSlider *slider = [NSSlider sliderWithValue:motion->settings.*parameters[i].member
-        minValue:parameters[i].low maxValue:parameters[i].high target:self action:@selector(sliderChanged:)];
-    slider.frame = NSMakeRect(24, y - 2, 392, 22); slider.tag = i; slider.continuous = YES;
-    slider.accessibilityLabel = @(parameters[i].label);
-    slider.accessibilityHelp = @(parameters[i].help);
-    [sliders addObject:slider]; [content addSubview:slider];
-    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(434, y + 1, 78, 24)];
-    field.tag = i; field.target = self; field.action = @selector(fieldChanged:);
-    field.alignment = NSTextAlignmentRight;
-    field.accessibilityLabel = [@(parameters[i].label) stringByAppendingString:@" value"];
-    field.accessibilityHelp = @(parameters[i].help);
-    [fields addObject:field]; [content addSubview:field];
+  addHelp(content, NSMakeRect(494, H - 42, 18, 18), @"Presets",
+      @"Grounded: a calm, natural tuning for every value, with corner snapping and Smart drops. "
+      "Leave-here speed 180, snap distance 64, projection 0.40, response 0.44 with no bounce, inset 16, tuck at 30% or 1000 pt/s, restore after 24 pt; "
+      "lift 0.60, settle 0.75, press 0.40, edge shade 0.50, dock lean 12, dock shadow 0.90, no glow, haptics on.\n\n"
+      "iOS-like baseline, Snappy, Soft spring and Position only change the spring and projection values and keep your snapping and drop choices.\n\n"
+      "Reset everything restores every compiled default, including the choices above the tabs.");
+
+  auto modeRow = [&](NSString *name, NSArray<NSString *> *labels, SEL action, CGFloat y) {
+    NSTextField *caption = label(name, NSMakeRect(24, y + 4, 74, 18), 12);
+    caption.textColor = NSColor.secondaryLabelColor; [content addSubview:caption];
+    NSSegmentedControl *control = [NSSegmentedControl segmentedControlWithLabels:labels
+        trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:action];
+    control.frame = NSMakeRect(100, y, 388, 26);
+    control.segmentDistribution = NSSegmentDistributionFillEqually;
+    [content addSubview:control];
+    return control;
+  };
+  dockControl = modeRow(@"Snaps to", @[@"Corners", @"Side edges", @"Press any edge"], @selector(dockingChanged:), H - 88);
+  addHelp(content, NSMakeRect(494, H - 84, 18, 18), @"Snaps to",
+      @"Where a release can snap.\n\n"
+      "Corners: the four corners of the visible work area. Side edges: flush against the left or right, at any height.\n\n"
+      "Press any edge: every edge resists like a soft wall. Push a little into an edge to snap flush to it anywhere along it, into two edges for a corner, or hard into a side to tuck. Nearness alone never snaps.\n\n"
+      "Fast flicks use momentum projection to choose a farther destination.");
+  placementControl = modeRow(@"A drop", @[@"Smart", @"Always snaps", @"Stays put"], @selector(placementChanged:), H - 122);
+  addHelp(content, NSMakeRect(494, H - 118, 18, 18), @"A drop",
+      @"What letting go does away from a tuck.\n\n"
+      "Smart: a slow drop stays where you put it unless it is close to a snap point; a flick snaps. Always snaps: every release snaps. Stays put: releases stop where dropped, inside the screen inset.\n\n"
+      "Tucking works in every mode. Controls that do not apply to the current choices are dimmed.");
+  hint = [NSTextField wrappingLabelWithString:@""];
+  hint.frame = NSMakeRect(24, H - 170, 488, 36);
+  hint.font = [NSFont systemFontOfSize:12]; hint.textColor = NSColor.secondaryLabelColor;
+  [content addSubview:hint];
+
+  NSTabView *tabs = [[NSTabView alloc] initWithFrame:NSMakeRect(18, 176, W - 36, H - 176 - 176)];
+  NSMutableArray<NSView *> *pages = NSMutableArray.array;
+  for (NSString *name in @[@"Feel", @"Edges", @"Cues"]) {
+    NSTabViewItem *item = [[NSTabViewItem alloc] initWithIdentifier:name];
+    item.label = name;
+    item.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, NSWidth(tabs.contentRect), NSHeight(tabs.contentRect))];
+    [tabs addTabViewItem:item];
+    [pages addObject:item.view];
   }
-  NSBox *separator = [[NSBox alloc] initWithFrame:NSMakeRect(24, 296, 488, 1)];
-  separator.boxType = NSBoxSeparator; [content addSubview:separator];
+  [content addSubview:tabs];
+  const CGFloat pageWidth = NSWidth(tabs.contentRect), pageTop = NSHeight(tabs.contentRect) - 42;
+  auto makeRow = [&](NSString *name, NSString *help, double low, double high, double value, NSInteger tag,
+                     SEL sliderAction, SEL fieldAction, NSMutableArray *rowSliders,
+                     NSMutableArray *rowFields, NSMutableArray *rowHeadings) {
+    NSTextField *heading = label(name, NSZeroRect, 11); [heading sizeToFit];
+    NSSlider *slider = [NSSlider sliderWithValue:value minValue:low maxValue:high target:self action:sliderAction];
+    slider.tag = tag; slider.continuous = YES;
+    slider.accessibilityLabel = name; slider.accessibilityHelp = help;
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSZeroRect];
+    field.tag = tag; field.target = self; field.action = fieldAction;
+    field.alignment = NSTextAlignmentRight;
+    field.accessibilityLabel = [name stringByAppendingString:@" value"]; field.accessibilityHelp = help;
+    [rowSliders addObject:slider]; [rowFields addObject:field]; [rowHeadings addObject:heading];
+  };
+  auto placeRow = [&](NSView *page, CGFloat y, NSTextField *heading, NSString *help, NSSlider *slider, NSTextField *field) {
+    heading.frameOrigin = NSMakePoint(12, y + 16); [page addSubview:heading];
+    addHelp(page, NSMakeRect(NSMaxX(heading.frame) + 5, y + 15, 18, 18), heading.stringValue, help);
+    slider.frame = NSMakeRect(12, y - 2, pageWidth - 110, 22); [page addSubview:slider];
+    field.frame = NSMakeRect(pageWidth - 88, y + 1, 72, 24); [page addSubview:field];
+  };
+  sliders = NSMutableArray.array; fields = NSMutableArray.array; headings = NSMutableArray.array;
+  for (size_t i = 0; i < parameterCount; ++i)
+    makeRow(@(parameters[i].label), @(parameters[i].help), parameters[i].low, parameters[i].high,
+            motion->settings.*parameters[i].member, i, @selector(sliderChanged:), @selector(fieldChanged:),
+            sliders, fields, headings);
+  const std::vector<std::vector<const char *>> pageKeys = {
+    {"response", "damping", "projection", "free_speed", "snap_distance", "margin"},
+    {"resistance", "press_dock", "press_tuck", "stash_percent", "stash_velocity", "restore_distance", "handle"}};
+  for (size_t page = 0; page < pageKeys.size(); ++page) {
+    CGFloat y = pageTop;
+    for (const char *key : pageKeys[page]) {
+      for (size_t i = 0; i < parameterCount; ++i) {
+        if (strcmp(parameters[i].key, key) != 0) continue;
+        placeRow(pages[page], y, headings[i], @(parameters[i].help), sliders[i], fields[i]);
+        y -= 38;
+      }
+    }
+  }
+
+  NSView *cues = pages[2];
   feedbackToggle = [NSButton checkboxWithTitle:@"Release feedback" target:self action:@selector(feedbackToggled:)];
-  feedbackToggle.frame = NSMakeRect(22, 268, 150, 20);
-  [content addSubview:feedbackToggle];
+  feedbackToggle.frame = NSMakeRect(10, pageTop + 4, 140, 20);
+  [cues addSubview:feedbackToggle];
+  addHelp(cues, NSMakeRect(150, pageTop + 5, 18, 18), @"Release feedback",
+      @"Physical cues for holding and letting go.\n\n"
+      "Picking the window up deepens and softens its shadow and shrinks it slightly. After release it stays lifted while it travels, sets down where it comes to rest, and dips once as it lands.\n\n"
+      "Held where it will stay, it lowers toward the desk. Held near where it would snap, it leans that way and its shadow slides there.\n\n"
+      "Pushed into a side, the screen's rim casts a shadow on the part going in, and the chevron fades in with depth. The shadow deepens once letting go would tuck.\n\n"
+      "Turn off to compare with no added feedback. The tucked chevron still appears.");
   hapticsToggle = [NSButton checkboxWithTitle:@"Haptics" target:self action:@selector(hapticsToggled:)];
-  hapticsToggle.frame = NSMakeRect(206, 268, 80, 20);
-  [content addSubview:hapticsToggle];
-  addHelp(content, NSMakeRect(282, 269, 18, 18), @"Haptics",
+  hapticsToggle.frame = NSMakeRect(196, pageTop + 4, 80, 20);
+  [cues addSubview:hapticsToggle];
+  addHelp(cues, NSMakeRect(272, pageTop + 5, 18, 18), @"Haptics",
       @"Force Touch trackpad taps for every event: pickup, each change in what letting go would do, and landing.\n\n"
       "Every tap uses the lightest alignment pattern, at most one every 0.15 seconds.\n\n"
       "macOS only plays haptics while a finger is on the trackpad, so a landing after a long flight may be silent. Mice have no haptics.");
-  [self button:@"Grounded defaults" frame:NSMakeRect(330, 263, 160, 28) action:@selector(grounded:) tag:0];
-  addHelp(content, NSMakeRect(494, 268, 18, 18), @"Grounded defaults",
-      @"Sets every motion and feedback value to a calm, natural tuning, with corner docking and Smart placement.\n\n"
-      "Motion: leave-here speed 180 so ordinary careful drops count as placement; snap distance 64 so corners feel a little magnetic; "
-      "projection 0.40 so flicks carry without far-corner surprises; response 0.44 with damping 1 for weight without bounce; "
-      "inset 16 for breathing room; tuck at 30% and 1000 pt/s so tucks are deliberate; restore after 24 pt so getting it back is easy.\n\n"
-      "Feedback: lift 0.60, press 0.40 and edge shade 0.50 for quieter cues; settle 0.75 because lowering is the main stay cue; "
-      "dock lean 12 with dock shadow 0.90 so the shadow points rather than the window drifting; no glow; haptics on.");
-  addHelp(content, NSMakeRect(160, 269, 18, 18), @"Release feedback",
-      @"Physical cues for holding and letting go.\n\n"
-      "Picking the window up deepens and softens its shadow and shrinks it slightly. After release it stays lifted while it travels, sets down where it comes to rest, and dips once as it lands.\n\n"
-      "While letting go would leave it where it is, it lowers toward the desk. Near a dock it would snap to, it leans toward the dock and casts its shadow that way.\n\n"
-      "Pushed into a side, the screen's rim casts a shadow on the part going in, and the chevron fades in with depth. The shadow deepens once letting go would tuck.\n\n"
-      "Turn off to compare with no added feedback. The tucked chevron still appears.");
-  feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array;
+  feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array; feedbackHeadings = NSMutableArray.array;
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
     const auto& parameter = feedbackParameters[i];
-    CGFloat x = 24 + (i % 4) * 124, row = i < 4 ? 220 : 172;
-    NSTextField *heading = label(@(parameter.label), NSMakeRect(x, row + 24, 100, 18), 11);
-    [heading sizeToFit]; [content addSubview:heading];
-    addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 4, row + 23, 18, 18), @(parameter.label), @(parameter.help));
-    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(x + 72, row, 42, 22)];
-    field.tag = i; field.target = self; field.action = @selector(feedbackFieldChanged:);
-    field.alignment = NSTextAlignmentRight;
-    field.accessibilityLabel = [@(parameter.label) stringByAppendingString:@" value"];
-    field.accessibilityHelp = @(parameter.help);
-    [feedbackFields addObject:field]; [content addSubview:field];
-    NSSlider *slider = [NSSlider sliderWithValue:feedback.*parameter.member minValue:parameter.low
-        maxValue:parameter.high target:self action:@selector(feedbackSliderChanged:)];
-    slider.frame = NSMakeRect(x, row, 66, 22); slider.tag = i; slider.continuous = YES;
-    slider.accessibilityLabel = @(parameter.label);
-    slider.accessibilityHelp = @(parameter.help);
-    [feedbackSliders addObject:slider]; [content addSubview:slider];
+    makeRow(@(parameter.label), @(parameter.help), parameter.low, parameter.high, feedback.*parameter.member, i,
+            @selector(feedbackSliderChanged:), @selector(feedbackFieldChanged:),
+            feedbackSliders, feedbackFields, feedbackHeadings);
+    placeRow(cues, pageTop - 36 - i * 36, feedbackHeadings[i], @(parameter.help), feedbackSliders[i], feedbackFields[i]);
   }
-  explanation = label(@"", NSMakeRect(24, 147, 488, 22), 11);
+
+  explanation = label(@"", NSMakeRect(24, 150, 488, 18), 11);
   explanation.textColor = NSColor.secondaryLabelColor; [content addSubview:explanation];
-  NSArray *titles = @[@"↖ Throw", @"↗ Throw", @"↙ Throw", @"↘ Throw"];
-  for (NSInteger i = 0; i < 4; ++i)
-    [self button:titles[i] frame:NSMakeRect(24 + i * 124, 115, 116, 28) action:@selector(sampleThrow:) tag:i];
-  [self button:@"Replay throw" frame:NSMakeRect(24, 79, 154, 28) action:@selector(replay:) tag:0];
-  [self button:@"Tuck / restore" frame:NSMakeRect(190, 79, 154, 28) action:@selector(toggleTuck:) tag:0];
-  [self button:@"Reset position" frame:NSMakeRect(356, 79, 156, 28) action:@selector(reset:) tag:0];
-  status = label(@"", NSMakeRect(24, 48, 488, 20), 11);
+  status = label(@"", NSMakeRect(24, 130, 488, 16), 11);
   status.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
+  status.textColor = NSColor.tertiaryLabelColor;
   [content addSubview:status];
-  fileStatus = label(@"Settings save and reload live · no rebuild needed", NSMakeRect(24, 22, 416, 18), 10);
+  NSTextField *tryLabel = label(@"Throw from center", NSMakeRect(24, 96, 120, 18), 12);
+  tryLabel.textColor = NSColor.secondaryLabelColor; [content addSubview:tryLabel];
+  NSArray *arrows = @[@"↖", @"↗", @"↙", @"↘"];
+  for (NSInteger i = 0; i < 4; ++i)
+    [self button:arrows[i] frame:NSMakeRect(144 + i * 46, 90, 42, 28) action:@selector(sampleThrow:) tag:i];
+  [self button:@"Replay last throw" frame:NSMakeRect(334, 90, 178, 28) action:@selector(replay:) tag:0];
+  [self button:@"Tuck / restore" frame:NSMakeRect(24, 56, 150, 28) action:@selector(toggleTuck:) tag:0];
+  [self button:@"Reset position" frame:NSMakeRect(180, 56, 150, 28) action:@selector(reset:) tag:0];
+  [self button:@"JSON…" frame:NSMakeRect(442, 56, 70, 28) action:@selector(reveal:) tag:0];
+  fileStatus = label(@"Settings save and reload live · no rebuild needed", NSMakeRect(24, 24, 488, 16), 10);
   fileStatus.textColor = NSColor.secondaryLabelColor; [content addSubview:fileStatus];
-  [self button:@"JSON…" frame:NSMakeRect(446, 17, 70, 25) action:@selector(reveal:) tag:0];
 
   const CGFloat w = motion->size.width, h = motion->size.height;
   const CGRect card = CGRectMake(kPad, kPad, w, h);
@@ -527,22 +561,52 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   NSButton *button = [NSButton buttonWithTitle:title target:self action:action];
   button.frame = frame; button.tag = tag; [controls.contentView addSubview:button];
 }
+// Whether a motion value affects the current snapping and drop choices.
+- (BOOL)relevant:(const char *)key {
+  const Settings& settings = motion->settings;
+  const bool press = settings.docking == Docking::AllEdges;
+  if (!strcmp(key, "snap_distance")) return settings.placement == Placement::Smart && !press;
+  if (!strcmp(key, "projection")) return settings.placement != Placement::Free;
+  if (!strcmp(key, "press_dock") || !strcmp(key, "press_tuck")) return press;
+  if (!strcmp(key, "stash_percent")) return !press;
+  return YES;
+}
+- (NSString *)hintText {
+  const Settings& settings = motion->settings;
+  if (settings.docking == Docking::AllEdges) {
+    NSString *drop = settings.placement == Placement::Free ? @"Drops stay where you leave them." :
+        settings.placement == Placement::AlwaysDock ? @"Every drop snaps to the nearest edge." :
+        @"Slow drops stay put; flicks throw to the nearest edge.";
+    return [drop stringByAppendingString:@" Push a little into any edge to snap flush to it, into two edges for a corner, or hard into a side to tuck."];
+  }
+  NSString *where = settings.docking == Docking::Corners ? @"a corner" : @"the left or right edge";
+  NSString *drop = settings.placement == Placement::Free ? @"Drops stay where you leave them; nothing snaps." :
+      settings.placement == Placement::AlwaysDock ? [NSString stringWithFormat:@"Every drop snaps to %@.", where] :
+      [NSString stringWithFormat:@"Slow drops stay put unless close to %@; flicks throw there.", where];
+  return [drop stringByAppendingString:@" Push past a side to tuck; click the strip to bring it back."];
+}
 - (void)syncControls {
   for (size_t i = 0; i < parameterCount; ++i) {
-    double value = motion->settings.*parameters[i].member;
-    sliders[i].doubleValue = value;
-    fields[i].stringValue = [NSString stringWithFormat:parameters[i].high > 10 ? @"%.0f" : @"%.3f", value];
+    const auto& parameter = parameters[i];
+    const double value = motion->settings.*parameter.member;
+    const BOOL on = [self relevant:parameter.key];
+    sliders[i].doubleValue = value; sliders[i].enabled = on; fields[i].enabled = on;
+    fields[i].stringValue = [NSString stringWithFormat:!strncmp(parameter.key, "press", 5) ? @"%.1f" :
+        parameter.high > 10 ? @"%.0f" : @"%.3f", value];
+    headings[i].textColor = on ? NSColor.labelColor : NSColor.tertiaryLabelColor;
   }
-  [dockMenu selectItemAtIndex:static_cast<NSInteger>(motion->settings.docking)];
-  [placementMenu selectItemAtIndex:static_cast<NSInteger>(motion->settings.placement)];
+  dockControl.selectedSegment = static_cast<NSInteger>(motion->settings.docking);
+  placementControl.selectedSegment = static_cast<NSInteger>(motion->settings.placement);
+  hint.stringValue = [self hintText];
   feedbackToggle.state = feedback.enabled ? NSControlStateValueOn : NSControlStateValueOff;
   hapticsToggle.state = feedback.haptics ? NSControlStateValueOn : NSControlStateValueOff;
   hapticsToggle.enabled = feedback.enabled;
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
-    double value = feedback.*feedbackParameters[i].member;
+    const double value = feedback.*feedbackParameters[i].member;
     feedbackSliders[i].doubleValue = value; feedbackSliders[i].enabled = feedback.enabled;
     feedbackFields[i].stringValue = [NSString stringWithFormat:feedbackParameters[i].high > 1 ? @"%.1f" : @"%.2f", value];
     feedbackFields[i].enabled = feedback.enabled;
+    feedbackHeadings[i].textColor = feedback.enabled ? NSColor.labelColor : NSColor.tertiaryLabelColor;
   }
 }
 - (void)scheduleSave {
@@ -583,7 +647,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)sliderChanged:(NSSlider *)sender {
   Settings next = motion->settings; next.*parameters[sender.tag].member = sender.doubleValue;
-  [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
+  [self apply:next save:YES];
 }
 - (void)fieldChanged:(NSTextField *)sender {
   NSScanner *scanner = [NSScanner scannerWithString:sender.stringValue];
@@ -594,27 +658,31 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     [self syncControls]; return;
   }
   Settings next = motion->settings; next.*parameter.member = value;
-  [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
+  [self apply:next save:YES];
 }
-- (void)dockingChanged:(NSPopUpButton *)sender {
+- (void)dockingChanged:(NSSegmentedControl *)sender {
   Settings next = motion->settings;
-  next.docking = static_cast<Docking>(sender.indexOfSelectedItem);
-  [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
+  next.docking = static_cast<Docking>(sender.selectedSegment);
+  [self apply:next save:YES];
 }
-- (void)placementChanged:(NSPopUpButton *)sender {
+- (void)placementChanged:(NSSegmentedControl *)sender {
   Settings next = motion->settings;
-  next.placement = static_cast<Placement>(sender.indexOfSelectedItem);
-  [presetMenu selectItemAtIndex:4]; [self apply:next save:YES];
+  next.placement = static_cast<Placement>(sender.selectedSegment);
+  [self apply:next save:YES];
 }
 - (void)presetChanged:(NSPopUpButton *)sender {
-  if (sender.indexOfSelectedItem == 4) return;
+  const NSInteger choice = sender.selectedItem.tag;
+  if (choice == 1) { [self grounded:nil]; return; }
+  if (choice == 9) { [self resetVariables:nil]; fileStatus.stringValue = @"Reset everything · saved"; return; }
+  if (choice < 2) return;
   Settings next;
   next.docking = motion->settings.docking;
   next.placement = motion->settings.placement;
-  if (sender.indexOfSelectedItem == 1) { next.response = .28; next.projection = .35; }
-  if (sender.indexOfSelectedItem == 2) { next.response = .60; next.damping = .85; }
-  if (sender.indexOfSelectedItem == 3) next.projection = 0;
+  if (choice == 3) { next.response = .28; next.projection = .35; }
+  if (choice == 4) { next.response = .60; next.damping = .85; }
+  if (choice == 5) next.projection = 0;
   [self apply:next save:YES];
+  fileStatus.stringValue = [NSString stringWithFormat:@"Applied %@ · saved", sender.selectedItem.title];
 }
 - (void)sampleThrow:(NSButton *)sender {
   pip_motion::Point v{sender.tag % 2 == 0 ? -1100.0 : 1100.0, sender.tag < 2 ? 600.0 : -600.0};
@@ -639,7 +707,6 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   tuned.lift = .60; tuned.settle = .75; tuned.press = .40; tuned.glow = 0;
   tuned.edge = .50; tuned.lean = 12; tuned.dockShadow = .90;
   feedback = tuned;
-  [presetMenu selectItemAtIndex:4];
   [self apply:next save:YES];
   fileStatus.stringValue = @"Applied grounded defaults · saved";
 }
@@ -648,7 +715,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [saveTimer invalidate]; saveTimer = nil;
   motion->resetSettings();
   feedback = Feedback{};
-  [self syncControls]; [presetMenu selectItemAtIndex:0];
+  [self syncControls];
   [self startAnimation]; [self saveSettings];
 }
 - (void)reveal:(id)sender { [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:settingsPath]]]; }
@@ -1072,7 +1139,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   next.docking = static_cast<Docking>([@[@"corners", @"edges", @"all-edges"] indexOfObject:dict[@"docking"]]);
   [saveTimer invalidate]; saveTimer = nil;
   feedback = nextFeedback;
-  [presetMenu selectItemAtIndex:4]; [self apply:next save:NO];
+  [self apply:next save:NO];
   if (migratedTuckDistance) [self saveSettings];
   else fileStatus.stringValue = @"Reloaded JSON · all controls are live";
 }
