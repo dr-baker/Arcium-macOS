@@ -24,10 +24,13 @@ app before rebuilding.
   and picked-up shadows are broad and light, with a softer contact shadow.
 - **Set down.** After release it stays lifted while it travels and sets down as
   it arrives. A drop that stays put sets down right away. A snap, tuck or
-  restore lands at its destination.
+  restore lands at its destination. A small scale dip confirms landing; the
+  Press control adjusts it.
 - **Stay here.** While letting go would leave the window where it is, its
-  border glows faintly. In Smart mode the glow appears as you slow down away
-  from a dock, and fades when speed or proximity means it would snap.
+  shadow tightens and the pickup shrink eases off as it lowers partway toward
+  rest. Four corner ticks mark the placement. Settle and Anchors tune these
+  independently. Hold glow remains available for comparison, with a default
+  of zero; existing saved glow values are preserved.
 - **Dock.** The window leans toward the dock release would select. The pull
   builds with proximity at any speed and is fully engaged while moving slowly
   enough to snap. The broad shadow shifts farther toward the dock, while the
@@ -43,10 +46,17 @@ app before rebuilding.
   rim shadow back to its faint level, and it clears once the window is fully
   back on screen.
 
-A press that hasn't moved the window still lifts, but previews nothing. Every
-cue comes from `Motion::predict()`, which uses the same classification as
-release. A randomized test checks that the prediction always matches what
-release does.
+A press that hasn't moved the window still lifts, but previews nothing.
+Placement previews come from `Motion::predict()`, which uses the same
+classification as release. Pickup and landing cues follow the interaction and
+motion phase. A randomized model test checks prediction against release; it
+does not validate visual appearance or haptic feel.
+
+Haptics are enabled by default and can be switched off independently. The app
+requests taps on pickup, debounced release-outcome changes and landing, using
+alignment taps for stay/dock changes and level-change taps around tuck/restore.
+Hardware delivery and feel remain unverified; a requested tap is not proof that
+the user felt one.
 
 The panel is padded by 112 points so it can draw its own shadow. The drag target
 keeps the full, unscaled card rectangle during pickup. The author reports that
@@ -61,13 +71,18 @@ The **Release feedback** row in the tuning window has its own hover help.
 | Control | Effect |
 | --- | --- |
 | Release feedback | Turns every cue off to compare with plain motion. The resting shadow and the tucked chevron remain. |
+| Haptics | Requests pickup, outcome-change and landing taps. Default on. |
 | Lift | How much the shadow grows when picked up. Default 0.70. |
-| Hold glow | Border glow strength while release would keep the window in place. Default 0.50. |
+| Settle | How far it lowers while release would keep it in place. Default 0.60. |
+| Press | Landing dip strength. Default 0.60. |
+| Anchors | Corner-mark visibility while release would keep it in place. Default 0.60. |
+| Hold glow | Border glow strength while release would keep the window in place. Default 0. |
 | Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
 | Dock lean | Maximum lean toward the dock, in points. Default 8; adjustable from 0 to 16. |
 
-These save to `settings.json` as `feedback`, `feedback_lift`, `feedback_glow`,
-`feedback_edge` and `feedback_lean`. They're optional, so a baseline settings
+These save to `settings.json` as `feedback`, `feedback_haptics`,
+`feedback_lift`, `feedback_settle`, `feedback_press`, `feedback_anchors`,
+`feedback_glow`, `feedback_edge` and `feedback_lean`. They're optional, so a baseline settings
 file still loads. **Reset all variables** resets them too. Presets leave them
 alone. While you drag, the line under the controls reads "Release now: …", so
 you can check what each cue is claiming.

@@ -65,8 +65,12 @@ static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[
 // Release feedback lives in the lab, not the motion model; it only reads predictions.
 struct Feedback {
   bool enabled = true;
+  bool haptics = true;
   double lift = .70;
-  double glow = .50;
+  double settle = .60;
+  double press = .60;
+  double anchors = .60;
+  double glow = 0;
   double edge = .60;
   double lean = 8;
 };
@@ -81,6 +85,16 @@ static const FeedbackParameter feedbackParameters[] = {
     "How much the shadow grows and softens when you pick the window up.\n\n"
     "After release, the window stays lifted while it travels and sets down as it arrives.\n\n"
     "Zero keeps the resting shadow."},
+  {"feedback_settle", "Settle", 0, 1, &Feedback::settle,
+    "How far the window lowers toward the desk while letting go would leave it where it is.\n\n"
+    "The shadow tightens and the shrink eases off, as if you are setting it down. Releasing finishes the motion.\n\n"
+    "Zero keeps it fully lifted until release."},
+  {"feedback_press", "Press", 0, 1, &Feedback::press,
+    "How much the window dips and springs back when it lands after you let go, like setting a cup on a table.\n\n"
+    "Applies when it stays put and when it arrives at a dock, tuck or restore. Zero turns it off."},
+  {"feedback_anchors", "Anchors", 0, 1, &Feedback::anchors,
+    "How visible the four corner marks are while letting go would leave the window where it is.\n\n"
+    "They mark the spot it will rest on. Zero hides them."},
   {"feedback_glow", "Hold glow", 0, 1, &Feedback::glow,
     "How brightly the border glows while letting go would leave the window where it is.\n\n"
     "In Smart mode it appears as you slow down away from a dock. Zero turns it off."},
@@ -163,13 +177,15 @@ static void approach(double& value, double target, double rise, double fall, dou
   Feedback feedback;
   CALayer *stage, *ambientShadow, *contactShadow, *glowShadow, *overlay;
   CAGradientLayer *rimShade;
-  CAShapeLayer *chevron, *rimLight;
-  NSButton *feedbackToggle;
+  CAShapeLayer *chevron, *rimLight, *anchorMarks;
+  NSButton *feedbackToggle, *hapticsToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
   double lift, glow, edgeAmount, leanX, leanY, lastVisualTime, releaseDistance, rimShadeStrength;
   Side chevronSide;
-  BOOL leaning;
+  BOOL leaning, awaitingLanding;
+  double pressStart, lastHaptic, pendingSince;
+  int hapticKey, pendingKey;
   double lastEventTimestamp, lastEventUptime;
 }
 - (instancetype)initWithSettingsPath:(NSString *)path;
@@ -316,7 +332,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [self button:@"Reset all variables" frame:NSMakeRect(348, 731, 164, 28) action:@selector(resetVariables:) tag:0];
   sliders = NSMutableArray.array; fields = NSMutableArray.array;
   for (size_t i = 0; i < parameterCount; ++i) {
-    CGFloat y = 686 - i * 40;
+    CGFloat y = 686 - i * 38;
     NSTextField *heading = label(@(parameters[i].label), NSMakeRect(24, y + 16, 370, 18), 11);
     [heading sizeToFit]; [content addSubview:heading];
     addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 6, y + 15, 18, 18),
@@ -334,25 +350,32 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     field.accessibilityHelp = @(parameters[i].help);
     [fields addObject:field]; [content addSubview:field];
   }
-  NSBox *separator = [[NSBox alloc] initWithFrame:NSMakeRect(24, 272, 488, 1)];
+  NSBox *separator = [[NSBox alloc] initWithFrame:NSMakeRect(24, 296, 488, 1)];
   separator.boxType = NSBoxSeparator; [content addSubview:separator];
   feedbackToggle = [NSButton checkboxWithTitle:@"Release feedback" target:self action:@selector(feedbackToggled:)];
-  feedbackToggle.frame = NSMakeRect(22, 242, 150, 20);
+  feedbackToggle.frame = NSMakeRect(22, 268, 150, 20);
   [content addSubview:feedbackToggle];
-  addHelp(content, NSMakeRect(160, 243, 18, 18), @"Release feedback",
+  hapticsToggle = [NSButton checkboxWithTitle:@"Haptics" target:self action:@selector(hapticsToggled:)];
+  hapticsToggle.frame = NSMakeRect(206, 268, 80, 20);
+  [content addSubview:hapticsToggle];
+  addHelp(content, NSMakeRect(282, 269, 18, 18), @"Haptics",
+      @"Force Touch trackpad taps for every event: pickup, each change in what letting go would do, and landing.\n\n"
+      "Changes between staying, snapping and switching docks tap lightly. Tucking and restoring tap more firmly.\n\n"
+      "macOS only plays haptics while a finger is on the trackpad, so a landing after a long flight may be silent. Mice have no haptics.");
+  addHelp(content, NSMakeRect(160, 269, 18, 18), @"Release feedback",
       @"Physical cues for holding and letting go.\n\n"
-      "Picking the window up deepens and softens its shadow. After release it stays lifted while it travels and sets down where it comes to rest.\n\n"
-      "While letting go would leave it where it is, its border glows faintly. Held slowly near a dock, it leans a few points toward where it would snap.\n\n"
+      "Picking the window up deepens and softens its shadow and shrinks it slightly. After release it stays lifted while it travels, sets down where it comes to rest, and dips once as it lands.\n\n"
+      "While letting go would leave it where it is, it lowers toward the desk and corner marks show where it will rest. Near a dock it would snap to, it leans toward the dock and casts its shadow that way.\n\n"
       "Pushed into a side, the screen's rim casts a shadow on the part going in, and the chevron fades in with depth. The shadow deepens once letting go would tuck.\n\n"
       "Turn off to compare with no added feedback. The tucked chevron still appears.");
   feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array;
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
     const auto& parameter = feedbackParameters[i];
-    CGFloat x = 24 + i * 124;
-    NSTextField *heading = label(@(parameter.label), NSMakeRect(x, 213, 100, 18), 11);
+    CGFloat x = 24 + (i % 4) * 124, row = i < 4 ? 220 : 172;
+    NSTextField *heading = label(@(parameter.label), NSMakeRect(x, row + 24, 100, 18), 11);
     [heading sizeToFit]; [content addSubview:heading];
-    addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 4, 212, 18, 18), @(parameter.label), @(parameter.help));
-    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(x + 72, 186, 42, 22)];
+    addHelp(content, NSMakeRect(NSMaxX(heading.frame) + 4, row + 23, 18, 18), @(parameter.label), @(parameter.help));
+    NSTextField *field = [[NSTextField alloc] initWithFrame:NSMakeRect(x + 72, row, 42, 22)];
     field.tag = i; field.target = self; field.action = @selector(feedbackFieldChanged:);
     field.alignment = NSTextAlignmentRight;
     field.accessibilityLabel = [@(parameter.label) stringByAppendingString:@" value"];
@@ -360,12 +383,12 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     [feedbackFields addObject:field]; [content addSubview:field];
     NSSlider *slider = [NSSlider sliderWithValue:feedback.*parameter.member minValue:parameter.low
         maxValue:parameter.high target:self action:@selector(feedbackSliderChanged:)];
-    slider.frame = NSMakeRect(x, 186, 66, 22); slider.tag = i; slider.continuous = YES;
+    slider.frame = NSMakeRect(x, row, 66, 22); slider.tag = i; slider.continuous = YES;
     slider.accessibilityLabel = @(parameter.label);
     slider.accessibilityHelp = @(parameter.help);
     [feedbackSliders addObject:slider]; [content addSubview:slider];
   }
-  explanation = label(@"", NSMakeRect(24, 153, 488, 22), 11);
+  explanation = label(@"", NSMakeRect(24, 147, 488, 22), 11);
   explanation.textColor = NSColor.secondaryLabelColor; [content addSubview:explanation];
   NSArray *titles = @[@"↖ Throw", @"↗ Throw", @"↙ Throw", @"↘ Throw"];
   for (NSInteger i = 0; i < 4; ++i)
@@ -402,6 +425,25 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   stage = [CALayer layer];
   stage.bounds = CGRectMake(0, 0, w, h);
   stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
+  // Corner marks on the desktop where a kept window will rest.
+  anchorMarks = [CAShapeLayer layer];
+  anchorMarks.frame = CGRectInset(card, -7, -7); anchorMarks.contentsScale = scale;
+  CGMutablePathRef marks = CGPathCreateMutable();
+  const CGFloat mw = w + 14, mh = h + 14, arm = 12;
+  for (int corner = 0; corner < 4; ++corner) {
+    const CGFloat x = corner % 2 ? mw : 0, y = corner < 2 ? 0 : mh;
+    const CGFloat dx = corner % 2 ? -arm : arm, dy = corner < 2 ? arm : -arm;
+    CGPathMoveToPoint(marks, nullptr, x + dx, y);
+    CGPathAddLineToPoint(marks, nullptr, x, y);
+    CGPathAddLineToPoint(marks, nullptr, x, y + dy);
+  }
+  anchorMarks.path = marks; CGPathRelease(marks);
+  anchorMarks.fillColor = nil; anchorMarks.strokeColor = gray(1, .95);
+  anchorMarks.lineWidth = 1.5; anchorMarks.lineCap = kCALineCapRound; anchorMarks.lineJoin = kCALineJoinRound;
+  anchorMarks.shadowColor = gray(0, 1); anchorMarks.shadowOpacity = .55;
+  anchorMarks.shadowRadius = 1.5; anchorMarks.shadowOffset = CGSizeZero;
+  anchorMarks.opacity = 0;
+  [host.layer addSublayer:anchorMarks];
   [host.layer addSublayer:stage];
   CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, 16, 16, nullptr);
   auto shadowLayer = [&](CGColorRef color) {
@@ -485,6 +527,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [dockMenu selectItemAtIndex:motion->settings.docking == Docking::Corners ? 0 : 1];
   [placementMenu selectItemAtIndex:static_cast<NSInteger>(motion->settings.placement)];
   feedbackToggle.state = feedback.enabled ? NSControlStateValueOn : NSControlStateValueOff;
+  hapticsToggle.state = feedback.haptics ? NSControlStateValueOn : NSControlStateValueOff;
+  hapticsToggle.enabled = feedback.enabled;
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
     double value = feedback.*feedbackParameters[i].member;
     feedbackSliders[i].doubleValue = value; feedbackSliders[i].enabled = feedback.enabled;
@@ -507,6 +551,11 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)feedbackToggled:(NSButton *)sender {
   Feedback next = feedback; next.enabled = sender.state == NSControlStateValueOn;
   [self applyFeedback:next];
+}
+- (void)hapticsToggled:(NSButton *)sender {
+  Feedback next = feedback; next.haptics = sender.state == NSControlStateValueOn;
+  [self applyFeedback:next];
+  [self haptic:NSHapticFeedbackPatternGeneric];
 }
 - (void)feedbackSliderChanged:(NSSlider *)sender {
   Feedback next = feedback; next.*feedbackParameters[sender.tag].member = sender.doubleValue;
@@ -560,16 +609,16 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)sampleThrow:(NSButton *)sender {
   pip_motion::Point v{sender.tag % 2 == 0 ? -1100.0 : 1100.0, sender.tag < 2 ? 600.0 : -600.0};
-  releaseDistance = 0;
+  releaseDistance = 0; awaitingLanding = NO;
   motion->throwFrom(motion->centerOrigin(), v, false); [self startAnimation];
 }
-- (void)replay:(id)sender { releaseDistance = 0; motion->replay(); [self startAnimation]; }
+- (void)replay:(id)sender { releaseDistance = 0; awaitingLanding = NO; motion->replay(); [self startAnimation]; }
 - (void)toggleTuck:(id)sender {
-  releaseDistance = 0;
+  releaseDistance = 0; awaitingLanding = NO;
   if (motion->tucked != Side::None) motion->restore(); else motion->tuck(Side::None);
   [self startAnimation];
 }
-- (void)reset:(id)sender { releaseDistance = 0; motion->reset(); [self showPosition]; [self stopAnimation]; }
+- (void)reset:(id)sender { releaseDistance = 0; awaitingLanding = NO; motion->reset(); [self showPosition]; [self stopAnimation]; }
 - (void)resetVariables:(id)sender {
   [controls makeFirstResponder:nil];
   [saveTimer invalidate]; saveTimer = nil;
@@ -593,7 +642,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)begin:(NSEvent *)event {
   [self stopAnimation]; [self noteEvent:event];
-  motion->begin([self point:event], event.timestamp); [self showPosition];
+  awaitingLanding = NO; hapticKey = pendingKey = -1;
+  motion->begin([self point:event], event.timestamp);
+  [self haptic:NSHapticFeedbackPatternGeneric];
+  [self showPosition];
 }
 - (void)drag:(NSEvent *)event {
   [self noteEvent:event];
@@ -602,7 +654,32 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)end:(NSEvent *)event {
   motion->end(event.timestamp);
   releaseDistance = length(motion->target - motion->position);
+  awaitingLanding = YES;
   [self startAnimation];
+}
+- (void)haptic:(NSHapticFeedbackPattern)pattern {
+  const double now = NSProcessInfo.processInfo.systemUptime;
+  if (!feedback.enabled || !feedback.haptics || now - lastHaptic < .05) return;
+  lastHaptic = now;
+  [NSHapticFeedbackManager.defaultPerformer performFeedbackPattern:pattern
+      performanceTime:NSHapticFeedbackPerformanceTimeNow];
+}
+// Identity of a release outcome for haptics: decision, side and which dock.
+- (int)hapticKeyFor:(const Outcome &)outcome {
+  int key = static_cast<int>(outcome.decision) * 100 + static_cast<int>(outcome.side) * 10;
+  if (outcome.decision == Decision::Dock) {
+    const auto area = motion->area();
+    key += outcome.target.x + motion->size.width / 2 < area.x + area.width / 2;
+    if (motion->settings.docking == Docking::Corners)
+      key += 2 * (outcome.target.y + motion->size.height / 2 > area.y + area.height / 2);
+  }
+  return key;
+}
+- (void)land {
+  awaitingLanding = NO;
+  pressStart = NSProcessInfo.processInfo.systemUptime;
+  [self haptic:NSHapticFeedbackPatternGeneric];
+  [self wakeVisuals];
 }
 - (NSString *)dockName:(pip_motion::Point)target {
   const auto area = motion->area();
@@ -637,11 +714,27 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const pip_motion::Point position = motion->position;
   const double w = motion->size.width, h = motion->size.height, handle = motion->settings.handle;
 
+  const bool keep = moved && outcome.decision == Decision::Keep;
   double liftTarget = 0;
-  if (dragging) liftTarget = 1;
+  // Held where it will stay, the window lowers toward the desk; release finishes setting it down.
+  if (dragging) liftTarget = keep ? 1 - feedback.settle : 1;
   else if (motion->phase == Phase::Settling && releaseDistance > 1)
     liftTarget = std::sqrt(std::clamp(length(motion->target - position) / releaseDistance, 0.0, 1.0));
-  const double glowTarget = moved && outcome.decision == Decision::Keep ? 1 : 0;
+  const double glowTarget = keep ? 1 : 0;
+
+  // Debounced haptics whenever what release would do changes.
+  if (moved) {
+    const int key = [self hapticKeyFor:outcome];
+    if (hapticKey < 0) hapticKey = pendingKey = key;
+    if (key != pendingKey) { pendingKey = key; pendingSince = now; }
+    else if (key != hapticKey && now - pendingSince >= .06) {
+      const auto firm = [](int k) { return k / 100 == static_cast<int>(Decision::Tuck) ||
+                                           k / 100 == static_cast<int>(Decision::Restore); };
+      [self haptic:firm(key) || firm(hapticKey) ? NSHapticFeedbackPatternLevelChange
+                                                : NSHapticFeedbackPatternAlignment];
+      hapticKey = key;
+    }
+  }
 
   // Magnetic pull toward the dock release would snap to: it builds with proximity, and is full
   // whenever the drag is slow enough to snap. Hysteresis steadies the slow-speed gate.
@@ -684,7 +777,11 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (!NSEqualPoints(example.frame.origin, NSPointFromCGPoint(card.origin))) [example setFrameOrigin:card.origin];
   // Lifting grows and softens the shadow while the card shrinks slightly with it.
   const double l = lift * feedback.lift;
-  const double cardScale = 1 - .025 * l;
+  // A landing dips the card once and springs back.
+  const double pressAge = now - pressStart, pressTime = .24;
+  const bool pressing = on && pressAge >= 0 && pressAge < pressTime;
+  const double dip = pressing ? .02 * feedback.press * (1 - std::cos(2 * M_PI * pressAge / pressTime)) / 2 : 0;
+  const double cardScale = (1 - .025 * l) * (1 - dip);
   stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
   stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
   ambientShadow.shadowRadius = 18 + 14 * l;
@@ -693,6 +790,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   contactShadow.shadowRadius = 4 + 3 * l;
   contactShadow.shadowOpacity = .16 * (1 - .75 * l);
   contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(2 + 2 * l) + leanY * .5);
+  anchorMarks.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
+  anchorMarks.opacity = glow * feedback.anchors;
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
@@ -748,7 +847,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       case Decision::None: break;
     }
   }
-  return lift == (on ? liftTarget : 0) && glow == (on ? glowTarget : 0) &&
+  return !pressing && lift == (on ? liftTarget : 0) && glow == (on ? glowTarget : 0) &&
       edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y;
 }
 - (void)startAnimation {
@@ -762,6 +861,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)tick:(NSTimer *)timer {
   double now = NSProcessInfo.processInfo.systemUptime;
   motion->step(std::min(.05, now - lastTick)); lastTick = now;
+  if (motion->phase != Phase::Settling && awaitingLanding) [self land];
   [self showPosition];
   if (motion->phase != Phase::Settling) [self stopAnimation];
 }
@@ -787,6 +887,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   dict[@"placement"] = @[@"smart", @"always-dock", @"free"][static_cast<NSInteger>(motion->settings.placement)];
   for (const auto& parameter : parameters) dict[@(parameter.key)] = @(motion->settings.*parameter.member);
   dict[@"feedback"] = feedback.enabled ? @YES : @NO;
+  dict[@"feedback_haptics"] = feedback.haptics ? @YES : @NO;
   for (const auto& parameter : feedbackParameters) dict[@(parameter.key)] = @(feedback.*parameter.member);
   return dict;
 }
@@ -851,10 +952,13 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (placementIndex == NSNotFound) valid = NO;
   else next.placement = static_cast<Placement>(placementIndex);
   Feedback nextFeedback;
-  id enabled = dict[@"feedback"];
-  if (enabled && !([enabled isKindOfClass:NSNumber.class] &&
-                   CFGetTypeID((__bridge CFTypeRef)enabled) == CFBooleanGetTypeID())) valid = NO;
-  else if (enabled) nextFeedback.enabled = [enabled boolValue];
+  for (NSString *key in @[@"feedback", @"feedback_haptics"]) {
+    id flag = dict[key];
+    if (!flag) continue;
+    if (!([flag isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)flag) == CFBooleanGetTypeID())) valid = NO;
+    else if ([key isEqual:@"feedback"]) nextFeedback.enabled = [flag boolValue];
+    else nextFeedback.haptics = [flag boolValue];
+  }
   for (const auto& parameter : feedbackParameters) {
     id value = dict[@(parameter.key)];
     if (!value) continue;
