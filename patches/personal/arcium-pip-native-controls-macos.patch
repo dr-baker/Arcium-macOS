@@ -316,7 +316,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1903 @@
+@@ -0,0 +1,1909 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1607,6 +1607,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (!_pipWindow) {
 +    return;
 +  }
++  // Chromium's native window bridge reports integral point rectangles. Round
++  // once here rather than letting a fractional inset truncate toward an edge.
++  frame.origin.x = std::round(frame.origin.x);
++  frame.origin.y = std::round(frame.origin.y);
++  frame.size.width = std::round(frame.size.width);
++  frame.size.height = std::round(frame.size.height);
 +  _adjusting = YES;
 +  [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
 +  _adjusting = NO;
@@ -3126,7 +3132,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 +  const Rect work{-1920, -76, 1920, 1032};
 +  Rect left = Tuck({-500, 200, 400, 225}, screen, work, Side::kLeft);
 +  Rect right = Tuck({-500, 200, 400, 225}, screen, work, Side::kRight);
-+  EXPECT_DOUBLE_EQ(left.x + left.width - screen.x, kHandleWidth);
++  EXPECT_NEAR(left.x + left.width - screen.x, kHandleWidth, 1e-9);
 +  EXPECT_DOUBLE_EQ(screen.x + screen.width - right.x, kHandleWidth);
 +  EXPECT_DOUBLE_EQ(left.width, 400);
 +  EXPECT_DOUBLE_EQ(right.height, 225);
