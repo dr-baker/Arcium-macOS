@@ -29,6 +29,9 @@ def main():
     run("/usr/bin/clang++", "-std=c++20", "-Wall", "-Wextra", "-pedantic",
         ROOT / "MotionTests.cpp", "-o", BUILD / "MotionTests")
     run(BUILD / "MotionTests")
+    run("/usr/bin/clang++", "-std=c++20", "-Wall", "-Wextra", "-fobjc-arc",
+        "-framework", "Foundation", ROOT / "SettingsSchemaTests.mm", "-o", BUILD / "SettingsSchemaTests")
+    run(BUILD / "SettingsSchemaTests")
     EXECUTABLE.parent.mkdir(parents=True, exist_ok=True)
     run("/usr/bin/clang++", "-std=c++20", "-O2", "-Wall", "-Wextra",
         "-Wno-unused-parameter", "-fobjc-arc", "-fmodules",

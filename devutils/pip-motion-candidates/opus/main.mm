@@ -1,6 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
-#include "Motion.hpp"
+#include "SettingsSchema.h"
 #include <memory>
 #include <vector>
 
@@ -48,10 +48,10 @@ static const Parameter parameters[] = {
     "The width of the strip left onscreen when the window is tucked.\n\n"
     "Higher: easier to grab, but occupies more screen space. Lower: hides more of the window.\n\n"
     "Also limits spring overshoot so a grabbable part of the window remains onscreen."},
-  {"resistance", "Vertical boundary resistance", .05, .85, &Settings::resistance,
-    "How much the window follows your pointer when pulled beyond the top or bottom boundary.\n\n"
+  {"resistance", "Edge resistance", .05, .85, &Settings::resistance,
+    "How much the window follows your pointer beyond an inset boundary: top and bottom in every mode, plus the sides in Press any edge.\n\n"
     "Lower: less movement for the same pull, so the edge feels firmer. Higher: more movement, so it feels softer.\n\n"
-    "Affects dragging beyond vertical boundaries. Damping controls spring bounce after release."},
+    "Changing this while held keeps the window and its current depth still. Damping controls spring bounce after release."},
   {"free_speed", "Leave here below speed (points/s)", 0, 800, &Settings::free_speed,
     "In Smart mode, releases at or below this speed count as deliberate placement.\n\n"
     "Away from a dock, the window stays where dropped. Near a dock, it snaps locally. Faster releases project toward a dock.\n\n"
@@ -61,13 +61,13 @@ static const Parameter parameters[] = {
     "Higher: a larger attraction zone. Lower: more freedom to leave the window near a dock. Zero requires exact alignment.\n\n"
     "Measured from the window's dropped position to the nearest corner or side-edge dock. Faster flicks use momentum projection instead.\n\n"
     "Not used by Press into any edge, where only pressing docks.", true},
-  {"press_dock", "Press to dock (% of reach)", 0, 20, &Settings::press_dock,
+  {"press_dock", "Press to dock (% of size)", 0, 20, &Settings::press_dock,
     "Press any edge: how far the window must be pushed into an edge before letting go snaps it flush there.\n\n"
-    "Measured as a share of the most the resistance lets the window go in, which is its width or height. The window's readout shows the current depth as “in N%”. Pushing into two edges snaps to that corner.\n\n"
+    "Measured as resisted travel past this drag’s boundary divided by the window’s width or height. The readout shows “depth N%”. Re-grabbing outside the inset starts fresh depth at the grabbed position. Pushing into two edges snaps to that corner.\n\n"
     "Lower: a lighter push snaps. Higher: a firmer push is needed, leaving room to place close to an edge.", true},
-  {"press_tuck", "Press to tuck (% of reach)", 2, 40, &Settings::press_tuck,
+  {"press_tuck", "Press to tuck (% of size)", 2, 40, &Settings::press_tuck,
     "Press any edge: how far the window must be pushed into the left or right before letting go tucks it.\n\n"
-    "Between the snap and tuck depths, letting go snaps flush to that side. The top and bottom never tuck. Softer resistance reaches the same depth with less push.\n\n"
+    "When tuck depth is higher than dock depth, the interval between them docks on that side. Tuck takes priority at or above its threshold, even if set below dock depth. The top and bottom never tuck. Softer resistance reaches the same depth with less push.\n\n"
     "Lower: a shorter push tucks. Higher: tucking needs a longer, more deliberate push.", true},
 };
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
@@ -194,6 +194,7 @@ static void approach(double& value, double target, double rise, double fall, dou
   double lastTick;
   NSString *settingsPath, *statePath;
   NSData *lastSettingsData;
+  NSDictionary *legacyPressThresholds;
   Feedback feedback;
   CALayer *stage, *ambientShadow, *contactShadow, *glowShadow, *overlay;
   CAGradientLayer *rimShade;
@@ -338,7 +339,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       "Grounded: a calm, natural tuning for every value, with corner snapping and Smart drops. "
       "Leave-here speed 180, snap distance 64, projection 0.40, response 0.44 with no bounce, inset 16, tuck at 30% or 1000 pt/s, restore after 24 pt; "
       "lift 0.60, settle 0.75, press 0.40, edge shade 0.50, dock lean 12, dock shadow 0.90, no glow, haptics on.\n\n"
-      "iOS-like baseline, Snappy, Soft spring and Position only change the spring and projection values and keep your snapping and drop choices.\n\n"
+      "iOS-like baseline, Snappy and Soft spring change only response, damping and projection. Position only sets projection to zero. They keep all other motion and feedback tuning.\n\n"
       "Reset everything restores every compiled default, including the choices above the tabs.");
 
   auto modeRow = [&](NSString *name, NSArray<NSString *> *labels, SEL action, CGFloat y) {
@@ -684,12 +685,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (choice == 6) { [self danielsTuning]; return; }
   if (choice == 9) { [self resetVariables:nil]; fileStatus.stringValue = @"Reset everything · saved"; return; }
   if (choice < 2) return;
-  Settings next;
-  next.docking = motion->settings.docking;
-  next.placement = motion->settings.placement;
-  if (choice == 3) { next.response = .28; next.projection = .35; }
-  if (choice == 4) { next.response = .60; next.damping = .85; }
-  if (choice == 5) next.projection = 0;
+  Settings next = springPreset(motion->settings, static_cast<SpringPreset>(choice - 2));
   [self apply:next save:YES];
   fileStatus.stringValue = [NSString stringWithFormat:@"Applied %@ · saved", sender.selectedItem.title];
 }
@@ -886,7 +882,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
     const pip_motion::Point toward = shown.target - position;
     const double distance = length(toward);
-    const double reach = 2 * std::max(motion->settings.snap_distance, 48.0);
+    const double reach = 2 * dockCueDistance(motion->settings);
     const double engage = smoothstep((reach - distance) / (reach / 2));
     if (engage > 0 && distance > .5) {
       leaning = true;
@@ -994,7 +990,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       case Decision::None: return prefix;
     }
   };
-  if (dragging) intent = !moved ? @"Picked up" : shown.decision == Decision::None ? @"Moving · release throws" :
+  if (dragging) intent = !moved ? @"Picked up" : shown.decision == Decision::None ? @"Moving" :
       describe(shown.decision, shown.side, shown.target, @"Release → ");
   else if (motion->phase == Phase::Settling)
     intent = describe(motion->decision, motion->tucked, motion->target, @"Settling → ");
@@ -1008,7 +1004,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (std::hypot(shadowX, shadowY) > .5) [cues addObject:[NSString stringWithFormat:@"shadow → %.0f pt", std::hypot(shadowX, shadowY)]];
   if (dragging && length(motion->pressed) > .5) {
     const pip_motion::Point in = motion->depth();
-    [cues addObject:[NSString stringWithFormat:@"in %.1f%%", std::max(std::abs(in.x), std::abs(in.y))]];
+    [cues addObject:[NSString stringWithFormat:@"depth %.1f%%", std::max(std::abs(in.x), std::abs(in.y))]];
   }
   if (edgeAmount > .01 && feedback.edge > 0) [cues addObject:[NSString stringWithFormat:@"rim %.0f%%", edgeAmount * 100]];
   if (glow > .01 && feedback.glow > 0) [cues addObject:@"glow"];
@@ -1070,7 +1066,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging) [self writeState];
 }
 - (NSDictionary *)settingsDictionary {
-  NSMutableDictionary *dict = [@{@"version":@1, @"docking":@[@"corners", @"edges", @"all-edges"][static_cast<NSInteger>(motion->settings.docking)]} mutableCopy];
+  NSMutableDictionary *dict = [@{@"version":@2, @"docking":@[@"corners", @"edges", @"all-edges"][static_cast<NSInteger>(motion->settings.docking)]} mutableCopy];
+  if (legacyPressThresholds) dict[@"legacy_press_thresholds"] = legacyPressThresholds;
   dict[@"placement"] = @[@"smart", @"always-dock", @"free"][static_cast<NSInteger>(motion->settings.placement)];
   for (const auto& parameter : parameters) dict[@(parameter.key)] = @(motion->settings.*parameter.member);
   dict[@"feedback"] = feedback.enabled ? @YES : @NO;
@@ -1105,9 +1102,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   lastSettingsData = data;
   NSError *error = nil;
   id object = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-  BOOL valid = [object isKindOfClass:NSDictionary.class];
-  NSDictionary *dict = valid ? object : @{};
-  valid = valid && [dict[@"version"] isEqual:@1] &&
+  const auto prepared = prepareSettings(object);
+  BOOL valid = prepared.has_value();
+  NSDictionary *dict = prepared ? prepared->values : @{};
+  valid = valid &&
       [@[@"corners", @"edges", @"all-edges"] containsObject:dict[@"docking"]];
   BOOL migratedTuckDistance = NO;
   if (valid && !dict[@"stash_percent"] && dict[@"stash_distance"]) {
@@ -1123,14 +1121,6 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       dict = converted;
       migratedTuckDistance = YES;
     }
-  }
-  // Press thresholds were pointer travel before they became depth percentages.
-  id legacyTuck = dict[@"press_tuck"];
-  if (valid && [legacyTuck isKindOfClass:NSNumber.class] && [legacyTuck doubleValue] > 40) {
-    NSMutableDictionary *converted = [dict mutableCopy];
-    [converted removeObjectsForKeys:@[@"press_dock", @"press_tuck"]];
-    dict = converted;
-    migratedTuckDistance = YES;
   }
   Settings next;
   for (const auto& parameter : parameters) {
@@ -1168,8 +1158,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   next.docking = static_cast<Docking>([@[@"corners", @"edges", @"all-edges"] indexOfObject:dict[@"docking"]]);
   [saveTimer invalidate]; saveTimer = nil;
   feedback = nextFeedback;
+  legacyPressThresholds = [dict[@"legacy_press_thresholds"] isKindOfClass:NSDictionary.class] ? dict[@"legacy_press_thresholds"] : nil;
   [self apply:next save:NO];
-  if (migratedTuckDistance) [self saveSettings];
+  if (migratedTuckDistance || prepared->rewrite) [self saveSettings];
   else fileStatus.stringValue = @"Reloaded JSON · all controls are live";
 }
 - (void)checkFile:(NSTimer *)timer { [self reloadSettings]; }

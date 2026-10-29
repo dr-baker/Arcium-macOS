@@ -55,17 +55,42 @@ struct Settings {
   double free_speed = 140;
   double snap_distance = 48;
   // Press into any edge: how far the window must be pushed in to dock, and to tuck at a side,
-  // as a percentage of the most the resistance allows (the window's size on that axis).
+  // as resisted displacement divided by the window's size on that axis.
   double press_dock = 2;
   double press_tuck = 12;
   Docking docking = Docking::Corners;
   Placement placement = Placement::Smart;
 };
 
+enum class SpringPreset { Baseline, Snappy, Soft, PositionOnly };
+inline Settings springPreset(Settings current, SpringPreset preset) {
+  if (preset == SpringPreset::PositionOnly) {
+    current.projection = 0;
+    return current;
+  }
+  const Settings defaults;
+  current.response = defaults.response;
+  current.damping = defaults.damping;
+  current.projection = defaults.projection;
+  if (preset == SpringPreset::Snappy) { current.response = .28; current.projection = .35; }
+  if (preset == SpringPreset::Soft) { current.response = .60; current.damping = .85; }
+  return current;
+}
+
+inline double dockCueDistance(const Settings& settings) {
+  return settings.docking != Docking::AllEdges && settings.placement == Placement::Smart ?
+      std::max(settings.snap_distance, 48.0) : 48.0;
+}
+
 inline double rubber(double distance, double extent, double coefficient) {
   const double magnitude = std::abs(distance);
   return std::copysign((1 - 1 / (1 + coefficient * magnitude / extent)) * extent,
                        distance);
+}
+
+inline double rubberInput(double distance, double extent, double coefficient) {
+  const double magnitude = std::min(std::abs(distance), extent - 1e-6);
+  return std::copysign(magnitude * extent / (coefficient * (extent - magnitude)), distance);
 }
 
 // Exact damped-oscillator evolution makes settlement independent of timer cadence.
@@ -129,12 +154,11 @@ class Motion {
   Side tucked = Side::None;
   Decision decision = Decision::None;
   double release_speed = 0, dock_distance = 0;
-  // Pointer travel past the inset bounds during this drag, before resistance (press mode).
+  // Presented displacement past this drag's resistance bounds, after presentation clamping.
   Point pressed;
-  // Signed press depth per axis, in percent of the reach the resistance allows.
+  // Re-grabbing outside an inset starts a fresh press at the grabbed presentation.
   Point pressDepth(Point press) const {
-    return {100 * rubber(press.x, size.width, settings.resistance) / size.width,
-            100 * rubber(press.y, size.height, settings.resistance) / size.height};
+    return {100 * press.x / size.width, 100 * press.y / size.height};
   }
   Point depth() const { return pressDepth(pressed); }
 
@@ -166,6 +190,7 @@ class Motion {
     tucked = Side::None;
     position = target = corners()[1];
     velocity = {};
+    pressed = {};
     phase = Phase::Resting;
     goal_ = Goal::Dock;
     restore_point_ = position;
@@ -177,6 +202,8 @@ class Motion {
   void begin(Point pointer, double time) {
     start_settling_ = phase == Phase::Settling;
     start_position_ = position;
+    resistance_anchor_ = position;
+    last_pointer_ = pointer;
     offset_ = pointer - position;
     drag_side_ = tucked;
     pressed = {};
@@ -190,6 +217,7 @@ class Motion {
     tucked = Side::None;
     position = target = clampVisible(origin);
     velocity = {};
+    pressed = {};
     phase = Phase::Resting;
     goal_ = Goal::Free;
     decision = Decision::None;
@@ -207,37 +235,23 @@ class Motion {
 
   void drag(Point pointer, double time) {
     if (phase != Phase::Dragging) return;
+    last_pointer_ = pointer;
     Point next = pointer - offset_;
     // An interrupted spring may already be beyond a boundary. Anchor resistance
     // at that presentation position so re-grabbing does not resist it twice.
-    const double low = std::min(area_.y + settings.margin, start_position_.y);
-    const double high = std::max(area_.y + area_.height - size.height - settings.margin,
-                                 start_position_.y);
-    pressed = {};
-    if (next.y < low) {
-      pressed.y = next.y - low;
-      next.y = low + rubber(next.y - low, size.height, settings.resistance);
-    }
-    if (next.y > high) {
-      pressed.y = next.y - high;
-      next.y = high + rubber(next.y - high, size.height, settings.resistance);
-    }
+    const Rect limits = dragLimits();
+    const double low = limits.y, high = limits.y + limits.height;
+    if (next.y < low) next.y = low + rubber(next.y - low, size.height, settings.resistance);
+    if (next.y > high) next.y = high + rubber(next.y - high, size.height, settings.resistance);
     // Press mode resists the sides too, so a little push docks and a long push tucks.
     if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
-      const double left = std::min(area_.x + settings.margin, start_position_.x);
-      const double right = std::max(area_.x + area_.width - size.width - settings.margin,
-                                    start_position_.x);
-      if (next.x < left) {
-        pressed.x = next.x - left;
-        next.x = left + rubber(next.x - left, size.width, settings.resistance);
-      }
-      if (next.x > right) {
-        pressed.x = next.x - right;
-        next.x = right + rubber(next.x - right, size.width, settings.resistance);
-      }
+      const double left = limits.x, right = limits.x + limits.width;
+      if (next.x < left) next.x = left + rubber(next.x - left, size.width, settings.resistance);
+      if (next.x > right) next.x = right + rubber(next.x - right, size.width, settings.resistance);
     }
     position = next;
     constrainPresentation();
+    updatePressed();
     tracker_.add(pointer, time);
   }
 
@@ -372,8 +386,26 @@ class Motion {
   bool canReplay() const { return last_throw_.has_value(); }
 
   void retune(Settings next) {
+    const bool changedBounds = next.margin != settings.margin || next.docking != settings.docking;
     settings = next;
-    if (phase == Phase::Dragging) return;
+    if (phase == Phase::Dragging) {
+      if (changedBounds) resistance_anchor_ = position;
+      const Rect limits = dragLimits();
+      Point raw = position;
+      if (raw.y < limits.y)
+        raw.y = limits.y + rubberInput(raw.y - limits.y, size.height, settings.resistance);
+      if (raw.y > limits.y + limits.height)
+        raw.y = limits.y + limits.height + rubberInput(raw.y - limits.y - limits.height, size.height, settings.resistance);
+      if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
+        if (raw.x < limits.x)
+          raw.x = limits.x + rubberInput(raw.x - limits.x, size.width, settings.resistance);
+        if (raw.x > limits.x + limits.width)
+          raw.x = limits.x + limits.width + rubberInput(raw.x - limits.x - limits.width, size.width, settings.resistance);
+      }
+      offset_ = last_pointer_ - raw;
+      updatePressed();
+      return;
+    }
     if (tucked != Side::None) {
       tuck(tucked);
     } else if (goal_ == Goal::Restore) {
@@ -414,6 +446,23 @@ class Motion {
 
  private:
   enum class Goal { Dock, Stash, Restore, Free };
+  Rect dragLimits() const {
+    const double left = std::min(area_.x + settings.margin, resistance_anchor_.x);
+    const double right = std::max(area_.x + area_.width - size.width - settings.margin, resistance_anchor_.x);
+    const double bottom = std::min(area_.y + settings.margin, resistance_anchor_.y);
+    const double top = std::max(area_.y + area_.height - size.height - settings.margin, resistance_anchor_.y);
+    return {left, bottom, right - left, top - bottom};
+  }
+  void updatePressed() {
+    const Rect limits = dragLimits();
+    pressed = {};
+    if (position.y < limits.y) pressed.y = position.y - limits.y;
+    if (position.y > limits.y + limits.height) pressed.y = position.y - limits.y - limits.height;
+    if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
+      if (position.x < limits.x) pressed.x = position.x - limits.x;
+      if (position.x > limits.x + limits.width) pressed.x = position.x - limits.x - limits.width;
+    }
+  }
   Point dockDestination(Point origin, Point release) const {
     const bool deliberate_attraction = settings.placement == Placement::Smart &&
         length(release) <= settings.free_speed;
@@ -493,7 +542,7 @@ class Motion {
   }
   struct Throw { Point origin, velocity; bool allow_stash; Point press; };
   Rect area_;
-  Point offset_, start_position_, restore_point_;
+  Point offset_, start_position_, restore_point_, resistance_anchor_, last_pointer_;
   Side drag_side_ = Side::None;
   Side restore_side_ = Side::Right;
   bool start_settling_ = false;

@@ -379,8 +379,8 @@ int main() {
   check(m.predict(60.3, true).decision == Decision::Keep && m.pressed.y == 0,
         "press mode keeps a slow drop near an edge until it is pressed");
   m.drag({400, 590}, 60.4);
-  check(near(m.pressed.y, 22) && m.position.y > 508 && m.position.y < 530,
-        "pressing past the top is resisted and measured as pointer travel");
+  check(near(m.pressed.y, m.position.y - 508) && m.position.y > 508 && m.position.y < 530,
+        "pressing past the top is resisted and measured as presented displacement");
   preview = m.predict(60.6);
   check(preview.decision == Decision::Dock && preview.target.x == 300 && preview.target.y == 508,
         "a small press docks on the top edge at the same horizontal position");
@@ -389,7 +389,7 @@ int main() {
 
   m.placeAt({600, 300});
   m.begin({700, 350}, 61); m.drag({798, 350}, 61.1);
-  check(near(m.pressed.x, 30) && m.position.x > 668 && m.position.x < 698,
+  check(near(m.pressed.x, m.position.x - 668) && m.position.x > 668 && m.position.x < 698,
         "press mode resists the sides too");
   preview = m.predict(61.3);
   check(preview.decision == Decision::Dock && preview.target.x == 668 && preview.target.y == 300,
@@ -414,7 +414,7 @@ int main() {
         "a flick in press mode lands on the nearest edge point it projects to");
   m = Motion{}; m.settings.docking = Docking::AllEdges;
   m.placeAt({668, 300}); m.begin({700, 350}, 70); m.drag({708, 350}, 70.005);
-  check(near(m.pressed.x, 8) && m.predict(70.005).decision == Decision::Dock &&
+  check(m.depth().x > 0 && m.depth().x < m.settings.press_dock && m.predict(70.005).decision == Decision::Dock &&
         m.predict(70.005, true).decision == Decision::Keep,
         "a short fast press throws without triggering the legacy velocity tuck");
   m.end(70.005);
@@ -427,12 +427,86 @@ int main() {
   m.placeAt({668, 300}); m.begin({700, 350}, 72); m.drag({708, 350}, 72.1);
   check(m.predict(72.3, true).decision == Decision::Dock,
         "positive edge pressure docks with a zero threshold");
-  // Depth is the resisted displacement as a share of the reach, so resistance changes the push.
-  m = Motion{}; m.settings.docking = Docking::AllEdges;
-  const Point depth22 = m.pressDepth({0, 22});
-  check(near(depth22.y, 100 * rubber(22, 180, .35) / 180) && depth22.y > 4 && depth22.y < 4.2,
-        "press depth is resisted travel over the window size");
-  m.settings.resistance = .7;
-  check(m.pressDepth({0, 22}).y > depth22.y, "a softer resistance setting reaches the same depth with less push");
+  // Changing resistance while held preserves the displayed depth and pointer continuity.
+  for (int axis = 0; axis < 4; ++axis) {
+    m = Motion{}; m.settings.docking = Docking::AllEdges; m.settings.press_tuck = 5;
+    const Point edge = axis == 0 ? Point{12, 250} : axis == 1 ? Point{668, 250} :
+        axis == 2 ? Point{300, 12} : Point{300, 508};
+    const Point push = axis == 0 ? Point{-30, 0} : axis == 1 ? Point{30, 0} :
+        axis == 2 ? Point{0, -20} : Point{0, 20};
+    m.placeAt(edge);
+    Point pointer = edge + Point{80, 60};
+    m.begin(pointer, 80); pointer = pointer + push; m.drag(pointer, 80.1);
+    const Point held = m.position, depth = m.depth();
+    const Outcome before = m.predict(80.3, true);
+    Settings next = m.settings; next.resistance = .85; m.retune(next);
+    check(near(length(m.position - held), 0) && near(length(m.depth() - depth), 0) &&
+          m.predict(80.3, true).decision == before.decision,
+          "retuning a stationary held card preserves position, depth and outcome on each edge");
+    m.drag(pointer, 80.4);
+    check(near(length(m.position - held), 0) && near(length(m.depth() - depth), 0),
+          "the next unchanged pointer event does not jump after retuning");
+    m.drag(pointer + push * .01, 80.5);
+    check(length(m.position - held) > 0 && length(m.position - held) < length(push * .01),
+          "small additional pushes remain continuous after retuning");
+    const Point released = m.position, releasedDepth = m.depth();
+    const Outcome expected = m.predict(80.7, true);
+    m.end(80.7); finish(m);
+    next.resistance = .05; m.retune(next); m.replay();
+    check(near(length(m.position - released), 0) && m.decision == expected.decision &&
+          near(length(m.target - expected.target), 0),
+          "replay keeps recorded presentation and decision after resistance changes");
+    check(near(std::abs(axis < 2 ? releasedDepth.x : releasedDepth.y),
+               100 * length(released - edge) / (axis < 2 ? m.size.width : m.size.height)),
+          "depth reflects the presented intrusion on each axis");
+  }
+  double softDepth = 0;
+  for (double resistance : {.85, .35}) {
+    m = Motion{}; m.settings.docking = Docking::AllEdges; m.settings.resistance = resistance;
+    m.placeAt({668, 250}); m.begin({700, 300}, 90); m.drag({730, 300}, 90.1);
+    if (resistance == .85) softDepth = m.depth().x;
+    else check(softDepth > m.depth().x, "softer resistance reaches greater depth for a new identical push");
+  }
+  m.drag({100000, 300}, 90.2);
+  check(near(m.pressed.x, m.position.x - 668) && near(m.position.x, 972),
+        "depth uses the clamped visible presentation rather than the rubber asymptote");
+  // Re-grabbing an interrupted outside presentation starts a fresh continuous push.
+  m.end(90.4); m.step(.01);
+  const Point outside = m.position;
+  m.begin(outside + Point{14, 60}, 91); m.drag(outside + Point{14, 60}, 91.1);
+  check(near(length(m.position - outside), 0) && near(length(m.depth()), 0),
+        "an outside re-grab starts fresh pressure without reapplying resistance");
+
+  Settings custom;
+  custom.margin = 22; custom.resistance = .63; custom.press_tuck = 26;
+  custom.press_dock = 4; custom.free_speed = 800; custom.snap_distance = 170;
+  custom.stash_percent = 30; custom.stash_velocity = 1000; custom.restore_distance = 24;
+  custom.handle = 36; custom.docking = Docking::AllEdges; custom.placement = Placement::Free;
+  custom.response = .75; custom.damping = 1.19; custom.projection = .2;
+  for (auto preset : {SpringPreset::Baseline, SpringPreset::Snappy, SpringPreset::Soft, SpringPreset::PositionOnly}) {
+    const Settings tuned = springPreset(custom, preset);
+    check(tuned.margin == custom.margin && tuned.resistance == custom.resistance &&
+        tuned.press_tuck == custom.press_tuck && tuned.press_dock == custom.press_dock &&
+        tuned.free_speed == custom.free_speed && tuned.snap_distance == custom.snap_distance &&
+        tuned.stash_percent == custom.stash_percent && tuned.stash_velocity == custom.stash_velocity &&
+        tuned.restore_distance == custom.restore_distance && tuned.handle == custom.handle &&
+        tuned.docking == custom.docking && tuned.placement == custom.placement,
+        "spring-only presets preserve every unrelated motion value");
+  }
+  check(springPreset(custom, SpringPreset::Snappy).response == .28 &&
+        springPreset(custom, SpringPreset::Soft).damping == .85 &&
+        springPreset(custom, SpringPreset::PositionOnly).response == .75 &&
+        springPreset(custom, SpringPreset::PositionOnly).damping == 1.19 &&
+        springPreset(custom, SpringPreset::PositionOnly).projection == 0,
+        "spring presets change only their advertised spring or projection values");
+  for (auto docking : {Docking::Corners, Docking::SideEdges, Docking::AllEdges}) {
+    for (auto placement : {Placement::Smart, Placement::AlwaysDock, Placement::Free}) {
+      Settings a; a.docking = docking; a.placement = placement; a.snap_distance = 180;
+      Settings b = a; b.snap_distance = 0;
+      const bool active = docking != Docking::AllEdges && placement == Placement::Smart;
+      check(active ? dockCueDistance(a) != dockCueDistance(b) : dockCueDistance(a) == dockCueDistance(b),
+            "only an enabled attraction control changes cue reach");
+    }
+  }
   std::cout << checks << " checks passed\n";
 }

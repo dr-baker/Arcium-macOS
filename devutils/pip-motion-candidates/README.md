@@ -16,24 +16,25 @@ window-motion spring still runs in both.
 | Feedback | Small label and directional arrow inside the dragged window | Pickup/set-down shadow, hold glow, progressive rim shade and chevron |
 | Slow docking | Names the decision and destination direction | Proximity-based pull toward the selected dock, with directional shadow; Reduce Motion disables the lean |
 | Fast flick | Continues predicting the release | Stays lifted during travel and sets down at the destination |
-| Deliberate placement | Says “Stay here” or “Place inside” | Lowers toward rest; optional hold glow |
+| Deliberate placement | Says “Stay here” or “Place inside” | Contact-shadow settle cue; optional hold glow |
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
-| Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
+| Live feedback tuning | Enable and strength | Enable, haptics, lift, pickup shadow, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
 | Release prediction | Runs the existing release on a model copy | Card cues preview gentle placement; fast-flick release remains momentum-aware |
-| Verification | Root: 93 model checks and strict app signature verification | Root: 103 model checks, strict app signature verification and runtime checkpoint |
+| Verification | Root: 93 model checks and strict app signature verification | Root: 138 motion and 18 schema checks, strict app signature verification and runtime checkpoint |
 
 Terra makes the decision explicit but adds text. Opus's revised design follows
 Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 92117.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 3351 (author-reported checkpoint).
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
-falloff. It lowers during deliberate placement, dips on landing and requests
+falloff. It retains its held look with a contact-shadow cue during deliberate placement,
+dips on landing and requests
 haptic feedback. Corner marks and their control have been removed; two live
 lines on the card now show its confirmed outcome and active cues. Root verified
-the signed bundle and runtime checkpoint, and ran the 103 current-source model checks.
+the signed bundle and runtime checkpoint, and ran the 138 current-source motion checks.
 Root left saved tuning untouched. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
@@ -51,7 +52,7 @@ away. The card's readout includes the current shadow offset. Its perceived
 clarity and its behavior during release remain unverified on screen.
 
 Opus now retains only release momentum toward its selected snap, tuck or
-restore destination. This changes Opus's motion model, with 103 model checks
+restore destination. This changes Opus's motion model, with 138 motion and 18 schema checks
 passing; the original lab, Terra and browser behavior are unchanged. It removes
 the initial wrong-way component, while forward spring overshoot remains
 possible. The cue revision also raises the fresh-settings lean default to 14
@@ -59,8 +60,7 @@ points (range 0–40), slows the shadow's outward response and requests only
 alignment-pattern haptics at least 0.15 seconds apart. Hardware feel is unverified.
 
 Visual cues now preview a gentle, zero-momentum release from the current
-position. Fast motion suppresses stay/snap cues and displays “Moving · release
-throws”; position-based tuck/restore cues remain available. The tuning-window
+position. Fast motion suppresses stay/snap cues and displays “Moving”; position-based tuck/restore cues remain available. The tuning-window
 readout and actual fast-flick release keep momentum projection. Entering the
 neutral cue state requests no haptic. Native tests must check both predictions
 and the transition between them; the card does not promise an exact fast-flick
@@ -78,7 +78,7 @@ depth-percentage thresholds for docking and side tucking, and corner placement
 when two edges are pressed. Root reproduced and fixed two new boundary cases:
 an 8-point fast press bypassed the 110-point tuck threshold through the legacy
 velocity rule, and a zero dock threshold snapped an interior drop with no press.
-Those fixes remain covered after the switch to depth percentages. All 103 model
+Those fixes remain covered after the switch to depth percentages. All 138 motion
 checks now pass. Native acceptance is pending.
 
 Root built a separate signed review bundle from immutable source commit
@@ -90,11 +90,15 @@ its review were superseded by the percentage-depth model and new tuning UI.
 
 Press thresholds are now 2% and 12% of resisted displacement normalized by the
 window size on each axis. The readout shows depth, and resistance changes the
-pointer travel needed to reach it. Legacy `press_tuck` values above 40 reset
-both thresholds to the new defaults; units migration at the cutoff needs review.
-The 716-point tuning window uses a Presets menu, Snaps to/A drop segmented
-controls and Feel/Edges/Cues tabs. Root has not validated their appearance or
-native interactions.
+pointer travel needed to reach it. Settings version 2 explicitly marks percentage units. Uniquely percentage
+version-1 tuning is retained; ambiguous pointer/percentage values reset once
+with originals retained in `legacy_press_thresholds`. Stationary resistance
+retuning preserves presentation and depth; replay keeps recorded presented
+depth. Spring presets now preserve unrelated tuning, and disabled attraction
+values no longer influence cues. The 760-point tuning window adds Daniel’s
+complete tuning preset and a Pickup shadow slider. Root has not validated their
+appearance or native interactions. See Opus's README for the migration policy
+and review response.
 
 Build without launching, from the worktree root:
 

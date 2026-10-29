@@ -27,14 +27,14 @@ before settling toward the target; it does not remove the spring or guarantee
 that forward momentum can never overshoot.
 
 This changes only Opus's copied motion model. The original lab, Terra and the
-browser implementation have not received this change. Root reran all 103 model
+browser implementation have not received this change. Root reran all 138 model
 checks, including the original motion cases and the new release-direction cases.
 
 The card's cues now use a separate gentle prediction, with zero release
 momentum, while preserving the measured speed for the cue gate. Stay and snap
 cues become neutral during fast movement, with hysteresis around the deliberate
 placement speed. Position-based tuck and restore cues remain available. The
-card then reads “Moving · release throws”. Entering neutral requests no haptic.
+card then reads “Moving”. Entering neutral requests no haptic.
 The actual release and the tuning window's “Release now” line still use the
 momentum-aware prediction; the card is not an exact fast-flick destination
 preview.
@@ -55,9 +55,20 @@ point on an edge. The old overlap and velocity tuck rules are excluded in this
 mode. A zero dock threshold still requires a positive press. The card's readout
 includes the current depth percentage. The settings use `docking: "all-edges"`,
 `press_dock` and `press_tuck`; older files can omit the two numeric keys.
-The current migration replaces both legacy pointer thresholds with percentage
-defaults when `press_tuck` exceeds 40. There is no explicit units marker; legacy
-values at or below that cutoff need migration review before acceptance.
+Settings version 2 marks these values as percentages. Version-1 values uniquely
+identifiable as percentages (tuck below 40%, dock at most 20%) are preserved.
+Ambiguous or old pointer thresholds reset once to 2%/12%; their original values
+remain in `legacy_press_thresholds` in the saved JSON. Malformed and out-of-range
+values are rejected before migration. Marked version-2 tuck 40% is preserved;
+41% is rejected. An existing 26.23% tuning migrates unchanged.
+
+Depth measures the actual clamped presentation beyond this drag's resistance
+boundary. An outside re-grab starts fresh pressure at its grabbed position,
+preventing an immediate re-tuck during restore. Changing resistance while held
+keeps presentation and depth unchanged, and rebases pointer input so the next
+event stays continuous. Replay preserves the recorded presentation and depth;
+new resistance affects subsequent gestures. A tuck threshold at or below dock
+threshold intentionally removes the side-docking interval: tuck takes priority.
 
 Grounded and Reset everything continue to select corner docking. Press-mode native feel,
 settings persistence and re-grab transitions remain unverified. During browser
@@ -65,7 +76,7 @@ integration, resistance and press docking must apply only to exterior display
 edges, allowing free movement across a shared boundary between screens.
 
 Root's fixes for short fast presses falling through to legacy tucking and zero
-thresholds snapping with no pressure remain covered. All 103 model checks pass,
+thresholds snapping with no pressure remain covered. All 138 model checks pass,
 including the new depth cases. Native percentage-depth behavior, re-grabs and
 migration are not accepted solely from those checks.
 
@@ -80,13 +91,16 @@ migration are not accepted solely from those checks.
   restore lands at its destination. A small scale dip confirms landing; the
   Press control adjusts it.
 - **Stay here.** While letting go would leave the window where it is, its
-  shadow tightens and the pickup shrink eases off as it lowers partway toward
-  rest. Settle tunes how far it lowers. The former corner marks and Anchors
+  broad shadow moves inward and its tight contact shadow returns. Pickup
+  shrink and the lifted look remain throughout the drag. Settle tunes this
+  independent cue. The former corner marks and Anchors
   control have been removed. Hold glow remains available for comparison, with a default
   of zero; existing saved glow values are preserved.
 - **Dock.** The window leans toward the dock a gentle release would select as
   you slow down. The pull is full within the attraction distance and fades out
-  by twice that distance, with a minimum 48-point full-strength zone. A separate
+  by twice that distance, with a minimum 48-point full-strength zone. Outside
+  Smart corner/side-edge placement, the full-strength zone is fixed at 48 points;
+  the disabled attraction control has no effect on it. A separate
   Dock shadow control moves the broad shadow toward
   that target, while the contact shadow stays close. Its requested travel is
   capped at 110 points before strength and proximity scaling: strength 1 reaches
@@ -141,7 +155,7 @@ reports the unscaled card's frame.
 
 ## Feedback controls
 
-The tuning window is now 716 points tall. Its **Presets** menu contains Grounded,
+The tuning window is now 760 points tall. Its **Presets** menu contains Daniel’s tuning, Grounded,
 iOS-like baseline, Snappy, Soft spring, Position only and Reset everything.
 The **Snaps to** and **A drop** segmented controls choose docking and placement;
 a sentence below them describes the current combination. **Feel**, **Edges**
@@ -162,7 +176,7 @@ JSON save. **Presets → Reset everything** restores the compiled defaults; it d
 undo the preset or restore previous custom tuning. Preset interaction has not
 been independently validated.
 
-The **Cues** tab has Release feedback, Haptics and seven numeric cue controls,
+The **Cues** tab has Release feedback, Haptics and eight numeric cue controls,
 each with hover help. Motion values live in Feel and Edges. Throw/replay,
 tuck/restore, Reset position, JSON and status controls stay below the tabs.
 
@@ -171,7 +185,8 @@ tuck/restore, Reset position, JSON and status controls stay below the tabs.
 | Release feedback | Turns every cue off to compare with plain motion. The resting shadow and the tucked chevron remain. |
 | Haptics | Requests pickup, outcome-change and landing taps. Default on. |
 | Lift | How much the shadow grows when picked up. Default 0.70. |
-| Settle | How far it lowers while release would keep it in place. Default 0.60. |
+| Pickup shadow | Softens (+1), translates (0) or sharpens (−1) the lifted shadow. Default +1. |
+| Settle | Contact-shadow cue while release would keep it in place, retaining the pickup look. Default 0.60. |
 | Press | Landing dip strength. Default 0.60. |
 | Hold glow | Border glow strength while release would keep the window in place. Default 0. |
 | Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
@@ -179,11 +194,30 @@ tuck/restore, Reset position, JSON and status controls stay below the tabs.
 | Dock shadow | Directional shadow-travel strength. Default 0.80; range 0–1, with travel capped at 110 points before scaling. |
 
 These save to `settings.json` as `feedback`, `feedback_haptics`,
-`feedback_lift`, `feedback_settle`, `feedback_press`,
+`feedback_lift`, `feedback_pickup_shadow`, `feedback_settle`, `feedback_press`,
 `feedback_glow`, `feedback_edge`, `feedback_lean` and `feedback_dock_shadow`.
 They're optional, so a baseline settings
-file still loads. **Reset all variables** resets them too. Presets leave them
-alone. While you drag, the line under the controls reads "Release now: …", so
+file still loads. **Presets → Reset everything** resets them too. Spring-only
+presets leave feedback and unrelated motion values alone. Grounded and Daniel’s
+tuning apply complete presets. While you drag, the line under the controls reads "Release now: …", so
 you can check what each cue is claiming.
 
 See `../../pip-motion-lab/README.md` for the motion controls and references.
+
+## Review fixes and validation
+
+The five findings in Astra's review of `68f5b9a` are addressed: explicit units
+migration, stationary retune/replay consistency, spring-preset preservation,
+mode-independent cue reach where attraction is disabled, and neutral “Moving”
+text. The builder runs 138 motion checks and 18 Foundation settings-schema
+checks before compiling and signing the app. These cover model behavior and
+in-memory migration, not native gestures or filesystem timing.
+
+Daniel’s tuning is a compiled complete preset, including Press any edge / Smart,
+response .752, damping 1.195, projection .197, resistance .631, free speed 800,
+inset 21.93, dock depth 2%, tuck depth 26.23%, Lift 1 and Settle 1. It is opt-in
+and survives settings resets. The Pickup shadow control defaults to softening.
+
+The running user-test app was left untouched during root's review fixes. Native
+layout, cue feel, haptic delivery, display crossing and input-region acceptance
+remain open; these changes have not been integrated into Chromium.
