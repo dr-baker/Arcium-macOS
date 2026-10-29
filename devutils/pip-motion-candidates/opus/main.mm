@@ -359,6 +359,14 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       @"Force Touch trackpad taps for every event: pickup, each change in what letting go would do, and landing.\n\n"
       "Every tap uses the lightest alignment pattern, at most one every 0.15 seconds.\n\n"
       "macOS only plays haptics while a finger is on the trackpad, so a landing after a long flight may be silent. Mice have no haptics.");
+  [self button:@"Grounded defaults" frame:NSMakeRect(330, 263, 160, 28) action:@selector(grounded:) tag:0];
+  addHelp(content, NSMakeRect(494, 268, 18, 18), @"Grounded defaults",
+      @"Sets every motion and feedback value to a calm, natural tuning, with corner docking and Smart placement.\n\n"
+      "Motion: leave-here speed 180 so ordinary careful drops count as placement; snap distance 64 so corners feel a little magnetic; "
+      "projection 0.40 so flicks carry without far-corner surprises; response 0.44 with damping 1 for weight without bounce; "
+      "inset 16 for breathing room; tuck at 30% and 1000 pt/s so tucks are deliberate; restore after 24 pt so getting it back is easy.\n\n"
+      "Feedback: lift 0.60, press 0.40 and edge shade 0.50 for quieter cues; settle 0.75 because lowering is the main stay cue; "
+      "dock lean 12 with dock shadow 0.90 so the shadow points rather than the window drifting; no glow; haptics on.");
   addHelp(content, NSMakeRect(160, 269, 18, 18), @"Release feedback",
       @"Physical cues for holding and letting go.\n\n"
       "Picking the window up deepens and softens its shadow and shrinks it slightly. After release it stays lifted while it travels, sets down where it comes to rest, and dips once as it lands.\n\n"
@@ -610,6 +618,21 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [self startAnimation];
 }
 - (void)reset:(id)sender { releaseDistance = 0; awaitingLanding = NO; motion->reset(); [self showPosition]; [self stopAnimation]; }
+- (void)grounded:(id)sender {
+  [controls makeFirstResponder:nil];
+  Settings next;
+  next.response = .44; next.damping = 1; next.projection = .40; next.margin = 16;
+  next.stash_percent = 30; next.stash_velocity = 1000; next.restore_distance = 24;
+  next.handle = 28; next.resistance = .35; next.free_speed = 180; next.snap_distance = 64;
+  next.docking = Docking::Corners; next.placement = Placement::Smart;
+  Feedback tuned;
+  tuned.lift = .60; tuned.settle = .75; tuned.press = .40; tuned.glow = 0;
+  tuned.edge = .50; tuned.lean = 12; tuned.dockShadow = .90;
+  feedback = tuned;
+  [presetMenu selectItemAtIndex:4];
+  [self apply:next save:YES];
+  fileStatus.stringValue = @"Applied grounded defaults · saved";
+}
 - (void)resetVariables:(id)sender {
   [controls makeFirstResponder:nil];
   [saveTimer invalidate]; saveTimer = nil;

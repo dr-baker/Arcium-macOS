@@ -111,6 +111,19 @@ reports the unscaled card's frame.
 
 ## Feedback controls
 
+**Grounded defaults** applies a complete preset only when clicked; launching
+the app leaves saved tuning alone. It selects corner docking and Smart
+placement, response 0.44, damping 1, projection 0.40, inset 16, tuck threshold
+30%, outward tuck speed 1000, restore distance 24, deliberate speed 180 and snap
+distance 64. It also sets the tucked strip to 28 and resistance to 0.35, even
+if those had custom values.
+
+The preset enables feedback and haptics, sets Lift 0.60, Settle 0.75, Press 0.40,
+Hold glow 0, Edge shade 0.50, Dock lean 12 and Dock shadow 0.90, and schedules a
+JSON save. **Reset all variables** restores the compiled defaults; it does not
+undo the preset or restore previous custom tuning. The new preset's native
+button interaction has not been independently validated.
+
 The **Release feedback** row in the tuning window has its own hover help.
 
 | Control | Effect |

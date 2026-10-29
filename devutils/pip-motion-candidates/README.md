@@ -27,7 +27,7 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 83377.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 85821.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It lowers during deliberate placement, dips on landing and requests
@@ -65,6 +65,13 @@ readout and actual fast-flick release keep momentum projection. Entering the
 neutral cue state requests no haptic. Native tests must check both predictions
 and the transition between them; the card does not promise an exact fast-flick
 destination.
+
+Opus also offers an opt-in Grounded defaults button. Source review confirms
+that it applies a complete motion/feedback preset only through its button
+action, including corner docking, Smart placement, a 28-point tucked strip and
+0.35 boundary resistance. It enables feedback and haptics. Reset restores
+compiled defaults rather than previous custom settings. Root verified the new
+bundle signature and runtime checkpoint; preset interaction remains unverified.
 
 Build without launching, from the worktree root:
 
