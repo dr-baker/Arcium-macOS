@@ -20,7 +20,7 @@ window-motion spring still runs in both.
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
 | Live feedback tuning | Enable and strength | Enable, haptics, lift, pickup shadow, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
 | Release prediction | Runs the existing release on a model copy | Card cues preview gentle placement; fast-flick release remains momentum-aware |
-| Verification | Root: 93 model checks and strict app signature verification | Root: 138 motion and 18 schema checks, strict app signature verification and runtime checkpoint |
+| Verification | Root: 93 model checks and strict app signature verification | Root: 157 motion and 18 schema checks, strict app signature verification and runtime checkpoint |
 
 Terra makes the decision explicit but adds text. Opus's revised design follows
 Daniel's requested pickup, hold and tuck cues. This is a source-level
@@ -34,7 +34,7 @@ falloff. It retains its held look with a contact-shadow cue during deliberate pl
 dips on landing and requests
 haptic feedback. Corner marks and their control have been removed; two live
 lines on the card now show its confirmed outcome and active cues. Root verified
-the signed bundle and runtime checkpoint, and ran the 138 current-source motion checks.
+the signed bundle and runtime checkpoint, and ran the 157 current-source motion checks.
 Root left saved tuning untouched. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
@@ -52,7 +52,7 @@ away. The card's readout includes the current shadow offset. Its perceived
 clarity and its behavior during release remain unverified on screen.
 
 Opus now retains only release momentum toward its selected snap, tuck or
-restore destination. This changes Opus's motion model, with 138 motion and 18 schema checks
+restore destination. This changes Opus's motion model, with 157 motion and 18 schema checks
 passing; the original lab, Terra and browser behavior are unchanged. It removes
 the initial wrong-way component, while forward spring overshoot remains
 possible. The cue revision also raises the fresh-settings lean default to 14
@@ -78,7 +78,7 @@ depth-percentage thresholds for docking and side tucking, and corner placement
 when two edges are pressed. Root reproduced and fixed two new boundary cases:
 an 8-point fast press bypassed the 110-point tuck threshold through the legacy
 velocity rule, and a zero dock threshold snapped an interior drop with no press.
-Those fixes remain covered after the switch to depth percentages. All 138 motion
+Those fixes remain covered after the switch to depth percentages. All 157 motion
 checks now pass. Native acceptance is pending.
 
 Root built a separate signed review bundle from immutable source commit
@@ -88,7 +88,7 @@ hashes, executable hash and bundle path are recorded in
 `opus/.build/press-review-b58161e/validation.json`. This historical snapshot and
 its review were superseded by the percentage-depth model and new tuning UI.
 
-Press thresholds are now 2% and 12% of resisted displacement normalized by the
+The selected Press any edge thresholds are now 2.4% and 24.7% of resisted displacement normalized by the
 window size on each axis. The readout shows depth, and resistance changes the
 pointer travel needed to reach it. Settings version 2 explicitly marks percentage units. Uniquely percentage
 version-1 tuning is retained; ambiguous pointer/percentage values reset once
@@ -149,3 +149,11 @@ with individual lift, glow, shade and lean controls.
 The original lab's settings and position are preserved. No browser app,
 profile, shared build output or existing PiP patch was changed by these
 experiments.
+
+The selected Opus defaults are being promoted into the native PiP patch. Dock
+engagement is 20% deeper (2% → 2.4%); tuck remains 24.7%. The production adapter
+adds active-display work areas and exterior-edge masks, physical tuck bounds,
+free-position persistence, and a mouse-transparent shadow window while retaining
+native clear glass controls. The lab's fixed-screen limitation remains explicit;
+it is not the production display adapter. Source/model checks do not establish
+visible native acceptance.

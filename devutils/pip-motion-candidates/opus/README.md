@@ -26,8 +26,9 @@ and momentum projection. This removes the initial wrong-way or sideways travel
 before settling toward the target; it does not remove the spring or guarantee
 that forward momentum can never overshoot.
 
-This changes only Opus's copied motion model. The original lab, Terra and the
-browser implementation have not received this change. Root reran all 138 model
+This motion model is now also authored into the native Arcium PiP patch. The
+original lab and Terra retain their independent models. Production compile and
+runtime acceptance are reported separately from lab checks. Root reran all 157 model
 checks, including the original motion cases and the new release-direction cases.
 
 The card's cues now use a separate gentle prediction, with zero release
@@ -43,9 +44,9 @@ preview.
 
 The third docking mode resists dragging past all four inset boundaries. In
 Smart placement, nearness alone does not snap a slow drop. Resisted depth past
-a boundary selects that edge once it reaches **Press to dock** (default 2%).
+a boundary selects that edge once it reaches **Press to dock** (selected default 2.4%).
 Pressing two boundaries selects their corner. Horizontal depth reaching
-**Press to tuck** (default 12%) tucks into that side; top and bottom do not tuck.
+**Press to tuck** (selected default 24.7%) tucks into that side; top and bottom do not tuck.
 Depth is the resisted displacement divided by the window size on that axis,
 expressed as a percentage. Changing resistance changes the pointer travel
 needed to reach a threshold.
@@ -57,7 +58,7 @@ includes the current depth percentage. The settings use `docking: "all-edges"`,
 `press_dock` and `press_tuck`; older files can omit the two numeric keys.
 Settings version 2 marks these values as percentages. Version-1 values uniquely
 identifiable as percentages (tuck below 40%, dock at most 20%) are preserved.
-Ambiguous or old pointer thresholds reset once to 2%/12%; their original values
+Ambiguous or old pointer thresholds reset once to 2.4%/24.7%; their original values
 remain in `legacy_press_thresholds` in the saved JSON. Malformed and out-of-range
 values are rejected before migration. Marked version-2 tuck 40% is preserved;
 41% is rejected. An existing 26.23% tuning migrates unchanged.
@@ -76,7 +77,7 @@ integration, resistance and press docking must apply only to exterior display
 edges, allowing free movement across a shared boundary between screens.
 
 Root's fixes for short fast presses falling through to legacy tucking and zero
-thresholds snapping with no pressure remain covered. All 138 model checks pass,
+thresholds snapping with no pressure remain covered. All 157 model checks pass,
 including the new depth cases. Native percentage-depth behavior, re-grabs and
 migration are not accepted solely from those checks.
 
@@ -232,14 +233,14 @@ See `../../pip-motion-lab/README.md` for the motion controls and references.
 The five findings in Astra's review of `68f5b9a` are addressed: explicit units
 migration, stationary retune/replay consistency, spring-preset preservation,
 mode-independent cue reach where attraction is disabled, and neutral “Moving”
-text. The builder runs 138 motion checks and 18 Foundation settings-schema
+text. The builder runs 157 motion checks and 18 Foundation settings-schema
 checks before compiling and signing the app. These cover model behavior and
 in-memory migration, not native gestures or filesystem timing.
 
 Daniel’s tuning is now the lab default: the app starts with it when no
 settings file exists, and Reset everything and the Daniel’s tuning preset both
 apply it. It includes Press any edge / Smart, response .625, damping .759,
-projection .266, resistance .631, free speed 800, inset 21.93, dock depth 2%,
+projection .266, resistance .631, free speed 800, inset 21.93, dock depth 2.4%,
 tuck depth 24.7%, plus the feedback defaults above. The motion model's own
 `Settings{}` defaults are unchanged; its checks and the iOS-like spring presets
 still use them. Grounded pins its own shadow and settle values.
@@ -251,3 +252,17 @@ remain open; these changes have not been integrated into Chromium.
 The centered-shadow and shared lift-spring revision compiles and passes the
 existing model/schema suites. Those suites do not assert its visual timing,
 shadow appearance or enlarged card hit region; native acceptance remains open.
+
+## Production motion port
+
+The selected Press any edge preset now uses 2.4% dock depth, 20% deeper than
+the former 2%. Tuck stays at 24.7%. The running lab's saved dock depth was
+changed from 2 to 2.4 without replacing any other tuning or restarting it.
+`selectedSettings()` and `FeedbackSettings` hold the selected values shared
+with the production model. Baseline model defaults and alternative presets
+remain available.
+
+The production adapter uses the active display's work area and exterior edge
+segments, preserving pointer offset across display seams. The model exposes
+that environment update without making the standalone lab a multi-display
+prototype; its screen-selection limitation still applies.

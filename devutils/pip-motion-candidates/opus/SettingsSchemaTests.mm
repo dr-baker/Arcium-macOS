@@ -13,7 +13,7 @@ int main() {
   @autoreleasepool {
     auto old = prepareSettings(@{@"version":@1, @"press_dock":@20, @"press_tuck":@40});
     check(old && old->rewrite && [old->values[@"version"] isEqual:@2] &&
-        [old->values[@"press_dock"] isEqual:@2] && [old->values[@"press_tuck"] isEqual:@12],
+        [old->values[@"press_dock"] isEqual:@2.4] && [old->values[@"press_tuck"] isEqual:@24.7],
         "ambiguous version-1 thresholds reset once to explicit percentage defaults");
     check([old->values[@"legacy_press_thresholds"][@"press_dock"] isEqual:@20] &&
         [old->values[@"legacy_press_thresholds"][@"press_tuck"] isEqual:@40],
@@ -38,14 +38,14 @@ int main() {
     check(partial && [partial->values[@"legacy_press_thresholds"][@"press_dock"] isEqual:@10],
         "partial ambiguous input backed up before reset");
     auto empty = prepareSettings(@{@"version":@1});
-    check(empty && [empty->values[@"press_tuck"] isEqual:@12], "missing legacy thresholds use defaults");
+    check(empty && [empty->values[@"press_tuck"] isEqual:@24.7], "missing legacy thresholds use defaults");
     check(prepareSettings(@{@"version":@2}).has_value(), "percentage thresholds remain optional");
     auto repeated = prepareSettings(old->values);
     check(repeated && !repeated->rewrite &&
         [repeated->values[@"legacy_press_thresholds"] isEqual:old->values[@"legacy_press_thresholds"]],
         "migration is idempotent and keeps the original record");
     auto historical = prepareSettings(@{@"version":@1, @"press_dock":@60, @"press_tuck":@300});
-    check(historical && [historical->values[@"press_tuck"] isEqual:@12], "old pointer range migrates explicitly");
+    check(historical && [historical->values[@"press_tuck"] isEqual:@24.7], "old pointer range migrates explicitly");
     check(!prepareSettings(@{@"version":@1, @"press_tuck":@301}), "invalid legacy range rejected before migration");
     std::cout << checks << " schema checks passed\n";
   }

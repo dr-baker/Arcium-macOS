@@ -73,33 +73,8 @@ static const Parameter parameters[] = {
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
 
 // Release feedback lives in the lab, not the motion model; it only reads predictions.
-struct Feedback {
-  bool enabled = true;
-  bool haptics = true;
-  double lift = .75;
-  double pickupShadow = -.44;
-  double shadowBox = .20;
-  double shadowIntensity = 1.10;
-  double settle = .62;
-  double settleDelay = .08;
-  double settleEase = .28;
-  double press = .40;
-  double glow = 0;
-  double edge = .80;
-  double lean = 40;
-  double dockShadow = .90;
-};
-// The lab's starting and Reset values: Daniel's tuning. The model's own defaults stay as the
-// iOS-like baseline its checks and spring presets use.
-static Settings labDefaults() {
-  Settings s;
-  s.response = .625; s.damping = .759; s.projection = .266; s.margin = 21.93;
-  s.stash_percent = 30; s.stash_velocity = 1009; s.restore_distance = 29.86;
-  s.handle = 26.35; s.resistance = .631; s.free_speed = 800; s.snap_distance = 64;
-  s.press_dock = 2; s.press_tuck = 24.7;
-  s.docking = Docking::AllEdges; s.placement = Placement::Smart;
-  return s;
-}
+using Feedback = pip_motion::FeedbackSettings;
+static Settings labDefaults() { return pip_motion::selectedSettings(); }
 struct FeedbackParameter {
   const char *key, *label;
   double low, high;
@@ -366,7 +341,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   presetMenu.target = self; presetMenu.action = @selector(presetChanged:);
   [content addSubview:presetMenu];
   addHelp(content, NSMakeRect(494, H - 42, 18, 18), @"Presets",
-      @"Daniel’s tuning: the lab defaults, saved from your Oct 28 session, with Press any edge and Smart drops: response 0.62, damping 0.76, projection 0.27, resistance 0.63, leave-here speed 800, inset 22, press to dock 2% and tuck 25%; lift 0.75, pickup shadow −0.44, shadow box 0.20, shadow intensity 1.10, settle 0.62 after 0.08 s with ease 0.28, press 0.40, edge shade 0.80, dock lean 40, dock shadow 0.90.\n\n"
+      @"Daniel’s tuning: the lab defaults, saved from your Oct 28 session, with Press any edge and Smart drops: response 0.62, damping 0.76, projection 0.27, resistance 0.63, leave-here speed 800, inset 22, press to dock 2.4% and tuck 25%; lift 0.75, pickup shadow −0.44, shadow box 0.20, shadow intensity 1.10, settle 0.62 after 0.08 s with ease 0.28, press 0.40, edge shade 0.80, dock lean 40, dock shadow 0.90.\n\n"
       "Grounded: a calm, natural tuning for every value, with corner snapping and Smart drops. "
       "Leave-here speed 180, snap distance 64, projection 0.40, response 0.44 with no bounce, inset 16, tuck at 30% or 1000 pt/s, restore after 24 pt; "
       "lift 0.60, settle 0.75, press 0.40, edge shade 0.50, dock lean 12, dock shadow 0.90, no glow, haptics on.\n\n"

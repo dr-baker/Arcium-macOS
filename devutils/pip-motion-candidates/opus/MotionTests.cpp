@@ -508,5 +508,54 @@ int main() {
             "only an enabled attraction control changes cue reach");
     }
   }
+  // The shipping preset makes docking 20% deeper than the selected lab's 2%.
+  for (int edge = 0; edge < 4; ++edge) {
+    m = Motion{}; m.settings = selectedSettings();
+    m.environment({0,0,1000,700}, {320,180});
+    const double margin = m.settings.margin;
+    const bool horizontal = edge < 2;
+    const double extent = horizontal ? m.size.width : m.size.height;
+    const Point origin = edge == 0 ? Point{margin,250} : edge == 1 ? Point{1000-320-margin,250} :
+        edge == 2 ? Point{300,margin} : Point{300,700-180-margin};
+    for (double percent : {2.0, 2.39, 2.41}) {
+      m.placeAt(origin); Point pointer = origin + Point{100,80}; m.begin(pointer,100);
+      const double push = rubberInput(extent*percent/100,extent,m.settings.resistance) * (edge%2 ? 1:-1);
+      m.drag(pointer + (horizontal ? Point{push,0}:Point{0,push}),100.1);
+      check(m.predict(100.3,true).decision == (percent < 2.4 ? Decision::Keep:Decision::Dock),
+            "selected press docks only after the harder 2.4 percent depth on every edge");
+    }
+  }
+  m = Motion{}; m.settings = selectedSettings();
+  m.environment({0,0,1000,700},{320,180},{true,false,true,true});
+  m.placeAt({650,250}); m.begin({750,300},110); m.drag({1200,300},110.1);
+  check(near(m.position.x,1100) && m.pressed.x == 0 && m.predict(110.3,true).decision == Decision::Keep,
+        "shared horizontal seam has no resistance, pressure or tuck");
+  const Point crossing = m.position;
+  m.environment({1000,0,1800,1100},{320,180},{false,true,true,true});
+  m.drag({1201,300},110.2);
+  check(near(m.position.x,crossing.x+1) && near(m.position.y,crossing.y),
+        "moving to a larger display preserves global drag offset");
+  m.drag({3300,300},110.3);
+  check(m.depth().x > m.settings.press_tuck && m.predict(110.5,true).side == Side::Right,
+        "the larger display's exterior side uses its new boundary");
+  m = Motion{}; m.settings = selectedSettings();
+  m.environment({0,0,1000,700},{320,180},{true,true,true,false});
+  m.placeAt({300,450}); m.begin({400,500},120); m.drag({400,1000},120.1);
+  check(near(m.position.y,950) && m.pressed.y == 0,
+        "vertical display seams are traversable without resistance");
+  for (bool right : {false,true}) {
+    m = Motion{}; m.settings = selectedSettings();
+    m.environment({right ? 0.0:80.0,30,920,670},{320,180},{},Rect{0,0,1000,700});
+    m.seed({300,250}); m.tuck(right ? Side::Right:Side::Left);
+    m.target.x = right ? 1000-m.settings.handle : -320+m.settings.handle;
+    finish(m);
+    check(m.phase == Phase::Tucked && near(m.position.x,m.target.x),
+          "physical tuck target remains reachable when the Dock insets the work area");
+  }
+  m = Motion{}; m.settings = selectedSettings();
+  m.seed({1000-m.settings.handle,250},Side::Right,{350,250});
+  m.begin({990,300},130); m.end(130.1); finish(m);
+  check(m.phase == Phase::Resting && near(m.position.x,350) && near(m.position.y,250),
+        "a handle click restores the exact free position saved by explicit tucking");
   std::cout << checks << " checks passed\n";
 }

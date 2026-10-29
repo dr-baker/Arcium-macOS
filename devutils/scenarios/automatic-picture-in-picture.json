@@ -64,12 +64,12 @@
     "Click the native PiP pause control and verify currentTime holds across two observations. Exercise the paused seeks, then resume once and confirm time advances while muted.",
     "Pause the video, switch away, and confirm automatic PiP does not appear.",
     "Use that PiP session to verify hover controls, seeking, return to tab, window dragging, resizing, and rounded clipping.",
-    "Resize between compact 284×160 and roomy 400×225. Keep play/pause available; show quick seek only when room permits and verify it returns after shrinking and enlarging. Inspect real Liquid Glass over video, the neutral scrubber and subtle source-Space accent in the thumb.",
+    "Resize between compact 284\u00d7160 and roomy 400\u00d7225. Keep play/pause available; show quick seek only when room permits and verify it returns after shrinking and enlarging. Inspect real Liquid Glass over video, the neutral scrubber and subtle source-Space accent in the thumb.",
     "With playback paused, drag the native scrubber and verify seeking changes time without resuming playback. Repeat while playing and verify its prior playing state returns.",
-    "Drag the video to all four corners and verify snapping stays inside the work area. Drag to a physical screen edge and verify tuck leaves a reachable restore handle; click the handle to restore. Repeat using the tuck control on both sides.",
+    "With the same paused/muted session, place PiP slowly in the interior and verify it stays there. Press into each exterior edge to dock, and into two edges for a corner. Docking starts at 2.4% displayed depth; side tuck starts at 24.7%. Cross shared screen seams without resistance, then verify work areas update on the larger display. Tuck on each exterior side, restore by clicking and dragging the handle, and verify an explicit tuck restores the original free position. Keep the first visual pass on the MacBook until the user authorizes the external-display check.",
     "Exercise precise phased scrolling: outward horizontal movement tucks, inward movement on the handle restores, downward movement dismisses, and cancellation restores the starting frame. Label synthetic AppKit event checks separately from hardware trackpad proof.",
     "Switch between ordinary macOS Spaces while PiP is visible and while tucked. Verify the window or restore handle remains visible and usable.",
-    "Enter another application’s full-screen Space after PiP already exists. Verify visible and tucked PiP follow there, and the first pause/restore click works without bringing the browser to the foreground or changing Spaces. Exit full screen and verify following still works.",
+    "Enter another application\u2019s full-screen Space after PiP already exists. Verify visible and tucked PiP follow there, and the first pause/restore click works without bringing the browser to the foreground or changing Spaces. Exit full screen and verify following still works.",
     "Inspect native keyboard and accessibility controls. Confirm hidden Chromium controls do not appear as duplicate usable controls. Verify permission and specialty-action fallback when those states are available.",
     "Disable automatic PiP in native Settings. Confirm an already-open PiP window remains open, then close it and verify subsequent departures do not open automatic PiP.",
     "With the preference disabled, enter PiP manually and confirm it remains available when switching away and returning.",
@@ -84,9 +84,10 @@
     "Explicit site blocks remain effective.",
     "The floating window clips video and hover controls to rounded corners and preserves its aspect ratio while resizing.",
     "Normal close and quit finish without a new crash.",
-    "The PiP window and tucked restore handle follow ordinary Spaces and a different application’s full-screen Space.",
+    "The PiP window and tucked restore handle follow ordinary Spaces and a different application\u2019s full-screen Space.",
     "The native controls preserve paused seeking, while visible and hidden states avoid duplicate legacy focus or accessibility controls.",
-    "Tucking preserves playback and a reachable restore handle; normal dismissal preserves automatic-PiP user-dismiss suppression."
+    "Tucking preserves playback and a reachable restore handle; normal dismissal preserves automatic-PiP user-dismiss suppression.",
+    "Glass buttons remain native clear glass throughout motion. The shadow companion ignores mouse events; clicks outside the visible PiP reach the underlying window. Gentle cues do not chase flick velocity, and the stay-here haptic is requested when settle progress reaches 95%."
   ],
   "verify_persistence": true,
   "verify_teardown": true

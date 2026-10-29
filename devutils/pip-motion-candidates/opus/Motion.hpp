@@ -62,6 +62,25 @@ struct Settings {
   Placement placement = Placement::Smart;
 };
 
+inline Settings selectedSettings() {
+  Settings s;
+  s.response = .625; s.damping = .759; s.projection = .266; s.margin = 21.93;
+  s.stash_percent = 30; s.stash_velocity = 1009; s.restore_distance = 29.86;
+  s.handle = 26.35; s.resistance = .631; s.free_speed = 800; s.snap_distance = 64;
+  s.press_dock = 2.4; s.press_tuck = 24.7;
+  s.docking = Docking::AllEdges; s.placement = Placement::Smart;
+  return s;
+}
+struct FeedbackSettings {
+  bool enabled = true, haptics = true;
+  double lift = .75, pickupShadow = -.44, shadowBox = .20, shadowIntensity = 1.10;
+  double settle = .62, settleDelay = .08, settleEase = .28;
+  double press = .40, glow = 0, edge = .80, lean = 40, dockShadow = .90;
+};
+struct Edges {
+  bool left = true, right = true, bottom = true, top = true;
+};
+
 enum class SpringPreset { Baseline, Snappy, Soft, PositionOnly };
 inline Settings springPreset(Settings current, SpringPreset preset) {
   if (preset == SpringPreset::PositionOnly) {
@@ -146,7 +165,7 @@ class VelocityTracker {
 
 class Motion {
  public:
-  explicit Motion(Rect area = {}) : area_(area) { reset(); }
+  explicit Motion(Rect area = {}) : area_(area), presentation_area_(area) { reset(); }
   Settings settings;
   Size size;
   Point position, velocity, target;
@@ -170,11 +189,13 @@ class Motion {
               std::clamp(projected.y, points[0].y, points[2].y)};
       const double left = p.x - points[0].x, right = points[1].x - p.x;
       const double bottom = p.y - points[0].y, top = points[2].y - p.y;
-      const double nearest = std::min({left, right, bottom, top});
-      if (nearest == left) p.x = points[0].x;
-      else if (nearest == right) p.x = points[1].x;
-      else if (nearest == bottom) p.y = points[0].y;
-      else p.y = points[2].y;
+      double nearest = INFINITY;
+      Point target = p;
+      if (edges_.left && left < nearest) { nearest = left; target = {points[0].x, p.y}; }
+      if (edges_.right && right < nearest) { nearest = right; target = {points[1].x, p.y}; }
+      if (edges_.bottom && bottom < nearest) { nearest = bottom; target = {p.x, points[0].y}; }
+      if (edges_.top && top < nearest) target = {p.x, points[2].y};
+      p = target;
       return p;
     }
     if (settings.docking == Docking::SideEdges) {
@@ -241,13 +262,13 @@ class Motion {
     // at that presentation position so re-grabbing does not resist it twice.
     const Rect limits = dragLimits();
     const double low = limits.y, high = limits.y + limits.height;
-    if (next.y < low) next.y = low + rubber(next.y - low, size.height, settings.resistance);
-    if (next.y > high) next.y = high + rubber(next.y - high, size.height, settings.resistance);
+    if (edges_.bottom && next.y < low) next.y = low + rubber(next.y - low, size.height, settings.resistance);
+    if (edges_.top && next.y > high) next.y = high + rubber(next.y - high, size.height, settings.resistance);
     // Press mode resists the sides too, so a little push docks and a long push tucks.
     if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
       const double left = limits.x, right = limits.x + limits.width;
-      if (next.x < left) next.x = left + rubber(next.x - left, size.width, settings.resistance);
-      if (next.x > right) next.x = right + rubber(next.x - right, size.width, settings.resistance);
+      if (edges_.left && next.x < left) next.x = left + rubber(next.x - left, size.width, settings.resistance);
+      if (edges_.right && next.x > right) next.x = right + rubber(next.x - right, size.width, settings.resistance);
     }
     position = next;
     constrainPresentation();
@@ -363,6 +384,7 @@ class Motion {
       side = position.x + size.width / 2 < area_.x + area_.width / 2 ? Side::Left : Side::Right;
     const Point destination = tuckTarget(side, position.y);
     if (tucked == Side::None) {
+      exact_restore_ = false;
       restore_point_ = {side == Side::Left ? area_.x + settings.margin :
           area_.x + area_.width - size.width - settings.margin, destination.y};
     }
@@ -392,14 +414,14 @@ class Motion {
       if (changedBounds) resistance_anchor_ = position;
       const Rect limits = dragLimits();
       Point raw = position;
-      if (raw.y < limits.y)
+      if (edges_.bottom && raw.y < limits.y)
         raw.y = limits.y + rubberInput(raw.y - limits.y, size.height, settings.resistance);
-      if (raw.y > limits.y + limits.height)
+      if (edges_.top && raw.y > limits.y + limits.height)
         raw.y = limits.y + limits.height + rubberInput(raw.y - limits.y - limits.height, size.height, settings.resistance);
       if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
-        if (raw.x < limits.x)
+        if (edges_.left && raw.x < limits.x)
           raw.x = limits.x + rubberInput(raw.x - limits.x, size.width, settings.resistance);
-        if (raw.x > limits.x + limits.width)
+        if (edges_.right && raw.x > limits.x + limits.width)
           raw.x = limits.x + limits.width + rubberInput(raw.x - limits.x - limits.width, size.width, settings.resistance);
       }
       offset_ = last_pointer_ - raw;
@@ -442,6 +464,26 @@ class Motion {
     return {area_.x + (area_.width - size.width) / 2,
             area_.y + (area_.height - size.height) / 2};
   }
+  // Switching displays changes the active work area without changing global pointer offset.
+  void environment(Rect area, Size dimensions, Edges edges = {}, std::optional<Rect> physical = std::nullopt) {
+    area_ = area;
+    presentation_area_ = physical.value_or(area);
+    size = dimensions;
+    edges_ = edges;
+    if (phase == Phase::Dragging) updatePressed();
+  }
+  void seed(Point origin, Side side = Side::None, Point restore = {}) {
+    position = target = origin;
+    tucked = side;
+    phase = side == Side::None ? Phase::Resting : Phase::Tucked;
+    goal_ = side == Side::None ? Goal::Free : Goal::Stash;
+    restore_point_ = restore;
+    exact_restore_ = side != Side::None;
+    restore_side_ = side;
+    velocity = pressed = {};
+  }
+  Point restorePosition() const { return restoreTarget(); }
+  Point rawPosition(Point pointer) const { return pointer - offset_; }
   Rect area() const { return area_; }
 
  private:
@@ -456,11 +498,11 @@ class Motion {
   void updatePressed() {
     const Rect limits = dragLimits();
     pressed = {};
-    if (position.y < limits.y) pressed.y = position.y - limits.y;
-    if (position.y > limits.y + limits.height) pressed.y = position.y - limits.y - limits.height;
+    if (edges_.bottom && position.y < limits.y) pressed.y = position.y - limits.y;
+    if (edges_.top && position.y > limits.y + limits.height) pressed.y = position.y - limits.y - limits.height;
     if (settings.docking == Docking::AllEdges && drag_side_ == Side::None) {
-      if (position.x < limits.x) pressed.x = position.x - limits.x;
-      if (position.x > limits.x + limits.width) pressed.x = position.x - limits.x - limits.width;
+      if (edges_.left && position.x < limits.x) pressed.x = position.x - limits.x;
+      if (edges_.right && position.x > limits.x + limits.width) pressed.x = position.x - limits.x - limits.width;
     }
   }
   Point dockDestination(Point origin, Point release) const {
@@ -485,6 +527,7 @@ class Motion {
                 area_.y + area_.height - size.height - settings.margin)};
   }
   Point restoreTarget() const {
+    if (exact_restore_) return clampVisible(restore_point_);
     return {restore_side_ == Side::Left ? area_.x + settings.margin :
                 area_.x + area_.width - size.width - settings.margin,
             std::clamp(restore_point_.y, area_.y + settings.margin,
@@ -516,10 +559,10 @@ class Motion {
       if (coordinate < low) { coordinate = low; speed = std::max(0.0, speed); }
       if (coordinate > high) { coordinate = high; speed = std::min(0.0, speed); }
     };
-    bound(position.x, velocity.x, area_.x - size.width + settings.handle,
-          area_.x + area_.width - settings.handle);
-    bound(position.y, velocity.y, area_.y - size.height + settings.handle,
-          area_.y + area_.height - settings.handle);
+    bound(position.x, velocity.x, edges_.left ? presentation_area_.x - size.width + settings.handle : -INFINITY,
+          edges_.right ? presentation_area_.x + presentation_area_.width - settings.handle : INFINITY);
+    bound(position.y, velocity.y, edges_.bottom ? presentation_area_.y - size.height + settings.handle : -INFINITY,
+          edges_.top ? presentation_area_.y + presentation_area_.height - settings.handle : INFINITY);
   }
   Point clampVisible(Point p) const {
     return {std::clamp(p.x, area_.x + settings.margin,
@@ -542,10 +585,13 @@ class Motion {
   }
   struct Throw { Point origin, velocity; bool allow_stash; Point press; };
   Rect area_;
+  Rect presentation_area_;
+  Edges edges_;
   Point offset_, start_position_, restore_point_, resistance_anchor_, last_pointer_;
   Side drag_side_ = Side::None;
   Side restore_side_ = Side::Right;
   bool start_settling_ = false;
+  bool exact_restore_ = false;
   Goal goal_ = Goal::Dock;
   VelocityTracker tracker_;
   std::optional<Throw> last_throw_;

@@ -12,6 +12,8 @@ Unreleased changes are in source, not the current download. [Roadmap](README.md#
 
 ### Polish and fixes
 
+- Place Picture-in-Picture freely, press into an edge to dock, or push farther into a side to tuck it away. Window movement uses the selected spring tuning and retains native glass controls.
+
 - Install Widevine from an existing Google Chrome installation in General settings for experimental protected-media playback. Requires an Arcium relaunch.
 - Keep Arc Space emoji and supported icons when importing. Choose Spaces from a compact list, and preserve icons edited in Arcium when refreshing an import.
 - Choose System for window chrome or content to follow macOS independently. Explicit Light and Dark choices stay separate.

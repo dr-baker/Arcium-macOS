@@ -42,8 +42,8 @@ inline std::optional<PreparedSettings> prepareSettings(id object) {
       if (tuck) originals[@"press_tuck"] = tuck;
       converted[@"legacy_press_thresholds"] = originals;
     }
-    converted[@"press_dock"] = @(Settings{}.press_dock);
-    converted[@"press_tuck"] = @(Settings{}.press_tuck);
+    converted[@"press_dock"] = @(selectedSettings().press_dock);
+    converted[@"press_tuck"] = @(selectedSettings().press_tuck);
   }
   return PreparedSettings{converted, true};
 }
