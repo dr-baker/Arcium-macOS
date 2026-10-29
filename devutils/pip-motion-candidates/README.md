@@ -20,15 +20,17 @@ window-motion spring still runs in both.
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
 | Live feedback tuning | Enable and strength | Enable, lift, hold glow, edge shade and dock lean |
 | Release prediction | Runs the existing release on a model copy | Shares classification between prediction and release |
-| Verification | Root: 93 model checks and strict app signature verification | Root verified the earlier bundle and unchanged 82-check model; the author compiled the revised UI separately without warnings |
+| Verification | Root: 93 model checks and strict app signature verification | Author rebuilt the revised app with 82 model checks passing; root verified its strict signature and new feedback settings in the runtime checkpoint |
 
 Terra makes the decision explicit but adds text. Opus's revised design follows
 Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The running Opus app still contains the earlier outline design;
-the revised UI needs a rebuild after that app quits.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 57925.
+Root verified the signed bundle and a runtime checkpoint from that PID with
+Lift 0.70, Hold glow 0.50, Edge shade 0.60 and Dock lean 4. Native appearance,
+interaction and input-region acceptance remain open.
 
 Build without launching, from the worktree root:
 
