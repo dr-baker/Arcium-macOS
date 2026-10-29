@@ -81,6 +81,13 @@ velocity rule, and a zero dock threshold snapped an interior drop with no press.
 All 100 model checks now pass, including four new regressions. The two source
 fixes are not in the running PID 88517; native acceptance is pending.
 
+Root built a separate signed review bundle from immutable source commit
+`b58161ee4feba61ee508dfe9e9d593bf991b5d93`, without replacing or launching the
+open app. Its 100 model checks and strict signature verification pass. Source
+hashes, executable hash and bundle path are recorded in
+`opus/.build/press-review-b58161e/validation.json`. Later uncommitted motion edits
+from the cancelled run are preserved and are outside that review snapshot.
+
 Build without launching, from the worktree root:
 
 ```sh
