@@ -72,6 +72,7 @@ struct Feedback {
   double glow = 0;
   double edge = .60;
   double lean = 8;
+  double dockShadow = .80;
 };
 struct FeedbackParameter {
   const char *key, *label;
@@ -101,6 +102,10 @@ static const FeedbackParameter feedbackParameters[] = {
     "How far, in points, the window leans toward the dock it would snap to, with its shadow cast further toward it.\n\n"
     "The pull builds as you get close to a dock, or anywhere while you move slowly enough to snap.\n\n"
     "Zero turns the lean off. Reduce Motion also turns it off."},
+  {"feedback_dock_shadow", "Dock shadow", 0, 1, &Feedback::dockShadow,
+    "How far the window's shadow slides toward the dock it would snap to, up to 72 points.\n\n"
+    "At 1 the shadow sits on the destination while the window hovers where you hold it. It builds with proximity, and is full while you move slowly enough to snap.\n\n"
+    "Zero keeps the shadow under the window."},
 };
 static constexpr size_t feedbackParameterCount = sizeof(feedbackParameters) / sizeof(feedbackParameters[0]);
 
@@ -119,7 +124,7 @@ static NSString *phaseName(Phase phase) {
 @end
 
 // The panel is padded so the window can draw its own shadow; only the card takes clicks.
-static constexpr CGFloat kPad = 112;
+static constexpr CGFloat kPad = 160;
 
 @interface PassView : NSView
 @end
@@ -178,7 +183,7 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSButton *feedbackToggle, *hapticsToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
-  double lift, glow, edgeAmount, leanX, leanY, lastVisualTime, releaseDistance, rimShadeStrength;
+  double lift, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
   Side chevronSide;
   BOOL leaning, awaitingLanding;
   double pressStart, lastHaptic, pendingSince;
@@ -730,9 +735,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   // whenever the drag is slow enough to snap. Hysteresis steadies the slow-speed gate.
   const double gate = motion->settings.free_speed;
   const bool slow = outcome.speed <= (leaning ? gate + std::max(60.0, gate / 2) : gate);
-  pip_motion::Point leanTarget{};
+  pip_motion::Point leanTarget{}, shadowTarget{};
   leaning = false;
-  if (on && moved && shown.decision == Decision::Dock && feedback.lean > 0 &&
+  if (on && moved && shown.decision == Decision::Dock &&
       !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
     const pip_motion::Point toward = shown.target - position;
     const double distance = length(toward);
@@ -741,6 +746,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     if (engage > 0 && distance > .5) {
       leaning = true;
       leanTarget = toward * (engage * std::min(feedback.lean, distance * .5) / distance);
+      // The shadow slides toward the destination, as if already resting there.
+      shadowTarget = toward * (engage * feedback.dockShadow * std::min(72.0, distance) / distance);
     }
   }
 
@@ -760,6 +767,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   approach(edgeAmount, on ? edgeTarget : 0, .12, .14, dt);
   approach(leanX, leanTarget.x, .08, .10, dt);
   approach(leanY, leanTarget.y, .08, .10, dt);
+  approach(shadowX, shadowTarget.x, .10, .12, dt);
+  approach(shadowY, shadowTarget.y, .10, .12, dt);
 
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
@@ -776,7 +785,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
   ambientShadow.shadowRadius = 18 + 14 * l;
   ambientShadow.shadowOpacity = .30 + .06 * l;
-  ambientShadow.shadowOffset = CGSizeMake(leanX * 1.5, -(8 + 10 * l) + leanY * 1.5);
+  ambientShadow.shadowOffset = CGSizeMake(shadowX, -(8 + 10 * l) + shadowY);
   contactShadow.shadowRadius = 4 + 3 * l;
   contactShadow.shadowOpacity = .16 * (1 - .75 * l);
   contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(2 + 2 * l) + leanY * .5);
@@ -839,6 +848,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (l > .01) [cues addObject:[NSString stringWithFormat:@"lift %.0f%%", l * 100]];
   if (keep && feedback.settle > 0) [cues addObject:@"lowered"];
   if (std::hypot(leanX, leanY) > .5) [cues addObject:[NSString stringWithFormat:@"lean %.0f pt", std::hypot(leanX, leanY)]];
+  if (std::hypot(shadowX, shadowY) > .5) [cues addObject:[NSString stringWithFormat:@"shadow → %.0f pt", std::hypot(shadowX, shadowY)]];
   if (edgeAmount > .01 && feedback.edge > 0) [cues addObject:[NSString stringWithFormat:@"rim %.0f%%", edgeAmount * 100]];
   if (glow > .01 && feedback.glow > 0) [cues addObject:@"glow"];
   if (dip > 0) [cues addObject:@"press"];
@@ -863,7 +873,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     }
   }
   return !pressing && lift == (on ? liftTarget : 0) && glow == (on ? glowTarget : 0) &&
-      edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y;
+      edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y &&
+      shadowX == shadowTarget.x && shadowY == shadowTarget.y;
 }
 - (void)startAnimation {
   [self showPosition];

@@ -33,8 +33,11 @@ app before rebuilding.
   of zero; existing saved glow values are preserved.
 - **Dock.** The window leans toward the dock release would select. The pull
   builds with proximity at any speed and is fully engaged while moving slowly
-  enough to snap. The broad shadow shifts farther toward the dock, while the
-  contact shadow stays close. Reduce Motion turns the lean off.
+  enough to snap. A separate Dock shadow control moves the broad shadow toward
+  that target, while the contact shadow stays close. Its requested travel is
+  capped at 72 points before strength and proximity scaling: strength 1 reaches
+  the destination only when it is within that range. Reduce Motion disables
+  both the lean and directional shadow movement.
 - **Tuck.** Pushing the window into a side makes the screen's rim cast a shadow
   on the part going in. The shadow is faint while approaching the tuck
   threshold, deepens once letting go would tuck, and stays while tucked. The
@@ -73,7 +76,7 @@ alignment taps for stay/dock changes and level-change taps around tuck/restore.
 Hardware delivery and feel remain unverified; a requested tap is not proof that
 the user felt one.
 
-The panel is padded by 112 points so it can draw its own shadow. The drag target
+The panel is padded by 160 points so it can draw its own shadow. The drag target
 keeps the full, unscaled card rectangle during pickup. The author reports that
 clicks in the transparent padding do not reach windows behind it; click-through
 must be resolved before browser integration. `state.json`'s `native_frame`
@@ -93,10 +96,12 @@ The **Release feedback** row in the tuning window has its own hover help.
 | Hold glow | Border glow strength while release would keep the window in place. Default 0. |
 | Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
 | Dock lean | Maximum lean toward the dock, in points. Default 8; adjustable from 0 to 16. |
+| Dock shadow | Directional shadow-travel strength. Default 0.80; range 0–1, with travel capped at 72 points before scaling. |
 
 These save to `settings.json` as `feedback`, `feedback_haptics`,
 `feedback_lift`, `feedback_settle`, `feedback_press`,
-`feedback_glow`, `feedback_edge` and `feedback_lean`. They're optional, so a baseline settings
+`feedback_glow`, `feedback_edge`, `feedback_lean` and `feedback_dock_shadow`.
+They're optional, so a baseline settings
 file still loads. **Reset all variables** resets them too. Presets leave them
 alone. While you drag, the line under the controls reads "Release now: …", so
 you can check what each cue is claiming.

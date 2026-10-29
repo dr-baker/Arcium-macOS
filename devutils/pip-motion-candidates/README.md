@@ -18,7 +18,7 @@ window-motion spring still runs in both.
 | Fast flick | Continues predicting the release | Stays lifted during travel and sets down at the destination |
 | Deliberate placement | Says “Stay here” or “Place inside” | Lowers toward rest; optional hold glow |
 | Tuck / restore | Label or symbol on the visible portion | Rim shade and chevron increase with depth and ease away during restore |
-| Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade and dock lean |
+| Live feedback tuning | Enable and strength | Enable, haptics, lift, settle, landing press, hold glow, edge shade, dock lean and dock shadow |
 | Release prediction | Runs the existing release on a model copy | Shares classification between prediction and release |
 | Verification | Root: 93 model checks and strict app signature verification | Author rebuilt the revised app with 82 model checks passing; root verified its strict signature and new feedback settings in the runtime checkpoint |
 
@@ -27,14 +27,14 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 75854.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 77541.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It lowers during deliberate placement, dips on landing and requests
 haptic feedback. Corner marks and their control have been removed; two live
 lines on the card now show its confirmed outcome and active cues. Root verified
 the signed bundle and a runtime checkpoint with Lift 0.70, Hold glow 0, Edge
-shade 0.60, Dock lean 16, Settle/Press 0.60 and Haptics enabled. Saved tuning was
+shade 0.60, Dock lean 16, Dock shadow 0.80, Settle/Press 0.60 and Haptics enabled. Saved tuning was
 preserved. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
 
@@ -44,6 +44,12 @@ decision types match. Haptics retain the debounced identity. The tuning-window
 diagnostic line and actual release remain immediate. Near-edge jitter, moving
 targets within one decision type and rapid release during the cue delay still
 need native acceptance; the motion model checks do not cover this visual filter.
+
+A separate directional shadow cue now requests travel toward the snap target,
+capped at 72 points before proximity and strength scaling. It indicates
+direction rather than an exact landing position when the target is farther
+away. The card's readout includes the current shadow offset. Its perceived
+clarity and its behavior during release remain unverified on screen.
 
 Build without launching, from the worktree root:
 
@@ -73,8 +79,8 @@ shared edge between adjacent displays. Following Spaces remains required.
 These checks need native runtime evidence; passing the current single-display
 motion checks does not satisfy this gate.
 
-The revised Opus panel also includes 112 points of transparent shadow padding,
-increased from 48 to reduce shadow clipping. This widens the known input issue.
+The revised Opus panel also includes 160 points of transparent shadow padding,
+increased from 112 for the directional shadow's travel. This widens the known input issue.
 Its author reports that clicks there do not reach the app behind it. Resolve
 that input region and prove clicks outside the visible card reach the underlying
 window before browser integration. The shadow must not enlarge the PiP's
