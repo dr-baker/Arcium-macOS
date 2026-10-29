@@ -60,13 +60,13 @@ static const Parameter parameters[] = {
     "Higher: a larger attraction zone. Lower: more freedom to leave the window near a dock. Zero requires exact alignment.\n\n"
     "Measured from the window's dropped position to the nearest corner or side-edge dock. Faster flicks use momentum projection instead.\n\n"
     "Not used by Press into any edge, where only pressing docks.", true},
-  {"press_dock", "Press to dock (points)", 0, 60, &Settings::press_dock,
-    "Press into any edge mode: how far your pointer must push past the screen inset before letting go docks on that edge.\n\n"
-    "The window resists the push, so it moves less than your pointer. Pushing into two edges docks in that corner.\n\n"
-    "Lower: a lighter push docks. Higher: a firmer push is needed, leaving more room to place near an edge.", true},
-  {"press_tuck", "Press to tuck (points)", 40, 300, &Settings::press_tuck,
-    "Press into any edge mode: how far your pointer must push past the left or right inset before letting go tucks.\n\n"
-    "Between the dock and tuck distances, letting go docks on that side. The top and bottom never tuck.\n\n"
+  {"press_dock", "Press to dock (% of reach)", 0, 20, &Settings::press_dock,
+    "Press any edge: how far the window must be pushed into an edge before letting go snaps it flush there.\n\n"
+    "Measured as a share of the most the resistance lets the window go in, which is its width or height. The window's readout shows the current depth as “in N%”. Pushing into two edges snaps to that corner.\n\n"
+    "Lower: a lighter push snaps. Higher: a firmer push is needed, leaving room to place close to an edge.", true},
+  {"press_tuck", "Press to tuck (% of reach)", 2, 40, &Settings::press_tuck,
+    "Press any edge: how far the window must be pushed into the left or right before letting go tucks it.\n\n"
+    "Between the snap and tuck depths, letting go snaps flush to that side. The top and bottom never tuck. Softer resistance reaches the same depth with less push.\n\n"
     "Lower: a shorter push tucks. Higher: tucking needs a longer, more deliberate push.", true},
 };
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
@@ -818,7 +818,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       motion->tucked == Side::None && motion->pressed.x != 0;
   if (pressingEdge && !committed) side = motion->pressed.x < 0 ? Side::Left : Side::Right;
   const double approachLevel = pressingEdge ?
-      .28 * smoothstep(std::abs(motion->pressed.x) / std::max(1.0, motion->settings.press_tuck)) :
+      .28 * smoothstep(std::abs(motion->depth().x) / std::max(1.0, motion->settings.press_tuck)) :
       .28 * smoothstep(over / tuckDistance);
   const double edgeTarget = committed ? .7 + .3 * depth : approachLevel;
 
@@ -910,8 +910,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (keep && feedback.settle > 0) [cues addObject:@"lowered"];
   if (std::hypot(leanX, leanY) > .5) [cues addObject:[NSString stringWithFormat:@"lean %.0f pt", std::hypot(leanX, leanY)]];
   if (std::hypot(shadowX, shadowY) > .5) [cues addObject:[NSString stringWithFormat:@"shadow → %.0f pt", std::hypot(shadowX, shadowY)]];
-  if (dragging && length(motion->pressed) > .5)
-    [cues addObject:[NSString stringWithFormat:@"press %.0f pt", length(motion->pressed)]];
+  if (dragging && length(motion->pressed) > .5) {
+    const pip_motion::Point in = motion->depth();
+    [cues addObject:[NSString stringWithFormat:@"in %.1f%%", std::max(std::abs(in.x), std::abs(in.y))]];
+  }
   if (edgeAmount > .01 && feedback.edge > 0) [cues addObject:[NSString stringWithFormat:@"rim %.0f%%", edgeAmount * 100]];
   if (glow > .01 && feedback.glow > 0) [cues addObject:@"glow"];
   if (dip > 0) [cues addObject:@"press"];
@@ -1025,6 +1027,14 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       dict = converted;
       migratedTuckDistance = YES;
     }
+  }
+  // Press thresholds were pointer travel before they became depth percentages.
+  id legacyTuck = dict[@"press_tuck"];
+  if (valid && [legacyTuck isKindOfClass:NSNumber.class] && [legacyTuck doubleValue] > 40) {
+    NSMutableDictionary *converted = [dict mutableCopy];
+    [converted removeObjectsForKeys:@[@"press_dock", @"press_tuck"]];
+    dict = converted;
+    migratedTuckDistance = YES;
   }
   Settings next;
   for (const auto& parameter : parameters) {

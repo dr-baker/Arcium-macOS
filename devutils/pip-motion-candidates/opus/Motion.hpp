@@ -54,9 +54,10 @@ struct Settings {
   double resistance = 0.35;
   double free_speed = 140;
   double snap_distance = 48;
-  // Press into any edge: pointer travel past the inset needed to dock, and to tuck at a side.
-  double press_dock = 10;
-  double press_tuck = 110;
+  // Press into any edge: how far the window must be pushed in to dock, and to tuck at a side,
+  // as a percentage of the most the resistance allows (the window's size on that axis).
+  double press_dock = 2;
+  double press_tuck = 12;
   Docking docking = Docking::Corners;
   Placement placement = Placement::Smart;
 };
@@ -130,6 +131,12 @@ class Motion {
   double release_speed = 0, dock_distance = 0;
   // Pointer travel past the inset bounds during this drag, before resistance (press mode).
   Point pressed;
+  // Signed press depth per axis, in percent of the reach the resistance allows.
+  Point pressDepth(Point press) const {
+    return {100 * rubber(press.x, size.width, settings.resistance) / size.width,
+            100 * rubber(press.y, size.height, settings.resistance) / size.height};
+  }
+  Point depth() const { return pressDepth(pressed); }
 
   Point dockTarget(Point origin, Point release_velocity) const {
     const Point projected = origin + release_velocity * settings.projection;
@@ -272,9 +279,10 @@ class Motion {
   Outcome classify(Point origin, Point release, bool allow_stash, Point press = {}) const {
     const double speed = length(release);
     if (settings.docking == Docking::AllEdges) {
-      const bool side = std::abs(press.x) > 0 && std::abs(press.x) >= settings.press_dock;
-      const bool end = std::abs(press.y) > 0 && std::abs(press.y) >= settings.press_dock;
-      if (allow_stash && std::abs(press.x) > 0 && std::abs(press.x) >= settings.press_tuck) {
+      const Point in = pressDepth(press);
+      const bool side = std::abs(in.x) > 0 && std::abs(in.x) >= settings.press_dock;
+      const bool end = std::abs(in.y) > 0 && std::abs(in.y) >= settings.press_dock;
+      if (allow_stash && std::abs(in.x) > 0 && std::abs(in.x) >= settings.press_tuck) {
         const Side tuck_side = press.x < 0 ? Side::Left : Side::Right;
         return {Decision::Tuck, tuck_side, tuckTarget(tuck_side, origin.y), speed};
       }

@@ -314,8 +314,8 @@ int main() {
     m.settings.placement = static_cast<Placement>(trial % 3);
     m.settings.docking = trial % 7 < 3 ? Docking::Corners :
         trial % 7 < 5 ? Docking::SideEdges : Docking::AllEdges;
-    m.settings.press_dock = uniform(2, 40);
-    m.settings.press_tuck = uniform(60, 200);
+    m.settings.press_dock = uniform(0, 8);
+    m.settings.press_tuck = uniform(4, 30);
     m.settings.free_speed = uniform(0, 800);
     m.settings.snap_distance = uniform(0, 180);
     m.settings.stash_percent = uniform(0, 75);
@@ -394,7 +394,8 @@ int main() {
   preview = m.predict(61.3);
   check(preview.decision == Decision::Dock && preview.target.x == 668 && preview.target.y == 300,
         "a small side press docks on that side at the same height");
-  m.drag({888, 350}, 61.4);
+  m.drag({908, 350}, 61.4);
+  check(m.depth().x > 12 && m.depth().x < 14, "a long side press reaches the tuck depth");
   preview = m.predict(61.6);
   check(preview.decision == Decision::Tuck && preview.side == Side::Right,
         "a long side press tucks");
@@ -426,5 +427,12 @@ int main() {
   m.placeAt({668, 300}); m.begin({700, 350}, 72); m.drag({708, 350}, 72.1);
   check(m.predict(72.3, true).decision == Decision::Dock,
         "positive edge pressure docks with a zero threshold");
+  // Depth is the resisted displacement as a share of the reach, so resistance changes the push.
+  m = Motion{}; m.settings.docking = Docking::AllEdges;
+  const Point depth22 = m.pressDepth({0, 22});
+  check(near(depth22.y, 100 * rubber(22, 180, .35) / 180) && depth22.y > 4 && depth22.y < 4.2,
+        "press depth is resisted travel over the window size");
+  m.settings.resistance = .7;
+  check(m.pressDepth({0, 22}).y > depth22.y, "a softer resistance setting reaches the same depth with less push");
   std::cout << checks << " checks passed\n";
 }
