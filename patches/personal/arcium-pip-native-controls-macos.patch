@@ -316,7 +316,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1885 @@
+@@ -0,0 +1,1903 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1283,6 +1283,24 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      [self rememberScreen:NSScreen.screens[tucked->screen]];
 +    } else {
 +      motion->restore(); _tucked = geo::Side::kNone;
++    }
++  }
++  if (motion->decision == Decision::Restore) {
++    NSScreen* destination = [self anchorScreen];
++    NSRect desktop = NSZeroRect;
++    for (NSScreen* candidate in NSScreen.screens) {
++      desktop = NSIsEmptyRect(desktop) ? candidate.frame : NSUnionRect(desktop,candidate.frame);
++      if ([candidate.deviceDescription[@"NSScreenNumber"] isEqual:_restoreDisplay]) destination = candidate;
++    }
++    if (destination) {
++      const auto frame = geo::Resize(ToRect(_restoreFrame), ToRect(destination.visibleFrame), _aspect,
++          _preferredWidth > 0 ? _preferredWidth : NSWidth(_restoreFrame), _sizeLimits);
++      const auto area = ToRect(destination.visibleFrame);
++      motion->environment({area.x,area.y,area.width,area.height}, {frame.width,frame.height}, {},
++          pip_motion::Rect{desktop.origin.x,desktop.origin.y,desktop.size.width,desktop.size.height});
++      motion->target = {frame.x,frame.y};
++      motion->velocity = pip_motion::toward(motion->velocity,motion->position,motion->target);
++      [self rememberScreen:destination];
 +    }
 +  }
 +  releaseDistance = length(motion->target - motion->position);
@@ -3073,7 +3091,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
-@@ -0,0 +1,188 @@
+@@ -0,0 +1,201 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
@@ -3246,6 +3264,19 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry_unittest.cc
 +  EXPECT_NEAR(big.x,1000+kMargin+.35*(2000-320-2*kMargin),1e-6);
 +  EXPECT_NEAR(big.y,-400+kMargin+.6*(1400-180-2*kMargin),1e-6);
 +  EXPECT_DOUBLE_EQ(big.width,small.width);
++}
++TEST(ArciumPiPGeometryTest, MigratedTuckRestoresOriginalDisplayWithoutClampingAtSeam) {
++  pip_motion::Motion motion;
++  motion.settings = pip_motion::selectedSettings();
++  motion.environment({1000,0,1600,1000},{320,180});
++  motion.seed({2600-motion.settings.handle,250},pip_motion::Side::Right,{350,250});
++  motion.begin({2590,300},1); motion.end(1.1);
++  EXPECT_DOUBLE_EQ(motion.target.x,350);
++  motion.environment({0,0,1000,700},{320,180},{},pip_motion::Rect{0,0,2600,1000});
++  for (int i=0;i<1200;++i) motion.step(1.0/120);
++  EXPECT_EQ(motion.phase,pip_motion::Phase::Resting);
++  EXPECT_DOUBLE_EQ(motion.position.x,350);
++  EXPECT_DOUBLE_EQ(motion.position.y,250);
 +}
 +TEST(ArciumPiPGeometryTest, SelectedMotionRequiresTwentyPercentMoreDockDepth) {
 +  pip_motion::Motion motion;
@@ -4968,7 +4999,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +                area_.y + area_.height - size.height - settings.margin)};
 +  }
 +  Point restoreTarget() const {
-+    if (exact_restore_) return clampVisible(restore_point_);
++    if (exact_restore_) return restore_point_;
 +    return {restore_side_ == Side::Left ? area_.x + settings.margin :
 +                area_.x + area_.width - size.width - settings.margin,
 +            std::clamp(restore_point_.y, area_.y + settings.margin,

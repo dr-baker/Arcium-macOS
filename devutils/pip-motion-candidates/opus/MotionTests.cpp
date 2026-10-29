@@ -557,5 +557,11 @@ int main() {
   m.begin({990,300},130); m.end(130.1); finish(m);
   check(m.phase == Phase::Resting && near(m.position.x,350) && near(m.position.y,250),
         "a handle click restores the exact free position saved by explicit tucking");
+  m = Motion{}; m.settings = selectedSettings();
+  m.environment({1000,0,1600,1000},{320,180});
+  m.seed({2600-m.settings.handle,250},Side::Right,{350,250});
+  m.begin({2590,300},140); m.end(140.1);
+  check(near(m.target.x,350) && near(m.target.y,250),
+        "a migrated tuck remembers its original display's free restore point");
   std::cout << checks << " checks passed\n";
 }

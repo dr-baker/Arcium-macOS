@@ -527,7 +527,7 @@ class Motion {
                 area_.y + area_.height - size.height - settings.margin)};
   }
   Point restoreTarget() const {
-    if (exact_restore_) return clampVisible(restore_point_);
+    if (exact_restore_) return restore_point_;
     return {restore_side_ == Side::Left ? area_.x + settings.margin :
                 area_.x + area_.width - size.width - settings.margin,
             std::clamp(restore_point_.y, area_.y + settings.margin,

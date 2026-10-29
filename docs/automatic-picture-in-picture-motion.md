@@ -44,7 +44,7 @@ inconsistent mouse-handle restore, and stale test margins. The fixes separate
 physical bounds from work areas, preserve the saved restore point in the model,
 and update landing assertions. Regressions cover all three.
 
-Standalone checks: 157 motion cases and 18 settings cases pass; these include
+Standalone checks: 158 motion cases and 18 settings cases pass; these include
 2.4% engagement on all four edges, display seams, display-area changes, physical
 Dock insets and exact free-position restore. The independent lab compiles.
 The browser build, hidden native tests, final Astra recheck and visible evidence

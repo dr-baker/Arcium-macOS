@@ -28,7 +28,7 @@ that forward momentum can never overshoot.
 
 This motion model is now also authored into the native Arcium PiP patch. The
 original lab and Terra retain their independent models. Production compile and
-runtime acceptance are reported separately from lab checks. Root reran all 157 model
+runtime acceptance are reported separately from lab checks. Root reran all 158 model
 checks, including the original motion cases and the new release-direction cases.
 
 The card's cues now use a separate gentle prediction, with zero release
@@ -77,7 +77,7 @@ integration, resistance and press docking must apply only to exterior display
 edges, allowing free movement across a shared boundary between screens.
 
 Root's fixes for short fast presses falling through to legacy tucking and zero
-thresholds snapping with no pressure remain covered. All 157 model checks pass,
+thresholds snapping with no pressure remain covered. All 158 model checks pass,
 including the new depth cases. Native percentage-depth behavior, re-grabs and
 migration are not accepted solely from those checks.
 
@@ -233,7 +233,7 @@ See `../../pip-motion-lab/README.md` for the motion controls and references.
 The five findings in Astra's review of `68f5b9a` are addressed: explicit units
 migration, stationary retune/replay consistency, spring-preset preservation,
 mode-independent cue reach where attraction is disabled, and neutral “Moving”
-text. The builder runs 157 motion checks and 18 Foundation settings-schema
+text. The builder runs 158 motion checks and 18 Foundation settings-schema
 checks before compiling and signing the app. These cover model behavior and
 in-memory migration, not native gestures or filesystem timing.
 
