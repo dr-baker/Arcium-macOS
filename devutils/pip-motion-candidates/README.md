@@ -27,7 +27,7 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 70827.
+validation. The author rebuilt and relaunched the revised Opus UI as PID 71938.
 The current revision includes a proximity-based lean, pickup shrink, a
 fixed-position chevron and softer broad/contact shadows with a longer rim-shade
 falloff. It now also lowers during deliberate placement, shows anchor marks,
@@ -36,6 +36,12 @@ and a runtime checkpoint with Lift 0.70, Hold glow 0.50, Edge shade 0.60, Dock
 lean 16, Settle/Press/Anchors 0.60 and Haptics enabled. The saved glow and lean
 values were preserved; the new glow default is zero. Native appearance,
 interaction, hardware haptics and input-region acceptance remain open.
+
+The current cue revision filters decision/dock changes for 100 ms and positions
+anchor marks at the release target independently of the card's visual lean.
+The diagnostic line and actual release remain immediate. Near-edge jitter and
+rapid release during the cue delay still need native acceptance; the motion
+model checks do not cover this visual filter.
 
 Build without launching, from the worktree root:
 

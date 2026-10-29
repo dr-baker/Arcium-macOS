@@ -28,7 +28,9 @@ app before rebuilding.
   Press control adjusts it.
 - **Stay here.** While letting go would leave the window where it is, its
   shadow tightens and the pickup shrink eases off as it lowers partway toward
-  rest. Four corner ticks mark the placement. Settle and Anchors tune these
+  rest. Four corner ticks mark the release target, independently of the card's
+  lean and scale; a clamped target can stay inside the screen as the card moves
+  past it. Settle and Anchors tune these
   independently. Hold glow remains available for comparison, with a default
   of zero; existing saved glow values are preserved.
 - **Dock.** The window leans toward the dock release would select. The pull
@@ -51,6 +53,13 @@ Placement previews come from `Motion::predict()`, which uses the same
 classification as release. Pickup and landing cues follow the interaction and
 motion phase. A randomized model test checks prediction against release; it
 does not validate visual appearance or haptic feel.
+
+After the initial drag outcome, a different decision or selected dock must
+remain stable for 100 ms before the visual cues and haptics adopt it. The
+“Release now” line and actual release still use the immediate prediction.
+This trades brief cue lag for less threshold chatter; it is not proof that the
+reported jitter is resolved. Before browser integration, test rapid reversals
+and releases within that interval, as well as repeated near-edge drags.
 
 Haptics are enabled by default and can be switched off independently. The app
 requests taps on pickup, debounced release-outcome changes and landing, using

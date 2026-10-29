@@ -186,6 +186,8 @@ static void approach(double& value, double target, double rise, double fall, dou
   BOOL leaning, awaitingLanding;
   double pressStart, lastHaptic, pendingSince;
   int hapticKey, pendingKey;
+  Outcome stableOutcome;
+  double anchorX, anchorY;
   double lastEventTimestamp, lastEventUptime;
 }
 - (instancetype)initWithSettingsPath:(NSString *)path;
@@ -714,7 +716,26 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const pip_motion::Point position = motion->position;
   const double w = motion->size.width, h = motion->size.height, handle = motion->settings.handle;
 
-  const bool keep = moved && outcome.decision == Decision::Keep;
+  // Cues and haptics follow a debounced outcome so threshold chatter (speed hovering at the
+  // deliberate limit, or position at a snap or tuck boundary) does not flicker the window.
+  Outcome shown = outcome;
+  if (moved) {
+    const int key = [self hapticKeyFor:outcome];
+    if (hapticKey < 0) { hapticKey = pendingKey = key; stableOutcome = outcome; }
+    if (key != pendingKey) { pendingKey = key; pendingSince = now; }
+    else if (key != hapticKey && now - pendingSince >= .1) {
+      const auto firm = [](int k) { return k / 100 == static_cast<int>(Decision::Tuck) ||
+                                           k / 100 == static_cast<int>(Decision::Restore); };
+      [self haptic:firm(key) || firm(hapticKey) ? NSHapticFeedbackPatternLevelChange
+                                                : NSHapticFeedbackPatternAlignment];
+      hapticKey = key;
+    }
+    if (key == hapticKey) stableOutcome = outcome;
+    shown = stableOutcome;
+  }
+  const bool keep = moved && shown.decision == Decision::Keep;
+  // Anchors sit on the desk at the spot a kept window will rest, which can differ near an edge.
+  if (keep) { anchorX = shown.target.x; anchorY = shown.target.y; }
   double liftTarget = 0;
   // Held where it will stay, the window lowers toward the desk; release finishes setting it down.
   if (dragging) liftTarget = keep ? 1 - feedback.settle : 1;
@@ -722,29 +743,15 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     liftTarget = std::sqrt(std::clamp(length(motion->target - position) / releaseDistance, 0.0, 1.0));
   const double glowTarget = keep ? 1 : 0;
 
-  // Debounced haptics whenever what release would do changes.
-  if (moved) {
-    const int key = [self hapticKeyFor:outcome];
-    if (hapticKey < 0) hapticKey = pendingKey = key;
-    if (key != pendingKey) { pendingKey = key; pendingSince = now; }
-    else if (key != hapticKey && now - pendingSince >= .06) {
-      const auto firm = [](int k) { return k / 100 == static_cast<int>(Decision::Tuck) ||
-                                           k / 100 == static_cast<int>(Decision::Restore); };
-      [self haptic:firm(key) || firm(hapticKey) ? NSHapticFeedbackPatternLevelChange
-                                                : NSHapticFeedbackPatternAlignment];
-      hapticKey = key;
-    }
-  }
-
   // Magnetic pull toward the dock release would snap to: it builds with proximity, and is full
   // whenever the drag is slow enough to snap. Hysteresis steadies the slow-speed gate.
   const double gate = motion->settings.free_speed;
   const bool slow = outcome.speed <= (leaning ? gate + std::max(60.0, gate / 2) : gate);
   pip_motion::Point leanTarget{};
   leaning = false;
-  if (on && moved && outcome.decision == Decision::Dock && feedback.lean > 0 &&
+  if (on && moved && shown.decision == Decision::Dock && feedback.lean > 0 &&
       !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
-    const pip_motion::Point toward = outcome.target - position;
+    const pip_motion::Point toward = shown.target - position;
     const double distance = length(toward);
     const double reach = 2 * std::max(motion->settings.snap_distance, 48.0);
     const double engage = std::max(slow ? 1.0 : 0.0, smoothstep(1 - distance / reach));
@@ -757,12 +764,12 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   // The screen rim casts a shadow on the part of the window going into a side.
   const double leftOver = area.x - position.x;
   const double rightOver = position.x + w - area.x - area.width;
-  Side side = moved && outcome.decision == Decision::Tuck ? outcome.side :
+  Side side = moved && shown.decision == Decision::Tuck ? shown.side :
       motion->tucked != Side::None ? motion->tucked : leftOver > rightOver ? Side::Left : Side::Right;
   const double over = side == Side::Left ? leftOver : rightOver;
   const double depth = std::clamp(over / std::max(1.0, w - handle), 0.0, 1.0);
   const double tuckDistance = std::max(1.0, w * motion->settings.stash_percent / 100);
-  const bool committed = moved ? outcome.decision == Decision::Tuck : motion->tucked != Side::None;
+  const bool committed = moved ? shown.decision == Decision::Tuck : motion->tucked != Side::None;
   const double edgeTarget = committed ? .7 + .3 * depth : .28 * smoothstep(over / tuckDistance);
 
   approach(lift, on ? liftTarget : 0, .07, .14, dt);
@@ -790,7 +797,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   contactShadow.shadowRadius = 4 + 3 * l;
   contactShadow.shadowOpacity = .16 * (1 - .75 * l);
   contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(2 + 2 * l) + leanY * .5);
-  anchorMarks.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
+  anchorMarks.position = CGPointMake(anchorX - position.x + kPad + w / 2, anchorY - position.y + kPad + h / 2);
   anchorMarks.opacity = glow * feedback.anchors;
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
