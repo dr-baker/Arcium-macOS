@@ -48,9 +48,10 @@ checks, including the original motion cases and the new release-direction cases.
   builds with proximity at any speed and is fully engaged while moving slowly
   enough to snap. A separate Dock shadow control moves the broad shadow toward
   that target, while the contact shadow stays close. Its requested travel is
-  capped at 72 points before strength and proximity scaling: strength 1 reaches
+  capped at 110 points before strength and proximity scaling: strength 1 reaches
   the destination only when it is within that range. Reduce Motion disables
-  both the lean and directional shadow movement.
+  both the lean and directional shadow movement. The shadow uses a slower
+  outward response and a faster return to make its movement more visible.
 - **Tuck.** Pushing the window into a side makes the screen's rim cast a shadow
   on the part going in. The shadow is faint while approaching the tuck
   threshold, deepens once letting go would tuck, and stays while tucked. The
@@ -84,12 +85,13 @@ The second lists active cue amounts, or “no cues” / “Feedback off”. Thes
 lab diagnostics; their appearance and timing still need native validation.
 
 Haptics are enabled by default and can be switched off independently. The app
-requests taps on pickup, debounced release-outcome changes and landing, using
-alignment taps for stay/dock changes and level-change taps around tuck/restore.
+requests alignment-pattern taps on pickup, debounced release-outcome changes
+and landing, with at least 0.15 seconds between requests. Tuck and restore use
+the same pattern as other outcomes.
 Hardware delivery and feel remain unverified; a requested tap is not proof that
 the user felt one.
 
-The panel is padded by 160 points so it can draw its own shadow. The drag target
+The panel is padded by 200 points so it can draw its own shadow. The drag target
 keeps the full, unscaled card rectangle during pickup. The author reports that
 clicks in the transparent padding do not reach windows behind it; click-through
 must be resolved before browser integration. `state.json`'s `native_frame`
@@ -108,8 +110,8 @@ The **Release feedback** row in the tuning window has its own hover help.
 | Press | Landing dip strength. Default 0.60. |
 | Hold glow | Border glow strength while release would keep the window in place. Default 0. |
 | Edge shade | Darkness of the rim shadow at the screen edge. 0 keeps only the chevron. Default 0.60. |
-| Dock lean | Maximum lean toward the dock, in points. Default 8; adjustable from 0 to 16. |
-| Dock shadow | Directional shadow-travel strength. Default 0.80; range 0–1, with travel capped at 72 points before scaling. |
+| Dock lean | Maximum lean toward the dock, in points, also limited to 60% of remaining distance. Default 14; adjustable from 0 to 40. |
+| Dock shadow | Directional shadow-travel strength. Default 0.80; range 0–1, with travel capped at 110 points before scaling. |
 
 These save to `settings.json` as `feedback`, `feedback_haptics`,
 `feedback_lift`, `feedback_settle`, `feedback_press`,

@@ -71,7 +71,7 @@ struct Feedback {
   double press = .60;
   double glow = 0;
   double edge = .60;
-  double lean = 8;
+  double lean = 14;
   double dockShadow = .80;
 };
 struct FeedbackParameter {
@@ -98,12 +98,12 @@ static const FeedbackParameter feedbackParameters[] = {
   {"feedback_edge", "Edge shade", 0, 1, &Feedback::edge,
     "How dark the shadow cast by the screen's rim gets on the part of the window going into a side.\n\n"
     "It starts faint as you push in, deepens once letting go would tuck, and stays while tucked. Zero leaves only the chevron."},
-  {"feedback_lean", "Dock lean", 0, 16, &Feedback::lean,
+  {"feedback_lean", "Dock lean", 0, 40, &Feedback::lean,
     "How far, in points, the window leans toward the dock it would snap to, with its shadow cast further toward it.\n\n"
     "The pull builds as you get close to a dock, or anywhere while you move slowly enough to snap.\n\n"
     "Zero turns the lean off. Reduce Motion also turns it off."},
   {"feedback_dock_shadow", "Dock shadow", 0, 1, &Feedback::dockShadow,
-    "How far the window's shadow slides toward the dock it would snap to, up to 72 points.\n\n"
+    "How far the window's shadow slides toward the dock it would snap to, up to 110 points.\n\n"
     "At 1 the shadow sits on the destination while the window hovers where you hold it. It builds with proximity, and is full while you move slowly enough to snap.\n\n"
     "Zero keeps the shadow under the window."},
 };
@@ -124,7 +124,7 @@ static NSString *phaseName(Phase phase) {
 @end
 
 // The panel is padded so the window can draw its own shadow; only the card takes clicks.
-static constexpr CGFloat kPad = 160;
+static constexpr CGFloat kPad = 200;
 
 @interface PassView : NSView
 @end
@@ -357,7 +357,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [content addSubview:hapticsToggle];
   addHelp(content, NSMakeRect(282, 269, 18, 18), @"Haptics",
       @"Force Touch trackpad taps for every event: pickup, each change in what letting go would do, and landing.\n\n"
-      "Changes between staying, snapping and switching docks tap lightly. Tucking and restoring tap more firmly.\n\n"
+      "Every tap uses the lightest alignment pattern, at most one every 0.15 seconds.\n\n"
       "macOS only plays haptics while a finger is on the trackpad, so a landing after a long flight may be silent. Mice have no haptics.");
   addHelp(content, NSMakeRect(160, 269, 18, 18), @"Release feedback",
       @"Physical cues for holding and letting go.\n\n"
@@ -546,7 +546,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)hapticsToggled:(NSButton *)sender {
   Feedback next = feedback; next.haptics = sender.state == NSControlStateValueOn;
   [self applyFeedback:next];
-  [self haptic:NSHapticFeedbackPatternGeneric];
+  [self haptic:NSHapticFeedbackPatternAlignment];
 }
 - (void)feedbackSliderChanged:(NSSlider *)sender {
   Feedback next = feedback; next.*feedbackParameters[sender.tag].member = sender.doubleValue;
@@ -635,7 +635,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [self stopAnimation]; [self noteEvent:event];
   awaitingLanding = NO; hapticKey = pendingKey = -1;
   motion->begin([self point:event], event.timestamp);
-  [self haptic:NSHapticFeedbackPatternGeneric];
+  [self haptic:NSHapticFeedbackPatternAlignment];
   [self showPosition];
 }
 - (void)drag:(NSEvent *)event {
@@ -650,7 +650,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)haptic:(NSHapticFeedbackPattern)pattern {
   const double now = NSProcessInfo.processInfo.systemUptime;
-  if (!feedback.enabled || !feedback.haptics || now - lastHaptic < .05) return;
+  if (!feedback.enabled || !feedback.haptics || now - lastHaptic < .15) return;
   lastHaptic = now;
   [NSHapticFeedbackManager.defaultPerformer performFeedbackPattern:pattern
       performanceTime:NSHapticFeedbackPerformanceTimeNow];
@@ -669,7 +669,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)land {
   awaitingLanding = NO;
   pressStart = NSProcessInfo.processInfo.systemUptime;
-  [self haptic:NSHapticFeedbackPatternGeneric];
+  [self haptic:NSHapticFeedbackPatternAlignment];
   [self wakeVisuals];
 }
 - (NSString *)dockName:(pip_motion::Point)target {
@@ -713,10 +713,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     if (hapticKey < 0) { hapticKey = pendingKey = key; stableOutcome = outcome; }
     if (key != pendingKey) { pendingKey = key; pendingSince = now; }
     else if (key != hapticKey && now - pendingSince >= .1) {
-      const auto firm = [](int k) { return k / 100 == static_cast<int>(Decision::Tuck) ||
-                                           k / 100 == static_cast<int>(Decision::Restore); };
-      [self haptic:firm(key) || firm(hapticKey) ? NSHapticFeedbackPatternLevelChange
-                                                : NSHapticFeedbackPatternAlignment];
+      [self haptic:NSHapticFeedbackPatternAlignment];
       hapticKey = key;
     }
     if (key == hapticKey) stableOutcome = outcome;
@@ -745,9 +742,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     const double engage = std::max(slow ? 1.0 : 0.0, smoothstep(1 - distance / reach));
     if (engage > 0 && distance > .5) {
       leaning = true;
-      leanTarget = toward * (engage * std::min(feedback.lean, distance * .5) / distance);
+      leanTarget = toward * (engage * std::min(feedback.lean, distance * .6) / distance);
       // The shadow slides toward the destination, as if already resting there.
-      shadowTarget = toward * (engage * feedback.dockShadow * std::min(72.0, distance) / distance);
+      shadowTarget = toward * (engage * feedback.dockShadow * std::min(110.0, distance) / distance);
     }
   }
 
@@ -767,8 +764,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   approach(edgeAmount, on ? edgeTarget : 0, .12, .14, dt);
   approach(leanX, leanTarget.x, .08, .10, dt);
   approach(leanY, leanTarget.y, .08, .10, dt);
-  approach(shadowX, shadowTarget.x, .10, .12, dt);
-  approach(shadowY, shadowTarget.y, .10, .12, dt);
+  approach(shadowX, shadowTarget.x, .26, .16, dt);
+  approach(shadowY, shadowTarget.y, .26, .16, dt);
 
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
