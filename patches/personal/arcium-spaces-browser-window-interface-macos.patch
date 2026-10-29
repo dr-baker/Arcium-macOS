@@ -58,7 +58,15 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
 ===================================================================
 --- src.orig/chrome/browser/app_controller_mac_browsertest.mm
 +++ src/chrome/browser/app_controller_mac_browsertest.mm
-@@ -324,12 +324,12 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -57,6 +57,7 @@
+ #include "chrome/browser/profiles/profile_test_util.h"
+ #include "chrome/browser/shortcuts/chrome_webloc_file.h"
+ #include "chrome/browser/signin/signin_util.h"
++#include "chrome/browser/ui/browser_init_state.h"
+ #include "chrome/browser/ui/browser_window.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
+@@ -324,12 +325,12 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
                         LittleArcExternalLinkPromotesLiveTab) {
    ASSERT_TRUE(embedded_test_server()->Start());
    std::ignore = AppController.sharedController;
@@ -74,18 +82,23 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    const GURL url = embedded_test_server()->GetURL("/simple.html");
    ui_test_utils::BrowserCreatedObserver browser_created_observer;
    content::TestNavigationObserver navigation_observer(url);
-@@ -339,15 +339,15 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -339,15 +340,17 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    BrowserWindowInterface* popup_window = browser_created_observer.Wait();
    navigation_observer.Wait();
    ASSERT_TRUE(popup_window);
 -  Browser* popup = popup_window->GetBrowserForMigrationOnly();
 +  BrowserWindowInterface* popup = popup_window;
    ASSERT_TRUE(popup);
-   EXPECT_TRUE(popup->is_type_popup());
+-  EXPECT_TRUE(popup->is_type_popup());
++  EXPECT_EQ(BrowserWindowInterface::TYPE_POPUP, popup->GetType());
    EXPECT_TRUE(helium::IsLittleArcBrowser(popup));
-   EXPECT_TRUE(popup->omit_from_session_restore());
-   EXPECT_FALSE(popup->should_trigger_session_restore());
+-  EXPECT_TRUE(popup->omit_from_session_restore());
+-  EXPECT_FALSE(popup->should_trigger_session_restore());
 -  EXPECT_EQ(original_tab_count, browser()->tab_strip_model()->count());
++  const BrowserInitState* init_state = BrowserInitState::From(popup);
++  ASSERT_TRUE(init_state);
++  EXPECT_TRUE(init_state->omit_from_session_restore());
++  EXPECT_FALSE(init_state->should_trigger_session_restore());
 +  EXPECT_EQ(original_tab_count, browser()->GetTabStripModel()->count());
    EXPECT_EQ(original_active_tab,
 -            browser()->tab_strip_model()->GetActiveWebContents());
@@ -93,7 +106,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
  
    content::WebContents* promoted_contents =
        popup->tab_strip_model()->GetActiveWebContents();
-@@ -356,20 +356,20 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -356,20 +359,20 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    EXPECT_TRUE(chrome::ExecuteCommand(popup, IDC_OPEN_FILE));
    destroyed_observer.Wait();
  
@@ -118,7 +131,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
                           {GURL("https://example.test/one"),
                            GURL("https://example.test/two")}));
    EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
-@@ -379,7 +379,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerHeli
+@@ -379,7 +382,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerHeli
                         DockMenuListsLoadedSpaceIdentities) {
    ASSERT_TRUE(helium::IsHeliumFavoritesAndPinsEnabled());
  
@@ -127,7 +140,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    helium::HeliumSpaceService* space_service =
        helium::HeliumSpaceServiceFactory::GetInstance()
            ->SetTestingSubclassFactoryAndUse<helium::HeliumSpaceService>(
-@@ -864,7 +864,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
+@@ -864,7 +867,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
                         OpenNewWindowAfterFirstRunIsSkipped) {
    ASSERT_FALSE(ProfilePicker::IsOpen());
    ASSERT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
@@ -136,7 +149,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    ASSERT_TRUE(IsReallyVisible(
        browser()->GetWindow()->GetNativeWindow().GetNativeNSWindow()));
    ASSERT_EQ(1u, CountVisibleWindows());
-@@ -901,11 +901,11 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
+@@ -901,11 +904,11 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
    ui_test_utils::BrowserCreatedObserver browser_created_observer;
    [app_controller commandDispatch:item];
  
@@ -151,7 +164,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_EQ(2u, GlobalBrowserCollection::GetInstance()->GetSize());
    ASSERT_TRUE(base::test::RunUntil([] { return CountVisibleWindows() == 2u; }));
    EXPECT_TRUE(IsReallyVisible(
-@@ -917,11 +917,11 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
+@@ -917,11 +920,11 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
                         ClickingDockIconReopensBrowserAfterFirstRunIsSkipped) {
    ASSERT_FALSE(ProfilePicker::IsOpen());
    ASSERT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
@@ -165,7 +178,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    AppController* app_controller = AppController.sharedController;
    NSMenu* menu = [app_controller applicationDockMenu:NSApp];
    ASSERT_TRUE(menu);
-@@ -945,10 +945,10 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
+@@ -945,10 +948,10 @@ IN_PROC_BROWSER_TEST_F(AppControllerFirs
    EXPECT_FALSE([app_controller applicationShouldHandleReopen:NSApp
                                             hasVisibleWindows:NO]);
  
@@ -179,7 +192,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_EQ(1u, GlobalBrowserCollection::GetInstance()->GetSize());
    ASSERT_TRUE(base::test::RunUntil([] { return CountVisibleWindows() == 1u; }));
    EXPECT_TRUE(IsReallyVisible(
-@@ -1001,10 +1001,10 @@ class AppControllerOpenShortcutBrowserTe
+@@ -1001,10 +1004,10 @@ class AppControllerOpenShortcutBrowserTe
  
  IN_PROC_BROWSER_TEST_F(AppControllerOpenShortcutBrowserTest,
                         OpenShortcutOnStartup) {
@@ -192,7 +205,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
            ->GetLastCommittedURL());
  }
  
-@@ -1035,14 +1035,14 @@ IN_PROC_BROWSER_TEST_F(AppControllerRepl
+@@ -1035,14 +1038,14 @@ IN_PROC_BROWSER_TEST_F(AppControllerRepl
  
    // Ensure that there is exactly 1 tab showing, and the tab is the NTP.
    GURL ntp(expected_url);
@@ -210,7 +223,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    ntp_navigation_observer.Wait();
  
    EXPECT_EQ(ntp,
-@@ -1054,9 +1054,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerRepl
+@@ -1054,9 +1057,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerRepl
    GURL simple(embedded_test_server()->GetURL("/simple.html"));
    SendOpenUrlToAppController(simple);
  
@@ -222,7 +235,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    event_navigation_observer.Wait();
  
    EXPECT_EQ(simple,
-@@ -1077,8 +1077,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -1077,8 +1080,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    // Create an incognito browser and make it the last active browser.
    BrowserWindowInterface* incognito_browser =
        CreateIncognitoBrowser(browser()->GetProfile());
@@ -233,7 +246,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_TRUE(incognito_browser->GetProfile()->IsIncognitoProfile());
    EXPECT_EQ(incognito_browser,
              GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser());
-@@ -1098,8 +1098,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -1098,8 +1101,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    SendOpenUrlToAppController(simple);
    event_navigation_observer.Wait();
    // It should be opened in the regular browser.
@@ -244,7 +257,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_EQ(simple, browser()
                          ->tab_strip_model()
                          ->GetActiveWebContents()
-@@ -1167,8 +1167,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -1167,8 +1170,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
  
    // Create a guest browser and make it the last active browser.
    BrowserWindowInterface* guest_browser = CreateGuestBrowser();
@@ -255,7 +268,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_TRUE(guest_browser->GetProfile()->IsGuestSession());
    guest_browser->GetWindow()->Show();
    EXPECT_EQ(guest_browser,
-@@ -1189,9 +1189,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -1189,9 +1192,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    SendOpenUrlToAppController(simple);
    event_navigation_observer.Wait();
    // It should be opened in the guest browser.
@@ -268,7 +281,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
                          ->GetActiveWebContents()
                          ->GetLastCommittedURL());
  }
-@@ -1249,7 +1249,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -1249,7 +1252,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    // Close the current non-incognito browser.
    CloseBrowserSynchronously(browser());
    EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(), 1u);
@@ -277,7 +290,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_EQ(incognito_browser,
              GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser());
    // Assure that `windowDidBecomeMain` is called even if this browser process
-@@ -1269,8 +1269,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
+@@ -1269,8 +1272,8 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrow
    event_navigation_observer.Wait();
    // Check the url is opened in the already opened incognito browser.
    EXPECT_EQ(GlobalBrowserCollection::GetInstance()->GetSize(), 1u);
@@ -288,7 +301,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
                          ->GetActiveWebContents()
                          ->GetLastCommittedURL());
  }
-@@ -1302,7 +1302,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
+@@ -1302,7 +1305,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
    SendOpenUrlToAppController(net::FilePathToFileURL(crwebloc_file));
    event_navigation_observer.Wait();
    // It should be opened in the regular browser.
@@ -297,7 +310,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_EQ(simple, browser()
                          ->tab_strip_model()
                          ->GetActiveWebContents()
-@@ -1335,9 +1335,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
+@@ -1335,9 +1338,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
                      .SaveToFile(crwebloc_file));
    }
  
@@ -309,7 +322,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
  
    SendOpenUrlToAppController(net::FilePathToFileURL(crwebloc_file));
    // Wait for any background tasks to complete and send its replies to the UI
-@@ -1346,7 +1346,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
+@@ -1346,7 +1349,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
    base::RunLoop().RunUntilIdle();
  
    // It should not be opened in the browser.
@@ -318,7 +331,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    EXPECT_NE(chrome_url, current_contents->GetLastCommittedURL());
  
    {
-@@ -1390,7 +1390,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
+@@ -1390,7 +1393,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerShor
    event_navigation_observer.Wait();
  
    // It should be opened in a new browser in the second profile.
@@ -327,7 +340,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    BrowserWindowInterface* new_browser =
        GlobalBrowserCollection::GetInstance()->GetLastActiveBrowser();
    EXPECT_EQ(profile2_ptr, new_browser->GetProfile());
-@@ -1761,7 +1761,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerMain
+@@ -1761,7 +1764,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerMain
  
    // Close a tab group to create a GROUP entry in TRS.
    ASSERT_TRUE(AddTabAtIndex(1, GURL("about:blank"), ui::PAGE_TRANSITION_LINK));
@@ -336,7 +349,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
    auto group_id = tab_strip->AddToNewGroup({0});
    tab_strip->CloseAllTabsInGroup(group_id);
  
-@@ -1817,8 +1817,8 @@ class AppControllerHandoffBrowserTest :
+@@ -1817,8 +1820,8 @@ class AppControllerHandoffBrowserTest :
    // Closes the tab, and waits for the close to finish.
    void CloseTab(BrowserWindowInterface* browser, int index) {
      content::WebContentsDestroyedWatcher destroyed_watcher(
@@ -347,7 +360,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
          index, TabCloseTypes::CLOSE_CREATE_HISTORICAL_TAB);
      destroyed_watcher.Wait();
    }
-@@ -1853,7 +1853,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
+@@ -1853,7 +1856,7 @@ IN_PROC_BROWSER_TEST_F(AppControllerHand
    EXPECT_EQ(g_handoff_url, test_url2);
  
    // Test that switching tabs updates the handoff URL.
@@ -356,7 +369,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
        0, TabStripUserGestureDetails(
               TabStripUserGestureDetails::GestureType::kOther));
    EXPECT_EQ(g_handoff_url, test_url1);
-@@ -1923,7 +1923,7 @@ class AppControllerHandoffPrerenderBrows
+@@ -1923,7 +1926,7 @@ class AppControllerHandoffPrerenderBrows
    void SetUpOnMainThread() override {
      // Arcium disables preloading by default. This fixture exercises Handoff
      // during prerendering, so opt in only for its disposable test profile.
@@ -365,7 +378,7 @@ Index: src/chrome/browser/app_controller_mac_browsertest.mm
      prefetch::SetPreloadPagesState(
          prefs, prefetch::PreloadPagesState::kStandardPreloading);
      ASSERT_EQ(prefetch::PreloadPagesState::kStandardPreloading,
-@@ -1938,7 +1938,7 @@ class AppControllerHandoffPrerenderBrows
+@@ -1938,7 +1941,7 @@ class AppControllerHandoffPrerenderBrows
    }
  
    content::WebContents* GetActiveWebContents() {
