@@ -54,9 +54,57 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.assertEqual("apply", arguments[1])
         self.assertEqual("--no-fuzz", arguments[2])
 
+    @unittest.skipUnless(shutil.which("timeout"), "needs GNU timeout")
+    def test_smoke_timeout_waits_for_supervised_shutdown(self) -> None:
+        for name in ("sudo", "brew", "pip3.14"):
+            self.write_executable(self.bin_dir / name, "#!/bin/sh\nexit 0\n")
+        (self.root / "devutils").symlink_to(ROOT / "devutils", target_is_directory=True)
+        (self.root / "dev.sh").write_text(
+            '_root_dir="$PWD"\n'
+            'HELIUM_DEV_BUILD_ROOT="$PWD/build"\n'
+            '_he_build_mode=diagnostics\n'
+            'he() { (\n'
+            '  if [ "$1" = setup ]; then exit 0; fi\n'
+            '  python3 "$PWD/build-worker.py"\n'
+            '); }\n'
+        )
+        (self.root / "build-worker.py").write_text(
+            'from datetime import datetime, timezone\n'
+            'import json, signal, time\n'
+            'from pathlib import Path\n'
+            'path = Path("build/.arcium/build-evidence/smoke/manifest.json")\n'
+            'path.parent.mkdir(parents=True, exist_ok=True)\n'
+            'value = {"started_at": datetime.now(timezone.utc).isoformat(),\n'
+            '         "phases": [{"name": "build", "attributes": {"child_started_offset_nanos": 0}}]}\n'
+            'def finish(signum, frame):\n'
+            '    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
+            '    time.sleep(1)\n'
+            '    value.update(finished_at=datetime.now(timezone.utc).isoformat(), returncode=143)\n'
+            '    path.write_text(json.dumps(value))\n'
+            '    raise SystemExit(143)\n'
+            'signal.signal(signal.SIGTERM, finish)\n'
+            'path.write_text(json.dumps(value))\n'
+            'while True: time.sleep(.1)\n'
+        )
+        self.write_executable(
+            self.bin_dir / "timeout",
+            f'#!{sys.executable}\nimport os, sys\n'
+            f'command = {shutil.which("timeout")!r}\n'
+            'args = ["1s" if arg == "120s" else arg for arg in sys.argv[1:]]\n'
+            'os.execv(command, [command, *args])\n',
+        )
+        result = subprocess.run([str(SANITY_SCRIPT)], cwd=self.root,
+                                env=self.entrypoint_environment(), capture_output=True,
+                                text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / "build/.arcium/lane.lock").exists())
+        self.assertFalse((self.root / "build/.arcium/lane-command.json").exists())
+
     def test_sanity_check_build_exit_statuses_and_setup(self) -> None:
         src_dir = self.root / "source"
         (self.root / "dev.sh").write_text(
+            f"_root_dir={str(ROOT)!r}\n"
+            f"HELIUM_DEV_BUILD_ROOT={str(self.root / 'build')!r}\n"
             f"_src_dir={str(src_dir)!r}\n"
             f"_out_dir={str(src_dir / 'out/Default')!r}\n"
             "mkdir -p \"$_src_dir\"\n"
@@ -78,7 +126,19 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.write_executable(self.bin_dir / "pip3.14", "#!/bin/bash\nexit 0\n")
         self.write_executable(
             self.bin_dir / "timeout",
-            '#!/bin/bash\necho smoke >> "$HE_CALLS"\nexit "$SMOKE_STATUS"\n',
+            '#!/bin/bash\necho smoke >> "$HE_CALLS"\n'
+            f'{sys.executable!r} - <<\'PY\'\n'
+            'from datetime import datetime, timezone\n'
+            'import json, os\n'
+            'from pathlib import Path\n'
+            'path = Path("build/.arcium/build-evidence/smoke/manifest.json")\n'
+            'path.parent.mkdir(parents=True, exist_ok=True)\n'
+            'now = datetime.now(timezone.utc).isoformat()\n'
+            'status = int(os.environ["SMOKE_STATUS"])\n'
+            'path.write_text(json.dumps({"started_at": now, "finished_at": now,\n'
+            '    "returncode": 143 if status == 124 else status,\n'
+            '    "phases": [{"name": "build", "attributes": {"child_started_offset_nanos": 0}}]}))\n'
+            'PY\nexit "$SMOKE_STATUS"\n',
         )
 
         environment = self.entrypoint_environment()

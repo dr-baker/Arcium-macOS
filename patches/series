@@ -1,4 +1,3 @@
-upstream-fixes/fix-xcode27-seatbelt.patch
 ungoogled-chromium/macos/fix-disabling-safebrowsing.patch
 ungoogled-chromium/macos/fix-dsymutil.patch
 ungoogled-chromium/macos/no-unknown-warnings.patch
@@ -10,16 +9,21 @@ helium/macos/change-product-dir-name.patch
 helium/macos/rust-dep.patch
 helium/macos/rbe-linux-clang-wrapper.patch
 helium/macos/clean-main-menu.patch
-helium/macos/disable-immersive-fullscreen.patch
 
 rebel/macos/sparkle-integration.patch
 helium/macos/updater/fixup-sparkle-glue.patch
 helium/macos/updater/sparkle2-integration.patch
 helium/macos/updater/disable-default-updater.patch
+
 helium/macos/applescript-tab-select-command.patch
 helium/macos/open-shortcuts-settings-action.patch
-
 helium/macos/native-translation-context-option.patch
+helium/macos/prevent-reset-on-keychain-unavailability.patch
+helium/macos/chromium-signing.patch
+helium/macos/lockdown-mode-imageio.patch
+helium/macos/disable-chromium-immersive-fullscreen.patch
+helium/macos/helium-immersive-fullscreen.patch
+helium/macos/fix-history-swiper-lifetime.patch
 
 personal/arcium-little-arc-macos.patch
 personal/arcium-spaces-macos.patch
@@ -36,7 +40,6 @@ personal/arcium-update-feed.patch
 
 # Command bar native material and Settings follow the shared appearance patch.
 personal/arcium-omnibox-appearance-macos.patch
-personal/arcium-live-resize-macos.patch
 
 # Surface style picker and panel material for the shared surface roles.
 personal/arcium-surface-roles-macos.patch
@@ -56,20 +59,19 @@ personal/arcium-concentric-window-corners-macos.patch
 personal/arcium-arc-import-settings-macos.patch
 personal/arcium-system-appearance-macos.patch
 personal/arcium-onboarding-appearance-macos.patch
-personal/arcium-dmg-first-run-defaults-macos.patch
+personal/arcium-widevine-experiment-macos.patch
 
 personal/arcium-command-settings-preview-macos.patch
 personal/arcium-command-appearance-controls-macos.patch
 personal/arcium-command-controls-keyboard-macos.patch
-
 personal/arcium-command-bar-studio-macos.patch
 personal/arcium-command-editor-close-reason-macos.patch
 personal/arcium-ui-workshop-macos.patch
 personal/arcium-command-design-presets-macos.patch
-
 personal/arcium-command-bar-styles-macos.patch
 personal/arcium-command-design-tokens-macos.patch
-
+personal/arcium-spaces-browser-window-interface-macos.patch
+personal/arcium-crashpad-component-linkage-macos.patch
+personal/arcium-dmg-first-run-defaults-macos.patch
 personal/arcium-command-style-previews-macos.patch
-
 personal/arcium-content-frame-macos.patch

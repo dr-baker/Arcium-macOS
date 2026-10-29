@@ -125,6 +125,22 @@ class AppsTest(unittest.TestCase):
         self.assertNotIn("https://example.com/",
                          (self.profile("blank") / "stub-args").read_text().splitlines())
 
+    def test_existing_profile_selection_is_not_overridden(self) -> None:
+        profile = self.profile("multiple")
+        (profile / "Profile 1").mkdir(parents=True)
+        state = json.dumps({"profile": {"last_used": "Profile 1",
+                                       "last_active_profiles": ["Default", "Profile 1"]}})
+        (profile / "Local State").write_text(state)
+        self.m.he("run", "--profile", "multiple")
+        args = (profile / "stub-args").read_text().splitlines()
+        self.assertIn(f"--user-data-dir={profile}", args)
+        self.assertFalse(any(arg.startswith("--profile-directory=") for arg in args))
+        self.assertEqual((profile / "Local State").read_text(), state)
+        self.m.he("stop", "--profile", "multiple")
+        refused = self.m.he("run", "--profile", "multiple",
+                            "--profile-directory=../other", check=False)
+        self.assertNotEqual(refused.returncode, 0)
+
     def test_seeding_copies_a_stopped_profile_once(self) -> None:
         seed = self.m.root / "seed"
         (seed / "Default").mkdir(parents=True)
@@ -328,10 +344,15 @@ class AppsTest(unittest.TestCase):
 
     def test_agent_build_refuses_a_pending_snapshot_and_strict_problems(self) -> None:
         self.m.he("pop")
-        self.assertIn("snapshot is pending", self.m.he("agent", "build", "chrome", check=False).stderr)
+        refused = self.m.he("agent", "build", "chrome", check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("build preconditions failed", refused.stderr)
+        self.assertIn("timestamp snapshot pending", refused.stderr)
         self.m.he("push")
         (self.m.worktree / "resources" / "icon.txt").write_text("changed\n")
-        self.assertIn("he check reports problems", self.m.he("agent", "build", "chrome", check=False).stderr)
+        refused = self.m.he("agent", "build", "chrome", check=False)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("build preconditions failed", refused.stderr)
 
     def test_check_json_reports_state(self) -> None:
         status = json.loads(self.m.he("check", "--json").stdout)
@@ -402,25 +423,47 @@ class RemoteExecutionTest(unittest.TestCase):
         script = f'source "{TOOLS / "dev.sh"}" >/dev/null && {function}'
         return run(["bash", "-c", script], env=self.m.env(**env), check=False)
 
-    def test_remote_backend_uses_nativelink_and_keeps_tls(self) -> None:
+    def test_ambient_endpoint_does_not_enable_remote_builds(self) -> None:
         result = self.call("___helium_configure_siso", SISO_REAPI_ADDRESS="grpc.example:443")
         self.assertEqual(result.returncode, 0, result.stderr)
         args = (self.m.src / "build/config/siso/args.txt").read_text()
-        self.assertIn("--reapi_address=grpc.example:443", args)
-        self.assertIn("--reapi_instance=main", args)
-        self.assertIn("--reapi_backend_config_path=nativelink.star", args)
-        self.call("___helium_setup_gn", SISO_REAPI_ADDRESS="grpc.example:443")
+        self.assertIn("--rbe_instance=", args)
+        self.assertNotIn("--reapi_address=", args)
+        result = self.call("___helium_setup_gn", SISO_REAPI_ADDRESS="grpc.example:443")
+        self.assertEqual(result.returncode, 0, result.stderr)
         gn = (self.m.out / "args.gn").read_text()
-        self.assertIn("use_remoteexec = true", gn)
-        self.assertNotIn("cc_wrapper", gn)
+        self.assertNotIn("use_remoteexec = true", gn)
 
     def test_local_backend_regenerates_chromium_defaults(self) -> None:
         self.call("___helium_configure_siso")
         self.assertIn("--rbe_instance=", (self.m.src / "build/config/siso/args.txt").read_text())
 
-    def test_plaintext_setting_is_validated(self) -> None:
+    def test_enabled_policy_configures_nativelink_and_gn(self) -> None:
+        toolchain = self.m.src / "tools/clang/scripts/update.py"
+        toolchain.parent.mkdir(parents=True)
+        toolchain.write_text("raise SystemExit(0)\n")
+        self.m.he("agent", "remote", "setup", "--project", "arcium-builds-test",
+                  "--zone", "us-central1-a", "--credentials-dir", str(self.m.root / "credentials"))
+        result = self.call("___helium_configure_siso", SISO_REAPI_ADDRESS="untrusted:1234")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = (self.m.src / "build/config/siso/args.txt").read_text()
+        self.assertIn("--reapi_address=127.0.0.1:50051", args)
+        self.assertIn("--reapi_instance=main", args)
+        self.assertIn("--reapi_backend_config_path=nativelink.star", args)
+        self.assertNotIn("untrusted", args)
+        result = self.call("___helium_setup_gn")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        gn = (self.m.out / "args.gn").read_text()
+        self.assertIn("use_remoteexec = true", gn)
+        self.assertIn("use_reclient = false", gn)
+        self.assertNotIn("cc_wrapper", gn)
+
+    def test_ambient_plaintext_setting_does_not_configure_remote_backend(self) -> None:
         result = self.call("___helium_configure_siso", SISO_REAPI_ADDRESS="x:1", RBE_service_no_security="yes")
-        self.assertIn("must be true or false", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        args = (self.m.src / "build/config/siso/args.txt").read_text()
+        self.assertIn("--rbe_instance=", args)
+        self.assertNotIn("--reapi_address=", args)
 
 
 if __name__ == "__main__":

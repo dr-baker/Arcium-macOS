@@ -1,6 +1,6 @@
 --- a/chrome/test/BUILD.gn
 +++ b/chrome/test/BUILD.gn
-@@ -141,6 +141,51 @@ if (!is_android && toolkit_views) {
+@@ -142,6 +142,51 @@ if (!is_android && toolkit_views) {
    }
  }
  
@@ -49,9 +49,9 @@
 +  }
 +}
 +
- source_set("in_process_browser_test_mixin") {
+ group("test") {
    testonly = true
- 
+   deps = [
 --- /dev/null
 +++ b/chrome/test/arcium_command_bar_studio_mac.mm
 @@ -0,0 +1,861 @@

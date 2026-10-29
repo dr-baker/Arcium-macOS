@@ -18,8 +18,8 @@
 +Patches are applied to integrate Sparkle into Chromium and hide the Sparkle UI.
 --- a/build/apple/tweak_info_plist.py
 +++ b/build/apple/tweak_info_plist.py
-@@ -195,6 +195,21 @@ def _IsValidBundleId(bundle_identifier):
-   return re.match(r'^[0-9a-zA-Z-.]+$', bundle_identifier) is not None
+@@ -217,6 +217,21 @@ def _IsValidBundleId(bundle_identifier):
+     return re.match(r'^[0-9a-zA-Z-.]+$', bundle_identifier) is not None
  
  
 +def _AddSparkleKeys(plist, ed_key, auto_checks, check_interval):
@@ -38,62 +38,69 @@
 +
 +
  def _TagSuffixes():
-   # Keep this list sorted in the order that tag suffix components are to
-   # appear in a tag value. That is to say, it should be sorted per ASCII.
-@@ -324,6 +339,29 @@ def Main(argv):
-       action='store_true',
-       default=False,
-       help='Use staging breakpad to upload reports. Ignored if --breakpad=0.')
-+  parser.add_option('--sparkle',
-+                    dest='use_sparkle',
-+                    action='store',
-+                    type='int',
-+                    default=False,
-+                    help='Enable Sparkle [1 or 0]')
-+  parser.add_option('--sparkle_ed_key',
-+                    dest='sparkle_ed_key',
-+                    action='store',
-+                    default=None,
-+                    help='Sparkle update signing EdDSA key')
-+  parser.add_option('--sparkle_automatic_checks',
-+                    dest='sparkle_automatic_checks',
-+                    action='store',
-+                    type='int',
-+                    default=False,
-+                    help='Enable Sparkle automatic checks [1 or 0]')
-+  parser.add_option('--sparkle_check_interval',
-+                    dest='sparkle_check_interval',
-+                    action='store',
-+                    type='int',
-+                    default=0,
-+                    help='Sparkle check interval (min: 3600)')
-   parser.add_option('--keystone',
-                     dest='use_keystone',
-                     action='store',
-@@ -468,6 +506,20 @@ def Main(argv):
-   else:
-     _RemoveKeystoneKeys(plist)
+     # Keep this list sorted in the order that tag suffix components are to
+     # appear in a tag value. That is to say, it should be sorted per ASCII.
+@@ -360,6 +375,36 @@ def Main(argv):
+         help='Use staging breakpad to upload reports. Ignored if --breakpad=0.',
+     )
+     parser.add_option(
++        '--sparkle',
++        dest='use_sparkle',
++        action='store',
++        type='int',
++        default=False,
++        help='Enable Sparkle [1 or 0]'
++    )
++    parser.add_option('--sparkle_ed_key',
++        dest='sparkle_ed_key',
++        action='store',
++        default=None,
++        help='Sparkle update signing EdDSA key'
++    )
++    parser.add_option(
++        '--sparkle_automatic_checks',
++        dest='sparkle_automatic_checks',
++        action='store',
++        type='int',
++        default=False,
++        help='Enable Sparkle automatic checks [1 or 0]'
++    )
++    parser.add_option(
++        '--sparkle_check_interval',
++        dest='sparkle_check_interval',
++        action='store',
++        type='int',
++        default=0,
++        help='Sparkle check interval (min: 3600)'
++    )
++    parser.add_option(
+         '--keystone',
+         dest='use_keystone',
+         action='store',
+@@ -536,6 +581,20 @@ def Main(argv):
+     else:
+         _RemoveKeystoneKeys(plist)
  
-+  # Add Sparkle parameters if configured to do so.
-+  if options.use_sparkle:
-+    if not options.sparkle_ed_key:
-+      print('Sparkle updates require an EdDSA key.', file=sys.stderr)
-+      return 1
-+    if options.sparkle_check_interval < 3600:
-+      print('Sparkle update check interval must be at least 1 hour (3600).', file=sys.stderr)
-+      return 1
-+    _AddSparkleKeys(plist, options.sparkle_ed_key,
-+                    options.sparkle_automatic_checks,
-+                    options.sparkle_check_interval)
-+  else:
-+    _RemoveSparkleKeys(plist)
++    # Add Sparkle parameters if configured to do so.
++    if options.use_sparkle:
++      if not options.sparkle_ed_key:
++        print('Sparkle updates require an EdDSA key.', file=sys.stderr)
++        return 1
++      if options.sparkle_check_interval < 3600:
++        print('Sparkle update check interval must be at least 1 hour (3600).', file=sys.stderr)
++        return 1
++      _AddSparkleKeys(plist, options.sparkle_ed_key,
++                      options.sparkle_automatic_checks,
++                      options.sparkle_check_interval)
++    else:
++      _RemoveSparkleKeys(plist)
 +
-   # Adds or removes any SCM keys.
-   if not _DoSCMKeys(plist, options.add_scm_info):
-     return 3
+     # Adds or removes any SCM keys.
+     if not _DoSCMKeys(plist, options.add_scm_info):
+         return 3
 --- a/chrome/BUILD.gn
 +++ b/chrome/BUILD.gn
-@@ -50,6 +50,7 @@ if (is_android) {
+@@ -51,6 +51,7 @@ if (is_android) {
    import("//build/util/branding.gni")
    import("//chrome/browser/buildflags.gni")
    import("//chrome/updater/branding.gni")
@@ -101,7 +108,7 @@
    import("//chrome/version.gni")
    import("//content/public/app/mac_helpers.gni")
    import("//media/cdm/library_cdm/cdm_paths.gni")
-@@ -512,6 +513,20 @@ if (is_win) {
+@@ -532,6 +533,20 @@ if (is_win) {
      } else {
        args += [ "--keystone=0" ]
      }
@@ -122,7 +129,7 @@
    }
  
    mac_app_bundle("chrome_app") {
-@@ -1169,6 +1184,10 @@ if (is_win) {
+@@ -1350,6 +1365,10 @@ if (is_win) {
  
      if (is_component_build) {
        frameworks = [ "Carbon.framework" ]
@@ -133,9 +140,9 @@
      }
  
      ldflags = [ "-ObjC" ]
-@@ -1219,6 +1238,12 @@ if (is_win) {
- 
-     bundle_deps += [ ":vulkan_loader_binaries" ]
+@@ -1408,6 +1427,12 @@ if (is_win) {
+       bundle_deps += [ ":chrome_renderer_library" ]
+     }
  
 +    if (enable_sparkle) {
 +      bundle_deps += [ "//third_party/sparkle:sparkle_framework" ]
@@ -168,7 +175,7 @@
 +}
 --- a/chrome/browser/ui/BUILD.gn
 +++ b/chrome/browser/ui/BUILD.gn
-@@ -9,6 +9,7 @@ import("//build/config/ozone.gni")
+@@ -10,6 +10,7 @@ import("//build/config/ozone.gni")
  import("//build/config/ui.gni")
  import("//chrome/browser/buildflags.gni")
  import("//chrome/common/features.gni")
@@ -176,8 +183,8 @@
  import("//components/captive_portal/core/features.gni")
  import("//components/compose/features.gni")
  import("//components/enterprise/buildflags/buildflags.gni")
-@@ -3643,6 +3644,10 @@ static_library("ui") {
-       "webui/settings/settings_utils_mac.mm",
+@@ -4606,6 +4607,10 @@ static_library("ui") {
+       "//ui/base/cursor",
      ]
  
 +    if (enable_sparkle) {
@@ -189,7 +196,7 @@
      allow_circular_includes_from += [
 --- a/third_party/sparkle/Sparkle.xcodeproj/project.pbxproj
 +++ b/third_party/sparkle/Sparkle.xcodeproj/project.pbxproj
-@@ -464,6 +464,8 @@
+@@ -465,6 +465,8 @@
  		72F9EC441D5E9ED8004AC8B6 /* SPUDownloadData.h in Headers */ = {isa = PBXBuildFile; fileRef = 72F9EC421D5E9ED8004AC8B6 /* SPUDownloadData.h */; settings = {ATTRIBUTES = (Public, ); }; };
  		72F9EC451D5E9ED8004AC8B6 /* SPUDownloadData.m in Sources */ = {isa = PBXBuildFile; fileRef = 72F9EC431D5E9ED8004AC8B6 /* SPUDownloadData.m */; };
  		72F9EC481D5EA904004AC8B6 /* SPUUpdaterDelegate.h in Headers */ = {isa = PBXBuildFile; fileRef = 72F9EC471D5EA7D3004AC8B6 /* SPUUpdaterDelegate.h */; settings = {ATTRIBUTES = (Public, ); }; };
@@ -198,7 +205,7 @@
  		72FE54422E56A14100227A91 /* SUUpdateAlert.xib in Resources */ = {isa = PBXBuildFile; fileRef = 72FE54412E56A14100227A91 /* SUUpdateAlert.xib */; };
  		C23E885B1BE7B24F0050BB73 /* SparkleTestCodeSignApp.enc.dmg in Resources */ = {isa = PBXBuildFile; fileRef = C23E88591BE7AF890050BB73 /* SparkleTestCodeSignApp.enc.dmg */; };
  		EA1E281722B645AE004AA304 /* libbsdiff.a in Frameworks */ = {isa = PBXBuildFile; fileRef = EA1E280F22B64522004AA304 /* libbsdiff.a */; };
-@@ -1400,9 +1402,11 @@
+@@ -1404,9 +1406,11 @@
  		72F9EC421D5E9ED8004AC8B6 /* SPUDownloadData.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SPUDownloadData.h; sourceTree = "<group>"; };
  		72F9EC431D5E9ED8004AC8B6 /* SPUDownloadData.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SPUDownloadData.m; sourceTree = "<group>"; };
  		72F9EC471D5EA7D3004AC8B6 /* SPUUpdaterDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SPUUpdaterDelegate.h; sourceTree = "<group>"; };
@@ -210,7 +217,7 @@
  		A5BF4F1B1BC7668B007A052A /* SUTestWebServer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = SUTestWebServer.h; sourceTree = "<group>"; };
  		A5BF4F1C1BC7668B007A052A /* SUTestWebServer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SUTestWebServer.m; sourceTree = "<group>"; };
  		C23E88591BE7AF890050BB73 /* SparkleTestCodeSignApp.enc.dmg */ = {isa = PBXFileReference; lastKnownFileType = file; path = SparkleTestCodeSignApp.enc.dmg; sourceTree = "<group>"; };
-@@ -2239,6 +2243,8 @@
+@@ -2246,6 +2250,8 @@
  				7269E49C2648FC6C0088C213 /* SPUUserUpdateState+Private.h */,
  				7269E4992648F7C00088C213 /* SPUUserUpdateState.m */,
  				725CB9561C7120410064365A /* SPUUserDriver.h */,
@@ -219,7 +226,7 @@
  			);
  			name = "User Driver";
  			sourceTree = "<group>";
-@@ -2578,6 +2584,7 @@
+@@ -2585,6 +2591,7 @@
  				3772FEA913DE0B6B00F79537 /* SUVersionDisplayProtocol.h in Headers */,
  				724BB3871D32A167005D534A /* SUXPCInstallerConnection.h in Headers */,
  				724BB3A81D33461B005D534A /* SUXPCInstallerStatus.h in Headers */,
@@ -227,7 +234,7 @@
  			);
  			runOnlyForDeploymentPostprocessing = 0;
  		};
-@@ -3664,6 +3671,7 @@
+@@ -3672,6 +3679,7 @@
  				724BB3881D32A167005D534A /* SUXPCInstallerConnection.m in Sources */,
  				724BB3A91D33461B005D534A /* SUXPCInstallerStatus.m in Sources */,
  				723AC011259DBDAA00BDB4FA /* SUReleaseNotesCommon.m in Sources */,
@@ -354,7 +361,7 @@
 +@end
 --- a/chrome/browser/app_controller_mac.mm
 +++ b/chrome/browser/app_controller_mac.mm
-@@ -42,6 +42,7 @@
+@@ -45,6 +45,7 @@
  #include "chrome/browser/browser_features.h"
  #include "chrome/browser/browser_process.h"
  #include "chrome/browser/browser_process_platform_part.h"
@@ -362,7 +369,7 @@
  #include "chrome/browser/command_updater_impl.h"
  #include "chrome/browser/download/download_core_service.h"
  #include "chrome/browser/download/download_core_service_factory.h"
-@@ -53,6 +54,9 @@
+@@ -57,6 +58,9 @@
  #include "chrome/browser/lifetime/browser_shutdown.h"
  #include "chrome/browser/mac/auth_session_request.h"
  #include "chrome/browser/mac/key_window_notifier.h"
@@ -411,7 +418,7 @@
  
 --- a/chrome/browser/BUILD.gn
 +++ b/chrome/browser/BUILD.gn
-@@ -56,6 +56,10 @@ if (is_win) {
+@@ -57,6 +57,10 @@ if (is_win) {
    import("//build/config/win/manifest.gni")
  }
  
@@ -422,7 +429,7 @@
  assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
  
  declare_args() {
-@@ -102,6 +106,10 @@ buildflag_header("buildflags") {
+@@ -103,6 +107,10 @@ buildflag_header("buildflags") {
      flags += [ "ENABLE_SEGMENT_HEAP=$enable_segment_heap" ]
    }
  
@@ -433,7 +440,7 @@
    # Android and ChromeOS don't support multiple browser processes, so they don't
    # employ ProcessSingleton.
    if (is_android || is_chromeos) {
-@@ -1563,6 +1571,21 @@ source_set("core") {
+@@ -1608,6 +1616,21 @@ source_set("core") {
        "UniformTypeIdentifiers.framework",
        "VideoToolbox.framework",
      ]
@@ -447,7 +454,7 @@
 +      ]
 +
 +      deps += [
-+        "//third_party/sparkle:sparkle_framework",
++        "//third_party/sparkle:build_sparkle_framework",
 +        "//components/helium_services",
 +      ]
 +      frameworks += [ "Sparkle.framework" ]
@@ -532,3 +539,45 @@
  # Remove localization files if requested
  
  if [[ "$SPARKLE_COPY_LOCALIZATIONS" -eq 0 ]]; then
+--- a/chrome/browser/lifetime/application_lifetime_desktop.cc
++++ b/chrome/browser/lifetime/application_lifetime_desktop.cc
+@@ -22,6 +22,7 @@
+ #include "chrome/browser/background/glic/glic_background_mode_manager.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/browser_process_platform_part.h"
++#include "chrome/browser/buildflags.h"
+ #include "chrome/browser/download/download_core_service.h"
+ #include "chrome/browser/global_features.h"
+ #include "chrome/browser/lifetime/application_lifetime.h"
+@@ -75,6 +76,10 @@
+ #include "chrome/browser/sessions/session_data_service_factory.h"
+ #endif  // BUILDFLAG(ENABLE_SESSION_SERVICE)
+ 
++#if BUILDFLAG(ENABLE_SPARKLE)
++#include "chrome/browser/mac/sparkle_glue.h"
++#endif
++
+ namespace chrome {
+ 
+ namespace {
+@@ -286,8 +291,19 @@ void AttemptRestartInternal(IgnoreUnload
+   content::GetUIThreadTaskRunner({})->PostTask(
+       FROM_HERE, base::BindOnce(&ExitIgnoreUnloadHandlers));
+ #else   // !BUILDFLAG(IS_CHROMEOS).
+-  // Set the flag to restore state after the restart.
++#if BUILDFLAG(ENABLE_SPARKLE)
++  if (helium::ApplicationIsNearlyUpdated()) {
++    helium::RelaunchBrowserUsingSparkle();
++    return;
++  }
++#endif
++
++  // This flag asks Chromium to launch another browser process on shutdown.
++  // Sparkle already does that for updates, so setting it before the branch above
++  // would request two relaunches. kWasRestarted still restores the session in
++  // either case.
+   pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, true);
++
+   if (ignore_unload_handlers) {
+     ExitIgnoreUnloadHandlers();
+   } else {

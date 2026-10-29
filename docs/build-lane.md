@@ -92,6 +92,17 @@ an independent copied app can continue after releasing shared build ownership.
 
 ## Desktop resource backoff
 
+Cloud compilation is an optional part of this lane, configured per build
+directory. New developers stay local; enrollment defaults to manual remote
+use. Experimental automatic use needs an explicitly enrolled, measured
+compiler-action threshold and recent input at an awake console. Idle, away,
+unknown activity, small plans and generator/link-only plans stay local. Planning,
+startup, compilation, and teardown remain inside the command lock. A failed
+startup must finish cleanup before auto mode falls back locally. A failure
+after remote compilation starts fails the command; it does not release the
+reservation or retry the graph automatically. See the
+[remote build process](../devutils/cloud_build/README.md) for setup and recovery.
+
 `he agent build` defaults to one fewer job than logical CPUs, capped at **13
 local jobs**. This favors unattended builds. `--jobs N` or
 `HELIUM_BUILD_JOBS=N` sets the ceiling; it no longer inherits an unrestricted
@@ -99,6 +110,12 @@ autoninja default. Both Ninja and Siso receive the limit, including Siso
 configured for remote execution but running offline. A stricter existing
 `SISO_LIMITS` local ceiling stays in effect. Use `--jobs`, rather than raw
 `-j` or `-local_jobs` flags.
+
+Recent console input caps the requested local
+ceiling at two. Idle builds retain the machine-relative default above.
+Remote builds cap local work, Siso preprocessing and dependency scanning at
+two, preserving stricter ambient limits. These are ceilings, not a promise
+of constant CPU utilization; existing memory/CPU admission and backoff remain.
 
 The dry run and actual build each run under a resource supervisor inside the
 existing command lock. On macOS they start with a utility QoS clamp; an
@@ -144,6 +161,12 @@ never permission to steal the lane. Real completed-action progress is explicitly
 unavailable in this resource record; a fresh sample does not prove a build is
 making progress. Build completion, pressure relief and
 monitor exit do not release the reservation. Keep it through packaging.
+
+Build invocations also retain [structured evidence](build-telemetry.md): raw
+phase output, full current Siso metrics, monotonic timings, trace identifiers,
+continuous correlated resource samples, and observed owned-process RSS.
+Use `he agent build-history` to find a run. The transition log above remains
+the live lane status record; it is not a complete memory or progress history.
 
 Re-source the updated canonical `dev.sh` while preserving
 `HELIUM_DEV_WORKTREE` to adopt this behavior. The notification watcher needs no

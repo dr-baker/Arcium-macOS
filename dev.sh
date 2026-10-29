@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Helium's development commands, based on upstream helium-macos dev.sh at the
-# commit this checkout's core pin matches (c0056de). Upstream commands keep
+# Chromium 156 update. Upstream commands keep
 # their names and meaning. Arcium's additions are listed in
 # docs/development-changes.md; the Python helpers live in devutils/he.
 
@@ -137,8 +137,9 @@ ___helium_setup_gn() {
     mkdir -p "$_out_dir"
     cat "$_main_repo/flags.gn" "$_root_dir/flags.macos.gn" > "$OUT_FILE"
 
-    if [ -n "${SISO_REAPI_ADDRESS:-}" ]; then
+    if ___helium_he remote enabled; then
         echo 'use_remoteexec = true' >> "$OUT_FILE"
+        echo 'use_reclient = false' >> "$OUT_FILE"
     elif command -v sccache 2>&1 >/dev/null; then
         echo 'cc_wrapper="sccache"' >> "$OUT_FILE"
     elif command -v ccache 2>&1 >/dev/null; then
@@ -153,10 +154,11 @@ ___helium_setup_gn() {
     fi
 
     echo 'target_cpu = "'"$TARGET_CPU"'"' >> "$OUT_FILE"
-    echo 'devtools_skip_typecheck = false' >> "$OUT_FILE"
     echo 'use_siso = true' >> "$OUT_FILE"
 
     sed -i '' s/is_official_build/is_component_build/ "$OUT_FILE"
+    # Static ANGLE duplicates Objective-C classes across macOS component dylibs.
+    echo 'use_static_angle = false' >> "$OUT_FILE"
     sed -i '' '/^[[:space:]]*dcheck_always_on[[:space:]]*=/d; /^[[:space:]]*enable_expensive_dchecks[[:space:]]*=/d' "$OUT_FILE"
     local checks=false
     [ "$_he_build_mode" != diagnostics ] || checks=true
@@ -164,45 +166,25 @@ ___helium_setup_gn() {
     ___helium_he stamp gn-defaults
 }
 
-# Remote execution through NativeLink is optional: set SISO_REAPI_ADDRESS
-# (and optionally SISO_REAPI_INSTANCE), then he configure --refresh-defaults.
-# TLS stays on unless RBE_service_no_security=true is set explicitly. With
-# SISO_REAPI_ADDRESS unset this writes Chromium's local Siso configuration,
-# which also covers full clones made with --nohooks.
+# Lane opt-in owns the backend; ambient endpoint variables never enable it.
 ___helium_configure_siso() {
-    case "${RBE_service_no_security:-false}" in
-        true|false) ;;
-        *) echo "error: RBE_service_no_security must be true or false" >&2; return 2 ;;
-    esac
-    if [ -n "${SISO_REAPI_ADDRESS:-}" ]; then
-        export SISO_REAPI_INSTANCE="${SISO_REAPI_INSTANCE:-main}"
-        python3 "$_src_dir/build/config/siso/configure_siso.py" \
-            --reapi_address="$SISO_REAPI_ADDRESS" \
-            --reapi_instance="$SISO_REAPI_INSTANCE" \
-            --reapi_backend_config_path=nativelink.star
-    else
-        python3 "$_src_dir/build/config/siso/configure_siso.py" \
-            --rbe_instance=projects/rbe-chrome-untrusted/instances/default_instance
-    fi
+    ___helium_he remote configure
 }
 
 ___helium_setup_remoteexec_toolchain() {
-    [ -n "${SISO_REAPI_ADDRESS:-}" ] || return 0
-    python3 "$_src_dir/tools/clang/scripts/update.py" \
-        --host-os=linux \
-        --output-dir="$_src_dir/third_party/llvm-build/Release+Asserts_linux"
+    : # The shared backend configurator downloads the pinned Linux toolchain.
 }
 
 ___helium_info_pull() {
     local mode="$1"
-    # fall back to git clone if tarball is unavailable
     if [ "$mode" = full ]; then
-        "$_root_dir/retrieve_and_unpack_resource.sh" -g "$_arch"
+        "$_root_dir/retrieve_and_unpack_resource.sh" -g "$_arch" || return $?
     elif "$_root_dir/retrieve_and_unpack_resource.sh" -d -g "$_arch"; then
-        mode=lite
+        mode=prepared
     else
-        "$_root_dir/retrieve_and_unpack_resource.sh" -g "$_arch"
-        mode=full
+        echo "Prepared source acquisition failed; preserved $_src_dir for diagnosis." >&2
+        echo "Fix the acquisition error and retry, or choose a fresh HELIUM_BUILD_DIR with he setup --full-source." >&2
+        return 1
     fi
     ___helium_he acquisition record --source-mode "$mode"
     _he_source_mode="$mode"
@@ -226,9 +208,8 @@ ___helium_configure() {
     ___helium_configure_siso
     ___helium_setup_remoteexec_toolchain
     ___helium_he test-assets
-    "$_root_dir/devutils/setup_dawn_go.sh" "$_src_dir" "$_depot_tools_dir" "$_arch"
-    python3 ./tools/gn/bootstrap/bootstrap.py -o "$_out_dir/gn" --skip-generate-buildfiles
-    "$_out_dir/gn" gen "$_out_dir" --fail-on-unused-args --export-compile-commands
+    "$_gn_path" gen "$_out_dir" --fail-on-unused-args --export-compile-commands
+    ___helium_he remote record-ready
 }
 
 ___helium_toolchain() {
@@ -267,6 +248,7 @@ ___helium_setup_presetup() {
     fi
     $force || ___helium_he space --need-gib 100
     ___helium_use_build_tmpdir
+    ___helium_setup_python
 
     rm -rf "$_src_dir" && mkdir -p "$_download_cache" "$_src_dir"
     ___helium_he timestamps discard --reason "fresh source" || true
@@ -276,7 +258,7 @@ ___helium_setup_presetup() {
     ___helium_he gclient-marker
     # Full-source build dirs keep Chromium's test data for browser_tests.
     if [ "$_he_source_mode" != full ]; then
-        python3 "$_main_repo/utils/prune_binaries.py" "$_src_dir" "$_main_repo/pruning.list"
+        python3 "$_main_repo/utils/prune_binaries.py" --keep-build-dependencies "$_src_dir" "$_main_repo/pruning.list"
         "$_python_env_bin" "$_main_repo/devutils/restore_lite_test_fixtures.py" --tree "$_src_dir"
     fi
     ___helium_toolchain
@@ -357,7 +339,7 @@ ___helium_substitution() {
     fi
 }
 
-# he build [--jobs N] [TARGET...]
+# he build [--execution local|auto|remote] [--jobs N] [--remote-jobs N] [TARGET...]
 ___helium_build() {
     local -a targets=() jobs=() guard=()
     while [ "$#" -gt 0 ]; do
@@ -368,12 +350,15 @@ ___helium_build() {
                 fi
                 if [ "$1" = --approved ]; then guard+=(--approved); shift; else guard+=(--edge-budget "$2"); shift 2; fi
                 ;;
-            --jobs)
-                case "${2:-}" in ''|*[!0-9]*|0) echo "usage: he build [--jobs N] [TARGET...]" >&2; return 2 ;; esac
-                jobs=(--jobs "$2")
+            --execution)
+                case "${2:-}" in local|auto|remote) ;; *) echo 'error: --execution requires local, auto, or remote' >&2; return 2 ;; esac
+                jobs+=("$1" "$2"); shift 2 ;;
+            --jobs|--remote-jobs)
+                case "${2:-}" in ''|*[!0-9]*|0) echo "usage: he build [--jobs N] [--remote-jobs N] [TARGET...]" >&2; return 2 ;; esac
+                jobs+=("$1" "$2")
                 shift 2
                 ;;
-            -*) echo "error: unknown build option $1; use --jobs N for concurrency" >&2; return 2 ;;
+            -*) echo "error: unknown build option $1; use --jobs N / --remote-jobs N for concurrency" >&2; return 2 ;;
             *) targets+=("$1"); shift ;;
         esac
     done
@@ -381,17 +366,16 @@ ___helium_build() {
     if [ "${HELIUM_AGENT_MODE:-}" = 1 ]; then
         # Explicit targets, no pending snapshot, a clean he check, and a
         # dry-run plan within the edge budget (see docs/agent-workflow.md).
-        ___helium_he agent-guard "${guard[@]}" "${jobs[@]}" "${targets[@]}" >/dev/null
+        [ "${#targets[@]}" -gt 0 ] || { echo 'error: he agent build needs explicit targets' >&2; return 2; }
+        guard+=(--guarded)
     fi
     [ "${#targets[@]}" -gt 0 ] || targets=(chrome chromedriver)
     ___helium_he acquisition require
     # Building popped source means the snapshot can never be restored safely.
-    ___helium_he timestamps discard --reason "built while patches were popped"
     ___helium_he check --warn
     ___helium_use_build_tmpdir
-    [ -z "${SISO_REAPI_ADDRESS:-}" ] || export SISO_REAPI_INSTANCE="${SISO_REAPI_INSTANCE:-main}"
     cd "$_src_dir"
-    SISO_PATH="$_siso_path" ___helium_he build-run "${jobs[@]}" -- "${targets[@]}" || return $?
+    SISO_PATH="$_siso_path" ___helium_he build-run "${guard[@]}" "${jobs[@]}" -- "${targets[@]}" || return $?
     ___helium_he completed-build -- "${targets[@]}"
 }
 
@@ -666,6 +650,7 @@ __helium_dispatch() {
         lint) ___helium_lint;;
 
         build) ___helium_build "$@";;
+        remote) ___helium_he remote "$@";;
         reset) ___helium_reset;;
         run) ___helium_run_profile "$@";;
         arcium) ___helium_arcium "$@";;
@@ -701,7 +686,7 @@ __helium_menu() {
     esac
     case $1 in
         setup|presetup|configure|resources|version|sub|unsub|namesub|nameunsub|translate|transgen|\
-        merge|unmerge|push|pop|replay|save-patch|pull|scratch|scratch-pull|format|tidy|lint|build|reset)
+        merge|unmerge|push|pop|replay|save-patch|pull|scratch|scratch-pull|format|tidy|lint|build|remote|reset)
             ___helium_locked "$1" __helium_dispatch "$@";;
 
         run)
@@ -730,6 +715,7 @@ __helium_menu() {
         validate) ___helium_validate "$2";;
         check) shift; ___helium_check "$@";;
         lane) shift; ___helium_he lane "$@";;
+        build-history) shift; ___helium_he build-history "$@";;
         locate) shift; ___helium_locate "$@";;
         *)
             echo "usage: he <command>" >&2
@@ -762,6 +748,7 @@ __helium_menu() {
             echo "\n" >&2
             echo "\tcheck [--json] - reports drift between patches, records, and the source tree" >&2
             echo "\tlane ACTION - durable reservations and turn notifications; see docs/build-lane.md" >&2
+            echo "\tbuild-history [--run ID] [--json] - build timings, resource samples, native metrics and output logs" >&2
             echo "\tlocate QUERY - finds which patch owns a file or symbol" >&2
             echo "\tvalidate config - validates the build configuration" >&2
             echo "\tvalidate patches - validates that patches are applied correctly" >&2
@@ -771,7 +758,10 @@ __helium_menu() {
             echo "\tlint - he format + he tidy" >&2
 
             echo "\n" >&2
-            echo "\tbuild [--daily|--diagnostics] [--jobs N] [TARGET...] - builds a diagnostic binary by default" >&2
+            echo "\tbuild [--daily|--diagnostics] [--jobs N] [--execution local|auto|remote] [--remote-jobs N] [TARGET...] - builds locally by default" >&2
+            echo "\tremote setup --project PROJECT [--cpus 8|64] - opt in to manual cloud builds; allocates no VM" >&2
+            echo "\tremote status | disable | recover - inspect policy, disable cloud use, or recover an unfinished session" >&2
+            echo "\tremote worker ACTION - plan, login, inspect or manage the worker; see devutils/cloud_build/README.md" >&2
             echo "\trun - runs a development build of helium with dev data dir & ui devtools enabled" >&2
             echo "\trun [--daily|--diagnostics] --profile NAME [--new] [--labeled] [--empty | --seed-from SRC] [flags] - runs Helium Dev on a named profile" >&2
             echo "\tstop [--profile NAME] - quits the Helium Dev app using that profile" >&2

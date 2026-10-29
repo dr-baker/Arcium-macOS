@@ -13,12 +13,12 @@ The original four suggestions were implemented and validated on macOS 26.6.2 in 
 3. Save split screens as durable Pins and verify their page ownership and lifecycle.
 4. Keep corner rounding concentric throughout the app, especially between the native window and browser content. Honor macOS window policy and account for Golden Gate's corner APIs.
 
-The Peek sign-in concept below is the fifth suggestion and remains deferred.
+The Peek sign-in feature below is the fifth suggestion and remains in development outside main.
 
 ## Open sign-in redirects in Peek while preserving the original page
 
 ID: ARCIUM-BACKLOG-PEEK-AUTH
-Status: Backlog only. Implementation has not started.
+Status: In development. Removed from local main pending further work. The implementation and test fixture remain on `feature/peek-auth`; the Snowflake follow-up remains on outer branch `fix/peek-snowflake-auth` and core branch `fix/peek-snowflake-auth-core`.
 
 An expired session can redirect the current tab through authentication and then land on a dashboard, losing the user's place. Add a simple opt-in option, preferably per site, that routes qualifying sign-in detours into Peek. The user completes login and closes Peek manually to resume the original page. Target authentication detours, not ordinary HTTP redirects. Manual close avoids inferring authentication completion from cookies.
 

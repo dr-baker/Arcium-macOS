@@ -17,6 +17,7 @@ build graph cannot see. Each problem names the command that fixes it.
 | When you need to… | Run |
 | --- | --- |
 | Know the build dir's state | `he agent check --json` |
+| Inspect build timing, raw output, and memory evidence | `he agent build-history`, then `he agent build-history --run ID --json`; see [telemetry](build-telemetry.md) |
 | Find the patch that owns a file, symbol, or string | `he agent locate QUERY` (text, a path, a glob such as `chrome/*.cc`, or a regex such as `scope.*glow`) |
 | Edit an existing patch | `he agent pop PATCH`, `quilt add PATH` for files it does not own yet, edit, `he agent save-patch`, `he agent push` |
 | Create a patch | [Creating a new patch](building.md#creating-a-new-patch) |
@@ -79,6 +80,18 @@ Use `--jobs N` for a different ceiling. Pressure can delay launch while the
 reservation remains owned; `lane status --json` reports the reason and latest
 resource sample. Do not bypass the supervisor with raw Ninja/Siso commands.
 
+Builds run offline locally unless the lane has opted into
+[remote compilation](../devutils/cloud_build/README.md). Enrollment defaults
+to manual cloud use: the tested 8-vCPU worker has no demonstrated speed
+crossover. Experimental automatic routing requires a recorded benchmark basis
+and compiler-action threshold, plus recent input at an awake console. Idle,
+away, unknown activity and generator/link-only plans stay local.
+`--execution local|auto|remote` overrides routing for one build.
+`--remote-jobs N` limits cloud concurrency independently of local resource
+backoff. Worker startup and teardown stay inside the command lock; the lane
+reservation still spans packaging and the authorized handoff. Remote routing
+never bypasses the edge budget. New developers need no Google credentials.
+
 ## Stay inside `he`
 
 In a build dir, run patch and build work through `he` so the lock and the
@@ -87,6 +100,24 @@ timestamp check see it: `he agent build` instead of `autoninja` or `ninja`,
 `he agent save-patch` after `quilt refresh`. Edit patches through Quilt at their position, never the
 merged catalog under `.arcium/patches`. When `he` refuses because the build
 dir is busy, wait for the other command rather than retrying in a loop.
+
+CI runs `python3 devutils/check_build_entrypoints.py` to reject new direct
+Ninja, autoninja and Siso launch sites in owned scripts, Python, workflows
+and executable documentation examples. Run it before handing off tooling
+changes. Builds and dry-run plans must enter through the shared router.
+Read-only Ninja inspection such as `-t commands` is allowed; mutating subtools
+such as `-t clean` are not. Use the supported cleanup commands instead.
+
+The production Chromium exceptions are the central command builder and the
+isolated cloud compiler smoke function. The independent command-bar Studio SDK
+also has one reviewed exception in `sdk.py:build`: it compiles its private graph
+under the iteration lock, validates frozen ABI inputs and limits jobs to 1–13.
+It cannot mutate shared Chromium output. Its fixed job cap does not provide
+`he` desktop resource backoff and can compete with a concurrent browser build.
+There is no inline lint suppression.
+Changing that function allowlist requires architecture review. The checker
+recognizes literal commands and simple assignments; it cannot prevent an
+agent from constructing an arbitrary command or bypassing the CLI manually.
 
 ## Runtime testing
 
@@ -104,6 +135,9 @@ uses, unless that is already established:
 Use the contract in `devutils/scenarios/` for the feature when one exists.
 
 Reuse the same named Dev profile when iterating on a build or taking screenshots.
+A named Dev profile is an isolated user-data directory. It can contain several
+Chromium profiles created through Spaces. Relaunch lets Chromium restore its
+saved profile selection; `he run` does not force the Default subprofile.
 Rebuilding and relabeling the app preserve that profile's favicon cache. A new
 profile starts with synthetic saved items and no cached icons for them; creating
 a new name for every build makes those icons disappear again. For an isolated

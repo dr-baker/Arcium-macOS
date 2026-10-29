@@ -190,11 +190,17 @@ prefix. See [Agent workflow](agent-workflow.md).
 
 ## Remote builds
 
-Upstream's remote-build support sets `RBE_service_no_security=true` for every
-remote build. Here TLS stays on unless you set it yourself, and `he configure`
-with `SISO_REAPI_ADDRESS` unset rewrites Chromium's local Siso configuration, so
-switching back from remote builds does not leave the remote backend selected.
-That local configuration also covers full clones made with `--nohooks`.
+All local decisions force Siso offline, including remote-ready outputs and
+shells with endpoint variables. Google Cloud use requires a build-directory
+policy from `he agent remote setup`. Enrollment defaults to manual use.
+Experimental automatic routing requires recent console input and an explicitly
+enrolled compiler-action threshold with a recorded benchmark basis. Plans can
+start a dedicated worker after the existing agent guard passes. Runtime
+routing keeps GN settings stable after the one-time opt-in configuration.
+Local and remote concurrency limits are independent. NativeLink's unencrypted
+API is reachable only through an authenticated IAP SSH tunnel with its own
+local port. The [remote build guide](../devutils/cloud_build/README.md) covers
+onboarding, release builds, interruption recovery, and retained disk costs.
 
 ## Full source
 
