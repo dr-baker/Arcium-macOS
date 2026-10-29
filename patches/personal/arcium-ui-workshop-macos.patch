@@ -8,7 +8,7 @@
  import("//build/cipd/cipd.gni")
  import("//build/config/buildflags_paint_preview.gni")
  import("//build/config/chrome_build.gni")
-@@ -147,8 +148,8 @@
+@@ -148,8 +149,8 @@ if (is_mac && toolkit_views) {
      testonly = true
      sources = [
        "arcium_command_bar_studio_mac.mm",
@@ -19,7 +19,7 @@
        "../browser/ui/views/omnibox/arcium_command_bar_material_mac.mm",
        "../browser/ui/views/helium/surface_style.cc",
        "../browser/ui/views/helium/glass_surface.cc",
-@@ -11671,7 +11672,12 @@
+@@ -10129,7 +10130,12 @@ if (!is_android && toolkit_views) {
  
      data_deps = [ "//chrome:browser_tests_pak" ]
      if (is_mac) {
@@ -77,12 +77,12 @@
 +  void Apply(const base::DictValue& document) {
 +    ApplyAccessibilityContext(document);
 +    auto* view = BrowserView::GetBrowserViewForBrowser(browser());
-+    auto* prefs = browser()->profile()->GetPrefs();
++    auto* prefs = browser()->GetProfile()->GetPrefs();
 +    const auto& context = *document.FindDict("context");
 +    prefs->SetDict(kCommandPanelLayoutPref, document.FindDict("layout")->Clone());
 +    prefs->SetInteger(arcium::kChromeUIScalePref, static_cast<int>(ContextScale(document) * 100 + .5));
 +    for (const auto [name, value] : ContextPreferences(document)) prefs->Set(name, value);
-+    helium::HeliumSpaceServiceFactory::GetForProfile(browser()->profile())->SetThemePreviewForBrowser(browser(), ContextTheme(document));
++    helium::HeliumSpaceServiceFactory::GetForProfile(browser()->GetProfile())->SetThemePreviewForBrowser(browser(), ContextTheme(document));
 +    const auto mode = context.FindString("mode");
 +    view->GetWidget()->SetColorModeOverride(mode && *mode == "light"
 +        ? ui::ColorProviderKey::ColorMode::kLight : ui::ColorProviderKey::ColorMode::kDark);
@@ -103,7 +103,7 @@
 +  }
 +};
 +IN_PROC_BROWSER_TEST_F(ArciumCommandWorkshopBrowserTest, ParentDestructionCancelsPendingPublications) {
-+  Browser* other = CreateBrowser(browser()->profile()); chrome::NewTab(other, NewTabTypes::kNoUserAction);
++  auto* other = CreateBrowser(browser()->GetProfile()); chrome::NewTab(other, NewTabTypes::kNoUserAction);
 +  auto* view = BrowserView::GetBrowserViewForBrowser(other);
 +  CommandPanelPresentation::SetSessionFactoryForTesting(view, base::BindRepeating([] {
 +    return CreateSession(DefaultScenario("streaming"));
@@ -111,7 +111,7 @@
 +  ASSERT_TRUE(view->ShowArciumCommandBar(true)); CloseBrowserSynchronously(other); Wait(350);
 +}
 +IN_PROC_BROWSER_TEST_F(ArciumCommandWorkshopBrowserTest, ProductionSettingsDesignRoundTrip) {
-+  arcium_settings::ArciumSettingsModel model(browser()->profile(), base::DoNothing(), base::DoNothing());
++  arcium_settings::ArciumSettingsModel model(browser()->GetProfile(), base::DoNothing(), base::DoNothing());
 +  for (const auto& document : VisualCases()) {
 +    const auto& layout = *document.FindDict("layout");
 +    ASSERT_TRUE(model.SetCommandPanelLayout(layout)); EXPECT_EQ(model.GetCommandPanelLayout(), layout);

@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -571,6 +571,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -580,6 +580,7 @@ struct ArciumAppearanceSnapshot: Equatab
      ]
  
      var mode = "system"
@@ -10,7 +10,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
      var modeManaged = false
      var modeAvailable = true
      var webMode = "system"
-@@ -706,6 +707,7 @@ struct ArciumAppearanceSnapshot: Equatab
+@@ -715,6 +716,7 @@ struct ArciumAppearanceSnapshot: Equatab
          chromeUIScaleAvailable = strictBoolean(dictionary["chromeUIScaleAvailable"]) ?? false
          chromeUIScaleManaged = strictBoolean(dictionary["chromeUIScaleManaged"]) ?? false
          mode = string(dictionary["mode"]) ?? "system"
@@ -18,7 +18,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
          modeManaged = boolean(dictionary["modeManaged"])
          modeAvailable = boolean(dictionary["modeAvailable"], defaultValue: false)
          webMode = string(dictionary["webMode"]) ?? "system"
-@@ -874,6 +876,24 @@ struct ArciumSettingsSnapshot: Equatable
+@@ -883,6 +885,24 @@ struct ArciumSettingsSnapshot: Equatable
  }
  
  @MainActor
@@ -43,7 +43,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
  final class ArciumSettingsStore: ObservableObject {
      @Published private(set) var snapshot: ArciumSettingsSnapshot
      /// The last typed chrome value sent to the native host. The host applies a
-@@ -1207,8 +1227,9 @@ final class ArciumSettingsStore: Observa
+@@ -1216,8 +1236,9 @@ final class ArciumSettingsStore: Observa
          settingChanged(key: "space_web_mode", value: ["spaceID": target.id, "mode": value])
      }
  
@@ -139,7 +139,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
-@@ -2069,11 +2069,11 @@ final class ArciumSettingsUIContractTest
+@@ -2089,11 +2089,11 @@ final class ArciumSettingsUIContractTest
      }
  
      private func snapshot(spaceID: String = "space-a", webMode: String = "system",
@@ -153,7 +153,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
              "webModeAvailable": available, "webModeManaged": managed,
              "spacePalette": ["id": spaceID, "name": "Space", "available": true]
          ]])
-@@ -2134,19 +2134,43 @@ final class ArciumSettingsUIContractTest
+@@ -2154,19 +2154,43 @@ final class ArciumSettingsUIContractTest
      }
  
      @MainActor
@@ -465,7 +465,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/helium/arcium_settings_model.cc
 +++ src/chrome/browser/ui/helium/arcium_settings_model.cc
-@@ -388,6 +388,7 @@ ArciumSettingsModel::ArciumSettingsModel
+@@ -391,6 +391,7 @@ ArciumSettingsModel::ArciumSettingsModel
    if (theme_service_) {
      theme_service_observation_.Observe(theme_service_);
    }
@@ -473,7 +473,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
  
    space_service_ = helium::HeliumSpaceServiceFactory::GetForProfile(profile_);
    if (space_service_ && space_service_->GetActiveSpace()) {
-@@ -822,6 +823,14 @@ bool ArciumSettingsModel::IsAppearanceAv
+@@ -854,6 +855,14 @@ bool ArciumSettingsModel::IsAppearanceAv
           prefs_->FindPreference(prefs::kBrowserColorScheme);
  }
  
@@ -488,7 +488,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
  int ArciumSettingsModel::GetAppearanceMode() const {
    const auto* space = GetAppearanceSpace();
    if (!space || space->theme().mode == helium::SpaceTheme::Mode::kAuto) {
-@@ -1080,6 +1089,7 @@ void ArciumSettingsModel::Shutdown() {
+@@ -1112,6 +1121,7 @@ void ArciumSettingsModel::Shutdown() {
    // runs while keyed services still exist, but the window must never ask them
    // for state after this point.
    shortcut_observation_.Reset();
@@ -496,7 +496,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
    theme_service_observation_.Reset();
    profile_observation_.Reset();
    pref_change_registrar_.Reset();
-@@ -1115,6 +1125,10 @@ void ArciumSettingsModel::OnThemeChanged
+@@ -1147,6 +1157,10 @@ void ArciumSettingsModel::OnThemeChanged
    NotifyChanged();
  }
  
@@ -529,7 +529,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.h
   public:
    ArciumSettingsModel(Profile* profile,
                        base::RepeatingClosure changed_callback,
-@@ -108,9 +110,11 @@ class ArciumSettingsModel final
+@@ -110,9 +112,11 @@ class ArciumSettingsModel final
  
    // Window chrome and website appearance belong to the captured Space.
    // Values match ThemeService::BrowserColorScheme for the SettingsUI bridge;
@@ -542,7 +542,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.h
    bool IsAppearanceManaged() const;
    bool SetAppearanceMode(int mode);
    bool IsWebAppearanceAvailable() const;
-@@ -152,6 +156,9 @@ class ArciumSettingsModel final
+@@ -154,6 +158,9 @@ class ArciumSettingsModel final
    // ThemeServiceObserver:
    void OnThemeChanged() override;
  
@@ -552,7 +552,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.h
   private:
    void NotifyChanged();
    void OnProfilePreferenceChanged(std::string_view name);
-@@ -174,6 +181,8 @@ class ArciumSettingsModel final
+@@ -176,6 +183,8 @@ class ArciumSettingsModel final
        shortcut_observation_{this};
    base::ScopedObservation<ThemeService, ThemeServiceObserver>
        theme_service_observation_{this};
@@ -662,11 +662,11 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -11477,6 +11477,7 @@ if (!is_android && toolkit_views) {
+@@ -9919,6 +9919,7 @@ if (!is_android && toolkit_views) {
        "../browser/extensions/api/settings_private/prefs_util_unittest.cc",
        "../browser/renderer_context_menu/render_view_context_menu_unittest.cc",
        "../browser/ui/helium/helium_space_service_unittest.cc",
 +      "../browser/ui/helium/arcium_system_appearance_model_unittest.cc",
        "../browser/ui/profiles/profile_picker_unittest.cc",
-       "../browser/ui/views/frame/arcium_browser_chrome_unittest.cc",
      "../browser/ui/helium/arcium_space_icon_unittest.cc",
+     ]
