@@ -109,7 +109,7 @@ static NSString *phaseName(Phase phase) {
 @end
 
 // The panel is padded so the window can draw its own shadow; only the card takes clicks.
-static constexpr CGFloat kPad = 48;
+static constexpr CGFloat kPad = 112;
 
 @interface PassView : NSView
 @end
@@ -429,7 +429,10 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   overlay.frame = stage.bounds; overlay.cornerRadius = 16; overlay.masksToBounds = YES;
   [stage addSublayer:overlay];
   rimShade = [CAGradientLayer layer];
-  rimShade.opacity = 0; rimShade.locations = @[@0, @.4, @1];
+  rimShade.opacity = 0;
+  NSMutableArray *stops = NSMutableArray.array;
+  for (int i = 0; i < 16; ++i) [stops addObject:@(i / 15.0)];
+  rimShade.locations = stops;
   [overlay addSublayer:rimShade];
   chevron = [CAShapeLayer layer];
   chevron.bounds = CGRectMake(0, 0, 10, 18); chevron.contentsScale = scale;
@@ -671,7 +674,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 
   approach(lift, on ? liftTarget : 0, .07, .14, dt);
   approach(glow, on ? glowTarget : 0, .09, .14, dt);
-  approach(edgeAmount, on ? edgeTarget : 0, .05, .08, dt);
+  approach(edgeAmount, on ? edgeTarget : 0, .12, .14, dt);
   approach(leanX, leanTarget.x, .08, .10, dt);
   approach(leanY, leanTarget.y, .08, .10, dt);
 
@@ -684,23 +687,29 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const double cardScale = 1 - .025 * l;
   stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
   stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
-  ambientShadow.shadowRadius = 14 + 14 * l;
-  ambientShadow.shadowOpacity = .36 + .08 * l;
-  ambientShadow.shadowOffset = CGSizeMake(leanX * 1.5, -(7 + 9 * l) + leanY * 1.5);
-  contactShadow.shadowRadius = 2.5 + 2 * l;
-  contactShadow.shadowOpacity = .28 * (1 - .75 * l);
-  contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(1.5 + 2 * l) + leanY * .5);
+  ambientShadow.shadowRadius = 18 + 14 * l;
+  ambientShadow.shadowOpacity = .30 + .06 * l;
+  ambientShadow.shadowOffset = CGSizeMake(leanX * 1.5, -(8 + 10 * l) + leanY * 1.5);
+  contactShadow.shadowRadius = 4 + 3 * l;
+  contactShadow.shadowOpacity = .16 * (1 - .75 * l);
+  contactShadow.shadowOffset = CGSizeMake(leanX * .5, -(2 + 2 * l) + leanY * .5);
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
   // Screen edge in card coordinates, accounting for lean and the lift scale about the card's center.
   const double rimScreen = side == Side::Left ? area.x : area.x + area.width;
   const double rim = w / 2 + (rimScreen - (position.x + leanX + w / 2)) / cardScale;
-  const double reach = std::max(56.0, handle * 2);
+  const double reach = std::max(88.0, handle * 3);
   if (rimShadeStrength != feedback.edge || !rimShade.colors) {
+    // Exponential falloff: dense at the rim with a long, soft tail and no visible stop.
     rimShadeStrength = feedback.edge;
-    rimShade.colors = @[(__bridge id)gray(0, feedback.edge), (__bridge id)gray(0, feedback.edge * .35),
-                        (__bridge id)gray(0, 0)];
+    NSMutableArray *colors = NSMutableArray.array;
+    for (int i = 0; i < 16; ++i) {
+      const double t = i / 15.0;
+      const double falloff = (std::exp(-3.2 * t) - std::exp(-3.2)) / (1 - std::exp(-3.2));
+      [colors addObject:(__bridge id)gray(0, feedback.edge * falloff)];
+    }
+    rimShade.colors = colors;
   }
   rimShade.frame = side == Side::Left ? CGRectMake(rim, 0, reach, h) : CGRectMake(rim - reach, 0, reach, h);
   rimShade.startPoint = CGPointMake(side == Side::Left ? 0 : 1, .5);

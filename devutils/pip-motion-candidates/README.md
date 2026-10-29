@@ -27,9 +27,10 @@ Daniel's requested pickup, hold and tuck cues. This is a source-level
 comparison, not a visual acceptance result. The earlier app bundles were
 launched for Daniel and their tuning windows moved to Desktop 3. Neither
 candidate has completed native interaction, appearance or persistence
-validation. The author rebuilt and relaunched the revised Opus UI as PID 60043.
-The current revision adds a stronger proximity-based lean, pickup shrink and a
-fixed-position chevron. Root verified the signed bundle and a runtime checkpoint
+validation. The author rebuilt and relaunched the revised Opus UI as PID 69736.
+The current revision includes a proximity-based lean, pickup shrink, a
+fixed-position chevron and softer broad/contact shadows with a longer rim-shade
+falloff. Root verified the signed bundle and a runtime checkpoint
 with Lift 0.70, Hold glow 0.50, Edge shade 0.60 and Dock lean 8. Native appearance,
 interaction and input-region acceptance remain open.
 
@@ -61,7 +62,8 @@ shared edge between adjacent displays. Following Spaces remains required.
 These checks need native runtime evidence; passing the current single-display
 motion checks does not satisfy this gate.
 
-The revised Opus panel also includes 48 points of transparent shadow padding.
+The revised Opus panel also includes 112 points of transparent shadow padding,
+increased from 48 to reduce shadow clipping. This widens the known input issue.
 Its author reports that clicks there do not reach the app behind it. Resolve
 that input region and prove clicks outside the visible card reach the underlying
 window before browser integration. The shadow must not enlarge the PiP's

@@ -21,7 +21,7 @@ app before rebuilding.
 - **Pickup.** Pressing the window grows and softens its shadow, and the tight
   contact shadow fades, so it reads as lifted off the desktop. The card and its
   shadows shrink together by about 1.75% at the default Lift value. The resting
-  shadow is stronger, reducing the contrast with the picked-up state.
+  and picked-up shadows are broad and light, with a softer contact shadow.
 - **Set down.** After release it stays lifted while it travels and sets down as
   it arrives. A drop that stays put sets down right away. A snap, tuck or
   restore lands at its destination.
@@ -37,6 +37,8 @@ app before rebuilding.
   threshold, deepens once letting go would tuck, and stays while tucked. The
   chevron stays at its final position in the exposed strip and only fades in
   with depth; it no longer travels along the edge or scales independently.
+  The rim shade uses 16 exponentially spaced alpha samples across a longer
+  reach and a slower rise and fall to soften the threshold transition.
 - **Restore.** Pulling a tucked window out past the restore distance eases the
   rim shadow back to its faint level, and it clears once the window is fully
   back on screen.
@@ -46,7 +48,7 @@ cue comes from `Motion::predict()`, which uses the same classification as
 release. A randomized test checks that the prediction always matches what
 release does.
 
-The panel is padded by 48 points so it can draw its own shadow. The drag target
+The panel is padded by 112 points so it can draw its own shadow. The drag target
 keeps the full, unscaled card rectangle during pickup. The author reports that
 clicks in the transparent padding do not reach windows behind it; click-through
 must be resolved before browser integration. `state.json`'s `native_frame`
