@@ -1,0 +1,22 @@
+{
+  "youtube-native-cycle.mp4": {
+    "bytes": 512411,
+    "sha256": "762fe42ea410b5c4d695bd8e2ea140af5af07113cdb4f1015c12be817b9fc496"
+  },
+  "youtube-floating-controls.png": {
+    "bytes": 618769,
+    "sha256": "c854029fd8808f1406a5400454aa903ae1ab96b27454f9da9a3c82a660a20f45"
+  },
+  "floating-controls-detail.png": {
+    "bytes": 392227,
+    "sha256": "3411edba1f01ff7e9e3c13a26c1ae3c905e66f3087128ee626edddb33a2ea8c5"
+  },
+  "arc-reference-cycle.mp4": {
+    "bytes": 1027870,
+    "sha256": "aef8f284a2b7d35e8062a9b0c5b5fe7e176176df62e61e9ca17451832828999c"
+  },
+  "arc-reference-window.png": {
+    "bytes": 1761428,
+    "sha256": "5248768f948bcf21647152bf69ebb3bf2e11fdb76a61d45cf306fb66962fbcab"
+  }
+}

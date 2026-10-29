@@ -6,11 +6,13 @@ Unreleased changes are in source, not the current download. [Roadmap](README.md#
 
 ### Highlights
 
+- Keep watching YouTube when switching tabs. Video opens automatically in a rounded Picture-in-Picture window and returns to the page when you switch back, with clear glass controls, responsive 15-second seeking, themed progress, and working pause for muted playback.
 - Migrate from Arc in one click on first launch. Bring over available Spaces, Pins, folders, and Favorites, or choose specific Spaces.
 - Recognize both pages in a split Pin. Each page gets its own site icon and title, with a small divider between them.
 
 ### Polish and fixes
 
+- Place Picture-in-Picture freely, press into an edge to dock, or push farther into a side to tuck it away. Window movement uses the selected spring tuning and retains native glass controls.
 - Install Widevine from an existing Google Chrome installation in General settings for experimental protected-media playback. Requires an Arcium relaunch.
 - Use a border-free page edge with an adaptive centered shadow: a soft black shadow in light mode and an accent glow in dark mode. Appearance adds a 0–6 px Border slider and Default, None, and Customize shadow choices, with the theme color picker in a customization sheet. The command bar shadow now sits 2 px below center.
 - Install by dragging Arcium to Applications in a blush DMG. New profiles keep the preview defaults without a separate installer app.

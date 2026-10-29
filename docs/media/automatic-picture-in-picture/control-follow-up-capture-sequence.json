@@ -1,0 +1,71 @@
+{
+  "title": "Native PiP capture sequence",
+  "continuous_screencast": false,
+  "description": "Ordered actual native Computer Use screenshot captures around actions; timing gaps are not continuous recording. No fabricated frames.",
+  "frames": [
+    {
+      "timestamp": "2026-10-27T03:45:54.546Z",
+      "label": "01-fresh-muted-paused",
+      "action": "Native AX mute while paused at 0:00; before first play",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "source_filename": "01-fresh-muted-paused.png",
+      "source_sha256": "9577760034206831640e020ecf6738c7b6244b0622bc722bae67642c4672ef76"
+    },
+    {
+      "timestamp": "2026-10-27T03:50:08.579Z",
+      "label": "02-native-pip-pause-action",
+      "action": "Native sky_click center control derived from current PiP 768x432 screenshot",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "source_filename": "02-native-pip-pause-action.png",
+      "source_sha256": "b473b45b6e092833def40ac594385315631c36939ff43ec78295650a366bb226"
+    },
+    {
+      "timestamp": "2026-10-27T03:50:59.592Z",
+      "label": "05-roomy-paused-visible",
+      "action": "Native Tab reveals Play icon after pause; previous capture03 controls had faded",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "source_filename": "05-roomy-paused-visible.png",
+      "source_sha256": "c6f578d5dfc0d1036856b0388f3cfa5646ee30775851d979cacba937b87ce8f8"
+    },
+    {
+      "timestamp": "2026-10-27T03:51:02.558Z",
+      "label": "06-roomy-resume-action",
+      "action": "Native AX Play click on current visible control",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "source_filename": "06-roomy-resume-action.png",
+      "source_sha256": "5bfbe843c45d5717ee83734ee3dc1293f7b911ac989caa7d3b483472958de3f4"
+    },
+    {
+      "timestamp": "2026-10-27T03:51:30.193Z",
+      "label": "07-roomy-playing-pause-icon",
+      "action": "Native Tab during resumed muted playback exposes Pause icon",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "source_filename": "07-roomy-playing-pause-icon.png",
+      "source_sha256": "613caa4ac852d00b173d9ce6563aa3c5f673164f53b86aa64bcb32f0662a0339"
+    },
+    {
+      "timestamp": "2026-10-27T03:53:04.454Z",
+      "label": "08-native-return-paused",
+      "action": "Native Back to tab returned to public YouTube; CDP confirms paused same226.491471 and pipfalse",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "source_filename": "08-native-return-paused.png",
+      "source_sha256": "919577b5165c6b0e1fedf8121cf2c71ef55a174f07c196dbcc05f1023c1f1c0b"
+    }
+  ],
+  "hero": "05-roomy-paused-visible.png",
+  "playing_controls": "07-roomy-playing-pause-icon.png",
+  "additional_unpublished_followup": [
+    {
+      "timestamp": "2026-10-27T03:57:39.398Z",
+      "label": "09-final-public-opener",
+      "action": "Bounded foreground follow-up: native Example Domain tab then return YouTube; playback precondition did not sustain, cycle remains unverified",
+      "path": "/private/tmp/arcium-pip-glass-evidence/09-final-public-opener.png",
+      "kind": "actual-native-screenshot-capture-sequence",
+      "reason": "Public opener readiness only; follow-up playing precondition did not sustain, not behavior proof."
+    }
+  ],
+  "video": "native-controls-capture-sequence.mp4",
+  "frame_hold_seconds": 2,
+  "source_core": "8397a055183bbbb30c5649e2fbfa3a68712e2a31",
+  "video_sha256": "90f8bf45b09567b282ffeb3e8fd6fbc24e01d788810e612bbc8a327ac9ae7fe8"
+}

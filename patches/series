@@ -75,3 +75,4 @@ personal/arcium-crashpad-component-linkage-macos.patch
 personal/arcium-dmg-first-run-defaults-macos.patch
 personal/arcium-command-style-previews-macos.patch
 personal/arcium-content-frame-macos.patch
+personal/arcium-pip-native-controls-macos.patch
