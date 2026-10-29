@@ -143,7 +143,8 @@ class ScratchAndTmpTest(Fixture):
 
 class AgentAndAssetsTest(Fixture):
     def test_planned_edges_reads_ninja_and_siso_progress(self) -> None:
-        self.assertEqual(agent.planned_edges("[1/4] cc a\n[2/4] cc b\n"), 4)
+        self.assertIsNone(agent.planned_edges("[1/4] cc a\n[2/4] cc b\n"))
+        self.assertEqual(agent.planned_edges("[1/4] cc a\n[4/4] link\n"), 4)
         self.assertEqual(agent.planned_edges("ninja: no work to do.\n"), 0)
         siso = ("build start: Ready 1 Pending 1\nrebuild manifest finished\n"
                 "schedule pending:1+ready:0 (node:9 edge:2)\n1m09.24s schedule pending:7+ready:2 (node:9 edge:9)\n"
