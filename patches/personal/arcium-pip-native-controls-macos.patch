@@ -301,7 +301,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1911 @@
+@@ -0,0 +1,1914 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1528,6 +1528,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      position.y + leanY - h*(cardScale-1)/2, w*cardScale, h*cardScale);
 +  [self setWindowFrame:frame animate:NO];
 +  [_shadowWindow setFrame:NSInsetRect(frame, -kShadowPad, -kShadowPad) display:NO];
++  if (_pipWindow.visible && _shadowWindow.parentWindow == _pipWindow) {
++    [_shadowWindow orderWindow:NSWindowBelow relativeTo:_pipWindow.windowNumber];
++  }
 +  CGPathRef path = CGPathCreateWithRoundedRect(CGRectMake(kShadowPad, kShadowPad,
 +      frame.size.width, frame.size.height), 16, 16, nullptr);
 +  ambientShadow.shadowPath = contactShadow.shadowPath = path;
@@ -2711,7 +2714,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
      constexpr int kResizeAreaCornerSize = 16;
      int window_component = GetHTComponentForFrame(
          point, gfx::Insets(kOverlayBorderThickness), kResizeAreaCornerSize,
-@@ -394,8 +425,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+@@ -392,8 +423,9 @@ std::unique_ptr<VideoOverlayWindowViews>
    // On Mac, we override the default native widget with our own subclass, which
    // allows us to get the default window styling (e.g. corner radius) even
    // though we're using `views::Widget::InitParams::remove_standard_frame`.
@@ -2722,7 +2725,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #endif  // BUILDFLAG(IS_MAC)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -486,6 +518,9 @@ VideoOverlayWindowViews::VideoOverlayWin
+@@ -484,6 +516,9 @@ VideoOverlayWindowViews::VideoOverlayWin
  }
  
  VideoOverlayWindowViews::~VideoOverlayWindowViews() {
@@ -2732,7 +2735,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (overlay_view_) {
      overlay_view_->RemoveObserver(this);
    }
-@@ -576,6 +611,9 @@ void VideoOverlayWindowViews::OnNativeFo
+@@ -574,6 +609,9 @@ void VideoOverlayWindowViews::OnNativeFo
  }
  
  void VideoOverlayWindowViews::OnNativeBlur() {
@@ -2742,7 +2745,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Controls should be hidden when there is no more focus on the window. This
    // is used for tabbing and touch interactions. For mouse interactions, the
    // window cannot be blurred before the ui::EventType::kMouseExited event is
-@@ -630,6 +668,10 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -628,6 +666,10 @@ void VideoOverlayWindowViews::OnNativeWi
  
  void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
      const gfx::Size& new_size) {
@@ -2753,7 +2756,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Hide the controls when the window is being resized. The controls will
    // reappear when the user interacts with the window again.
    UpdateControlsVisibility(false);
-@@ -641,6 +683,15 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -639,6 +681,15 @@ void VideoOverlayWindowViews::OnNativeWi
  }
  
  void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
@@ -2769,7 +2772,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Every time a user uses a keyboard to interact on the window, restart the
    // timer to automatically hide the controls.
    hide_controls_timer_.Reset();
-@@ -672,11 +723,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+@@ -670,11 +721,11 @@ void VideoOverlayWindowViews::OnKeyEvent
        TogglePlayPause();
        event->SetHandled();
      } else if (event->key_code() == ui::VKEY_LEFT &&
@@ -2783,7 +2786,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
        Forward15Seconds();
        event->SetHandled();
      }
-@@ -804,6 +855,11 @@ void VideoOverlayWindowViews::FireEnable
+@@ -802,6 +853,11 @@ void VideoOverlayWindowViews::FireEnable
  }
  
  bool VideoOverlayWindowViews::AreControlsVisible() const {
@@ -2795,7 +2798,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If we're animating to a visibility state, then we'll act as if we're in
    // that state.
    if (fade_animation_) {
-@@ -865,6 +921,14 @@ void VideoOverlayWindowViews::UpdateCont
+@@ -863,6 +919,14 @@ void VideoOverlayWindowViews::UpdateCont
            : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
                  !can_hide_title_and_scrim;
  
@@ -2810,7 +2813,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (should_animate) {
      // Animate the title and top scrim.
      if (title_is_visible != AreTitleAndScrimVisible()) {
-@@ -962,6 +1026,9 @@ void VideoOverlayWindowViews::OnViewVisi
+@@ -960,6 +1024,9 @@ void VideoOverlayWindowViews::OnViewVisi
  
    // The visibility of `overlay_view_` affects our minimum size.
    OnSizeConstraintsChanged();
@@ -2820,7 +2823,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
-@@ -977,6 +1044,63 @@ void VideoOverlayWindowViews::SetForcedT
+@@ -975,6 +1042,63 @@ void VideoOverlayWindowViews::SetForcedT
  }
  
  #if BUILDFLAG(IS_MAC)
@@ -2884,7 +2887,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
    MoveToActiveFullscreenSpace();
  }
-@@ -1462,6 +1586,19 @@ void VideoOverlayWindowViews::OnRootView
+@@ -1460,6 +1584,19 @@ void VideoOverlayWindowViews::OnRootView
    }
    view_holder_.clear();
  
@@ -2904,7 +2907,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Don't show the controls until the mouse hovers over the window.
    UpdateControlsVisibility(false, /*should_animate=*/false);
  }
-@@ -1523,6 +1660,12 @@ void VideoOverlayWindowViews::UpdateLaye
+@@ -1521,6 +1658,12 @@ void VideoOverlayWindowViews::UpdateLaye
  }
  
  void VideoOverlayWindowViews::OnUpdateControlsBounds() {
@@ -2917,7 +2920,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    controls_container_view_->SetSize(GetBounds().size());
  
    // Adding an extra pixel to width/height makes sure the scrim covers the
-@@ -1772,6 +1915,11 @@ bool VideoOverlayWindowViews::IsActive()
+@@ -1770,6 +1913,11 @@ bool VideoOverlayWindowViews::IsActive()
  }
  
  void VideoOverlayWindowViews::Close() {
@@ -2929,7 +2932,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1820,6 +1968,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1818,6 +1966,11 @@ void VideoOverlayWindowViews::ShowInacti
      overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
      overlay_view_->ShowBubble(GetNativeView());
      SetBounds(CalculateAndUpdateWindowBounds());
@@ -2941,7 +2944,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    }
  
    // When the window is first shown, make the title and top controls
-@@ -1853,6 +2006,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1851,6 +2004,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -2953,7 +2956,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1886,6 +2044,15 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1884,6 +2042,15 @@ void VideoOverlayWindowViews::UpdateNatu
    // Update the views::Widget bounds to adhere to sizing spec. This will also
    // update the layout of the controls.
    SetBounds(CalculateAndUpdateWindowBounds());
@@ -2969,7 +2972,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (is_tucking_forced_) {
      tucker_->Tuck();
    }
-@@ -1894,6 +2061,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1892,6 +2059,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -2979,7 +2982,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1964,6 +2134,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1962,6 +2132,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -2989,7 +2992,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1999,11 +2172,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1997,11 +2170,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -3007,7 +3010,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2237,7 +2416,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2235,7 +2414,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -3016,7 +3019,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2415,6 +2594,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2413,6 +2592,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -3026,7 +3029,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2520,6 +2702,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2518,6 +2700,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
