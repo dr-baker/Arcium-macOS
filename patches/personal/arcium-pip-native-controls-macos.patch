@@ -201,7 +201,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,139 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -209,6 +209,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +#define CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_NATIVE_CONTROLS_H_
 +
 +#include <cstdint>
++#include <array>
++#include <cstddef>
 +#include <functional>
 +#include <memory>
 +#include <optional>
@@ -246,7 +248,49 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  kPlacementChanged,
 +};
 +
++enum class Effect {
++  kPickup,
++  kSettle,
++  kDockLean,
++  kShadows,
++  kDockShadow,
++  kEdgeShade,
++  kStrings,
++  kLanding,
++  kHaptics,
++  kReturn,
++  kCount,
++};
++
++struct EffectPreference {
++  const char* pref;
++  const char* key;
++  const char* title;
++  const char* description;
++};
++inline constexpr std::array<EffectPreference, static_cast<size_t>(Effect::kCount)>
++    kEffectPreferences = {{
++  {"arcium.pip.effects.pickup", "pip_effect_pickup", "Pickup lift", "Grow the window slightly while holding it."},
++  {"arcium.pip.effects.settle", "pip_effect_settle", "Settle cue", "Lower the lifted window as a deliberate drop becomes likely. Requires pickup lift."},
++  {"arcium.pip.effects.dock_lean", "pip_effect_dock_lean", "Dock lean", "Lean toward the edge where the window will dock."},
++  {"arcium.pip.effects.shadows", "pip_effect_shadows", "Custom shadows", "Draw soft shadows that respond to window movement."},
++  {"arcium.pip.effects.dock_shadow", "pip_effect_dock_shadow", "Projected dock shadow", "Move the custom shadow toward the docking destination. Requires custom shadows."},
++  {"arcium.pip.effects.edge_shade", "pip_effect_edge_shade", "Edge shading", "Shade the window as it moves into a screen edge."},
++  {"arcium.pip.effects.strings", "pip_effect_strings", "Pressure strings", "Show elastic pressure strings along edges and around corners."},
++  {"arcium.pip.effects.landing", "pip_effect_landing", "Landing press", "Dip slightly when the window comes to rest."},
++  {"arcium.pip.effects.haptics", "pip_effect_haptics", "Haptic feedback", "Play light Force Touch trackpad taps for movement decisions."},
++  {"arcium.pip.effects.return", "pip_effect_return", "Return animation", "Shrink and fade when returning the video to its browser tab."},
++}};
++
 +struct State {
++  std::array<bool, kEffectPreferences.size()> effects{};
++  bool HasEffect(Effect effect) const { return effects[static_cast<size_t>(effect)]; }
++  bool HasVisualEffects() const {
++    return HasEffect(Effect::kPickup) || HasEffect(Effect::kSettle) ||
++           HasEffect(Effect::kDockLean) || HasEffect(Effect::kShadows) ||
++           HasEffect(Effect::kDockShadow) || HasEffect(Effect::kEdgeShade) ||
++           HasEffect(Effect::kStrings) || HasEffect(Effect::kLanding);
++  }
 +  geometry::SizeLimits size_limits;
 +  bool playing = false;
 +  bool can_play = false;
@@ -301,7 +345,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2419 @@
+@@ -0,0 +1,2621 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -326,6 +370,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +using arcium::pip::ActionCallback;
 +using arcium::pip::Placement;
 +using arcium::pip::State;
++using arcium::pip::Effect;
 +namespace geo = arcium::pip::geometry;
 +using pip_motion::Motion;
 +using pip_motion::Outcome;
@@ -447,7 +492,24 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +        }
 +      }];
 +}
++void TintCapsule(NSView* surface, NSColor* accent) {
++  if (@available(macOS 26.0, *)) {
++    if ([surface isKindOfClass:NSGlassEffectView.class]) {
++      ((NSGlassEffectView*)surface).tintColor = [accent colorWithAlphaComponent:.12];
++      return;
++    }
++  }
++  surface.layer.backgroundColor = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency ?
++      [[NSColor colorWithWhite:.15 alpha:1] blendedColorWithFraction:.12 ofColor:accent].CGColor :
++      [accent colorWithAlphaComponent:.06].CGColor;
++}
 +void Place(NSView* surface, NSView* content, NSRect frame) {
++  const CGFloat radius = std::min(NSWidth(frame),NSHeight(frame))/2;
++  if (@available(macOS 26.0, *)) {
++    if ([surface isKindOfClass:NSGlassEffectView.class])
++      ((NSGlassEffectView*)surface).cornerRadius = radius;
++  }
++  surface.layer.cornerRadius = radius;
 +  surface.frame = frame;
 +  content.frame = NSMakeRect(0, 0, frame.size.width, frame.size.height);
 +}
@@ -738,20 +800,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (BOOL)update:(const Motion&)model frame:(NSRect)frame screen:(NSScreen*)screen
 +           now:(double)now dt:(double)dt enabled:(BOOL)enabled {
 +  if (!enabled || !screen || !_parent.visible) { [self close]; return YES; }
-+  [_window setFrame:screen.frame display:NO];
++  if (!NSEqualRects(_window.frame,screen.frame)) [_window setFrame:screen.frame display:NO];
 +  if (!_window.parentWindow) [_parent addChildWindow:_window ordered:NSWindowBelow];
 +  [_window orderWindow:NSWindowBelow relativeTo:_parent.windowNumber];
 +  const NSPoint fxOrigin = screen.frame.origin;
-+  for (CALayer* layer in @[stringRoot,stringOcclusion,borderString.group,borderString.glow,
-+      borderString.fields,borderString.shape,borderString.horizontal,borderString.vertical,threadGlow,threadShape])
++  for (CALayer* layer in @[stringRoot,stringOcclusion,threadGlow,threadShape])
 +    layer.frame = fxRoot.bounds;
-+  // The string cannot shine through native glass controls or video letterboxing.
-+  CGMutablePathRef mask = CGPathCreateMutable();
-+  CGPathAddRect(mask, nullptr, fxRoot.bounds);
-+  const CGRect cutout = CGRectMake(frame.origin.x-fxOrigin.x, frame.origin.y-fxOrigin.y,
-+      frame.size.width, frame.size.height);
-+  CGPathAddRoundedRect(mask, nullptr, CGRectInset(cutout,-1,-1),20,20);
-+  stringOcclusion.path = mask; CGPathRelease(mask);
 +  const Motion* motion = &model;
 +  const bool dragging = model.phase == Phase::Dragging;
 +  const bool pressMode = dragging && model.settings.docking == Docking::AllEdges && model.tucked == Side::None;
@@ -830,6 +884,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    if (peakStress >= 0) breakStart = now;
 +  }
 +
++  // Each field's radial reach in fx coordinates; the string is invisible outside every field.
++  CGPoint fieldCenter[2] = {}; CGSize fieldRadius[2] = {};
 +  for (int axis = 0; axis < 2; ++axis) {
 +    Membrane& m = membranes[axis];
 +    const bool side = axis == 0;
@@ -866,10 +922,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      const double crossReach = std::max(reach, std::abs(m.bend) + 80);
 +      const CGPoint center = side ? CGPointMake(m.boundary - fxOrigin.x, m.anchor - fxOrigin.y) :
 +          CGPointMake(m.anchor - fxOrigin.x, m.boundary - fxOrigin.y);
-+      const double fw = fxRoot.bounds.size.width, fh = fxRoot.bounds.size.height;
-+      field.startPoint = CGPointMake(center.x / fw, center.y / fh);
-+      field.endPoint = CGPointMake((center.x + (side ? crossReach : reach)) / fw,
-+          (center.y + (side ? reach : crossReach)) / fh);
++      // Start and end points are set once the string's bounds are known.
++      fieldCenter[axis] = center;
++      fieldRadius[axis] = CGSizeMake(side ? crossReach : reach, side ? reach : crossReach);
 +      const double stress = active ? m.stress : m.stress * std::min(1.0, std::abs(m.bend) / m.pressedBend);
 +      double rgb[3]; stressColor(stress, rgb);
 +      field.colors = @[(__bridge id)rgba(rgb, 1), (__bridge id)rgba(rgb, 1),
@@ -896,6 +951,18 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    CGMutablePathRef path = CGPathCreateMutable();
 +    borderSamples.clear();
 +    if (cornerString) {
++      // The loop circles the whole work area, but only the part inside a glow field can show.
++      // Samples stay complete for tearing; the drawn path skips the invisible stretches.
++      auto inField = [&](CGPoint p) {
++        for (int axis = 0; axis < 2; ++axis) if (axisGlow[axis] > 0) {
++          const double rx = fieldRadius[axis].width + 8, ry = fieldRadius[axis].height + 8;
++          const double dx = (p.x - fieldCenter[axis].x) / rx, dy = (p.y - fieldCenter[axis].y) / ry;
++          if (dx * dx + dy * dy <= 1) return true;
++        }
++        return false;
++      };
++      bool drawing = false, closed = true;
++      CGPoint previous = CGPointZero;
 +      double travelled = 0;
 +      for (size_t edge = 0; edge < sections.size(); ++edge) {
 +        const double edgeLength = sections[edge];
@@ -912,13 +979,25 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +            visibility = std::max(visibility, axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0));
 +          }
 +          const CGPoint local = CGPointMake(point.x - fxOrigin.x, point.y - fxOrigin.y);
-+          if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
-+          else CGPathAddLineToPoint(path, nullptr, local.x, local.y);
++          // Each drawn run extends one sample past the field on both sides, where it is transparent.
++          const bool inside = inField(local);
++          if (inside && !drawing) {
++            if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
++            else {
++              CGPathMoveToPoint(path, nullptr, previous.x, previous.y);
++              CGPathAddLineToPoint(path, nullptr, local.x, local.y);
++            }
++            drawing = true;
++          } else if (drawing) {
++            CGPathAddLineToPoint(path, nullptr, local.x, local.y);
++            if (!inside) { drawing = false; closed = false; }
++          } else closed = false;
++          previous = local;
 +          borderSamples.push_back({point, at, visibility});
 +        }
 +        travelled += edgeLength;
 +      }
-+      CGPathCloseSubpath(path);
++      if (closed) CGPathCloseSubpath(path);
 +    } else {
 +      const int axis = straightStringAxis;
 +      const auto& m = membranes[axis];
@@ -940,6 +1019,25 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +        const double visible = axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0);
 +        borderSamples.push_back({point, at, visible});
 +      }
++    }
++    // Size the string's gradient, mask and glow layers to what it covers rather than the screen,
++    // keeping fx coordinates inside them. The margin holds the widest glow.
++    CGRect extent = CGPathIsEmpty(path) ? CGRectNull : CGPathGetPathBoundingBox(path);
++    extent = CGRectIntersection(CGRectInset(extent, -84, -84), fxRoot.bounds);
++    if (CGRectIsNull(extent) || CGRectIsEmpty(extent)) extent = CGRectMake(0, 0, 1, 1);
++    const CGPoint middle = CGPointMake(CGRectGetMidX(extent), CGRectGetMidY(extent));
++    for (CALayer *layer in @[borderString.group, borderString.glow, borderString.fields, borderString.shape]) {
++      layer.bounds = extent; layer.position = middle;
++    }
++    for (int axis = 0; axis < 2; ++axis) {
++      CAGradientLayer *field = axis == 0 ? borderString.horizontal : borderString.vertical;
++      field.bounds = CGRectMake(0, 0, extent.size.width, extent.size.height); field.position = middle;
++      if (axisGlow[axis] <= 0) continue;
++      const CGPoint start = CGPointMake((fieldCenter[axis].x - extent.origin.x) / extent.size.width,
++          (fieldCenter[axis].y - extent.origin.y) / extent.size.height);
++      field.startPoint = start;
++      field.endPoint = CGPointMake(start.x + fieldRadius[axis].width / extent.size.width,
++          start.y + fieldRadius[axis].height / extent.size.height);
 +    }
 +    borderString.shape.path = path; CGPathRelease(path);
 +    const int peak = cornerString ? (membranes[0].stress * axisGlow[0] > membranes[1].stress * axisGlow[1] ? 0 : 1) : straightStringAxis;
@@ -977,9 +1075,25 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    for (int c = 0; c < 3; ++c) threadRGB[c] = 1 + (breakRGB[c] - 1) * stressRemaining;
 +    threadShape.strokeColor = rgba(threadRGB, 1); threadGlow.shadowColor = rgba(threadRGB, 1);
 +    threadShape.lineWidth = 3 - 1.5 * u;
++    // The glow takes its shape from the stroked threads, not from a full-screen alpha pass.
++    CGPathRef outline = CGPathCreateCopyByStrokingPath(threadShape.path, nullptr, threadShape.lineWidth,
++        kCGLineCapRound, kCGLineJoinRound, 10);
++    threadGlow.shadowPath = outline; CGPathRelease(outline);
 +    threadGlow.opacity = 1.0 * std::pow(1 - u, 1.4);
 +  } else threadGlow.opacity = 0;
-+
++  // The string's occlusion mask only matters while some string or thread is visible.
++  const bool stringVisible = (borderString.group.opacity > 0 && (axisGlow[0] > 0 || axisGlow[1] > 0)) ||
++      threadGlow.opacity > 0;
++  stringRoot.hidden = !stringVisible;
++  if (stringVisible) {
++    // The string cannot shine through glass controls or video letterboxing.
++    CGMutablePathRef mask = CGPathCreateMutable();
++    CGPathAddRect(mask, nullptr, fxRoot.bounds);
++    const CGRect cutout = CGRectMake(frame.origin.x-fxOrigin.x, frame.origin.y-fxOrigin.y,
++        frame.size.width, frame.size.height);
++    CGPathAddRoundedRect(mask, nullptr, CGRectInset(cutout,-1,-1),20,20);
++    stringOcclusion.path = mask; CGPathRelease(mask);
++  }
 +
 +  return threads.empty() && axisGlow[0] == 0 && axisGlow[1] == 0 &&
 +      membranes[0].bend == 0 && membranes[0].bendVelocity == 0 &&
@@ -1012,7 +1126,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  NSView* _backGlass;
 +  NSView* _forwardGlass;
 +  NSView* _muteGlass;
-+  NSView* _restoreGlass;
++  NSView* _restoreHost;
++  CGFloat _controlScale;
 +  ArciumPiPSlider* _slider;
 +  NSTextField* _timestamp;
 +  NSTextField* _title;
@@ -1065,6 +1180,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  std::unique_ptr<pip_motion::Gestures> gestures;
 +  Feedback feedback;
 +  NSTimer* _motionTimer;
++  id _motionDisplayLink;
++  BOOL _motionFramesRunning, _motionFrameDirty;
++  double _motionRenderTime, _lastRenderAt;
 +  NSWindow* _shadowWindow;
 +  ArciumPiPPressureFeedback* _pressureFeedback;
 +  CALayer* ambientShadow;
@@ -1110,7 +1228,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  _pipWindow = window;
 +  _originalShadow = window.hasShadow;
-+  feedback.settle = 1; feedback.settleEase = .10;
++  [self configureEffects];
 +  slowSince = -1;
 +  hapticKey = pendingKey = -1;
 +  _delivery = std::make_shared<Delivery>(Delivery{std::move(callback)});
@@ -1280,10 +1398,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _backGlass = Capsule(_backButton, 18);
 +  _forwardGlass = Capsule(_forwardButton, 18);
 +  _muteGlass = Capsule(_muteButton, 14);
-+  _restoreGlass = Capsule(_restoreButton, 14);
++  _restoreHost = [[NSView alloc] initWithFrame:NSZeroRect];
++  [_restoreHost addSubview:_restoreButton];
++  _controlScale = 0;
 +  for (NSView* surface in @[
 +         _returnGlass, _tuckGlass, _closeGlass, _playGlass, _backGlass,
-+         _forwardGlass, _muteGlass, _restoreGlass
++         _forwardGlass, _muteGlass, _restoreHost
 +       ]) {
 +    [_glassContent addSubview:surface];
 +  }
@@ -1361,7 +1481,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  const bool limits_changed = !(_sizeLimits == state.size_limits);
 +  _sizeLimits = state.size_limits;
++  const bool effects_changed = _state.effects != state.effects;
 +  _state = state;
++  [self configureEffects];
 +  if (!std::isfinite(_state.position)) {
 +    _state.position = 0;
 +  }
@@ -1387,6 +1509,23 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +         !((NSControl*)focused).enabled)) {
 +      [self focusControls:NO];
 +    }
++  }
++  const bool needs_presentation = !motion && _state.HasVisualEffects() &&
++      _pipWindow.visible && self.window == _pipWindow && !_state.blocked &&
++      !_returning && !_resizing;
++  if (effects_changed || needs_presentation) {
++    if (_magnifying || _resizing) {
++      // Keep resize ownership intact. Recreate decoration at the final size
++      // when the gesture completes, never at an intermediate size.
++      [self clearMotionPresentation];
++    } else if (motion || (needs_presentation && [self ensureMotion])) {
++      const BOOL done = [self updateMotionVisuals];
++      if (!done || motion->phase == Phase::Dragging || motion->phase == Phase::Settling)
++        [self startMotionTimer];
++    }
++  }
++  if (_returning && !_state.HasEffect(Effect::kReturn) && !_state.blocked) {
++    [self cancelReturn]; [self deliver:Action::kReturn value:0];
 +  }
 +}
 +
@@ -1422,7 +1561,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  for (NSView* view in @[ _returnGlass, _tuckGlass, _closeGlass ]) {
 +    Present(view, visible, animate);
 +  }
-+  _restoreGlass.hidden = _state.blocked || _tucked == geo::Side::kNone;
++  _restoreHost.hidden = _state.blocked || _tucked == geo::Side::kNone;
 +  Present(_slider, visible && _state.can_seek, animate);
 +  Present(_timestamp, visible && _state.can_seek, animate);
 +  Present(_title,
@@ -1432,12 +1571,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  Present(_resizeView, visible, animate);
 +  Present(_playGlass, visible && _state.can_play, animate);
 +  Present(_muteGlass, visible && _state.can_mute, animate);
-+  _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill", 20);
++  _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill", 20 * std::max(.8,_controlScale));
 +  _playButton.accessibilityLabel = _state.playing ? @"Pause" : @"Play";
 +  _playButton.cell.accessibilityLabel = _playButton.accessibilityLabel;
 +  _playButton.toolTip = _playButton.accessibilityLabel;
 +  _muteButton.image =
-+      Symbol(_state.muted ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 13);
++      Symbol(_state.muted ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 13 * std::max(.8,_controlScale));
 +  _muteButton.accessibilityLabel = _state.muted ? @"Unmute" : @"Mute";
 +  _muteButton.cell.accessibilityLabel = _muteButton.accessibilityLabel;
 +  _muteButton.toolTip = _muteButton.accessibilityLabel;
@@ -1445,9 +1584,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      initWithCharacters:reinterpret_cast<const unichar*>(_state.title.data())
 +                  length:_state.title.size()];
 +  _slider.enabled = _state.can_seek;
-+  ((ArciumPiPSliderCell*)_slider.cell).accent = Accent(_state.accent);
++  NSColor* accent = Accent(_state.accent);
++  ((ArciumPiPSliderCell*)_slider.cell).accent = accent;
++  for (NSView* surface in @[_returnGlass,_tuckGlass,_closeGlass,_playGlass,
++      _backGlass,_forwardGlass,_muteGlass]) TintCapsule(surface,accent);
 +  _restoreButton.image =
-+      Symbol(_tucked == geo::Side::kLeft ? @"chevron.right" : @"chevron.left");
++      Symbol(_tucked == geo::Side::kLeft ? @"chevron.right" : @"chevron.left", 18);
 +  [self updateProgress];
 +  BOOL tick = visible && _state.playing && _state.can_seek && !_seeking &&
 +              self.window.visible;
@@ -1480,31 +1622,38 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  const CGFloat w = NSWidth(self.bounds), h = NSHeight(self.bounds);
 +  _glassContainer.frame = self.bounds;
 +  _glassContent.frame = self.bounds;
-+  Place(_returnGlass, _returnButton, NSMakeRect(12, h - 44, 32, 32));
-+  Place(_closeGlass, _closeButton, NSMakeRect(w - 44, h - 44, 32, 32));
-+  Place(_tuckGlass, _tuckButton, NSMakeRect(w - 82, h - 44, 32, 32));
-+  CGFloat centerY = std::max(88.0, h * 0.5);
-+  Place(_playGlass, _playButton,
-+        NSMakeRect(w * 0.5 - 24, centerY - 24, 48, 48));
-+  Place(_backGlass, _backButton,
-+        NSMakeRect(w * 0.5 - 80, centerY - 18, 36, 36));
-+  Place(_forwardGlass, _forwardButton,
-+        NSMakeRect(w * 0.5 + 44, centerY - 18, 36, 36));
-+  BOOL seekButtons = w >= 320 && h >= 180 && _state.can_seek &&
-+                     _nativeVisible && !_state.blocked &&
-+                     _tucked == geo::Side::kNone;
-+  Present(_backGlass, seekButtons,
-+          !_state.blocked && _tucked == geo::Side::kNone);
-+  Present(_forwardGlass, seekButtons,
-+          !_state.blocked && _tucked == geo::Side::kNone);
-+  Place(_muteGlass, _muteButton, NSMakeRect(12, 12, 28, 28));
-+  _slider.frame = NSMakeRect(16, 40, w - 32, 24);
-+  _timestamp.frame = NSMakeRect(48, 13, w - 96, 14);
-+  _title.frame = NSMakeRect(52, h - 35, std::max(0.0, w - 144), 16);
-+  _resizeView.frame = NSMakeRect(w - 24, 0, 24, 24);
-+  CGFloat handleX = _tucked == geo::Side::kLeft ? w - geo::kHandleWidth : 0;
-+  Place(_restoreGlass, _restoreButton,
-+        NSMakeRect(handleX, h * 0.5 - 32, geo::kHandleWidth, 64));
++  const CGFloat scale = std::clamp(std::min(w/480.0,h/270.0),.8,1.45);
++  const CGFloat pad = 12*scale, utility = 32*scale;
++  if (std::abs(scale-_controlScale) > .001) {
++    _controlScale = scale;
++    _returnButton.image = Symbol(@"pip.exit",15*scale);
++    _closeButton.image = Symbol(@"xmark",15*scale);
++    _tuckButton.image = Symbol(@"minus",15*scale);
++    _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill",20*scale);
++    _backButton.image = Symbol(@"gobackward.15",15*scale);
++    _forwardButton.image = Symbol(@"goforward.15",15*scale);
++    _muteButton.image = Symbol(_state.muted ? @"speaker.slash.fill" : @"speaker.wave.2.fill",13*scale);
++    _title.font = [NSFont systemFontOfSize:12*scale weight:NSFontWeightSemibold];
++    _timestamp.font = [NSFont monospacedDigitSystemFontOfSize:10*scale weight:NSFontWeightRegular];
++  }
++  Place(_returnGlass,_returnButton,NSMakeRect(pad,h-pad-utility,utility,utility));
++  Place(_closeGlass,_closeButton,NSMakeRect(w-pad-utility,h-pad-utility,utility,utility));
++  Place(_tuckGlass,_tuckButton,NSMakeRect(w-pad-2*utility-6*scale,h-pad-utility,utility,utility));
++  const CGFloat centerY = h*.5;
++  Place(_playGlass,_playButton,NSMakeRect(w*.5-24*scale,centerY-24*scale,48*scale,48*scale));
++  Place(_backGlass,_backButton,NSMakeRect(w*.5-80*scale,centerY-18*scale,36*scale,36*scale));
++  Place(_forwardGlass,_forwardButton,NSMakeRect(w*.5+44*scale,centerY-18*scale,36*scale,36*scale));
++  const BOOL seekButtons = w >= 320 && h >= 180 && _state.can_seek &&
++      _nativeVisible && !_state.blocked && _tucked == geo::Side::kNone;
++  Present(_backGlass,seekButtons,!_state.blocked && _tucked == geo::Side::kNone);
++  Present(_forwardGlass,seekButtons,!_state.blocked && _tucked == geo::Side::kNone);
++  Place(_muteGlass,_muteButton,NSMakeRect(pad,pad,28*scale,28*scale));
++  _slider.frame = NSMakeRect(16*scale,40*scale,std::max(0.0,w-32*scale),24*scale);
++  _timestamp.frame = NSMakeRect(48*scale,13*scale,std::max(0.0,w-96*scale),14*scale);
++  _title.frame = NSMakeRect(52*scale,h-35*scale,std::max(0.0,w-144*scale),16*scale);
++  _resizeView.frame = NSMakeRect(w-24*scale,0,24*scale,24*scale);
++  const CGFloat handleX = _tucked == geo::Side::kLeft ? w-geo::kHandleWidth : 0;
++  Place(_restoreHost,_restoreButton,NSMakeRect(handleX,h*.5-32,geo::kHandleWidth,64));
 +  [self updateKeyLoop];
 +}
 +
@@ -1687,7 +1836,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self updateMotionScreen:pointer];
 +  motion->drag({pointer.x, pointer.y}, event.timestamp);
 +  lastEventTimestamp = event.timestamp; lastEventUptime = NSProcessInfo.processInfo.systemUptime;
-+  [self updateMotionVisuals];
++  [self requestMotionFrame];
 +}
 +- (void)mouseUp:(NSEvent*)event {
 +  if (_suppressMouseUp) { _suppressMouseUp = NO; return; }
@@ -1777,7 +1926,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  return static_cast<int>(outcome.decision)*100+static_cast<int>(outcome.side)*20+edges;
 +}
 +- (void)ensureMotionLayers {
-+  if (!_shadowWindow) {
++  if (_state.HasEffect(Effect::kShadows) && !_shadowWindow) {
 +    _shadowWindow = [[NSPanel alloc] initWithContentRect:NSZeroRect
 +        styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
 +        backing:NSBackingStoreBuffered defer:YES];
@@ -1793,7 +1942,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    ambientShadow.shadowColor = contactShadow.shadowColor = NSColor.blackColor.CGColor;
 +    [host.layer addSublayer:ambientShadow]; [host.layer addSublayer:contactShadow];
 +  }
-+  if (!_shadeView) {
++  if (!_state.HasEffect(Effect::kShadows) && _shadowWindow) {
++    [_shadowWindow.parentWindow removeChildWindow:_shadowWindow]; [_shadowWindow orderOut:nil];
++    _shadowWindow = nil; ambientShadow = contactShadow = nil;
++    _pipWindow.hasShadow = _originalShadow;
++  }
++  if (_state.HasEffect(Effect::kEdgeShade) && !_shadeView) {
 +    _shadeView = [[NSView alloc] initWithFrame:self.bounds];
 +    _shadeView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 +    _shadeView.wantsLayer = YES; _shadeView.layer.masksToBounds = YES;
@@ -1801,39 +1955,89 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [_shadeView.layer addSublayer:rimShade];
 +    [self addSubview:_shadeView positioned:NSWindowBelow relativeTo:nil];
 +  }
-+  if (_pipWindow.visible && !_shadowWindow.parentWindow) {
++  if (_pipWindow.visible && _shadowWindow && !_shadowWindow.parentWindow) {
 +    [_pipWindow addChildWindow:_shadowWindow ordered:NSWindowBelow];
 +  }
-+  if (_pipWindow.visible) _pipWindow.hasShadow = NO;
++  if (_pipWindow.visible && _shadowWindow) _pipWindow.hasShadow = NO;
++  if (!_state.HasEffect(Effect::kEdgeShade)) {
++    [_shadeView removeFromSuperview]; _shadeView = nil; rimShade = nil;
++  }
 +}
-+- (void)startMotionTimer {
-+  if (_motionTimer) return;
-+  lastVisualTime = NSProcessInfo.processInfo.systemUptime;
-+  __weak ArciumPiPNativeOverlay* weakSelf = self;
-+  _motionTimer = [NSTimer timerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer* timer) {
-+    [weakSelf motionTick:timer];
-+  }];
-+  [NSRunLoop.mainRunLoop addTimer:_motionTimer forMode:NSRunLoopCommonModes];
++// Coalesce active input into the next display frame. Idle input responds
++// immediately; a stalled display link must not leave the window frozen.
++- (void)requestMotionFrame {
++  if (_invalidated || !motion || _state.blocked || _magnifying || _resizing || _returning) return;
++  _motionFrameDirty = YES;
++  const double now = NSProcessInfo.processInfo.systemUptime;
++  if (_motionFramesRunning && now - _lastRenderAt < .1) return;
++  const BOOL wasRunning = _motionFramesRunning;
++  [self startMotionFrames];
++  if (!wasRunning) lastVisualTime = now;
++  [self renderMotionAt:now];
++}
++- (void)startMotionTimer { [self requestMotionFrame]; }
++- (void)startMotionFrames {
++  if (_motionFramesRunning) return;
++  _motionFramesRunning = YES;
++  if (@available(macOS 14.0, *)) {
++    if (!_motionDisplayLink) {
++      CADisplayLink* link = [self displayLinkWithTarget:self selector:@selector(displayMotionFrame:)];
++      [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
++      _motionDisplayLink = link;
++    }
++    [self matchMotionFrameRate];
++    ((CADisplayLink*)_motionDisplayLink).paused = NO;
++  } else {
++    const NSInteger rate = std::max<NSInteger>(60, (_pipWindow.screen ?: NSScreen.mainScreen).maximumFramesPerSecond);
++    __weak ArciumPiPNativeOverlay* weakSelf = self;
++    _motionTimer = [NSTimer timerWithTimeInterval:1.0/rate repeats:YES block:^(NSTimer* timer) {
++      [weakSelf motionTick:timer];
++    }];
++    _motionTimer.tolerance = 0;
++    [NSRunLoop.mainRunLoop addTimer:_motionTimer forMode:NSRunLoopCommonModes];
++  }
++}
++- (void)matchMotionFrameRate API_AVAILABLE(macos(14.0)) {
++  const float rate = std::max<NSInteger>(60, (_pipWindow.screen ?: NSScreen.mainScreen).maximumFramesPerSecond);
++  CADisplayLink* link = _motionDisplayLink;
++  if (link.preferredFrameRateRange.preferred != rate)
++    link.preferredFrameRateRange = CAFrameRateRangeMake(60,rate,rate);
++}
++- (void)pauseMotionFrames {
++  _motionFramesRunning = NO;
++  if (@available(macOS 14.0, *)) ((CADisplayLink*)_motionDisplayLink).paused = YES;
++  [_motionTimer invalidate]; _motionTimer = nil;
++}
++- (void)displayMotionFrame:(CADisplayLink*)link API_AVAILABLE(macos(14.0)) {
++  [self matchMotionFrameRate];
++  [self renderMotionAt:link.targetTimestamp];
 +}
 +- (void)motionTick:(NSTimer*)timer {
++  [self renderMotionAt:NSProcessInfo.processInfo.systemUptime];
++}
++- (void)renderMotionAt:(double)target {
 +  if (_invalidated || !motion || _state.blocked) { [self stopMotion]; return; }
-+  const double now = NSProcessInfo.processInfo.systemUptime;
++  if (_magnifying || _resizing) { [self pauseMotionFrames]; return; }
++  _motionFrameDirty = NO;
++  _lastRenderAt = NSProcessInfo.processInfo.systemUptime;
 +  if (motion->phase == Phase::Settling) {
 +    if (ReduceMotion()) { motion->position = motion->target; motion->velocity = {}; motion->phase = motion->tucked == Side::None ? Phase::Resting : Phase::Tucked; }
-+    else motion->step(std::clamp(now-lastVisualTime, 0.0, .05));
++    else motion->step(std::clamp(target-lastVisualTime, 0.0, .05));
 +  }
 +  if (awaitingLanding && motion->phase != Phase::Settling) {
-+    awaitingLanding = NO; pressStart = now;
++    awaitingLanding = NO; pressStart = target;
 +    [self haptic:NSHapticFeedbackPatternAlignment];
 +  }
++  _motionRenderTime = target;
 +  const BOOL done = [self updateMotionVisuals];
-+  if (done && motion->phase != Phase::Dragging && motion->phase != Phase::Settling) {
-+    [_motionTimer invalidate]; _motionTimer = nil;
++  _motionRenderTime = 0;
++  if (done && !_motionFrameDirty && motion->phase != Phase::Dragging && motion->phase != Phase::Settling) {
++    [self pauseMotionFrames];
 +    if (_tucked == geo::Side::kNone) [self rememberPlacement];
 +  }
 +}
 +- (void)stopMotion {
-+  [_motionTimer invalidate]; _motionTimer = nil;
++  [self pauseMotionFrames];
 +  // Cancellation, permission blocking, hide and display reconfiguration all
 +  // restore the pinch snapshot before releasing the model that owns it.
 +  if (_magnifying && gestures) {
@@ -1855,10 +2059,31 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [_shadeView removeFromSuperview]; _shadeView = nil; rimShade = nil;
 +  _pipWindow.hasShadow = _originalShadow;
 +}
++- (void)configureEffects {
++  feedback = Feedback{};
++  feedback.enabled = std::any_of(_state.effects.begin(), _state.effects.end(), [](bool enabled) { return enabled; });
++  feedback.lift = _state.HasEffect(Effect::kPickup) ? .75 : 0;
++  feedback.settle = _state.HasEffect(Effect::kSettle) ? 1 : 0;
++  feedback.settleEase = .10;
++  feedback.lean = _state.HasEffect(Effect::kDockLean) ? 40 : 0;
++  feedback.shadowIntensity = _state.HasEffect(Effect::kShadows) ? 1.10 : 0;
++  feedback.dockShadow = _state.HasEffect(Effect::kDockShadow) ? .90 : 0;
++  feedback.edge = _state.HasEffect(Effect::kEdgeShade) ? .80 : 0;
++  feedback.press = _state.HasEffect(Effect::kLanding) ? .40 : 0;
++  feedback.haptics = _state.HasEffect(Effect::kHaptics);
++}
++- (void)clearMotionPresentation {
++  lift = liftVelocity = settleAmount = settleVelocity = 0;
++  glow = edgeAmount = leanX = leanY = shadowX = shadowY = 0;
++  [_pressureFeedback close]; _pressureFeedback = nil;
++  [_shadowWindow.parentWindow removeChildWindow:_shadowWindow];
++  [_shadowWindow orderOut:nil]; _shadowWindow = nil; ambientShadow = contactShadow = nil;
++  [_shadeView removeFromSuperview]; _shadeView = nil; rimShade = nil;
++  _pipWindow.hasShadow = _originalShadow;
++}
 +- (BOOL)updateMotionVisuals {
 +  if (!motion) return YES;
-+  [self ensureMotionLayers];
-+  const double now = NSProcessInfo.processInfo.systemUptime;
++  const double now = _motionRenderTime > 0 ? _motionRenderTime : NSProcessInfo.processInfo.systemUptime;
 +  const double dt = std::clamp(now - lastVisualTime, 0.0, .05);
 +  lastVisualTime = now;
 +  const bool on = feedback.enabled && !ReduceMotion();
@@ -1894,6 +2119,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    shown = stableOutcome;
 +    if (shown.decision == cue.decision) { shown.target = cue.target; shown.side = cue.side; }
 +  }
++  if (!_state.HasVisualEffects() || ReduceMotion()) {
++    [self clearMotionPresentation];
++    [self setWindowFrame:NSMakeRect(position.x,position.y,w,h) animate:NO];
++    return YES;
++  }
++  [self ensureMotionLayers];
 +  const bool keep = moved && shown.decision == Decision::Keep;
 +  // Hand speed rises quickly but eases down, so a slowing drag reads as a glide rather than a step.
 +  approach(handSpeed, dragging ? cue.speed : 0, .04, .12, dt);
@@ -2032,8 +2263,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  rimShade.startPoint = CGPointMake(side == Side::Left ? bleed/(reach+bleed):reach/(reach+bleed),.5);
 +  rimShade.endPoint = CGPointMake(side == Side::Left ? 1:0,.5);
 +  rimShade.opacity = edgeAmount;
-+  if (!_pressureFeedback) _pressureFeedback = [[ArciumPiPPressureFeedback alloc] initWithParent:_pipWindow screen:screen];
-+  const BOOL pressureDone = [_pressureFeedback update:*motion frame:frame screen:screen now:now dt:dt enabled:on];
++  BOOL pressureDone = YES;
++  if (_state.HasEffect(Effect::kStrings)) {
++    if (!_pressureFeedback) _pressureFeedback = [[ArciumPiPPressureFeedback alloc] initWithParent:_pipWindow screen:screen];
++    pressureDone = [_pressureFeedback update:*motion frame:frame screen:screen now:now dt:dt enabled:on];
++  } else {
++    [_pressureFeedback close]; _pressureFeedback = nil;
++  }
 +  [CATransaction commit];
 +  return pressureDone && !pressing && lift == liftGoal && liftVelocity == 0 &&
 +      std::abs(settleAmount-settleGoal)<.001 && settleVelocity == 0 &&
@@ -2064,8 +2300,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  frame.origin.y = std::round(NSMinY(frame));
 +  frame.size.width = right - frame.origin.x;
 +  frame.size.height = top - frame.origin.y;
++  if (NSEqualRects(_pipWindow.frame,frame)) return;
 +  _adjusting = YES;
-+  [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
++  if (!animate && NSEqualSizes(_pipWindow.frame.size,frame.size))
++    [_pipWindow setFrameOrigin:frame.origin];
++  else [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
 +  _adjusting = NO;
 +}
 +- (void)preparePlacement:(const Placement&)placement
@@ -2161,6 +2400,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _nativeVisible = NO;
 +  [self refreshChrome];
 +  [self placeTuckedWindowAnimated:YES];
++  if (_state.HasEffect(Effect::kEdgeShade) && [self ensureMotion])
++    [self requestMotionFrame];
 +}
 +- (void)placeTuckedWindowAnimated:(BOOL)animate {
 +  NSArray<NSScreen*>* screens = NSScreen.screens;
@@ -2224,7 +2465,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return;
 +  }
 +  [self setNeedsLayout:YES];
-+  if (_adjusting || _dragging || _motionTimer || _scrolling || _resizing) {
++  if (_adjusting || _dragging || _motionFramesRunning || _scrolling || _resizing) {
 +    return;
 +  }
 +  if (!_placementReady) {
@@ -2335,7 +2576,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    }
 +    [self finishMotionRelease];
 +    if (!_mouseInside) [self restoreGestureFocus];
-+  } else [self updateMotionVisuals];
++  } else [self requestMotionFrame];
 +  return YES;
 +}
 +- (void)applyPinch:(CGFloat)delta ended:(BOOL)ended cancelled:(BOOL)cancelled {
@@ -2368,6 +2609,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self setWindowFrame:NSMakeRect(motion->position.x, motion->position.y,
 +      motion->size.width, motion->size.height) animate:NO];
 +  if (ended || cancelled) {
++    if (![self updateMotionVisuals]) [self startMotionTimer];
 +    if (!cancelled) [self rememberPlacement];
 +    [self armHideTimer];
 +    if (!_mouseInside) [self restoreGestureFocus];
@@ -2417,6 +2659,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  } else if (phase == 2 && _resizing) {
 +    _resizing = NO;
 +    _preferredWidth = NSWidth(_pipWindow.frame);
++    if (_state.HasVisualEffects() && [self ensureMotion] && ![self updateMotionVisuals])
++      [self startMotionTimer];
 +    [self rememberPlacement];
 +  }
 +}
@@ -2480,7 +2724,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)returnToTab:(id)sender {
 +  if (_invalidated || _state.blocked || _returning) return;
 +  [self stopMotion];
-+  if (ReduceMotion() || !_openerWindow.visible) {
++  if (!_state.HasEffect(Effect::kReturn) || ReduceMotion() || !_openerWindow.visible) {
 +    [self deliver:Action::kReturn value:0]; return;
 +  }
 +  _returning = YES; _returnFrame = _pipWindow.frame;
@@ -2641,6 +2885,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _axParent = nil;
 +  _beforeFocusRelease = nullptr;
 +  [self stopMotion];
++  if (@available(macOS 14.0, *)) [(CADisplayLink*)_motionDisplayLink invalidate];
++  _motionDisplayLink = nil;
 +  _invalidated = YES;
 +  if (_delivery) {
 +    _delivery->callback = nullptr;
@@ -2725,7 +2971,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
-@@ -1,31 +1,58 @@
+@@ -1,31 +1,65 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -2739,6 +2985,9 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +
 +#include "base/memory/weak_ptr.h"
 +#include "base/values.h"
++#include "base/scoped_observation.h"
++#include "chrome/browser/profiles/profile_observer.h"
++#include "components/prefs/pref_change_registrar.h"
  #include "ui/views/widget/native_widget_mac.h"
  
 +namespace arcium::pip {
@@ -2750,7 +2999,9 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
 -// This NativeWidget allows VideoOverlayWindowViews to have default Mac window
 -// styling despite removing the standard frame.
- class VideoOverlayWindowNativeWidgetMac : public views::NativeWidgetMac {
+-class VideoOverlayWindowNativeWidgetMac : public views::NativeWidgetMac {
++class VideoOverlayWindowNativeWidgetMac : public views::NativeWidgetMac,
++                                         public ProfileObserver {
   public:
 -  VideoOverlayWindowNativeWidgetMac(VideoOverlayWindowViews* widget);
 +  explicit VideoOverlayWindowNativeWidgetMac(VideoOverlayWindowViews* widget);
@@ -2784,12 +3035,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
 -#endif  // CHROME_BROWSER_UI_VIEWS_OVERLAY_VIDEO_OVERLAY_WINDOW_NATIVE_WIDGET_MAC_H_
 + private:
++  void OnProfileWillBeDestroyed(Profile* profile) override;
 +  void SaveUserPlacement();
 +  void ApplyWindowPolicy();
 +  void ClearNativeControlsFocus();
 +  void OnNativeAction(arcium::pip::Action action, double value);
 +  base::WeakPtr<VideoOverlayWindowViews> video_;
 +  base::WeakPtr<Profile> profile_;
++  PrefChangeRegistrar effects_pref_registrar_;
++  base::ScopedObservation<Profile, ProfileObserver> profile_observation_{this};
 +  base::DictValue placement_pref_snapshot_;
 +  std::unique_ptr<arcium::pip::NativeControls> controls_;
 +  base::WeakPtrFactory<VideoOverlayWindowNativeWidgetMac> weak_factory_{this};
@@ -2799,7 +3053,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
-@@ -1,17 +1,45 @@
+@@ -1,17 +1,46 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -2820,6 +3074,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  #include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
 +#include "components/global_media_controls/public/views/media_progress_view.h"
 +#include "components/prefs/pref_service.h"
++#include "base/functional/bind.h"
 +#include "components/remote_cocoa/app_shim/native_widget_mac_nswindow.h"
  #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
 +#include "content/public/browser/video_picture_in_picture_window_controller.h"
@@ -2850,7 +3105,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +50,298 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +51,318 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -2866,6 +3121,14 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  if (auto* contents = video_->GetController()->GetWebContents()) {
 +    profile_ = Profile::FromBrowserContext(contents->GetBrowserContext())
 +                   ->GetWeakPtr();
++    profile_observation_.Observe(profile_.get());
++    effects_pref_registrar_.Init(profile_->GetPrefs());
++    for (const auto& effect : arcium::pip::kEffectPreferences) {
++      effects_pref_registrar_.Add(effect.pref, base::BindRepeating(
++          [](base::WeakPtr<VideoOverlayWindowNativeWidgetMac> widget) {
++            if (widget) widget->RefreshNativeControls();
++          }, weak_factory_.GetWeakPtr()));
++    }
 +  }
 +  controls_ = std::make_unique<arcium::pip::NativeControls>(
 +      window, [weak = weak_factory_.GetWeakPtr()](arcium::pip::Action action,
@@ -2878,6 +3141,12 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +    if (weak)
 +      weak->ClearNativeControlsFocus();
 +  });
++}
++
++void VideoOverlayWindowNativeWidgetMac::OnProfileWillBeDestroyed(Profile* profile) {
++  effects_pref_registrar_.Reset();
++  profile_observation_.Reset();
++  profile_ = nullptr;
 +}
 +
 +void VideoOverlayWindowNativeWidgetMac::ApplyWindowPolicy() {
@@ -2990,6 +3259,8 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +void VideoOverlayWindowNativeWidgetMac::OnWindowDestroying(
 +    gfx::NativeWindow window) {
 +  SaveUserPlacement();
++  effects_pref_registrar_.Reset();
++  profile_observation_.Reset();
 +  if (video_) {
 +    video_->DetachNativeControlsHost();
 +  }
@@ -3039,6 +3310,10 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  }
 +  auto* video = video_.get();
 +  arcium::pip::State state;
++  if (profile_) {
++    for (size_t i = 0; i < arcium::pip::kEffectPreferences.size(); ++i)
++      state.effects[i] = profile_->GetPrefs()->GetBoolean(arcium::pip::kEffectPreferences[i].pref);
++  }
 +  state.size_limits = SizeLimitsFor(video);
 +  state.playing = video->playback_state_for_testing_ ==
 +                  content::VideoOverlayWindow::kPlaying;
@@ -3822,7 +4097,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1067 @@
+@@ -0,0 +1,1239 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3857,8 +4132,18 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +- (BOOL)consumeScroll:(NSEvent*)event;
 +- (void)recognizePinch:(NSMagnificationGestureRecognizer*)recognizer;
 +- (void)applyPinch:(CGFloat)delta ended:(BOOL)ended cancelled:(BOOL)cancelled;
++- (void)resizeEvent:(NSEvent*)event phase:(NSInteger)phase;
 +- (BOOL)consumeMagnify:(NSEvent*)event;
 +- (BOOL)acceptsGestureInput;
++- (void)renderMotionAt:(double)target;
++@end
++
++// Reports visibility for state-refresh admission without ordering a native window.
++@interface ArciumPiPTestWindow : NSWindow
++@property BOOL testVisible;
++@end
++@implementation ArciumPiPTestWindow
++- (BOOL)isVisible { return self.testVisible || [super isVisible]; }
 +@end
 +
 +@interface ArciumPiPTestPinchRecognizer : NSMagnificationGestureRecognizer
@@ -3943,7 +4228,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +    }
 +    NSScreen* screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
 +    NSRect area = screen.visibleFrame;
-+    window_ = [[NSWindow alloc]
++    window_ = [[ArciumPiPTestWindow alloc]
 +        initWithContentRect:NSMakeRect(NSMidX(area) - 200, NSMidY(area) - 112.5,
 +                                       400, 225)
 +                  styleMask:NSWindowStyleMaskBorderless
@@ -4017,6 +4302,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +    // AppKit; its native run loop delivers these blocks without displaying UI.
 +    [window_.contentView layoutSubtreeIfNeeded];
 +    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    // Hidden test windows may not receive display-link callbacks. Deliver a
++    // display frame explicitly; hardware/display delivery remains a native gate.
++    if ([[Overlay() valueForKey:@"motionFramesRunning"] boolValue])
++      [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
 +    [window_.contentView layoutSubtreeIfNeeded];
 +  }
 +  void Update() {
@@ -4039,7 +4328,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +                           return emitted.action == action;
 +                         });
 +  }
-+  bool Scroll(NSEventPhase phase, CGFloat dx = 0, CGFloat dy = 0) {
++  bool Scroll(NSEventPhase phase, CGFloat dx = 0, CGFloat dy = 0, bool display_frame = true) {
 +    NSPoint background =
 +        NSMakePoint(20, NSHeight(window_.contentView.bounds) * 0.5);
 +    NSButton* restore = Button(@"Restore Picture in Picture");
@@ -4054,7 +4343,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +        background, window_, dx, dy, true, phase, NSEventPhaseNone);
 +    EXPECT_EQ(event.phase, phase);
 +    EXPECT_TRUE(event.hasPreciseScrollingDeltas);
-+    return [Overlay() consumeScroll:event];
++    const bool consumed = [Overlay() consumeScroll:event];
++    if (display_frame) Pump();
++    return consumed;
 +  }
 +  void ExpectPresentedWithinOverlay(NSView* control) {
 +    ASSERT_TRUE(IsPresented(control));
@@ -4541,6 +4832,162 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_EQ(Count(Action::kReturn),1u);
 +  EXPECT_EQ(Count(Action::kClose),0u);
 +  ExpectSameFrame(window_.frame,original);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ActivePanCoalescesUntilDisplayFrame) {
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,0,false));
++  const NSRect rendered = window_.frame;
++  // Scroll injects the native event directly without pumping the display.
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,0,false));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,0,false));
++  ExpectSameFrame(window_.frame,rendered);
++  [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
++  EXPECT_GT(NSMinX(window_.frame),NSMinX(rendered)+30);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++  EXPECT_FALSE([[Overlay() valueForKey:@"motionFramesRunning"] boolValue]);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ControlsScaleAndTuckedHandleHasNoGlass) {
++  Resize(NSMakeSize(284,160));
++  const CGFloat compact = NSWidth(Button(@"Play").frame);
++  ExpectPresentedWithinOverlay(Button(@"Play"));
++  Resize(NSMakeSize(960,540));
++  EXPECT_GT(NSWidth(Button(@"Play").frame),compact*1.5);
++  for (NSString* label in @[@"Play",@"Return to tab",@"Close Picture in Picture",
++      @"Back 15 seconds",@"Forward 15 seconds",@"Mute"])
++    ExpectPresentedWithinOverlay(Button(label));
++  state_.effects[static_cast<size_t>(Effect::kEdgeShade)] = true;
++  Update();
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  NSButton* restore = Button(@"Restore Picture in Picture");
++  ASSERT_TRUE(restore);
++  EXPECT_EQ(restore.superview.class,NSView.class);
++  EXPECT_NE([Overlay() valueForKey:@"shadeView"],nil);
++  [restore performClick:nil]; Pump();
++}
++
++TEST_F(ArciumPiPNativeControlsTest, AllEffectsDefaultOffWithoutCompanionWindows) {
++  for (bool enabled : state_.effects) EXPECT_FALSE(enabled);
++  const NSRect original = window_.frame;
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++  EXPECT_NEAR(NSWidth(window_.frame),NSWidth(original),.5);
++  EXPECT_NEAR(NSHeight(window_.frame),NSHeight(original),.5);
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  EXPECT_EQ([Overlay() valueForKey:@"pressureFeedback"],nil);
++  EXPECT_EQ([Overlay() valueForKey:@"shadeView"],nil);
++  EXPECT_EQ(window_.childWindows.count,0u);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, LiveEffectChangesPreservePanOwnership) {
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++  state_.effects[static_cast<size_t>(Effect::kPickup)] = true;
++  Update();
++  EXPECT_TRUE([[Overlay() valueForKey:@"scrolling"] boolValue]);
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++  state_.effects.fill(false);
++  Update();
++  EXPECT_TRUE([[Overlay() valueForKey:@"scrolling"] boolValue]);
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, DisablingCustomShadowsRestoresNativeShadow) {
++  const BOOL originalShadow = window_.hasShadow;
++  state_.effects[static_cast<size_t>(Effect::kShadows)] = true;
++  Update();
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,0));
++  EXPECT_NE([Overlay() valueForKey:@"shadowWindow"],nil);
++  state_.effects[static_cast<size_t>(Effect::kShadows)] = false;
++  Update();
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  EXPECT_EQ(window_.hasShadow,originalShadow);
++  EXPECT_TRUE([[Overlay() valueForKey:@"scrolling"] boolValue]);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, LiveShadowToggleDuringPinchWaitsForFinalGeometry) {
++  const NSRect original = window_.frame;
++  [Overlay() applyPinch:.1 ended:NO cancelled:NO];
++  state_.effects[static_cast<size_t>(Effect::kShadows)] = true;
++  Update();
++  EXPECT_TRUE([[Overlay() valueForKey:@"magnifying"] boolValue]);
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  Pump();
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++  [Overlay() applyPinch:.2 ended:NO cancelled:NO];
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(original));
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  [Overlay() applyPinch:0 ended:YES cancelled:YES];
++  ExpectSameFrame(window_.frame,original);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++  NSWindow* shadow = [Overlay() valueForKey:@"shadowWindow"];
++  ASSERT_NE(shadow,nil);
++  const NSRect shadowFrame = shadow.frame;
++  // Changes to a resting effect apply without recording a new user placement.
++  state_.effects.fill(false);
++  Update();
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  state_.effects[static_cast<size_t>(Effect::kShadows)] = true;
++  Update();
++  shadow = [Overlay() valueForKey:@"shadowWindow"];
++  ASSERT_NE(shadow,nil);
++  ExpectSameFrame(shadow.frame,shadowFrame);
++  Pump();
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, VisibleRefreshDoesNotStealPointerResize) {
++  state_.effects[static_cast<size_t>(Effect::kPickup)] = true;
++  Update();
++  [Overlay() resizeEvent:nil phase:0];
++  // Pickup has no companion window; reporting visibility here causes no ordering.
++  ((ArciumPiPTestWindow*)window_).testVisible = YES;
++  Update();
++  ((ArciumPiPTestWindow*)window_).testVisible = NO;
++  const NSRect resized = NSMakeRect(NSMinX(window_.frame),NSMinY(window_.frame),480,270);
++  [window_ setFrame:resized display:NO];
++  [Overlay() resizeEvent:nil phase:2];
++  ExpectSameFrame(window_.frame,resized);
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++  // A stale model would restore the old 400-point width on the next drag.
++  EXPECT_GT(NSWidth(window_.frame),470);
++  EXPECT_GT(NSHeight(window_.frame),260);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, LiveEffectsWaitForPointerResizeCompletion) {
++  controls_->PreparePlacement({}, nil, 16.0 / 9.0, {});
++  Pump();
++  state_.effects[static_cast<size_t>(Effect::kShadows)] = true;
++  Update();
++  [Overlay() resizeEvent:nil phase:0];
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  Update();
++  const NSRect resized = NSMakeRect(NSMinX(window_.frame),NSMinY(window_.frame),480,270);
++  [window_ setFrame:resized display:NO];
++  state_.effects.fill(false);
++  Update();
++  state_.effects[static_cast<size_t>(Effect::kShadows)] = true;
++  Update();
++  EXPECT_TRUE([[Overlay() valueForKey:@"resizing"] boolValue]);
++  EXPECT_EQ([Overlay() valueForKey:@"shadowWindow"],nil);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++  [Overlay() resizeEvent:nil phase:2];
++  ExpectSameFrame(window_.frame,resized);
++  EXPECT_NE([Overlay() valueForKey:@"shadowWindow"],nil);
++  EXPECT_TRUE(controls_->TakeUserPlacement());
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++  EXPECT_NEAR(NSWidth(window_.frame),NSWidth(resized),.5);
++  EXPECT_NEAR(NSHeight(window_.frame),NSHeight(resized),.5);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, FinalSizeLandingIgnoresPlaceholderOrigin) {
@@ -5105,12 +5552,14 @@ Index: src/chrome/browser/ui/browser_ui_prefs.cc
  #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
  #include "chrome/browser/ui/helium/arcium_content_frame.h"
  #if defined(TOOLKIT_VIEWS)
-@@ -184,6 +188,9 @@ void RegisterBrowserUserPrefs(user_prefs
+@@ -184,6 +188,11 @@ void RegisterBrowserUserPrefs(user_prefs
    registry->RegisterBooleanPref(prefs::kArciumAutoPictureInPictureEnabled,
                                  true);
  
 +#if BUILDFLAG(IS_MAC)
 +  registry->RegisterDictionaryPref(arcium::pip::kPlacementPref);
++  for (const auto& effect : arcium::pip::kEffectPreferences)
++    registry->RegisterBooleanPref(effect.pref, false);
 +#endif
    registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
                                  pref_registration_flags);
@@ -5857,3 +6306,285 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_gestures.h
 +};
 +
 +}  // namespace pip_motion
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -49,6 +49,25 @@ struct ArciumChoice: Identifiable, Equat
+     var id: Int { value }
+ }
+ 
++struct ArciumPiPEffectSnapshot: Identifiable, Equatable {
++    let key: String
++    let title: String
++    let description: String
++    let value: Bool
++    let available: Bool
++    let managed: Bool
++    var id: String { key }
++
++    init(_ dictionary: [String: Any]) {
++        key = dictionary["key"] as? String ?? ""
++        title = dictionary["title"] as? String ?? ""
++        description = dictionary["description"] as? String ?? ""
++        value = boolean(dictionary["value"])
++        available = boolean(dictionary["available"])
++        managed = boolean(dictionary["managed"])
++    }
++}
++
+ struct ArciumGeneralSnapshot: Equatable {
+     var startupType = 0
+     var startupOptions: [ArciumChoice] = []
+@@ -57,6 +76,7 @@ struct ArciumGeneralSnapshot: Equatable
+     var peekEnabled = false
+     var persistentItemsEnabled = false
+     var autoPictureInPictureEnabled = false
++    var pictureInPictureEffects: [ArciumPiPEffectSnapshot] = []
+     var confirmToQuit = false
+     var showSpacesInDockMenu = false
+     var managed: [String: Bool] = [:]
+@@ -74,6 +94,8 @@ struct ArciumGeneralSnapshot: Equatable
+         peekEnabled = boolean(dictionary["peekEnabled"])
+         persistentItemsEnabled = boolean(dictionary["persistentItemsEnabled"])
+         autoPictureInPictureEnabled = boolean(dictionary["autoPictureInPictureEnabled"])
++        pictureInPictureEffects = (dictionary["pipEffects"] as? [[String: Any]] ?? [])
++            .map(ArciumPiPEffectSnapshot.init).filter { !$0.key.isEmpty }
+         confirmToQuit = boolean(dictionary["confirmToQuit"])
+         showSpacesInDockMenu = boolean(dictionary["showSpacesInDockMenu"])
+         managed = booleanMap(dictionary["managed"])
+@@ -1509,7 +1531,7 @@ final class ArciumSettingsStore: Observa
+         case "auto_picture_in_picture_enabled": snapshot.general.autoPictureInPictureEnabled
+         case "confirm_to_quit": snapshot.general.confirmToQuit
+         case "show_spaces_in_dock_menu": snapshot.general.showSpacesInDockMenu
+-        default: false
++        default: snapshot.general.pictureInPictureEffects.first { $0.key == key }?.value ?? false
+         }
+     }
+ 
+@@ -1518,7 +1540,9 @@ final class ArciumSettingsStore: Observa
+             "prompt_for_download", "little_arc_external_links", "peek_enabled",
+             "persistent_items_enabled", "auto_picture_in_picture_enabled",
+             "confirm_to_quit", "show_spaces_in_dock_menu"
+-        ].contains(key) else {
++        ].contains(key) || snapshot.general.pictureInPictureEffects.contains(where: {
++            $0.key == key && $0.available && !$0.managed
++        }) else {
+             return
+         }
+         settingChanged(key: key, value: value)
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -495,6 +495,10 @@ private struct GeneralSettingsPage: View
+                         )
+                     )
+ 
++
++                }
++
++                Section("Picture in Picture") {
+                     BooleanSetting(
+                         title: "Enter Picture-in-Picture automatically",
+                         description: store.snapshot.general.hasValue("auto_picture_in_picture_enabled")
+@@ -509,6 +513,20 @@ private struct GeneralSettingsPage: View
+                     )
+                 }
+ 
++                Section("Picture in Picture effects") {
++                    ForEach(store.snapshot.general.pictureInPictureEffects) { effect in
++                        BooleanSetting(
++                            title: effect.title,
++                            description: effect.description,
++                            enabled: effect.available && !effect.managed,
++                            value: Binding(
++                                get: { store.generalBoolean(effect.key) },
++                                set: { store.setGeneralBoolean(effect.key, value: $0) }
++                            )
++                        )
++                    }
++                }
++
+                 Section("Links and address bar") {
+                     BooleanSetting(
+                         title: "Open external links in Little Arc",
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift
+@@ -657,6 +657,31 @@ final class ArciumSettingsUIContractTest
+     }
+ 
+     @MainActor
++    func testPiPEffectTogglesAreOptInManagedAndLiveSnapshots() {
++        let delegate = TestDelegate()
++        let store = ArciumSettingsStore(snapshot: NSDictionary(dictionary: [
++            "available": true,
++            "general": ["pipEffects": [
++                ["key": "pip_effect_pickup", "title": "Pickup lift", "available": true],
++                ["key": "pip_effect_haptics", "title": "Haptics", "value": true,
++                 "available": true, "managed": true]
++            ]]
++        ]), delegate: delegate)
++        XCTAssertFalse(store.generalBoolean("pip_effect_pickup"))
++        XCTAssertTrue(store.generalBoolean("pip_effect_haptics"))
++        store.setGeneralBoolean("pip_effect_pickup", value: true)
++        store.setGeneralBoolean("pip_effect_haptics", value: false)
++        store.setGeneralBoolean("pip_effect_unknown", value: true)
++        XCTAssertEqual(delegate.settings.map(\.key), ["pip_effect_pickup"])
++        XCTAssertEqual(delegate.settings.first?.value as? Bool, true)
++        store.updateSnapshot(NSDictionary(dictionary: ["available": true,
++            "general": ["pipEffects": [["key": "pip_effect_pickup", "title": "Pickup lift",
++                "value": true, "available": true]]]]))
++        XCTAssertTrue(store.generalBoolean("pip_effect_pickup"))
++        XCTAssertFalse(ArciumGeneralSnapshot([:]).pictureInPictureEffects.contains { $0.value })
++    }
++
++    @MainActor
+     func testNativeFeatureSettingsReadWriteAndRefreshUseStableKeys() {
+         let delegate = TestDelegate()
+         let store = ArciumSettingsStore(
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -2,6 +2,7 @@
+ // You can use, redistribute, and/or modify this source code under
+ // the terms of the GPL-3.0 license that can be found in the LICENSE file.
+ 
++#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
+ #include "chrome/browser/ui/cocoa/arcium_settings_window_controller.h"
+ 
+ #import <AppKit/AppKit.h>
+@@ -1419,7 +1420,17 @@ void SettingsModelProfileWillBeDestroyed
+       model &&
+       model->HasLocalPreference(prefs::kArciumShowSpacesInDockMenu);
+ 
++  NSMutableArray* pip_effects = [NSMutableArray array];
++  for (const auto& effect : arcium::pip::kEffectPreferences) {
++    const bool exists = model && model->HasPreference(effect.pref);
++    [pip_effects addObject:@{
++      @"key": @(effect.key), @"title": @(effect.title), @"description": @(effect.description),
++      @"value": @(exists && model->GetBoolean(effect.pref)),
++      @"available": @(exists), @"managed": @(exists && model->IsManaged(effect.pref)),
++    }];
++  }
+   NSDictionary* general = @{
++    @"pipEffects": pip_effects,
+     @"availableSection" : @(available),
+     @"startupType" : @(model ? model->GetStartupType()
+                              : static_cast<int>(SessionStartupPref::DEFAULT)),
+@@ -2398,6 +2409,16 @@ void SettingsModelProfileWillBeDestroyed
+     }
+     return;
+   }
++  for (const auto& effect : arcium::pip::kEffectPreferences) {
++    if ([key isEqualToString:@(effect.key)]) {
++      if (GetBooleanObject(value, &boolean_value) && model_->HasPreference(effect.pref) &&
++          !model_->IsManaged(effect.pref)) {
++        model_->SetBoolean(effect.pref, boolean_value);
++        [self modelDidChange];
++      }
++      return;
++    }
++  }
+   if ([key isEqualToString:kKeyAutoPictureInPictureEnabled] &&
+       GetBooleanObject(value, &boolean_value)) {
+     if (base::FeatureList::IsEnabled(
+Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/arcium_settings_model.cc
++++ src/chrome/browser/ui/helium/arcium_settings_model.cc
+@@ -41,6 +41,9 @@
+ #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
+ #include "chrome/browser/ui/views/helium/surface_style.h"
+ #include "chrome/common/pref_names.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
++#endif
+ #include "components/prefs/pref_service.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/color/color_id.h"
+@@ -57,7 +60,7 @@ constexpr char kSharedPaletteDarkChromeC
+ constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
+ constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
+ 
+-constexpr std::array<std::string_view, 44> kProfilePreferences = {
++constexpr auto kProfilePreferences = std::to_array<std::string_view>({
+     prefs::kRestoreOnStartup,
+     prefs::kPromptForDownload,
+     prefs::kHeliumLittleArcExternalLinks,
+@@ -66,6 +69,18 @@ constexpr std::array<std::string_view, 4
+     prefs::kNewTabNextToActive,
+     prefs::kTabCyclingMRU,
+     prefs::kArciumAutoPictureInPictureEnabled,
++#if BUILDFLAG(IS_MAC)
++    arcium::pip::kEffectPreferences[0].pref,
++    arcium::pip::kEffectPreferences[1].pref,
++    arcium::pip::kEffectPreferences[2].pref,
++    arcium::pip::kEffectPreferences[3].pref,
++    arcium::pip::kEffectPreferences[4].pref,
++    arcium::pip::kEffectPreferences[5].pref,
++    arcium::pip::kEffectPreferences[6].pref,
++    arcium::pip::kEffectPreferences[7].pref,
++    arcium::pip::kEffectPreferences[8].pref,
++    arcium::pip::kEffectPreferences[9].pref,
++#endif
+     prefs::kShiftRightClickContextMenu,
+     prefs::kHeliumLayout,
+     prefs::kVerticalTabsUncollapsedWidth,
+@@ -102,7 +117,7 @@ constexpr std::array<std::string_view, 4
+     helium::kHeliumActiveSpaceIdPref,
+     helium::kArciumChromeAppearancePref,
+     arcium_settings::kSharedPalettePref,
+-};
++});
+ 
+ struct ParsedSharedPalette {
+   base::DictValue configuration;
+Index: src/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
+===================================================================
+--- src.orig/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
++++ src/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
+@@ -10,6 +10,8 @@
+ #include "base/functional/callback_helpers.h"
+ #include "base/test/bind.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
++#include "components/prefs/pref_service.h"
+ #include "chrome/browser/ui/helium/helium_space.h"
+ #include "chrome/browser/ui/helium/helium_space_service.h"
+ #include "chrome/browser/ui/helium/helium_space_service_factory.h"
+@@ -40,6 +42,31 @@ class ArciumSystemAppearanceModelTest :
+   raw_ptr<helium::HeliumSpaceService> service_ = nullptr;
+ };
+ 
++TEST_F(ArciumSystemAppearanceModelTest, PiPEffectsDefaultOffAndNotifyNativeSettings) {
++  int changes = 0;
++  ArciumSettingsModel model(profile(),
++      base::BindLambdaForTesting([&] { ++changes; }), base::DoNothing());
++  for (const auto& effect : arcium::pip::kEffectPreferences) {
++    SCOPED_TRACE(effect.pref);
++    ASSERT_TRUE(model.HasPreference(effect.pref));
++    EXPECT_FALSE(model.GetBoolean(effect.pref));
++    EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(effect.pref));
++    int before = changes;
++    model.SetBoolean(effect.pref,true);
++    EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(effect.pref));
++    EXPECT_GT(changes,before);
++    before = changes;
++    profile()->GetPrefs()->SetBoolean(effect.pref,false);
++    EXPECT_FALSE(model.GetBoolean(effect.pref));
++    EXPECT_GT(changes,before);
++  }
++  model.Shutdown();
++  const int stopped = changes;
++  for (const auto& effect : arcium::pip::kEffectPreferences)
++    profile()->GetPrefs()->SetBoolean(effect.pref,true);
++  EXPECT_EQ(stopped,changes);
++}
++
+ TEST_F(ArciumSystemAppearanceModelTest,
+        NativeChangesRefreshFixedChromeAndStopAtShutdown) {
+   ui::MockOsSettingsProvider os;

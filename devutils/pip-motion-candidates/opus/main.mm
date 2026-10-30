@@ -328,8 +328,16 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSTextField *hint;
   NSMutableArray<NSTextField *> *headings, *feedbackHeadings;
   NSTextField *status, *fileStatus, *explanation;
-  NSTimer *animationTimer, *fileTimer, *saveTimer, *visualTimer;
-  double lastTick;
+  NSTimer *fileTimer, *saveTimer;
+  // One display-synchronized frame drives the spring, window placement and visuals.
+  // CADisplayLink on macOS 14+, a refresh-rate timer before that.
+  id frameLink;
+  NSTimer *frameTimer;
+  BOOL framesRunning, animating, frameDirty, statusFresh;
+  double lastTick, renderTime, lastStatusUpdate, lastRenderAt;
+  // Last velocity-graph inputs, so an unchanged graph is not rebuilt.
+  size_t traceKeyCount;
+  double traceKeyTime, traceKeyValue, traceKeyFirst, traceKeyWidth, traceKeyHeight, traceKeyDX, traceKeyDY, traceKeyPeak;
   NSString *settingsPath, *statePath;
   NSData *lastSettingsData;
   NSDictionary *legacyPressThresholds;
@@ -725,6 +733,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   };
   glowingShape(&dustGlow, &dustShape, 3);
   dustShape.fillColor = gray(1, .85); dustShape.strokeColor = nil;
+  // The dust glow uses the specks as its shadow path; match the fill's alpha.
+  dustGlow.shadowOpacity = .85;
   // One stage holds the shadows, card and overlay so they lift and scale together.
   PassView *host = [[PassView alloc] initWithFrame:root.bounds];
   host.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -741,6 +751,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   borderString.shape.contentsScale = scale;
   borderString.shape.fillColor = nil; borderString.shape.strokeColor = gray(1, 1);
   borderString.shape.lineWidth = 4.5; borderString.shape.lineJoin = kCALineJoinRound;
+  borderString.shape.lineCap = kCALineCapRound;
   borderString.fields.mask = borderString.shape;
   borderString.horizontal = [CAGradientLayer layer];
   borderString.vertical = [CAGradientLayer layer];
@@ -923,7 +934,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   traceLine.strokeColor = [NSColor colorWithSRGBRed:.66 green:.84 blue:.88 alpha:.9].CGColor;
   traceLine.lineWidth = 1.75; traceLine.fillColor = nil;
   traceLine.lineCap = kCALineCapRound; traceLine.lineJoin = kCALineJoinRound;
-  traceLine.shadowColor = gray(1, 1); traceLine.shadowOpacity = .15; traceLine.shadowRadius = 2;
+  traceLine.shadowColor = gray(1, 1); traceLine.shadowOpacity = .135; traceLine.shadowRadius = 2;
   traceLine.shadowOffset = CGSizeZero;
   [traceBox addSublayer:traceLine];
   traceDot = [CAShapeLayer layer]; traceDot.frame = traceBox.bounds; traceDot.contentsScale = scale;
@@ -955,11 +966,14 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     // settings window still use the screen-coordinate monitor adapter.
     if (event.type == NSEventTypeMagnify) {
       ++lab->pinchEvents; lab->lastPinchRoute = @"monitor"; lab->lastPinchDelta = event.magnification;
-      const NSPoint point = event.window ? [event.window convertPointToScreen:event.locationInWindow] : event.locationInWindow;
-      fprintf(stderr, "pinch event phase=%lu window=%ld key=%ld card_key=%d point=(%.1f,%.1f) delta=%.5f\n",
-          (unsigned long)event.phase, (long)event.window.windowNumber, (long)NSApp.keyWindow.windowNumber,
-          lab->panel.isKeyWindow, point.x, point.y, event.magnification);
-      [lab writeState];
+      // Per-event logging is opt-in; state.json is written once the pinch ends.
+      static const bool logPinch = getenv("OPUS_PIP_LOG_PINCH") != nullptr;
+      if (logPinch) {
+        const NSPoint point = event.window ? [event.window convertPointToScreen:event.locationInWindow] : event.locationInWindow;
+        fprintf(stderr, "pinch event phase=%lu window=%ld key=%ld card_key=%d point=(%.1f,%.1f) delta=%.5f\n",
+            (unsigned long)event.phase, (long)event.window.windowNumber, (long)NSApp.keyWindow.windowNumber,
+            lab->panel.isKeyWindow, point.x, point.y, event.magnification);
+      }
       if (event.window == lab->panel) return event;
     }
     return [lab consumeGesture:event] ? nil : event;
@@ -1047,7 +1061,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 }
 - (void)applyFeedback:(Feedback)next {
   feedback = next; [self syncControls]; [self scheduleSave];
-  [self wakeVisuals]; [self updateVisuals];
+  [self wakeVisuals];
 }
 - (void)feedbackToggled:(NSButton *)sender {
   Feedback next = feedback; next.enabled = sender.state == NSControlStateValueOn;
@@ -1338,22 +1352,87 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const bool top = target.y + motion->size.height / 2 > area.y + area.height / 2;
   return [NSString stringWithFormat:@"%@-%@ corner", top ? @"top" : @"bottom", left ? @"left" : @"right"];
 }
-- (void)wakeVisuals {
-  if (returnedToBrowser || visualTimer) return;
-  lastVisualTime = NSProcessInfo.processInfo.systemUptime;
-  visualTimer = [NSTimer timerWithTimeInterval:1.0/120 target:self selector:@selector(visualTick:) userInfo:nil repeats:YES];
-  [NSRunLoop.mainRunLoop addTimer:visualTimer forMode:NSRunLoopCommonModes];
+- (void)wakeVisuals { [self requestFrame]; }
+// Marks the card for the next display frame. When frames are idle, renders now so the first
+// response to input is not delayed, then keeps frames running until everything has settled.
+- (void)requestFrame {
+  if (returnedToBrowser) return;
+  frameDirty = YES;
+  // A stalled link (display asleep, window between screens) must not freeze the card.
+  if (framesRunning && CACurrentMediaTime() - lastRenderAt < .1) return;
+  const BOOL wasRunning = framesRunning;
+  [self startFrames];  // Before rendering, so a nested request only marks the frame dirty.
+  if (!wasRunning) lastVisualTime = CACurrentMediaTime();
+  [self renderAt:CACurrentMediaTime()];
 }
-- (void)visualTick:(NSTimer *)timer {
-  if ([self updateVisuals] && motion->phase != Phase::Dragging && motion->phase != Phase::Settling) {
-    [visualTimer invalidate]; visualTimer = nil;
+- (void)startFrames {
+  if (framesRunning || returnedToBrowser) return;
+  framesRunning = YES;
+  if (@available(macOS 14.0, *)) {
+    if (!frameLink) {
+      // A view's display link follows the display the card is on.
+      CADisplayLink *link = [panel.contentView displayLinkWithTarget:self selector:@selector(displayFrame:)];
+      [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+      frameLink = link;
+    }
+    [self matchFrameRate];
+    ((CADisplayLink *)frameLink).paused = NO;
+  } else {
+    const NSInteger rate = std::max<NSInteger>(60, (panel.screen ?: NSScreen.mainScreen).maximumFramesPerSecond);
+    frameTimer = [NSTimer timerWithTimeInterval:1.0 / rate target:self selector:@selector(timerFrame:) userInfo:nil repeats:YES];
+    frameTimer.tolerance = 0;
+    [NSRunLoop.mainRunLoop addTimer:frameTimer forMode:NSRunLoopCommonModes];
   }
+}
+// Ask for the card's display's full rate, so ProMotion and faster external displays are not capped.
+- (void)matchFrameRate API_AVAILABLE(macos(14.0)) {
+  const float rate = std::max<NSInteger>(60, (panel.screen ?: NSScreen.mainScreen).maximumFramesPerSecond);
+  CADisplayLink *link = frameLink;
+  if (link.preferredFrameRateRange.preferred != rate) link.preferredFrameRateRange = CAFrameRateRangeMake(60, rate, rate);
+}
+- (void)stopFrames {
+  framesRunning = NO;
+  if (@available(macOS 14.0, *)) ((CADisplayLink *)frameLink).paused = YES;
+  [frameTimer invalidate]; frameTimer = nil;
+}
+- (void)displayFrame:(CADisplayLink *)link API_AVAILABLE(macos(14.0)) {
+  [self matchFrameRate];
+  [self renderAt:link.targetTimestamp];
+}
+- (void)timerFrame:(NSTimer *)timer { [self renderAt:CACurrentMediaTime()]; }
+// One frame: step the spring to the time this frame is shown, place the window, draw once.
+- (void)renderAt:(double)target {
+  if (returnedToBrowser) { [self stopFrames]; return; }
+  frameDirty = NO;
+  lastRenderAt = CACurrentMediaTime();
+  BOOL finishedSettle = NO;
+  if (animating) {
+    motion->step(std::clamp(target - lastTick, 0.0, .05)); lastTick = target;
+    if (motion->phase != Phase::Settling) {
+      animating = NO; finishedSettle = YES;
+      if (awaitingLanding) [self land];
+    }
+  }
+  [self placeWindow];
+  [self updateStatus:finishedSettle];
+  renderTime = target;
+  const BOOL settled = [self updateVisuals];
+  renderTime = 0;
+  if (finishedSettle) [self writeState];
+  if (settled && !animating && !frameDirty &&
+      motion->phase != Phase::Dragging && motion->phase != Phase::Settling) [self stopFrames];
+}
+- (void)placeWindow {
+  const CGFloat w = motion->size.width, h = motion->size.height;
+  const NSRect frame = NSMakeRect(motion->position.x - kPad, motion->position.y - kPad, w + 2 * kPad, h + 2 * kPad);
+  if (!NSEqualSizes(panel.frame.size, frame.size)) [panel setFrame:frame display:NO];
+  else if (!NSEqualPoints(panel.frame.origin, frame.origin)) [panel setFrameOrigin:frame.origin];
 }
 // Physical cues derived from the release prediction: lift, hold glow, rim shadow and dock lean.
 // Returns YES once every smoothed value has reached its target.
 - (BOOL)updateVisuals {
   if (returnedToBrowser) return YES;
-  const double now = NSProcessInfo.processInfo.systemUptime;
+  const double now = renderTime > 0 ? renderTime : CACurrentMediaTime();
   const double dt = std::clamp(now - lastVisualTime, 0.0, .05);
   lastVisualTime = now;
   const bool on = feedback.enabled;
@@ -1508,7 +1587,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const double dip = pressing ? .02 * feedback.press * (1 - std::cos(2 * M_PI * pressAge / pressTime)) / 2 : 0;
   // Lifting brings the card toward you: it grows slightly as its shadow spreads.
   const double cardScale = (1 + .03 * l) * (1 - dip);
-  if (!NSEqualRects(cardHost.frame, NSRectFromCGRect(card))) cardHost.frame = NSRectFromCGRect(card);
+  // The card view stays put; lean is a layer translation so the glass view is not laid out per frame.
+  const CGRect home = CGRectMake(kPad, kPad, w, h);
+  if (!NSEqualRects(cardHost.frame, NSRectFromCGRect(home))) cardHost.frame = NSRectFromCGRect(home);
   // Fast flicks stretch the card along its travel, then lift scale, then tilt in perspective.
   const double speed = std::hypot(visVX, visVY);
   const double stretch = on && !reduceMotion ? feedback.stretch / 100 * smoothstep((speed - 600) / 2400) : 0;
@@ -1524,8 +1605,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     transform = CATransform3DConcat(CATransform3DConcat(CATransform3DConcat(transform,
         CATransform3DMakeRotation(tiltY, 0, 1, 0)), CATransform3DMakeRotation(tiltX, 1, 0, 0)), perspective);
   }
+  if (leanX != 0 || leanY != 0) transform = CATransform3DConcat(transform, CATransform3DMakeTranslation(leanX, leanY, 0));
   stage.transform = transform;
-  [self updateStringOcclusion];
   // Pickup shadow: +1 spreads and softens as it lifts, -1 tightens and darkens.
   const double k = std::clamp(feedback.pickupShadow, -1.0, 1.0);
   // Light comes from a box over the middle of the work area. A window over the box casts
@@ -1641,6 +1722,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     if (peakStress >= 0) breakStart = now;
   }
 
+  // Each field's radial reach in fx coordinates; the string is invisible outside every field.
+  CGPoint fieldCenter[2] = {}; CGSize fieldRadius[2] = {};
   for (int axis = 0; axis < 2; ++axis) {
     Membrane& m = membranes[axis];
     const bool side = axis == 0;
@@ -1677,10 +1760,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       const double crossReach = std::max(reach, std::abs(m.bend) + 80);
       const CGPoint center = side ? CGPointMake(m.boundary - fxOrigin.x, m.anchor - fxOrigin.y) :
           CGPointMake(m.anchor - fxOrigin.x, m.boundary - fxOrigin.y);
-      const double fw = fxRoot.bounds.size.width, fh = fxRoot.bounds.size.height;
-      field.startPoint = CGPointMake(center.x / fw, center.y / fh);
-      field.endPoint = CGPointMake((center.x + (side ? crossReach : reach)) / fw,
-          (center.y + (side ? reach : crossReach)) / fh);
+      // Start and end points are set once the string's bounds are known.
+      fieldCenter[axis] = center;
+      fieldRadius[axis] = CGSizeMake(side ? crossReach : reach, side ? reach : crossReach);
       const double stress = active ? m.stress : m.stress * std::min(1.0, std::abs(m.bend) / m.pressedBend);
       double rgb[3]; stressColor(stress, rgb);
       field.colors = @[(__bridge id)rgba(rgb, 1), (__bridge id)rgba(rgb, 1),
@@ -1707,6 +1789,18 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     CGMutablePathRef path = CGPathCreateMutable();
     borderSamples.clear();
     if (cornerString) {
+      // The loop circles the whole work area, but only the part inside a glow field can show.
+      // Samples stay complete for tearing; the drawn path skips the invisible stretches.
+      auto inField = [&](CGPoint p) {
+        for (int axis = 0; axis < 2; ++axis) if (axisGlow[axis] > 0) {
+          const double rx = fieldRadius[axis].width + 8, ry = fieldRadius[axis].height + 8;
+          const double dx = (p.x - fieldCenter[axis].x) / rx, dy = (p.y - fieldCenter[axis].y) / ry;
+          if (dx * dx + dy * dy <= 1) return true;
+        }
+        return false;
+      };
+      bool drawing = false, closed = true;
+      CGPoint previous = CGPointZero;
       double travelled = 0;
       for (size_t edge = 0; edge < sections.size(); ++edge) {
         const double edgeLength = sections[edge];
@@ -1723,13 +1817,25 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
             visibility = std::max(visibility, axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0));
           }
           const CGPoint local = CGPointMake(point.x - fxOrigin.x, point.y - fxOrigin.y);
-          if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
-          else CGPathAddLineToPoint(path, nullptr, local.x, local.y);
+          // Each drawn run extends one sample past the field on both sides, where it is transparent.
+          const bool inside = inField(local);
+          if (inside && !drawing) {
+            if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
+            else {
+              CGPathMoveToPoint(path, nullptr, previous.x, previous.y);
+              CGPathAddLineToPoint(path, nullptr, local.x, local.y);
+            }
+            drawing = true;
+          } else if (drawing) {
+            CGPathAddLineToPoint(path, nullptr, local.x, local.y);
+            if (!inside) { drawing = false; closed = false; }
+          } else closed = false;
+          previous = local;
           borderSamples.push_back({point, at, visibility});
         }
         travelled += edgeLength;
       }
-      CGPathCloseSubpath(path);
+      if (closed) CGPathCloseSubpath(path);
     } else {
       const int axis = straightStringAxis;
       const auto& m = membranes[axis];
@@ -1751,6 +1857,25 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
         const double visible = axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0);
         borderSamples.push_back({point, at, visible});
       }
+    }
+    // Size the string's gradient, mask and glow layers to what it covers rather than the screen,
+    // keeping fx coordinates inside them. The margin holds the widest glow.
+    CGRect extent = CGPathIsEmpty(path) ? CGRectNull : CGPathGetPathBoundingBox(path);
+    extent = CGRectIntersection(CGRectInset(extent, -84, -84), fxRoot.bounds);
+    if (CGRectIsNull(extent) || CGRectIsEmpty(extent)) extent = CGRectMake(0, 0, 1, 1);
+    const CGPoint middle = CGPointMake(CGRectGetMidX(extent), CGRectGetMidY(extent));
+    for (CALayer *layer in @[borderString.group, borderString.glow, borderString.fields, borderString.shape]) {
+      layer.bounds = extent; layer.position = middle;
+    }
+    for (int axis = 0; axis < 2; ++axis) {
+      CAGradientLayer *field = axis == 0 ? borderString.horizontal : borderString.vertical;
+      field.bounds = CGRectMake(0, 0, extent.size.width, extent.size.height); field.position = middle;
+      if (axisGlow[axis] <= 0) continue;
+      const CGPoint start = CGPointMake((fieldCenter[axis].x - extent.origin.x) / extent.size.width,
+          (fieldCenter[axis].y - extent.origin.y) / extent.size.height);
+      field.startPoint = start;
+      field.endPoint = CGPointMake(start.x + fieldRadius[axis].width / extent.size.width,
+          start.y + fieldRadius[axis].height / extent.size.height);
     }
     borderString.shape.path = path; CGPathRelease(path);
     const int peak = cornerString ? (membranes[0].stress * axisGlow[0] > membranes[1].stress * axisGlow[1] ? 0 : 1) : straightStringAxis;
@@ -1788,8 +1913,17 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     for (int c = 0; c < 3; ++c) threadRGB[c] = 1 + (breakRGB[c] - 1) * stressRemaining;
     threadShape.strokeColor = rgba(threadRGB, 1); threadGlow.shadowColor = rgba(threadRGB, 1);
     threadShape.lineWidth = 3 - 1.5 * u;
+    // The glow takes its shape from the stroked threads, not from a full-screen alpha pass.
+    CGPathRef outline = CGPathCreateCopyByStrokingPath(threadShape.path, nullptr, threadShape.lineWidth,
+        kCGLineCapRound, kCGLineJoinRound, 10);
+    threadGlow.shadowPath = outline; CGPathRelease(outline);
     threadGlow.opacity = feedback.edgeGlow * std::pow(1 - u, 1.4);
   } else threadGlow.opacity = 0;
+  // The string's occlusion mask only matters while some string or thread is visible.
+  const bool stringVisible = (borderString.group.opacity > 0 && (axisGlow[0] > 0 || axisGlow[1] > 0)) ||
+      threadGlow.opacity > 0;
+  stringRoot.hidden = !stringVisible;
+  if (stringVisible) [self updateStringOcclusion];
 
   // Flight state is captured synchronously by startAnimation, before the first spring step.
   const bool settlingNow = motion->phase == Phase::Settling;
@@ -1819,31 +1953,46 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const double gx = 0, gw = traceBox.bounds.size.width, gy = 3;
   const double gh = std::max(12.0, traceBox.bounds.size.height - 30), zero = gy + gh / 2;
   const double firstTime = traceSamples.front().first;
-  const double span = std::max(.6, traceSamples.back().first - firstTime);
-  CGMutablePathRef graph = CGPathCreateMutable();
-  double x = gx, y = zero;
-  for (size_t i = 0; i < traceSamples.size(); ++i) {
-    x = gx + gw * (traceSamples[i].first - firstTime) / span;
-    y = zero + (gh / 2 - 2) * std::asinh(traceSamples[i].second / 50) / std::asinh(tracePeak / 50);
-    if (i == 0) CGPathMoveToPoint(graph, nullptr, x, y); else CGPathAddLineToPoint(graph, nullptr, x, y);
+  // Rebuild the graph only when it is shown and its inputs changed; at rest it is static.
+  const bool traceShown = on && feedback.springTrace > 0;
+  const bool traceChanged = traceKeyCount != traceSamples.size() || traceKeyTime != traceSamples.back().first ||
+      traceKeyValue != traceSamples.back().second || traceKeyFirst != firstTime || traceKeyWidth != gw ||
+      traceKeyHeight != traceBox.bounds.size.height || traceKeyDX != traceDirection.x ||
+      traceKeyDY != traceDirection.y || traceKeyPeak != tracePeak;
+  if (traceShown && (traceChanged || traceSamples.size() == 1)) {
+    traceKeyCount = traceSamples.size(); traceKeyTime = traceSamples.back().first;
+    traceKeyValue = traceSamples.back().second; traceKeyFirst = firstTime; traceKeyWidth = gw;
+    traceKeyHeight = traceBox.bounds.size.height; traceKeyDX = traceDirection.x; traceKeyDY = traceDirection.y;
+    traceKeyPeak = tracePeak;
+    const double span = std::max(.6, traceSamples.back().first - firstTime);
+    CGMutablePathRef graph = CGPathCreateMutable();
+    double x = gx, y = zero;
+    for (size_t i = 0; i < traceSamples.size(); ++i) {
+      x = gx + gw * (traceSamples[i].first - firstTime) / span;
+      y = zero + (gh / 2 - 2) * std::asinh(traceSamples[i].second / 50) / std::asinh(tracePeak / 50);
+      if (i == 0) CGPathMoveToPoint(graph, nullptr, x, y); else CGPathAddLineToPoint(graph, nullptr, x, y);
+    }
+    if (traceSamples.size() == 1 && std::abs(signedVelocity) < .5) {
+      x = gx + gw; CGPathAddLineToPoint(graph, nullptr, x, zero);
+    }
+    traceLine.path = graph;
+    CGPathRef graphOutline = CGPathCreateCopyByStrokingPath(graph, nullptr, traceLine.lineWidth,
+        kCGLineCapRound, kCGLineJoinRound, 10);
+    traceLine.shadowPath = graphOutline; CGPathRelease(graphOutline); CGPathRelease(graph);
+    CGPathRef dot = CGPathCreateWithEllipseInRect(CGRectMake(x - 2, y - 2, 4, 4), nullptr);
+    traceDot.path = dot; CGPathRelease(dot);
+    CGMutablePathRef base = CGPathCreateMutable();
+    CGPathMoveToPoint(base, nullptr, gx, zero); CGPathAddLineToPoint(base, nullptr, gx + gw, zero);
+    traceBase.path = base; CGPathRelease(base);
+    const double dx = traceDirection.x, dy = traceDirection.y;
+    CGMutablePathRef arrow = CGPathCreateMutable();
+    CGPathMoveToPoint(arrow, nullptr, -7 * dx, -7 * dy);
+    CGPathAddLineToPoint(arrow, nullptr, 7 * dx, 7 * dy);
+    CGPathMoveToPoint(arrow, nullptr, 2 * dx - 4 * dy, 2 * dy + 4 * dx);
+    CGPathAddLineToPoint(arrow, nullptr, 7 * dx, 7 * dy);
+    CGPathAddLineToPoint(arrow, nullptr, 2 * dx + 4 * dy, 2 * dy - 4 * dx);
+    traceArrow.path = arrow; CGPathRelease(arrow);
   }
-  if (traceSamples.size() == 1 && std::abs(signedVelocity) < .5) {
-    x = gx + gw; CGPathAddLineToPoint(graph, nullptr, x, zero);
-  }
-  traceLine.path = graph; CGPathRelease(graph);
-  CGPathRef dot = CGPathCreateWithEllipseInRect(CGRectMake(x - 2, y - 2, 4, 4), nullptr);
-  traceDot.path = dot; CGPathRelease(dot);
-  CGMutablePathRef base = CGPathCreateMutable();
-  CGPathMoveToPoint(base, nullptr, gx, zero); CGPathAddLineToPoint(base, nullptr, gx + gw, zero);
-  traceBase.path = base; CGPathRelease(base);
-  const double dx = traceDirection.x, dy = traceDirection.y;
-  CGMutablePathRef arrow = CGPathCreateMutable();
-  CGPathMoveToPoint(arrow, nullptr, -7 * dx, -7 * dy);
-  CGPathAddLineToPoint(arrow, nullptr, 7 * dx, 7 * dy);
-  CGPathMoveToPoint(arrow, nullptr, 2 * dx - 4 * dy, 2 * dy + 4 * dx);
-  CGPathAddLineToPoint(arrow, nullptr, 7 * dx, 7 * dy);
-  CGPathAddLineToPoint(arrow, nullptr, 2 * dx + 4 * dy, 2 * dy - 4 * dx);
-  traceArrow.path = arrow; CGPathRelease(arrow);
   NSString *reading = std::abs(signedVelocity) < .5 ? @"0 pt/s" : [NSString stringWithFormat:@"%+.0f pt/s", signedVelocity];
   if (![traceValue.string isEqual:reading]) traceValue.string = reading;
   traceBox.opacity = on ? feedback.springTrace : 0;
@@ -1882,7 +2031,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       const double r = speck.radius * (1 + .6 * u);
       CGPathAddEllipseInRect(specks, nullptr, CGRectMake(speck.x - fxOrigin.x - r, speck.y - fxOrigin.y - r, 2 * r, 2 * r));
     }
-    dustShape.path = specks; CGPathRelease(specks);
+    dustShape.path = specks;
+    dustGlow.shadowPath = specks; CGPathRelease(specks);
     dustGlow.opacity = feedback.dust * std::pow(1 - u, 1.3);
   } else dustGlow.opacity = 0;
 
@@ -1998,7 +2148,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (![cueText.string isEqual:cueLine]) cueText.string = cueLine;
   [CATransaction commit];
 
-  if (dragging) {
+  // The settings window's readout refreshes about ten times a second while the card moves.
+  if (dragging && statusFresh) {
     switch (outcome.decision) {
       case Decision::Keep:
         explanation.stringValue = [NSString stringWithFormat:@"Release now: stays here · moving %.0f pt/s", outcome.speed]; break;
@@ -2036,19 +2187,13 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     wasSettling = YES;
   }
   [self showPosition];
-  if (motion->phase != Phase::Settling || animationTimer) return;
-  lastTick = NSProcessInfo.processInfo.systemUptime;
-  animationTimer = [NSTimer timerWithTimeInterval:1.0/120 target:self selector:@selector(tick:) userInfo:nil repeats:YES];
-  [NSRunLoop.mainRunLoop addTimer:animationTimer forMode:NSRunLoopCommonModes];
+  if (motion->phase != Phase::Settling || animating) return;
+  // The spring is stepped by the display frame; see renderAt:.
+  animating = YES;
+  lastTick = CACurrentMediaTime();
+  [self startFrames];
 }
-- (void)stopAnimation { [animationTimer invalidate]; animationTimer = nil; }
-- (void)tick:(NSTimer *)timer {
-  double now = NSProcessInfo.processInfo.systemUptime;
-  motion->step(std::min(.05, now - lastTick)); lastTick = now;
-  if (motion->phase != Phase::Settling && awaitingLanding) [self land];
-  [self showPosition];
-  if (motion->phase != Phase::Settling) [self stopAnimation];
-}
+- (void)stopAnimation { animating = NO; }
 - (void)updateStringOcclusion {
   // Glass remains translucent to the desktop, but the string is fully occluded by the card.
   CGMutablePathRef mask = CGPathCreateMutable();
@@ -2115,7 +2260,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)returnToBrowser {
   if (returnedToBrowser) return;
   returnedToBrowser = YES; awaitingLanding = NO; consumeTrackpadMomentum = NO; pendingTrackpadPan = NO;
-  [self stopAnimation]; [visualTimer invalidate]; visualTimer = nil;
+  [self stopAnimation]; [self stopFrames];
   [fxPanel orderOut:nil];
   const BOOL animate = panel.visible && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
   if (animate) {
@@ -2157,11 +2302,12 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     return;
   }
   const CGFloat w = motion->size.width, h = motion->size.height;
-  [panel setFrame:NSMakeRect(motion->position.x - kPad, motion->position.y - kPad,
-                             w + 2 * kPad, h + 2 * kPad) display:YES];
+  // A resize lays out synchronously; a move waits for the next display frame, where the window
+  // and its effects are placed together. See renderAt:.
   if (stage.bounds.size.width != w || stage.bounds.size.height != h) {
+    [self placeWindow];
     [CATransaction begin]; [CATransaction setDisableActions:YES];
-    cardHost.frame = NSMakeRect(kPad + leanX, kPad + leanY, w, h);
+    cardHost.frame = NSMakeRect(kPad, kPad, w, h);
     CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, kCardRadius, kCardRadius, nullptr);
     for (CALayer *shadow in @[ambientShadow, contactShadow, glowShadow]) {
       shadow.frame = stage.bounds; shadow.shadowPath = shape;
@@ -2177,10 +2323,21 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     example.frame = NSMakeRect(kPad, kPad, w, h);
     const CGRect bounds = panel.contentView.bounds;
     cardHost.superview.frame = NSRectFromCGRect(bounds);
-    borderString.group.frame = borderString.glow.frame = borderString.fields.frame =
-        borderString.shape.frame = borderString.horizontal.frame = borderString.vertical.frame = fxRoot.bounds;
     [CATransaction commit];
   }
+  [self updateStatus:NO];
+  [self requestFrame];
+  // The state file is an observable checkpoint, not a frame-by-frame trace; a pinch writes it once it ends.
+  if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging &&
+      gestures->kind() != pip_motion::Gestures::Kind::Pinch) [self writeState];
+}
+// Settings-window readout. While the card moves it refreshes about ten times a second.
+- (void)updateStatus:(BOOL)force {
+  statusFresh = NO;
+  const bool inMotion = motion->phase == Phase::Dragging || motion->phase == Phase::Settling;
+  const double now = CACurrentMediaTime();
+  if (!force && inMotion && now - lastStatusUpdate < .1) return;
+  lastStatusUpdate = now; statusFresh = YES;
   status.stringValue = [NSString stringWithFormat:@"%@  ·  x %.0f  y %.0f  →  %.0f, %.0f",
       phaseName(motion->phase), motion->position.x, motion->position.y, motion->target.x, motion->target.y];
   if (motion->decision == Decision::Keep || motion->decision == Decision::Dock) {
@@ -2192,9 +2349,6 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
         motion->phase == Phase::Dragging ? @"Grabbed during restore · release to continue or drag to place" :
         @"Restoring to the side at the same height";
   else explanation.stringValue = @"Smart mode leaves slow drops away from a dock where you put them";
-  [self wakeVisuals]; [self updateVisuals];
-  // The state file is an observable checkpoint, not a frame-by-frame trace.
-  if (motion->phase != Phase::Settling && motion->phase != Phase::Dragging) [self writeState];
 }
 - (NSDictionary *)settingsDictionary {
   NSMutableDictionary *dict = [@{@"version":@2, @"docking":@[@"corners", @"edges", @"all-edges"][static_cast<NSInteger>(motion->settings.docking)]} mutableCopy];
@@ -2305,7 +2459,9 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)applicationWillTerminate:(NSNotification *)notification {
   [self cancelReturnAnimation];
   if (gestureMonitor) [NSEvent removeMonitor:gestureMonitor];
-  [self stopAnimation]; [fileTimer invalidate]; [saveTimer invalidate]; [visualTimer invalidate];
+  [self stopAnimation]; [self stopFrames]; [fileTimer invalidate]; [saveTimer invalidate];
+  if (@available(macOS 14.0, *)) [(CADisplayLink *)frameLink invalidate];
+  frameLink = nil;
 }
 @end
 

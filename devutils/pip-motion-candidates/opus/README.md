@@ -367,3 +367,32 @@ animation, and reports “Returned to browser · Reset position to bring card
 back”. The lab opens no browser or URL. Reset position brings the card and
 effects back without changing tuning. Pinch still resizes the card; double-click
 does not toggle its size.
+
+## Frame pacing
+
+One display-synchronized frame drives the card. A `CADisplayLink` on the
+card's view (macOS 14+) follows whichever display the card is on and asks for
+that display's full refresh rate; earlier systems use a timer at the display's
+maximum rate. Each frame steps the spring to the frame's presentation time,
+moves the window with `setFrameOrigin:`, and updates the visuals once. Input
+only records the new position, except that the first event after idle renders
+immediately. A resize still lays out synchronously.
+
+Per-frame work avoided:
+
+- Lean is a translation in the card layer's transform; the glass view's frame
+  no longer changes during a lean.
+- The string occlusion mask is rebuilt only while a string or thread is
+  visible, and the string layers are hidden otherwise.
+- The corner string draws only the stretch inside its glow fields, and its
+  gradient, mask and glow layers are sized to that stretch instead of the
+  screen. Tearing still samples the whole loop.
+- Thread and dust glows and the velocity line's glow use stroked shadow paths.
+  The velocity graph is rebuilt only when shown and its samples change.
+- The settings-window readout refreshes about ten times a second while the
+  card moves.
+- A pinch writes `state.json` once when it ends. Per-event pinch logging is
+  opt-in with `OPUS_PIP_LOG_PINCH=1`.
+
+Tilt over the live glass is unchanged. Setting Tilt to 0 in the lab is the
+comparison for its cost.

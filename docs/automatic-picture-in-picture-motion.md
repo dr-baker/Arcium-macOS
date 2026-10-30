@@ -13,7 +13,18 @@ in the model carry the selected motion and cue values.
 
 The lab and production header use identical model bytes after the production
 copyright preamble. Lab JSON remains live-tunable; production uses the selected
-constants. A settings UI for these constants is outside this change.
+constants. A settings UI for the motion constants is outside this change. Optional effects
+have individual switches under General > Picture in Picture effects. All ten
+switches default to off, independently of automatic PiP: pickup lift, settle
+cue, dock lean, custom shadows, projected dock shadow, edge shading, pressure
+strings, landing press, haptics and return animation. Settle needs pickup lift;
+projected dock shadow needs custom shadows. Clear-glass controls, movement,
+pinch resizing, docking, tucking and following Spaces remain enabled.
+
+Effect preferences update an open PiP window. Changes during a pinch remove
+decoration immediately and recreate it at the final size after completion or
+cancellation, without recording an intermediate placement. Managed switches
+remain read-only, and settings updates stop when their profile is destroyed.
 
 ## Native adaptation
 
@@ -24,7 +35,7 @@ exterior segments retain both. Visible work areas control docking; physical
 screen bounds control reachable tucked positions. Resizing to a smaller screen
 uses the existing aspect and size-limit rules.
 
-The main native window's frame presents pickup growth and lean, so video and
+When enabled, the main native window's frame presents pickup growth and lean, so video and
 AppKit controls share actual input geometry. The video remains on Chromium's
 compositor surface, with no frame readback, new decoder or alternate playback
 path. Existing clear-glass button surfaces and their availability fallbacks
@@ -39,7 +50,7 @@ saved free position through mouse, keyboard and accessibility paths.
 
 ## Accepted lab gestures
 
-The browser now carries the accepted Opus lab behavior from `f02b96a`:
+The browser now carries the accepted Opus lab behavior from `aacdad4`:
 
 - Precise two-finger movement feeds both axes into the same motion model as
   mouse dragging. Only AppKit's vertical delta is inverted for screen coordinates.
@@ -47,20 +58,36 @@ The browser now carries the accepted Opus lab behavior from `f02b96a`:
   video size limits and the current display work area still constrain the result.
   A zero-delta scroll prelude does not pick up the window, and trailing scroll
   changes after pinch cannot start another drag.
-- A single pressed edge shows a straight elastic string. Once both corner
+- With pressure strings enabled, a single pressed edge shows a straight elastic string. Once both corner
   depths reach the docking threshold, it joins into a loop with 20-point corners.
   Dock releases spring back intact; tuck releases break the complete visible
   curve into moving fragments that relax to white within 120 milliseconds.
 - Double-click returns the video to its browser tab. The return button uses the
-  same action, with a short shrink and fade when the opener is visible. Hide,
+  same action. With return animation enabled and the opener visible, it uses
+  a short shrink and fade. Hide,
   permission blocking and teardown cancel that animation.
 
 The accepted saved tuning uses settle strength 1 and settle ease .10 seconds.
 The controls retain native clear glass, adaptive ±15-second buttons and the
-theme accent in the scrubber. Gesture focus uses the browser's existing
+theme accent in the scrubber. Button frames, symbols, radii and text scale
+together between compact and large windows; glass carries a 12% accent tint.
+The tucked handle is a plain accessible chevron with the existing click and
+drag actions. Explicit button tucking recreates edge shading when enabled. Gesture focus uses the browser's existing
 activation-independent window without globally activating the application.
 Hardware pinch delivery and focus across apps and Spaces in this port still
 need a native check. Hidden or detached overlays reject gesture admission.
+
+Movement and optional effects use a view-bound display link on macOS 14 and
+later, following the display's maximum refresh rate. Input while active requests
+one render per display frame; the first input after idle renders immediately.
+The driver pauses at rest and invalidates during teardown. Older systems use a
+refresh-rate timer. Pinch geometry remains synchronous. Repeated window frames
+are skipped, and movement with unchanged dimensions only sets the frame origin.
+
+Pressure strings draw only within visible glow fields and bound gradient/glow
+layers to that path. Tear samples remain complete. Threads use an explicit
+stroked shadow path, and occlusion masks update only while feedback is visible.
+No browser performance improvement has been measured.
 
 The lab's debug graph and recording meters are not part of browser playback.
 Video continues through Chromium's compositor surface with its existing decoder
