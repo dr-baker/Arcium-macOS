@@ -37,7 +37,36 @@ version-1 corner placements remain readable. This preserves free and along-edge
 positions across sessions and work-area changes. Explicit tuck restores its
 saved free position through mouse, keyboard and accessibility paths.
 
-## Review and proof
+## Accepted lab gestures
+
+The browser now carries the accepted Opus lab behavior from `f02b96a`:
+
+- Precise two-finger movement feeds both axes into the same motion model as
+  mouse dragging. Only AppKit's vertical delta is inverted for screen coordinates.
+- A native magnification recognizer resizes around the video center. Chromium's
+  video size limits and the current display work area still constrain the result.
+  A zero-delta scroll prelude does not pick up the window, and trailing scroll
+  changes after pinch cannot start another drag.
+- A single pressed edge shows a straight elastic string. Once both corner
+  depths reach the docking threshold, it joins into a loop with 20-point corners.
+  Dock releases spring back intact; tuck releases break the complete visible
+  curve into moving fragments that relax to white within 120 milliseconds.
+- Double-click returns the video to its browser tab. The return button uses the
+  same action, with a short shrink and fade when the opener is visible. Hide,
+  permission blocking and teardown cancel that animation.
+
+The accepted saved tuning uses settle strength 1 and settle ease .10 seconds.
+The controls retain native clear glass, adaptive ±15-second buttons and the
+theme accent in the scrubber. Gesture focus uses the browser's existing
+activation-independent window without globally activating the application.
+Hardware pinch delivery and focus across apps and Spaces in this port still
+need a native check. Hidden or detached overlays reject gesture admission.
+
+The lab's debug graph and recording meters are not part of browser playback.
+Video continues through Chromium's compositor surface with its existing decoder
+and audio path; the pressure feedback uses a separate click-through native window.
+
+## Previous Chromium 156 proof
 
 The final implementation is outer `9f0688a4`, core `fd7c9080`, on Chromium
 156.0.8078.47. It includes published macOS main `9ee47eb2` and core main

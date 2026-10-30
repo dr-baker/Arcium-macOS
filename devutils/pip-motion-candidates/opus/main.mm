@@ -1,7 +1,9 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 #include "SettingsSchema.h"
+#include "Gestures.hpp"
 #include <memory>
+#include <random>
 #include <vector>
 
 using namespace pip_motion;
@@ -73,13 +75,18 @@ static const Parameter parameters[] = {
 static constexpr size_t parameterCount = sizeof(parameters) / sizeof(parameters[0]);
 
 // Release feedback lives in the lab, not the motion model; it only reads predictions.
-using Feedback = pip_motion::FeedbackSettings;
+// Visual effects are lab-only additions on top of the shared feedback settings.
+struct Feedback : pip_motion::FeedbackSettings {
+  double settleMeter = .60, edgeGlow = 1, meters = 1, tilt = 5, stretch = 1.5, landingShadow = .60;
+  double springTrace = 1, dust = .70;
+};
 static Settings labDefaults() { return pip_motion::selectedSettings(); }
 struct FeedbackParameter {
   const char *key, *label;
   double low, high;
   double Feedback::*member;
   const char *help;
+  bool effect = false;
 };
 static const FeedbackParameter feedbackParameters[] = {
   {"feedback_lift", "Lift", 0, 1, &Feedback::lift,
@@ -127,6 +134,37 @@ static const FeedbackParameter feedbackParameters[] = {
     "How far the window's shadow slides toward the dock it would snap to, up to 110 points.\n\n"
     "At 1 the shadow sits on the destination while the window hovers where you hold it. It builds with proximity, and is full while you move slowly enough to snap.\n\n"
     "Zero keeps the shadow under the window."},
+  {"effect_settle_meter", "Settle meter", 0, 1, &Feedback::settleMeter,
+    "A thin line traces around the window's border as it settles, completing just as the settle haptic taps.\n\n"
+    "On completion a soft ring ripples outward from the border, so the tap is visible on screen and in recordings.\n\n"
+    "Sets the brightness of both. Zero turns them off.", true},
+  {"effect_edge_glow", "Edge glow", 0, 1, &Feedback::edgeGlow,
+    "In Press any edge, the inset boundary appears as a glowing line planted on the screen where your press began, bending outward around the window.\n\n"
+    "It shows stress with color: white when relaxed, then yellow, orange and red where the window bends it, reaching red at tuck depth on the sides. The string stays fully behind the glass window.\n\n"
+    "Letting go into a tuck tears it into a burst of threads that recoil toward its ends and fray away. "
+    "Any other release, including a dock, or pulling away, lets it spring back through straight where it is, without following the window.\n\n"
+    "Sets its brightness. Zero turns it off.", true},
+  {"effect_meters", "Meters", 0, 1, &Feedback::meters,
+    "Floating readouts beside the window, made for recordings.\n\n"
+    "PRESS appears while you push into an edge: a bar fills with depth past the dock and tuck marks, with the exact percentage. "
+    "SETTLE appears while the window settles and reads SET when it finishes, with the haptic.\n\n"
+    "Sets their opacity. Zero hides them.", true},
+  {"effect_tilt", "Tilt", 0, 12, &Feedback::tilt,
+    "Maximum tilt, in degrees, as the window moves: its leading edge tips away in perspective and it springs flat with a slight wobble when it stops.\n\n"
+    "Builds with speed. Zero turns it off. Reduce Motion also turns it off.", true},
+  {"effect_stretch", "Stretch", 0, 4, &Feedback::stretch,
+    "How much a fast flick stretches the window along its direction of travel, in percent, narrowing it slightly across.\n\n"
+    "Starts above 600 pt/s and is full by 3000 pt/s, recovering as it slows and lands. Above about 2% it reads as cartoonish. Reduce Motion turns it off.", true},
+  {"effect_landing_shadow", "Landing shadow", 0, 1, &Feedback::landingShadow,
+    "On landing, the tight contact shadow briefly flares outward and then tightens, as if the window pressed air out from under it.\n\n"
+    "Pairs with the Press dip. Zero turns it off.", true},
+  {"effect_spring_trace", "Spring trace", 0, 1, &Feedback::springTrace,
+    "An always-visible velocity graph inside the glass window. It follows your direction while dragging, then fixes the arrow to the initial flight when tossed. At rest it reads zero and keeps the recent curve.\n\n"
+    "The line crosses below zero when the spring reverses, including its return from overshoot. High speeds are compressed vertically so small rebounds remain visible. The readout is signed points per second. Sets its opacity. Zero hides it.", true},
+  {"effect_dust", "Dust", 0, 1, &Feedback::dust,
+    "Soft specks drift out from under the window when Stay here finishes settling, with its tap. Releasing an already settled window does not repeat them.\n\n"
+    "A hard landing also kicks them up. Harder throws raise more, faster.\n\n"
+    "Sets their brightness. Zero turns it off.", true},
 };
 static constexpr size_t feedbackParameterCount = sizeof(feedbackParameters) / sizeof(feedbackParameters[0]);
 
@@ -142,10 +180,15 @@ static NSString *phaseName(Phase phase) {
 @class MotionLab;
 @interface ExampleView : NSView
 @property(nonatomic, weak) MotionLab *lab;
+@property(nonatomic, strong) NSTrackingArea *gestureTracking;
+@property(nonatomic, weak) NSWindow *previousKeyWindow;
 @end
 
 // The panel is padded so the window can draw its own shadow; only the card takes clicks.
 static constexpr CGFloat kPad = 200;
+static constexpr CGFloat kCardRadius = 20;
+// Recording meter capsule and its track, in the capsule's coordinates.
+static constexpr CGFloat kHudW = 228, kHudH = 42, kTrackX = 72, kTrackW = 100, kTrackY = 15;
 
 @interface PassView : NSView
 @end
@@ -162,8 +205,82 @@ static constexpr CGFloat kPad = 200;
 }
 @end
 
+// A single closed stroke carries both pressure fields around the display's inset border.
+@interface BorderString : NSObject
+@property(nonatomic, strong) CALayer *group, *glow, *fields;
+@property(nonatomic, strong) CAGradientLayer *horizontal, *vertical;
+@property(nonatomic, strong) CAShapeLayer *shape;
+@end
+@implementation BorderString
+@end
+
+// Pressure sources stay planted in screen coordinates while the card moves away.
+struct Membrane {
+  pip_motion::Point normal;
+  double center = 0, stress = 0;
+  double boundary = 0, sign = 1, lo = 0, hi = 0, anchor = 0;
+  double bend = 0, bendVelocity = 0, pressedBend = 1;
+};
+struct BorderSample {
+  pip_motion::Point point;
+  double perimeter = 0, visibility = 0;
+};
+// Arc length joins the four straights and four quarter-circles without a corner seam.
+struct BorderGeometry {
+  pip_motion::Rect bounds;
+  double radius;
+  double straightWidth() const { return std::max(0.0, bounds.width - 2 * radius); }
+  double straightHeight() const { return std::max(0.0, bounds.height - 2 * radius); }
+  double quarter() const { return M_PI * radius / 2; }
+  double perimeter() const { return 2 * (straightWidth() + straightHeight()) + 4 * quarter(); }
+  std::array<double, 8> sections() const {
+    return {straightWidth(), quarter(), straightHeight(), quarter(), straightWidth(), quarter(), straightHeight(), quarter()};
+  }
+  double source(int axis, double sign, double anchor) const {
+    const double sw = straightWidth(), sh = straightHeight(), q = quarter();
+    if (axis == 0) return sign > 0 ? sw + q + std::clamp(anchor - bounds.y - radius, 0.0, sh) :
+        2 * sw + 3 * q + sh + std::clamp(bounds.y + bounds.height - radius - anchor, 0.0, sh);
+    return sign < 0 ? std::clamp(anchor - bounds.x - radius, 0.0, sw) :
+        sw + 2 * q + sh + std::clamp(bounds.x + bounds.width - radius - anchor, 0.0, sw);
+  }
+  pip_motion::Point point(double at) const {
+    const double l = bounds.x, b = bounds.y, r = l + bounds.width, t = b + bounds.height;
+    const auto lengths = sections();
+    for (int section = 0; section < 8; ++section) {
+      if (at > lengths[section] && section != 7) { at -= lengths[section]; continue; }
+      if (section == 0) return {l + radius + at, b};
+      if (section == 2) return {r, b + radius + at};
+      if (section == 4) return {r - radius - at, t};
+      if (section == 6) return {l, t - radius - at};
+      const pip_motion::Point center = section == 1 ? pip_motion::Point{r - radius, b + radius} :
+          section == 3 ? pip_motion::Point{r - radius, t - radius} :
+          section == 5 ? pip_motion::Point{l + radius, t - radius} : pip_motion::Point{l + radius, b + radius};
+      const double angle = (section - 3) * M_PI / 4 + at / std::max(.001, radius);
+      return center + pip_motion::Point{std::cos(angle) * radius, std::sin(angle) * radius};
+    }
+    return {l + radius, b};
+  }
+};
+static double perimeterDelta(double a, double b, double perimeter) {
+  return std::remainder(a - b, perimeter);
+}
+struct Thread { double x, y, vx, vy, angle, spin, length, curl, phase; };
+struct Speck { double x, y, vx, vy, radius; };
+
 static CGColorRef gray(CGFloat white, CGFloat alpha) {
   return [NSColor colorWithWhite:white alpha:alpha].CGColor;
+}
+// Stress runs from relaxed white through yellow and orange to red at the breaking point.
+static void stressColor(double s, double rgb[3]) {
+  static const double stops[4][4] = {{0, 1, 1, 1}, {.3, 1, .93, .55}, {.62, 1, .6, .22}, {1, 1, .27, .22}};
+  s = std::clamp(s, 0.0, 1.0);
+  int i = 1;
+  while (i < 3 && s > stops[i][0]) ++i;
+  const double t = (s - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0]);
+  for (int c = 0; c < 3; ++c) rgb[c] = stops[i - 1][c + 1] + (stops[i][c + 1] - stops[i - 1][c + 1]) * t;
+}
+static CGColorRef rgba(const double rgb[3], CGFloat alpha) {
+  return [NSColor colorWithSRGBRed:rgb[0] green:rgb[1] blue:rgb[2] alpha:alpha].CGColor;
 }
 static double smoothstep(double x) {
   x = std::clamp(x, 0.0, 1.0);
@@ -180,11 +297,27 @@ static void approach(double& value, double target, double rise, double fall, dou
 @end
 @implementation ExamplePanel
 - (NSRect)constrainFrameRect:(NSRect)frame toScreen:(NSScreen *)screen { return frame; }
-- (BOOL)canBecomeKeyWindow { return NO; }
+- (BOOL)canBecomeKeyWindow { return !self.ignoresMouseEvents; }
+// Native glass has no public active-state control. Keep this appearance-only
+// AppKit hook confined to the lab card; it does not change actual keyboard focus.
+- (BOOL)hasKeyAppearance { return !self.ignoresMouseEvents; }
+- (BOOL)_hasKeyAppearance { return !self.ignoresMouseEvents; }
 @end
 
 @interface MotionLab : NSObject <NSApplicationDelegate, NSWindowDelegate> {
   std::unique_ptr<Motion> motion;
+  std::unique_ptr<pip_motion::Gestures> gestures;
+  id gestureMonitor;
+  NSMagnificationGestureRecognizer *pinchRecognizer;
+  NSUInteger pinchEvents;
+  NSString *lastPinchRoute;
+  double lastPinchDelta;
+  BOOL consumeTrackpadMomentum, suppressMouseUp;
+  NSTimer *returnTimer;
+  double returnStart;
+  NSRect returnFrame;
+  CATransform3D returnTransform;
+  pip_motion::Point returnDelta;
   NSWindow *controls;
   ExamplePanel *panel;
   ExampleView *example;
@@ -201,16 +334,46 @@ static void approach(double& value, double target, double rise, double fall, dou
   NSData *lastSettingsData;
   NSDictionary *legacyPressThresholds;
   Feedback feedback;
-  CALayer *stage, *ambientShadow, *contactShadow, *glowShadow, *overlay;
+  CALayer *stage, *ambientShadow, *contactShadow, *glowShadow, *overlay, *windowShade;
   CAGradientLayer *rimShade;
-  CAShapeLayer *chevron, *rimLight;
+  CAShapeLayer *chevron, *rimLight, *meter, *ripple, *threadShape;
+  CALayer *threadGlow, *stringRoot;
+  CAShapeLayer *stringOcclusion;
+  // Full-screen, click-through effects layer behind the PiP, in screen coordinates minus fxOrigin.
+  ExamplePanel *fxPanel;
+  CALayer *fxRoot, *dustGlow, *traceBox;
+  CAShapeLayer *dustShape, *traceLine, *traceBase, *traceArrow, *traceDot;
+  CATextLayer *traceValue, *traceTitle;
+  PassView *cardHost, *cardContent;
+  NSView *glassSurface;
+  CAGradientLayer *glassTint, *glassEdge;
+  CAShapeLayer *glassOutline;
+  NSPoint fxOrigin;
+  std::vector<Speck> dust;
+  std::vector<std::pair<double, double>> traceSamples;
+  pip_motion::Point traceDirection;
+  double dustStart, flightPeak, flightDistance;
+  double traceStart, tracePeak;
+  BOOL wasSettling, stayDustDone, returnedToBrowser;
+  BorderString *borderString;
+  std::vector<BorderSample> borderSamples;
+  std::array<Membrane, 2> membranes;
+  std::vector<Thread> threads;
+  double axisGlow[2], breakStart, breakRGB[3];
+  BOOL axisPressed[2], wasPressing, cornerString;
+  int straightStringAxis;
+  BOOL pendingTrackpadPan;
+  double meterAlpha, meterProgress, rippleStart, pressHudAlpha, pressHudFill, settleHudAlpha;
+  CALayer *pressHud, *pressFill, *pressDockTick, *pressTuckTick, *settleHud, *settleFill;
+  CATextLayer *pressValue, *pressDockLabel, *pressTuckLabel, *settleValue;
+  double tiltX, tiltY, tiltVX, tiltVY, visVX, visVY, prevX, prevY, prevVelocityTime;
   CATextLayer *intentText, *cueText;
   NSButton *feedbackToggle, *hapticsToggle;
   NSMutableArray<NSSlider *> *feedbackSliders;
   NSMutableArray<NSTextField *> *feedbackFields;
   double lift, liftVelocity, castX, castY, settleAmount, settleVelocity, handSpeed, slowSince, glow, edgeAmount, leanX, leanY, shadowX, shadowY, lastVisualTime, releaseDistance, rimShadeStrength;
   Side chevronSide;
-  BOOL leaning, awaitingLanding, moving, settleTapped;
+  BOOL leaning, awaitingLanding, moving, settleTapped, settleHudDone;
   double pressStart, lastHaptic, pendingSince;
   int hapticKey, pendingKey;
   Outcome stableOutcome;
@@ -220,28 +383,73 @@ static void approach(double& value, double target, double rise, double fall, dou
 - (void)begin:(NSEvent *)event;
 - (void)drag:(NSEvent *)event;
 - (void)end:(NSEvent *)event;
+- (BOOL)consumeGesture:(NSEvent *)event;
+- (void)recognizePinch:(NSMagnificationGestureRecognizer *)recognizer;
 @end
 
 @implementation ExampleView
+- (BOOL)acceptsFirstResponder { return YES; }
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  if (self.gestureTracking) [self removeTrackingArea:self.gestureTracking];
+  self.gestureTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+      options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+      owner:self userInfo:nil];
+  [self addTrackingArea:self.gestureTracking];
+}
+- (void)mouseEntered:(NSEvent *)event {
+  // AppKit routes trackpad magnification through the key window. The nonactivating
+  // panel can take gesture focus under the pointer without raising the settings window.
+  if (!self.window.isKeyWindow) self.previousKeyWindow = NSApp.keyWindow;
+  [NSApp activateIgnoringOtherApps:YES];
+  [self.window makeKeyWindow]; [self.window makeFirstResponder:self];
+}
+- (void)mouseExited:(NSEvent *)event {
+  if (!self.window.isKeyWindow) return;
+  if (self.previousKeyWindow.visible) [self.previousKeyWindow makeKeyWindow];
+  else [self.window resignKeyWindow];
+  self.previousKeyWindow = nil;
+}
 - (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
 - (BOOL)mouseDownCanMoveWindow { return NO; }
 - (void)mouseDown:(NSEvent *)event { [self.lab begin:event]; }
 - (void)mouseDragged:(NSEvent *)event { [self.lab drag:event]; }
 - (void)mouseUp:(NSEvent *)event { [self.lab end:event]; }
+- (void)scrollWheel:(NSEvent *)event {
+  if (![self.lab consumeGesture:event]) [super scrollWheel:event];
+}
 @end
 
-// The card artwork, rendered once into a layer so the whole card can scale with its shadow.
-static void drawCard(NSRect bounds) {
-  [[NSBezierPath bezierPathWithRoundedRect:bounds xRadius:16 yRadius:16] addClip];
-  NSGradient *gradient = [[NSGradient alloc] initWithStartingColor:
-      [NSColor colorWithSRGBRed:.12 green:.30 blue:.38 alpha:1]
-      endingColor:[NSColor colorWithSRGBRed:.05 green:.08 blue:.15 alpha:1]];
-  [gradient drawInRect:bounds angle:25];
-  [[NSColor colorWithWhite:1 alpha:.08] setFill];
-  [[NSBezierPath bezierPathWithOvalInRect:NSMakeRect(150, -90, 260, 260)] fill];
-  [@"Opus PiP Lab" drawAtPoint:NSMakePoint(22, 118) withAttributes:@{
-    NSFontAttributeName:[NSFont systemFontOfSize:21 weight:NSFontWeightSemibold],
-    NSForegroundColorAttributeName:NSColor.whiteColor}];
+static NSView *makeGlassSurface(NSRect frame, NSView *content) {
+  content.frame = NSMakeRect(0, 0, NSWidth(frame), NSHeight(frame));
+  content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  content.wantsLayer = YES;
+  content.layer.cornerRadius = kCardRadius; content.layer.masksToBounds = YES;
+  NSWorkspace *workspace = NSWorkspace.sharedWorkspace;
+  if (!workspace.accessibilityDisplayShouldReduceTransparency && !workspace.accessibilityDisplayShouldIncreaseContrast) {
+    if (@available(macOS 26.0, *)) {
+      NSGlassEffectView *glass = [[NSGlassEffectView alloc] initWithFrame:frame];
+      glass.style = NSGlassEffectViewStyleClear;
+      glass.cornerRadius = kCardRadius;
+      glass.tintColor = [NSColor colorWithSRGBRed:.12 green:.26 blue:.32 alpha:.18];
+      glass.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+      glass.contentView = content;
+      return glass;
+    }
+    NSVisualEffectView *material = [[NSVisualEffectView alloc] initWithFrame:frame];
+    material.material = NSVisualEffectMaterialHUDWindow;
+    material.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    material.state = NSVisualEffectStateActive;
+    material.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+    material.wantsLayer = YES; material.layer.cornerRadius = kCardRadius; material.layer.masksToBounds = YES;
+    [material addSubview:content];
+    return material;
+  }
+  PassView *solid = [[PassView alloc] initWithFrame:frame];
+  solid.wantsLayer = YES; solid.layer.cornerRadius = kCardRadius;
+  solid.layer.backgroundColor = [NSColor colorWithSRGBRed:.06 green:.10 blue:.13 alpha:1].CGColor;
+  [solid addSubview:content];
+  return solid;
 }
 
 static NSTextField *label(NSString *text, NSRect frame, CGFloat size) {
@@ -314,6 +522,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   NSData *previousData = [NSData dataWithContentsOfFile:statePath];
   id previousState = previousData ? [NSJSONSerialization JSONObjectWithData:previousData options:0 error:nil] : nil;
   motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
+  gestures = std::make_unique<pip_motion::Gestures>(*motion);
   motion->settings = labDefaults();
   // Tuning window: behavior choices on top, grouped values in tabs, try-it actions below.
   const CGFloat W = 536, H = 896;
@@ -376,7 +585,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 
   NSTabView *tabs = [[NSTabView alloc] initWithFrame:NSMakeRect(18, 176, W - 36, H - 176 - 176)];
   NSMutableArray<NSView *> *pages = NSMutableArray.array;
-  for (NSString *name in @[@"Feel", @"Edges", @"Cues"]) {
+  for (NSString *name in @[@"Feel", @"Edges", @"Cues", @"Effects"]) {
     NSTabViewItem *item = [[NSTabViewItem alloc] initWithIdentifier:name];
     item.label = name;
     item.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, NSWidth(tabs.contentRect), NSHeight(tabs.contentRect))];
@@ -441,13 +650,19 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
       "Stay here taps when the settle animation finishes, not when the outcome changes. With Settle at zero it taps on the change.\n\n"
       "Every tap uses the lightest alignment pattern, at most one every 0.15 seconds.\n\n"
       "macOS only plays haptics while a finger is on the trackpad, so a landing after a long flight may be silent. Mice have no haptics.");
+  NSTextField *effectsNote = label(@"Visual effects for the moving window. Each follows Release feedback.",
+      NSMakeRect(12, pageTop + 4, pageWidth - 24, 18), 11);
+  effectsNote.textColor = NSColor.secondaryLabelColor; [pages[3] addSubview:effectsNote];
   feedbackSliders = NSMutableArray.array; feedbackFields = NSMutableArray.array; feedbackHeadings = NSMutableArray.array;
+  int rows[2] = {0, 0};
   for (size_t i = 0; i < feedbackParameterCount; ++i) {
     const auto& parameter = feedbackParameters[i];
     makeRow(@(parameter.label), @(parameter.help), parameter.low, parameter.high, feedback.*parameter.member, i,
             @selector(feedbackSliderChanged:), @selector(feedbackFieldChanged:),
             feedbackSliders, feedbackFields, feedbackHeadings);
-    placeRow(cues, pageTop - 34 - i * 34, feedbackHeadings[i], @(parameter.help), feedbackSliders[i], feedbackFields[i]);
+    const int row = rows[parameter.effect]++;
+    placeRow(parameter.effect ? pages[3] : cues, pageTop - 34 - row * 34, feedbackHeadings[i], @(parameter.help),
+             feedbackSliders[i], feedbackFields[i]);
   }
 
   explanation = label(@"", NSMakeRect(24, 150, 488, 18), 11);
@@ -483,15 +698,64 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   RootView *root = [[RootView alloc] initWithFrame:NSMakeRect(0, 0, w + 2 * kPad, h + 2 * kPad)];
   root.wantsLayer = YES; panel.contentView = root;
   const CGFloat scale = screen.backingScaleFactor;
+  // Effects that travel beyond the PiP's margin draw in a click-through window covering the screen.
+  fxOrigin = screen.frame.origin;
+  fxPanel = [[ExamplePanel alloc] initWithContentRect:screen.frame
+      styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+      backing:NSBackingStoreBuffered defer:NO];
+  fxPanel.opaque = NO; fxPanel.backgroundColor = NSColor.clearColor;
+  fxPanel.hasShadow = NO; fxPanel.hidesOnDeactivate = NO; fxPanel.ignoresMouseEvents = YES;
+  fxPanel.level = panel.level - 1; fxPanel.collectionBehavior = panel.collectionBehavior;
+  PassView *fxView = [[PassView alloc] initWithFrame:NSMakeRect(0, 0, NSWidth(screen.frame), NSHeight(screen.frame))];
+  fxView.layer = [CALayer layer]; fxView.wantsLayer = YES; fxPanel.contentView = fxView;
+  fxRoot = fxView.layer;
+  stringRoot = [CALayer layer]; stringRoot.frame = fxRoot.bounds;
+  stringOcclusion = [CAShapeLayer layer]; stringOcclusion.frame = fxRoot.bounds;
+  stringOcclusion.contentsScale = scale; stringOcclusion.fillRule = kCAFillRuleEvenOdd;
+  stringOcclusion.fillColor = gray(0, 1); stringRoot.mask = stringOcclusion;
+  [fxRoot addSublayer:stringRoot];
+  auto glowingShape = [&](CALayer *__strong *halo, CAShapeLayer *__strong *shape, CGFloat bloom) {
+    *halo = [CALayer layer]; (*halo).frame = fxRoot.bounds; (*halo).opacity = 0;
+    (*halo).shadowOffset = CGSizeZero; (*halo).shadowOpacity = 1; (*halo).shadowRadius = bloom;
+    (*halo).shadowColor = gray(1, 1);
+    *shape = [CAShapeLayer layer]; (*shape).frame = fxRoot.bounds; (*shape).contentsScale = scale;
+    (*shape).fillColor = nil; (*shape).strokeColor = gray(1, 1);
+    (*shape).lineCap = kCALineCapRound; (*shape).lineJoin = kCALineJoinRound;
+    [*halo addSublayer:*shape]; [fxRoot addSublayer:*halo];
+  };
+  glowingShape(&dustGlow, &dustShape, 3);
+  dustShape.fillColor = gray(1, .85); dustShape.strokeColor = nil;
   // One stage holds the shadows, card and overlay so they lift and scale together.
   PassView *host = [[PassView alloc] initWithFrame:root.bounds];
+  host.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   host.layer = [CALayer layer]; host.wantsLayer = YES;
   [root addSubview:host];
-  stage = [CALayer layer];
-  stage.bounds = CGRectMake(0, 0, w, h);
-  stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
-  [host.layer addSublayer:stage];
-  CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, 16, 16, nullptr);
+  borderString = [BorderString new];
+  borderString.group = [CALayer layer]; borderString.group.frame = fxRoot.bounds;
+  borderString.group.opacity = 0;
+  borderString.glow = [CALayer layer]; borderString.glow.frame = fxRoot.bounds;
+  borderString.glow.shadowOffset = CGSizeZero; borderString.glow.shadowOpacity = 1;
+  borderString.glow.shadowRadius = 18;
+  borderString.fields = [CALayer layer]; borderString.fields.frame = fxRoot.bounds;
+  borderString.shape = [CAShapeLayer layer]; borderString.shape.frame = fxRoot.bounds;
+  borderString.shape.contentsScale = scale;
+  borderString.shape.fillColor = nil; borderString.shape.strokeColor = gray(1, 1);
+  borderString.shape.lineWidth = 4.5; borderString.shape.lineJoin = kCALineJoinRound;
+  borderString.fields.mask = borderString.shape;
+  borderString.horizontal = [CAGradientLayer layer];
+  borderString.vertical = [CAGradientLayer layer];
+  for (CAGradientLayer *field in @[borderString.horizontal, borderString.vertical]) {
+    field.frame = fxRoot.bounds; field.type = kCAGradientLayerRadial; field.opacity = 0;
+    [borderString.fields addSublayer:field];
+  }
+  [borderString.glow addSublayer:borderString.fields];
+  [borderString.group addSublayer:borderString.glow];
+  [stringRoot addSublayer:borderString.group];
+  cardHost = [[PassView alloc] initWithFrame:NSRectFromCGRect(card)];
+  cardHost.wantsLayer = YES;
+  [host addSubview:cardHost];
+  stage = cardHost.layer;
+  CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, kCardRadius, kCardRadius, nullptr);
   auto shadowLayer = [&](CGColorRef color) {
     CALayer *layer = [CALayer layer];
     layer.frame = stage.bounds; layer.shadowPath = shape; layer.shadowColor = color;
@@ -504,13 +768,22 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   contactShadow = shadowLayer(gray(0, 1));
   glowShadow.shadowOffset = CGSizeZero; glowShadow.shadowRadius = 8;
   CGPathRelease(shape);
-  NSImage *artwork = [NSImage imageWithSize:NSMakeSize(w, h) flipped:NO drawingHandler:^BOOL(NSRect rect) {
-    drawCard(rect); return YES;
-  }];
-  CALayer *cardLayer = [CALayer layer];
-  cardLayer.frame = stage.bounds; cardLayer.contentsScale = scale;
-  cardLayer.contents = [artwork layerContentsForContentsScale:scale];
-  [stage addSublayer:cardLayer];
+  cardContent = [[PassView alloc] initWithFrame:NSRectFromCGRect(stage.bounds)];
+  glassSurface = makeGlassSurface(NSRectFromCGRect(stage.bounds), cardContent);
+  glassSurface.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  [cardHost addSubview:glassSurface];
+  glassTint = [CAGradientLayer layer]; glassTint.frame = stage.bounds;
+  glassTint.colors = @[(__bridge id)[NSColor colorWithSRGBRed:.38 green:.65 blue:.73 alpha:.09].CGColor,
+      (__bridge id)[NSColor colorWithSRGBRed:.02 green:.06 blue:.09 alpha:.28].CGColor];
+  glassTint.startPoint = CGPointMake(.2, 1); glassTint.endPoint = CGPointMake(.8, 0);
+  [cardContent.layer addSublayer:glassTint];
+  glassEdge = [CAGradientLayer layer]; glassEdge.frame = stage.bounds;
+  glassEdge.colors = @[(__bridge id)gray(1, .12), (__bridge id)gray(1, .05), (__bridge id)gray(1, .55)];
+  glassEdge.locations = @[@0, @.45, @1];
+  glassOutline = [CAShapeLayer layer]; glassOutline.fillColor = nil;
+  glassOutline.strokeColor = gray(1, 1); glassOutline.lineWidth = .8;
+  glassEdge.mask = glassOutline;
+  [cardContent.layer addSublayer:glassEdge];
 
   // Live readout on the card: what release would do, and which cues are animating.
   auto textLayer = [&](CGRect frame, NSFont *font, CGFloat alpha) {
@@ -518,17 +791,19 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     text.frame = frame; text.contentsScale = scale;
     text.font = (__bridge CFTypeRef)font; text.fontSize = font.pointSize;
     text.foregroundColor = gray(1, alpha); text.truncationMode = kCATruncationEnd;
+    text.shadowColor = gray(0, 1); text.shadowOpacity = .65;
+    text.shadowRadius = 3; text.shadowOffset = CGSizeMake(0, -1);
     text.string = @"";
-    [stage addSublayer:text];
+    [cardContent.layer addSublayer:text];
     return text;
   };
-  intentText = textLayer(CGRectMake(22, 86, w - 44, 20), [NSFont systemFontOfSize:13 weight:NSFontWeightMedium], .8);
-  cueText = textLayer(CGRectMake(22, 16, w - 44, 16), [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightRegular], .55);
+  intentText = textLayer(CGRectZero, [NSFont systemFontOfSize:11 weight:NSFontWeightMedium], .8);
+  cueText = textLayer(CGRectZero, [NSFont monospacedDigitSystemFontOfSize:10 weight:NSFontWeightRegular], .8);
 
   // Overlay on the card: the screen rim's shadow, the chevron and the glowing border.
   overlay = [CALayer layer];
-  overlay.frame = stage.bounds; overlay.cornerRadius = 16; overlay.masksToBounds = YES;
-  [stage addSublayer:overlay];
+  overlay.frame = stage.bounds; overlay.cornerRadius = kCardRadius; overlay.masksToBounds = YES;
+  [cardContent.layer addSublayer:overlay];
   rimShade = [CAGradientLayer layer];
   rimShade.opacity = 0;
   NSMutableArray *stops = NSMutableArray.array;
@@ -543,16 +818,152 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [overlay addSublayer:chevron];
   rimLight = [CAShapeLayer layer];
   rimLight.frame = overlay.bounds; rimLight.contentsScale = scale;
-  CGPathRef rim = CGPathCreateWithRoundedRect(CGRectInset(overlay.bounds, .75, .75), 15.25, 15.25, nullptr);
+  CGPathRef rim = CGPathCreateWithRoundedRect(CGRectInset(overlay.bounds, .75, .75), kCardRadius - .75, kCardRadius - .75, nullptr);
   rimLight.path = rim; CGPathRelease(rim);
   rimLight.fillColor = nil; rimLight.strokeColor = gray(1, .9); rimLight.lineWidth = 1.5;
   rimLight.opacity = 0;
   [overlay addSublayer:rimLight];
+  // Settle meter: the border traced clockwise from the top center, then a ripple on completion.
+  CGMutablePathRef outline = CGPathCreateMutable();
+  const CGRect border = CGRectInset(stage.bounds, 1, 1);
+  const CGFloat bl = CGRectGetMinX(border), br = CGRectGetMaxX(border), bb = CGRectGetMinY(border), bt = CGRectGetMaxY(border);
+  CGPathMoveToPoint(outline, nullptr, CGRectGetMidX(border), bt);
+  CGPathAddArcToPoint(outline, nullptr, br, bt, br, CGRectGetMidY(border), kCardRadius - 1);
+  CGPathAddArcToPoint(outline, nullptr, br, bb, CGRectGetMidX(border), bb, kCardRadius - 1);
+  CGPathAddArcToPoint(outline, nullptr, bl, bb, bl, CGRectGetMidY(border), kCardRadius - 1);
+  CGPathAddArcToPoint(outline, nullptr, bl, bt, CGRectGetMidX(border), bt, kCardRadius - 1);
+  CGPathCloseSubpath(outline);
+  auto outlineLayer = [&]() {
+    CAShapeLayer *layer = [CAShapeLayer layer];
+    layer.frame = stage.bounds; layer.contentsScale = scale; layer.path = outline;
+    layer.fillColor = nil; layer.strokeColor = gray(1, .95); layer.lineWidth = 2; layer.lineCap = kCALineCapRound;
+    layer.shadowColor = gray(1, 1); layer.shadowOffset = CGSizeZero; layer.shadowRadius = 4; layer.shadowOpacity = .7;
+    layer.opacity = 0;
+    [stage addSublayer:layer];
+    return layer;
+  };
+  meter = outlineLayer(); meter.strokeEnd = 0;
+  ripple = outlineLayer();
+  CGPathRelease(outline);
+
+  // Threads torn from a released membrane fly free of the PiP's margin, glowing in the stress color.
+  glowingShape(&threadGlow, &threadShape, 6);
+  [stringRoot addSublayer:threadGlow];
+  threadShape.lineWidth = 1.25;
+
+  // Recording meters: dark glass capsules floating beside the card, above everything else.
+  auto text = [&](CALayer *parent, CGRect frame, NSFont *font, CGFloat alpha, NSString *alignment) {
+    CATextLayer *layer = [CATextLayer layer];
+    layer.frame = frame; layer.contentsScale = scale; layer.alignmentMode = alignment;
+    layer.font = (__bridge CFTypeRef)font; layer.fontSize = font.pointSize;
+    layer.foregroundColor = gray(1, alpha); layer.string = @"";
+    [parent addSublayer:layer];
+    return layer;
+  };
+  auto hud = [&](NSString *title, CALayer *__strong *fill, CATextLayer *__strong *value) {
+    CALayer *box = [CALayer layer];
+    box.bounds = CGRectMake(0, 0, kHudW, kHudH); box.cornerRadius = kHudH / 2;
+    box.backgroundColor = gray(.08, .72); box.borderColor = gray(1, .18); box.borderWidth = .5;
+    box.shadowColor = gray(0, 1); box.shadowOpacity = .35; box.shadowRadius = 14; box.shadowOffset = CGSizeMake(0, -4);
+    box.opacity = 0;
+    NSFont *titleFont = [NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
+    CATextLayer *name = text(box, CGRectMake(18, 14, 54, 14), titleFont, 1, kCAAlignmentLeft);
+    name.string = [[NSAttributedString alloc] initWithString:title attributes:@{NSFontAttributeName:titleFont,
+        NSForegroundColorAttributeName:[NSColor colorWithWhite:1 alpha:.62], NSKernAttributeName:@1.6}];
+    CALayer *track = [CALayer layer];
+    track.frame = CGRectMake(kTrackX, kTrackY, kTrackW, 4); track.cornerRadius = 2; track.backgroundColor = gray(1, .16);
+    [box addSublayer:track];
+    CALayer *bar = [CALayer layer];
+    bar.anchorPoint = CGPointMake(0, .5); bar.frame = CGRectMake(kTrackX, kTrackY, 0, 4); bar.cornerRadius = 2;
+    bar.backgroundColor = gray(1, .96);
+    bar.shadowColor = gray(1, 1); bar.shadowOpacity = .9; bar.shadowRadius = 5; bar.shadowOffset = CGSizeZero;
+    [box addSublayer:bar];
+    *fill = bar;
+    *value = text(box, CGRectMake(kTrackX + kTrackW + 6, 12, kHudW - kTrackX - kTrackW - 24, 17),
+        [NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium], .95, kCAAlignmentRight);
+    [host.layer addSublayer:box];
+    return box;
+  };
+  pressHud = hud(@"PRESS", &pressFill, &pressValue);
+  settleHud = hud(@"SETTLE", &settleFill, &settleValue);
+  auto tick = [&](NSString *name, CALayer *__strong *mark, CATextLayer *__strong *caption) {
+    CALayer *line = [CALayer layer];
+    line.bounds = CGRectMake(0, 0, 1.5, 12); line.cornerRadius = .75; line.backgroundColor = gray(1, .75);
+    [pressHud addSublayer:line];
+    *mark = line;
+    *caption = text(pressHud, CGRectMake(0, 0, 32, 11), [NSFont systemFontOfSize:8 weight:NSFontWeightMedium], .6,
+        kCAAlignmentCenter);
+    (*caption).string = name;
+  };
+  tick(@"dock", &pressDockTick, &pressDockLabel);
+  tick(@"tuck", &pressTuckTick, &pressTuckLabel);
+
+  // Velocity belongs to the glass card and inherits its motion and resizing.
+  traceBox = [CALayer layer];
+  traceBox.opacity = 0;
+  NSFont *traceFont = [NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
+  traceTitle = text(traceBox, CGRectZero, traceFont, 1, kCAAlignmentLeft);
+  traceTitle.string = [[NSAttributedString alloc] initWithString:@"VELOCITY" attributes:@{NSFontAttributeName:traceFont,
+      NSForegroundColorAttributeName:[NSColor colorWithWhite:1 alpha:.82], NSKernAttributeName:@1}];
+  traceArrow = [CAShapeLayer layer]; traceArrow.bounds = CGRectMake(-8, -8, 16, 16); traceArrow.contentsScale = scale;
+  traceArrow.strokeColor = gray(1, .8); traceArrow.fillColor = nil; traceArrow.lineWidth = 1.4;
+  traceArrow.lineCap = kCALineCapRound; traceArrow.lineJoin = kCALineJoinRound;
+  [traceBox addSublayer:traceArrow];
+  traceValue = text(traceBox, CGRectZero,
+      [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightMedium], .95, kCAAlignmentRight);
+  for (CATextLayer *label in @[traceTitle, traceValue]) {
+    label.shadowColor = gray(0, 1); label.shadowOpacity = .4;
+    label.shadowRadius = 3; label.shadowOffset = CGSizeMake(0, -1);
+  }
+  traceBase = [CAShapeLayer layer]; traceBase.frame = traceBox.bounds; traceBase.contentsScale = scale;
+  traceBase.strokeColor = gray(1, .3); traceBase.lineWidth = 1; traceBase.lineDashPattern = @[@3, @3];
+  traceBase.fillColor = nil;
+  [traceBox addSublayer:traceBase];
+  traceLine = [CAShapeLayer layer]; traceLine.frame = traceBox.bounds; traceLine.contentsScale = scale;
+  traceLine.strokeColor = [NSColor colorWithSRGBRed:.66 green:.84 blue:.88 alpha:.9].CGColor;
+  traceLine.lineWidth = 1.75; traceLine.fillColor = nil;
+  traceLine.lineCap = kCALineCapRound; traceLine.lineJoin = kCALineJoinRound;
+  traceLine.shadowColor = gray(1, 1); traceLine.shadowOpacity = .15; traceLine.shadowRadius = 2;
+  traceLine.shadowOffset = CGSizeZero;
+  [traceBox addSublayer:traceLine];
+  traceDot = [CAShapeLayer layer]; traceDot.frame = traceBox.bounds; traceDot.contentsScale = scale;
+  traceDot.fillColor = gray(1, .86);
+  [traceBox addSublayer:traceDot];
+  [cardContent.layer insertSublayer:traceBox below:overlay];
+  // Shade the composed window, including native glass chrome, rather than only its content.
+  windowShade = [CALayer layer]; windowShade.frame = stage.bounds;
+  windowShade.cornerRadius = kCardRadius; windowShade.masksToBounds = YES; windowShade.zPosition = 1;
+  [stage addSublayer:windowShade];
+  [windowShade addSublayer:rimShade];
+  [windowShade addSublayer:chevron];
+  [self layoutCardContent];
 
   // Transparent, unscaled event target over the card.
   example = [[ExampleView alloc] initWithFrame:NSRectFromCGRect(card)];
   example.lab = self;
+  example.allowedTouchTypes = NSTouchTypeMaskIndirect;
   [root addSubview:example];
+  pinchRecognizer = [[NSMagnificationGestureRecognizer alloc] initWithTarget:self action:@selector(recognizePinch:)];
+  pinchRecognizer.delaysMagnificationEvents = YES;
+  [example addGestureRecognizer:pinchRecognizer];
+  __weak MotionLab *weakSelf = self;
+  gestureMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
+      NSEventMaskScrollWheel | NSEventMaskMagnify handler:^NSEvent *(NSEvent *event) {
+    MotionLab *lab = weakSelf;
+    if (!lab) return event;
+    // Let the card's native recognizer own its stream. Events addressed to the
+    // settings window still use the screen-coordinate monitor adapter.
+    if (event.type == NSEventTypeMagnify) {
+      ++lab->pinchEvents; lab->lastPinchRoute = @"monitor"; lab->lastPinchDelta = event.magnification;
+      const NSPoint point = event.window ? [event.window convertPointToScreen:event.locationInWindow] : event.locationInWindow;
+      fprintf(stderr, "pinch event phase=%lu window=%ld key=%ld card_key=%d point=(%.1f,%.1f) delta=%.5f\n",
+          (unsigned long)event.phase, (long)event.window.windowNumber, (long)NSApp.keyWindow.windowNumber,
+          lab->panel.isKeyWindow, point.x, point.y, event.magnification);
+      [lab writeState];
+      if (event.window == lab->panel) return event;
+    }
+    return [lab consumeGesture:event] ? nil : event;
+  }];
   [self syncControls];
   if ([NSFileManager.defaultManager fileExistsAtPath:settingsPath]) [self reloadSettings];
   else [self saveSettings];
@@ -568,6 +979,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     }
   }
   [controls makeKeyAndOrderFront:nil]; [panel orderFrontRegardless];
+  [fxPanel orderWindow:NSWindowBelow relativeTo:panel.windowNumber];
   [NSApp activateIgnoringOtherApps:YES];
   [self showPosition];
   fileTimer = [NSTimer timerWithTimeInterval:.5 target:self selector:@selector(checkFile:) userInfo:nil repeats:YES];
@@ -707,7 +1119,17 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   if (motion->tucked != Side::None) motion->restore(); else motion->tuck(Side::None);
   [self startAnimation];
 }
-- (void)reset:(id)sender { releaseDistance = 0; awaitingLanding = NO; motion->reset(); [self showPosition]; [self stopAnimation]; }
+- (void)reset:(id)sender {
+  [self cancelReturnAnimation];
+  pendingTrackpadPan = NO;
+  const BOOL wasReturned = returnedToBrowser;
+  returnedToBrowser = NO; suppressMouseUp = NO; consumeTrackpadMomentum = NO;
+  releaseDistance = 0; awaitingLanding = NO; motion->reset(); [self showPosition]; [self stopAnimation];
+  if (wasReturned) {
+    [panel orderFrontRegardless];
+    [fxPanel orderWindow:NSWindowBelow relativeTo:panel.windowNumber];
+  }
+}
 - (void)danielsTuning {
   [controls makeFirstResponder:nil];
   feedback = Feedback{};
@@ -751,21 +1173,121 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   return lastEventTimestamp + (NSProcessInfo.processInfo.systemUptime - lastEventUptime);
 }
 - (void)begin:(NSEvent *)event {
+  consumeTrackpadMomentum = NO; pendingTrackpadPan = NO;
+  if (returnedToBrowser) return;
+  if (gestures->kind() == pip_motion::Gestures::Kind::Pinch) { suppressMouseUp = YES; return; }
+  if (event.clickCount == 2 && motion->tucked == Side::None) {
+    suppressMouseUp = YES;
+    [self returnToBrowser];
+    return;
+  }
+  [NSApp activateIgnoringOtherApps:YES];
+  [panel makeKeyWindow]; [panel makeFirstResponder:example];
   [self stopAnimation]; [self noteEvent:event];
+  stayDustDone = NO;
   awaitingLanding = NO; hapticKey = pendingKey = -1; slowSince = -1; settleTapped = NO;
   motion->begin([self point:event], event.timestamp);
   [self haptic:NSHapticFeedbackPatternAlignment];
   [self showPosition];
 }
 - (void)drag:(NSEvent *)event {
+  if (returnedToBrowser || gestures->kind() == pip_motion::Gestures::Kind::Pinch) return;
   [self noteEvent:event];
   motion->drag([self point:event], event.timestamp); [self showPosition];
 }
 - (void)end:(NSEvent *)event {
+  if (suppressMouseUp) { suppressMouseUp = NO; return; }
   motion->end(event.timestamp);
   releaseDistance = length(motion->target - motion->position);
   awaitingLanding = YES;
   [self startAnimation];
+}
+- (void)recognizePinch:(NSMagnificationGestureRecognizer *)recognizer {
+  if (returnedToBrowser || motion->tucked != Side::None) return;
+  const BOOL cancelled = recognizer.state == NSGestureRecognizerStateCancelled || recognizer.state == NSGestureRecognizerStateFailed;
+  const BOOL ended = recognizer.state == NSGestureRecognizerStateEnded;
+  if (recognizer.state == NSGestureRecognizerStatePossible) return;
+  ++pinchEvents; lastPinchRoute = @"recognizer"; lastPinchDelta = recognizer.magnification;
+  consumeTrackpadMomentum = NO; pendingTrackpadPan = NO;
+  if (gestures->kind() != pip_motion::Gestures::Kind::Pinch) {
+    if (cancelled || ended) return;
+    [self stopAnimation]; awaitingLanding = NO; gestures->beginPinch();
+  }
+  if (!cancelled) gestures->magnify(recognizer.magnification);
+  recognizer.magnification = 0;
+  if (cancelled || ended) gestures->endPinch(cancelled);
+  [self showPosition];
+}
+- (BOOL)consumeGesture:(NSEvent *)event {
+  if (returnedToBrowser) return NO;
+  const BOOL magnify = event.type == NSEventTypeMagnify;
+  if (!magnify && event.type != NSEventTypeScrollWheel) return NO;
+  // Ownership belongs to one scroll sequence, including its trailing inertia.
+  // A new sequence over another window must clear the previous card's ownership.
+  if (magnify || (event.momentumPhase == NSEventPhaseNone &&
+      ((event.phase & (NSEventPhaseBegan | NSEventPhaseMayBegin)) || event.phase == NSEventPhaseNone))) {
+    consumeTrackpadMomentum = NO; pendingTrackpadPan = NO;
+  }
+  if (!magnify && !event.hasPreciseScrollingDeltas) return NO;
+  if (!magnify && event.momentumPhase != NSEventPhaseNone) {
+    const BOOL consume = consumeTrackpadMomentum;
+    if (event.momentumPhase & (NSEventPhaseEnded | NSEventPhaseCancelled))
+      consumeTrackpadMomentum = NO;
+    return consume;
+  }
+  const BOOL active = gestures->kind() != pip_motion::Gestures::Kind::None || pendingTrackpadPan;
+  const NSPoint point = event.window ? [event.window convertPointToScreen:event.locationInWindow]
+                                    : event.locationInWindow;
+  const NSRect card = NSMakeRect(motion->position.x, motion->position.y,
+                                 motion->size.width, motion->size.height);
+  if (!active && !NSPointInRect(point, card)) return NO;
+  const BOOL cancelled = (event.phase & NSEventPhaseCancelled) != 0;
+  const BOOL ended = (event.phase & NSEventPhaseEnded) != 0;
+  [self noteEvent:event];
+  if (magnify) {
+    pendingTrackpadPan = NO;
+    if (motion->tucked != Side::None) return NO;
+    if (!active && (ended || cancelled)) return NO;
+    if (gestures->kind() != pip_motion::Gestures::Kind::Pinch) {
+      [self stopAnimation];
+      awaitingLanding = NO;
+      gestures->beginPinch();
+    }
+    if (!cancelled) gestures->magnify(event.magnification);
+    if (ended || cancelled || event.phase == NSEventPhaseNone)
+      gestures->endPinch(cancelled);
+    [self showPosition];
+    return YES;
+  }
+  if (gestures->kind() == pip_motion::Gestures::Kind::Pinch) return YES;
+  if (event.phase == NSEventPhaseNone) return NO;
+  if (gestures->kind() != pip_motion::Gestures::Kind::Pan) {
+    if (ended || cancelled) {
+      const BOOL owned = pendingTrackpadPan; pendingTrackpadPan = NO; return owned;
+    }
+    if (event.phase & (NSEventPhaseBegan | NSEventPhaseMayBegin)) {
+      pendingTrackpadPan = YES; consumeTrackpadMomentum = YES;
+    }
+    // A zero-delta prelude is not pickup. Pinch recognition cancels this pending
+    // pan, and its leftover Changed events cannot create a new pickup afterward.
+    if (!pendingTrackpadPan) return NO;
+    if (event.scrollingDeltaX == 0 && event.scrollingDeltaY == 0) return YES;
+    pendingTrackpadPan = NO;
+    [self stopAnimation];
+    stayDustDone = NO; awaitingLanding = NO; hapticKey = pendingKey = -1;
+    slowSince = -1; settleTapped = NO;
+    gestures->beginPan(event.timestamp);
+  }
+  consumeTrackpadMomentum = YES;
+  if (!cancelled)
+    gestures->pan({event.scrollingDeltaX, -event.scrollingDeltaY}, event.timestamp);
+  if (ended || cancelled) {
+    gestures->endPan(event.timestamp, cancelled);
+    releaseDistance = length(motion->target - motion->position);
+    awaitingLanding = !cancelled;
+    [self startAnimation];
+  } else [self showPosition];
+  return YES;
 }
 - (void)haptic:(NSHapticFeedbackPattern)pattern {
   const double now = NSProcessInfo.processInfo.systemUptime;
@@ -817,7 +1339,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   return [NSString stringWithFormat:@"%@-%@ corner", top ? @"top" : @"bottom", left ? @"left" : @"right"];
 }
 - (void)wakeVisuals {
-  if (visualTimer) return;
+  if (returnedToBrowser || visualTimer) return;
   lastVisualTime = NSProcessInfo.processInfo.systemUptime;
   visualTimer = [NSTimer timerWithTimeInterval:1.0/120 target:self selector:@selector(visualTick:) userInfo:nil repeats:YES];
   [NSRunLoop.mainRunLoop addTimer:visualTimer forMode:NSRunLoopCommonModes];
@@ -830,6 +1352,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 // Physical cues derived from the release prediction: lift, hold glow, rim shadow and dock lean.
 // Returns YES once every smoothed value has reached its target.
 - (BOOL)updateVisuals {
+  if (returnedToBrowser) return YES;
   const double now = NSProcessInfo.processInfo.systemUptime;
   const double dt = std::clamp(now - lastVisualTime, 0.0, .05);
   lastVisualTime = now;
@@ -932,16 +1455,44 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   pip_motion::spring(settleAmount, settleVelocity, settleGoal,
       settleGoal > settleAmount ? feedback.settleEase : std::max(.12, .45 * feedback.settleEase), 1, dt);
   if (std::abs(settleAmount - settleGoal) < 1e-3 && std::abs(settleVelocity) < 1e-2) { settleAmount = settleGoal; settleVelocity = 0; }
-  // One tap when the settle animation completes; it rearms once the card lifts well back up.
+  // The tap and particles share one completion event, rearmed once the card lifts back up.
+  bool staySettled = false;
   if (dragging && keep && on && feedback.settle > 0 && !settleTapped && settleAmount >= .95) {
-    settleTapped = YES; [self haptic:NSHapticFeedbackPatternAlignment];
+    settleTapped = YES; staySettled = true; rippleStart = now; [self haptic:NSHapticFeedbackPatternAlignment];
   } else if (!keep || settleAmount < .5) settleTapped = NO;
+  if (dragging && (!keep || settleAmount < .5)) stayDustDone = NO;
   approach(glow, on ? glowTarget : 0, .09, .14, dt);
   approach(edgeAmount, on ? edgeTarget : 0, .12, .14, dt);
   approach(leanX, leanTarget.x, .08, .10, dt);
   approach(leanY, leanTarget.y, .08, .10, dt);
   approach(shadowX, shadowTarget.x, .26, .16, dt);
   approach(shadowY, shadowTarget.y, .26, .16, dt);
+
+  // Presented velocity for tilt and stretch, measured across frames at least 4 ms apart. After
+  // an idle gap it restarts from rest, so a jump while the timer slept is not read as a flick.
+  const double vdt = now - prevVelocityTime;
+  if (vdt > .25) { prevX = position.x; prevY = position.y; prevVelocityTime = now; visVX = visVY = 0; }
+  else if (vdt >= .004) {
+    double rx = (position.x - prevX) / vdt, ry = (position.y - prevY) / vdt;
+    const double fast = std::hypot(rx, ry);
+    if (fast > 5000) { rx *= 5000 / fast; ry *= 5000 / fast; }
+    const double blend = 1 - std::exp(-vdt / .05);
+    visVX += (rx - visVX) * blend; visVY += (ry - visVY) * blend;
+    prevX = position.x; prevY = position.y; prevVelocityTime = now;
+    if (std::hypot(visVX, visVY) < 1 && rx == 0 && ry == 0) visVX = visVY = 0;
+  }
+  // Tilt: the leading edge tips away with speed and springs flat, with a little wobble, on stopping.
+  const bool reduceMotion = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+  const double maxTilt = on && !reduceMotion ? feedback.tilt * M_PI / 180 : 0;
+  pip_motion::spring(tiltY, tiltVY, maxTilt * std::tanh(visVX / 1600), .32, .6, dt);
+  pip_motion::spring(tiltX, tiltVX, -maxTilt * std::tanh(visVY / 1600), .32, .6, dt);
+  if (visVX == 0 && visVY == 0 && std::abs(tiltX) + std::abs(tiltY) < 1e-4 && std::abs(tiltVX) + std::abs(tiltVY) < 1e-3)
+    tiltX = tiltY = tiltVX = tiltVY = 0;
+  // The settle meter keeps its last progress while it fades after release.
+  if (dragging) meterProgress = std::clamp(settleAmount / .95, 0.0, 1.0);
+  const double meterTarget = on && dragging && keep && settleAmount > .02 ? 1 : 0;
+  approach(meterAlpha, meterTarget, .08, .2, dt);
+  const bool pressMode = on && dragging && motion->settings.docking == Docking::AllEdges && length(motion->pressed) > .5;
 
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
@@ -957,8 +1508,24 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   const double dip = pressing ? .02 * feedback.press * (1 - std::cos(2 * M_PI * pressAge / pressTime)) / 2 : 0;
   // Lifting brings the card toward you: it grows slightly as its shadow spreads.
   const double cardScale = (1 + .03 * l) * (1 - dip);
-  stage.position = CGPointMake(CGRectGetMidX(card), CGRectGetMidY(card));
-  stage.transform = CATransform3DMakeScale(cardScale, cardScale, 1);
+  if (!NSEqualRects(cardHost.frame, NSRectFromCGRect(card))) cardHost.frame = NSRectFromCGRect(card);
+  // Fast flicks stretch the card along its travel, then lift scale, then tilt in perspective.
+  const double speed = std::hypot(visVX, visVY);
+  const double stretch = on && !reduceMotion ? feedback.stretch / 100 * smoothstep((speed - 600) / 2400) : 0;
+  CATransform3D transform = CATransform3DMakeScale(cardScale, cardScale, 1);
+  if (stretch > 1e-4) {
+    const double angle = std::atan2(visVY, visVX);
+    const CATransform3D along = CATransform3DConcat(CATransform3DConcat(CATransform3DMakeRotation(-angle, 0, 0, 1),
+        CATransform3DMakeScale(1 + stretch, 1 - stretch / 2, 1)), CATransform3DMakeRotation(angle, 0, 0, 1));
+    transform = CATransform3DConcat(along, transform);
+  }
+  if (tiltX != 0 || tiltY != 0) {
+    CATransform3D perspective = CATransform3DIdentity; perspective.m34 = -1.0 / 900;
+    transform = CATransform3DConcat(CATransform3DConcat(CATransform3DConcat(transform,
+        CATransform3DMakeRotation(tiltY, 0, 1, 0)), CATransform3DMakeRotation(tiltX, 1, 0, 0)), perspective);
+  }
+  stage.transform = transform;
+  [self updateStringOcclusion];
   // Pickup shadow: +1 spreads and softens as it lifts, -1 tightens and darkens.
   const double k = std::clamp(feedback.pickupShadow, -1.0, 1.0);
   // Light comes from a box over the middle of the work area. A window over the box casts
@@ -981,13 +1548,385 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   contactShadow.shadowRadius = 4 + 3 * l;
   contactShadow.shadowOpacity = std::min(1.0, intensity * .16 * (1 - .75 * l * std::max(k, 0.0)));
   contactShadow.shadowOffset = CGSizeMake(leanX * .5 + castX * .2, leanY * .5 + castY * .2);
+  // Landing: the contact shadow flares outward, then tightens past rest before easing back.
+  const double landAge = now - pressStart, landTime = .45;
+  const bool landing = on && feedback.landingShadow > 0 && pressStart > 0 && landAge >= 0 && landAge < landTime;
+  if (landing) {
+    const double u = landAge / landTime;
+    const double flare = std::sin(2 * M_PI * u) * std::exp(-2.2 * u) * feedback.landingShadow;
+    contactShadow.shadowRadius = std::max(1.5, contactShadow.shadowRadius + 9 * flare);
+    contactShadow.shadowOpacity = std::clamp(contactShadow.shadowOpacity * (1 + .9 * flare), 0.0, 1.0);
+  }
   glowShadow.shadowOpacity = .45 * glow * feedback.glow;
   rimLight.opacity = .6 * glow * feedback.glow;
 
+  // Settle meter traces the border as it settles; completion sends a ripple outward with the tap.
+  meter.strokeEnd = meterProgress;
+  meter.opacity = meterAlpha * feedback.settleMeter;
+  const double rippleAge = now - rippleStart, rippleTime = .55;
+  const bool rippling = on && rippleStart > 0 && rippleAge >= 0 && rippleAge < rippleTime;
+  if (rippling) {
+    const double u = rippleAge / rippleTime, grow = 22 * (1 - (1 - u) * (1 - u));
+    ripple.transform = CATransform3DMakeScale(1 + 2 * grow / w, 1 + 2 * grow / h, 1);
+    ripple.opacity = (1 - u) * (1 - u) * feedback.settleMeter;
+  } else ripple.opacity = 0;
+
+  // Straight edge strings join into the inset border loop only during a corner press.
+  const pip_motion::Point depthNow = motion->depth();
+  const pip_motion::Point panelOrigin{position.x - kPad, position.y - kPad};
+  const double grow = (cardScale - 1) / 2;
+  const double cardL = kPad + leanX - w * grow, cardR = kPad + leanX + w * (1 + grow);
+  const double cardB = kPad + leanY - h * grow, cardT = kPad + leanY + h * (1 + grow);
+  const pip_motion::Point pressedNow = motion->pressed;
+  auto falloff = [](double outside) { return std::exp(-outside * outside / (105.0 * 105.0)); };
+  const auto work = motion->area();
+  const double inset = motion->settings.margin;
+  double left = work.x + inset, right = work.x + work.width - inset;
+  double bottom = work.y + inset, top = work.y + work.height - inset;
+  // Preserve the resistance boundary during the rebound, including a restored tucked card.
+  for (int axis = 0; axis < 2; ++axis) if (axisGlow[axis] > 0) {
+    const auto& m = membranes[axis];
+    (axis == 0 ? (m.sign < 0 ? left : right) : (m.sign < 0 ? bottom : top)) = m.boundary;
+  }
+  auto geometry = [&]() {
+    const double width = std::max(1.0, right - left), height = std::max(1.0, top - bottom);
+    return BorderGeometry{{left, bottom, width, height}, std::min({double(kCardRadius), width / 2, height / 2})};
+  };
+
+  // A tuck consumes every visible part of the loop, including the joined corner and center.
+  if (wasPressing && !dragging && motion->decision == Decision::Tuck) {
+    static std::mt19937 rng{std::random_device{}()};
+    std::uniform_real_distribution<double> unit(0, 1);
+    auto r = [&](double a, double b) { return a + (b - a) * unit(rng); };
+    const auto border = geometry();
+    const double perimeter = border.perimeter();
+    double peakStress = -1;
+    for (int axis = 0; axis < 2; ++axis) if (axisPressed[axis] && membranes[axis].stress > peakStress) {
+      peakStress = membranes[axis].stress; stressColor(peakStress, breakRGB);
+    }
+    for (size_t first = 0; first + 1 < borderSamples.size(); first += 6) {
+      const size_t last = std::min(borderSamples.size() - 1, first + 6);
+      double visible = 0;
+      for (size_t i = first; i <= last; ++i) visible = std::max(visible, borderSamples[i].visibility);
+      if (visible < .01) continue;
+      const auto& a = borderSamples[first]; const auto& b = borderSamples[last];
+      const double at = (a.perimeter + b.perimeter) / 2;
+      int owner = 0; double strongest = -1;
+      for (int axis = 0; axis < 2; ++axis) {
+        const auto& m = membranes[axis];
+        const double distance = std::abs(perimeterDelta(at, border.source(axis, m.sign, m.anchor), perimeter));
+        const double strength = axisGlow[axis] * falloff(std::max(0.0, distance - (m.hi - m.lo) / 2));
+        if ((!cornerString && axis == straightStringAxis) || (cornerString && strength > strongest)) {
+          strongest = strength; owner = axis;
+        }
+      }
+      const auto& m = membranes[owner];
+      const double away = perimeterDelta(at, border.source(owner, m.sign, m.anchor), perimeter) < 0 ? -1 : 1;
+      const pip_motion::Point tangent = owner == 0 ? pip_motion::Point{0, m.sign} : pip_motion::Point{-m.sign, 0};
+      const double local = std::max(.25, m.stress) * (.35 + .65 * strongest);
+      const double along = away * (140 + 560 * local) * r(.6, 1.25), inward = (100 + 300 * local) * r(.55, 1.2);
+      Thread thread;
+      thread.x = a.point.x; thread.y = a.point.y;
+      thread.vx = tangent.x * along - m.normal.x * inward;
+      thread.vy = tangent.y * along - m.normal.y * inward;
+      thread.angle = std::atan2(b.point.y - a.point.y, b.point.x - a.point.x);
+      thread.length = length(b.point - a.point); thread.spin = r(-5, 5) * (.5 + local);
+      thread.curl = r(-.1, .1) * thread.length; thread.phase = r(0, 2 * M_PI);
+      threads.push_back(thread);
+    }
+    for (int axis = 0; axis < 2; ++axis) {
+      axisGlow[axis] = 0; membranes[axis].bend = membranes[axis].bendVelocity = 0;
+    }
+    borderSamples.clear(); borderString.shape.path = nil; borderString.group.opacity = 0;
+    if (peakStress >= 0) breakStart = now;
+  }
+
+  for (int axis = 0; axis < 2; ++axis) {
+    Membrane& m = membranes[axis];
+    const bool side = axis == 0;
+    const double pushed = side ? pressedNow.x : pressedNow.y;
+    const bool active = pressMode && std::abs(pushed) > .5;
+    if (active) {
+      const double lo = side ? cardB : cardL, hi = side ? cardT : cardR;
+      const double sign = pushed < 0 ? -1 : 1;
+      const double edge = pushed < 0 ? (side ? cardL : cardB) : (side ? cardR : cardT);
+      const double boundary = (pushed < 0 ? kPad : kPad + (side ? w : h)) - pushed;
+      const double center = (lo + hi) / 2 + (side ? panelOrigin.y : panelOrigin.x);
+      if (!axisPressed[axis]) m.anchor = center;
+      m.anchor = std::clamp(m.anchor, center - 120, center + 120);
+      m.boundary = boundary + (side ? panelOrigin.x : panelOrigin.y); m.sign = sign;
+      m.lo = lo + (side ? panelOrigin.y : panelOrigin.x);
+      m.hi = hi + (side ? panelOrigin.y : panelOrigin.x); m.center = center;
+      m.bend = std::max(0.0, sign * (edge - boundary) + 1.5); m.bendVelocity = 0;
+      m.pressedBend = std::max(1.0, m.bend);
+      const double depth = std::abs(side ? depthNow.x : depthNow.y);
+      m.stress = std::clamp(depth / (side ? std::max(1.0, motion->settings.press_tuck) :
+          2.5 * std::max(.5, motion->settings.press_dock)), 0.0, 1.0);
+      m.normal = side ? pip_motion::Point{sign, 0} : pip_motion::Point{0, sign};
+      (side ? (sign < 0 ? left : right) : (sign < 0 ? bottom : top)) = m.boundary;
+    } else if (m.bend != 0 || m.bendVelocity != 0) {
+      pip_motion::spring(m.bend, m.bendVelocity, 0, .24, .22, dt);
+      if (std::abs(m.bend) < .05 && std::abs(m.bendVelocity) < 1) m.bend = m.bendVelocity = 0;
+    }
+    axisPressed[axis] = active;
+    approach(axisGlow[axis], active ? 1 : 0, .05, .45, dt);
+    CAGradientLayer *field = side ? borderString.horizontal : borderString.vertical;
+    field.opacity = axisGlow[axis];
+    if (axisGlow[axis] > 0) {
+      const double span = m.hi - m.lo, reach = span / 2 + 260;
+      const double crossReach = std::max(reach, std::abs(m.bend) + 80);
+      const CGPoint center = side ? CGPointMake(m.boundary - fxOrigin.x, m.anchor - fxOrigin.y) :
+          CGPointMake(m.anchor - fxOrigin.x, m.boundary - fxOrigin.y);
+      const double fw = fxRoot.bounds.size.width, fh = fxRoot.bounds.size.height;
+      field.startPoint = CGPointMake(center.x / fw, center.y / fh);
+      field.endPoint = CGPointMake((center.x + (side ? crossReach : reach)) / fw,
+          (center.y + (side ? reach : crossReach)) / fh);
+      const double stress = active ? m.stress : m.stress * std::min(1.0, std::abs(m.bend) / m.pressedBend);
+      double rgb[3]; stressColor(stress, rgb);
+      field.colors = @[(__bridge id)rgba(rgb, 1), (__bridge id)rgba(rgb, 1),
+          (__bridge id)gray(1, .65), (__bridge id)gray(1, 0)];
+      field.locations = @[@0, @(std::min(.85, (span / 2 + 170) / reach)), @.92, @1];
+    }
+  }
+  // The rounded loop is reserved for an actual two-edge corner press. Keep the
+  // last held shape during release so its rebound or break remains continuous.
+  if (pressMode) {
+    const bool corner = axisPressed[0] && axisPressed[1] &&
+        std::abs(depthNow.x) >= motion->settings.press_dock &&
+        std::abs(depthNow.y) >= motion->settings.press_dock;
+    if (!corner && (cornerString || !axisPressed[straightStringAxis]))
+      straightStringAxis = axisPressed[0] && (!axisPressed[1] || std::abs(depthNow.x) >= std::abs(depthNow.y)) ? 0 : 1;
+    cornerString = corner;
+  }
+  borderString.horizontal.opacity = cornerString || straightStringAxis == 0 ? axisGlow[0] : 0;
+  borderString.vertical.opacity = cornerString || straightStringAxis == 1 ? axisGlow[1] : 0;
+  if (axisGlow[0] > 0 || axisGlow[1] > 0) {
+    const auto border = geometry();
+    const double perimeter = border.perimeter();
+    const auto sections = border.sections();
+    CGMutablePathRef path = CGPathCreateMutable();
+    borderSamples.clear();
+    if (cornerString) {
+      double travelled = 0;
+      for (size_t edge = 0; edge < sections.size(); ++edge) {
+        const double edgeLength = sections[edge];
+        const int count = std::max(1, int(std::ceil(edgeLength / 4)));
+        for (int i = edge == 0 ? 0 : 1; i <= count; ++i) {
+          const double t = double(i) / count, at = travelled + t * edgeLength;
+          auto point = border.point(at);
+          double visibility = 0;
+          for (int axis = 0; axis < 2; ++axis) if (axisGlow[axis] > 0) {
+            const auto& m = membranes[axis];
+            const double distance = std::abs(perimeterDelta(at, border.source(axis, m.sign, m.anchor), perimeter));
+            const double halfSpan = (m.hi - m.lo) / 2, reach = halfSpan + 260;
+            point = point + m.normal * (m.bend * falloff(std::max(0.0, distance - halfSpan)));
+            visibility = std::max(visibility, axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0));
+          }
+          const CGPoint local = CGPointMake(point.x - fxOrigin.x, point.y - fxOrigin.y);
+          if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
+          else CGPathAddLineToPoint(path, nullptr, local.x, local.y);
+          borderSamples.push_back({point, at, visibility});
+        }
+        travelled += edgeLength;
+      }
+      CGPathCloseSubpath(path);
+    } else {
+      const int axis = straightStringAxis;
+      const auto& m = membranes[axis];
+      const bool side = axis == 0;
+      const double offset = side ? fxOrigin.y : fxOrigin.x;
+      const double reach = (m.hi - m.lo) / 2 + 260;
+      const double extent = side ? fxRoot.bounds.size.height : fxRoot.bounds.size.width;
+      const double a0 = std::max(offset + 10, m.anchor - reach);
+      const double a1 = std::min(offset + extent - 10, m.anchor + reach);
+      for (double u = a0; u <= a1 + .01; u += 4) {
+        const double distance = std::abs(u - m.anchor);
+        const double bend = m.bend * falloff(std::max({0.0, m.lo - u, u - m.hi}));
+        const double cross = m.boundary + m.sign * bend;
+        const pip_motion::Point point = side ? pip_motion::Point{cross, u} : pip_motion::Point{u, cross};
+        const CGPoint local = CGPointMake(point.x - fxOrigin.x, point.y - fxOrigin.y);
+        if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
+        else CGPathAddLineToPoint(path, nullptr, local.x, local.y);
+        const double at = border.source(axis, m.sign, m.anchor) + (side ? m.sign : -m.sign) * (u - m.anchor);
+        const double visible = axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0);
+        borderSamples.push_back({point, at, visible});
+      }
+    }
+    borderString.shape.path = path; CGPathRelease(path);
+    const int peak = cornerString ? (membranes[0].stress * axisGlow[0] > membranes[1].stress * axisGlow[1] ? 0 : 1) : straightStringAxis;
+    const auto& m = membranes[peak];
+    double rgb[3]; stressColor(m.stress * std::min(1.0, std::abs(m.bend) / m.pressedBend), rgb);
+    borderString.glow.shadowColor = rgba(rgb, 1);
+    borderString.glow.shadowRadius = 18 + 18 * m.stress;
+    borderString.group.opacity = feedback.edgeGlow;
+  } else {
+    borderString.shape.path = nil; borderString.group.opacity = 0; borderSamples.clear();
+  }
+  wasPressing = pressMode;
+
+  // Threads drift with drag, spin, curl and fray as they fade, staying planted in screen space.
+  const double threadLife = .85, threadAge = now - breakStart;
+  if (!threads.empty() && threadAge > threadLife) threads.clear();
+  if (!threads.empty()) {
+    const double u = threadAge / threadLife, drag = std::exp(-3.2 * dt);
+    CGMutablePathRef path = CGPathCreateMutable();
+    for (Thread& thread : threads) {
+      thread.vx *= drag; thread.vy *= drag;
+      thread.x += thread.vx * dt; thread.y += thread.vy * dt;
+      thread.angle += thread.spin * dt; thread.length *= std::exp(-1.1 * dt); thread.curl *= 1 + 1.4 * dt;
+      const double px = thread.x - fxOrigin.x, py = thread.y - fxOrigin.y;
+      const double ex = px + std::cos(thread.angle) * thread.length, ey = py + std::sin(thread.angle) * thread.length;
+      const double wobble = thread.curl * std::sin(thread.phase + 9 * u);
+      CGPathMoveToPoint(path, nullptr, px, py);
+      CGPathAddQuadCurveToPoint(path, nullptr, (px + ex) / 2 - std::sin(thread.angle) * wobble,
+          (py + ey) / 2 + std::cos(thread.angle) * wobble, ex, ey);
+    }
+    threadShape.path = path; CGPathRelease(path);
+    // Breaking releases the tension immediately; its stress color relaxes to white.
+    const double stressRemaining = std::pow(1 - std::clamp(threadAge / .12, 0.0, 1.0), 3);
+    double threadRGB[3];
+    for (int c = 0; c < 3; ++c) threadRGB[c] = 1 + (breakRGB[c] - 1) * stressRemaining;
+    threadShape.strokeColor = rgba(threadRGB, 1); threadGlow.shadowColor = rgba(threadRGB, 1);
+    threadShape.lineWidth = 3 - 1.5 * u;
+    threadGlow.opacity = feedback.edgeGlow * std::pow(1 - u, 1.4);
+  } else threadGlow.opacity = 0;
+
+  // Flight state is captured synchronously by startAnimation, before the first spring step.
+  const bool settlingNow = motion->phase == Phase::Settling;
+  const bool flying = settlingNow && flightDistance > 40;
+  if (flying) flightPeak = std::max(flightPeak, length(motion->velocity));
+  const bool finishedSettle = wasSettling && !settlingNow && !dragging;
+  const bool landed = finishedSettle && flightDistance > 40;
+  wasSettling = settlingNow;
+
+  // The display stays visible at rest; motion adds samples, idle leaves the last curve and zero.
+  const pip_motion::Point readVelocity = dragging ? pip_motion::Point{visVX, visVY} : motion->velocity;
+  if (length(traceDirection) < .5) traceDirection = {1, 0};
+  if (dragging && length(readVelocity) > 5) traceDirection = readVelocity * (1 / length(readVelocity));
+  const double signedVelocity = readVelocity.x * traceDirection.x + readVelocity.y * traceDirection.y;
+  if (traceSamples.empty()) {
+    traceStart = now; tracePeak = 100;
+    traceSamples.emplace_back(0, signedVelocity);
+  }
+  const double elapsed = now - traceStart;
+  if (((dragging || settlingNow) && elapsed > traceSamples.back().first + 1.0 / 240) ||
+      (!dragging && !settlingNow && traceSamples.back().second != 0))
+    traceSamples.emplace_back(elapsed, signedVelocity);
+  while (traceSamples.size() > 2 && traceSamples[1].first < elapsed - 1.6)
+    traceSamples.erase(traceSamples.begin());
+  tracePeak = 100;
+  for (const auto& sample : traceSamples) tracePeak = std::max(tracePeak, std::abs(sample.second));
+  const double gx = 0, gw = traceBox.bounds.size.width, gy = 3;
+  const double gh = std::max(12.0, traceBox.bounds.size.height - 30), zero = gy + gh / 2;
+  const double firstTime = traceSamples.front().first;
+  const double span = std::max(.6, traceSamples.back().first - firstTime);
+  CGMutablePathRef graph = CGPathCreateMutable();
+  double x = gx, y = zero;
+  for (size_t i = 0; i < traceSamples.size(); ++i) {
+    x = gx + gw * (traceSamples[i].first - firstTime) / span;
+    y = zero + (gh / 2 - 2) * std::asinh(traceSamples[i].second / 50) / std::asinh(tracePeak / 50);
+    if (i == 0) CGPathMoveToPoint(graph, nullptr, x, y); else CGPathAddLineToPoint(graph, nullptr, x, y);
+  }
+  if (traceSamples.size() == 1 && std::abs(signedVelocity) < .5) {
+    x = gx + gw; CGPathAddLineToPoint(graph, nullptr, x, zero);
+  }
+  traceLine.path = graph; CGPathRelease(graph);
+  CGPathRef dot = CGPathCreateWithEllipseInRect(CGRectMake(x - 2, y - 2, 4, 4), nullptr);
+  traceDot.path = dot; CGPathRelease(dot);
+  CGMutablePathRef base = CGPathCreateMutable();
+  CGPathMoveToPoint(base, nullptr, gx, zero); CGPathAddLineToPoint(base, nullptr, gx + gw, zero);
+  traceBase.path = base; CGPathRelease(base);
+  const double dx = traceDirection.x, dy = traceDirection.y;
+  CGMutablePathRef arrow = CGPathCreateMutable();
+  CGPathMoveToPoint(arrow, nullptr, -7 * dx, -7 * dy);
+  CGPathAddLineToPoint(arrow, nullptr, 7 * dx, 7 * dy);
+  CGPathMoveToPoint(arrow, nullptr, 2 * dx - 4 * dy, 2 * dy + 4 * dx);
+  CGPathAddLineToPoint(arrow, nullptr, 7 * dx, 7 * dy);
+  CGPathAddLineToPoint(arrow, nullptr, 2 * dx + 4 * dy, 2 * dy - 4 * dx);
+  traceArrow.path = arrow; CGPathRelease(arrow);
+  NSString *reading = std::abs(signedVelocity) < .5 ? @"0 pt/s" : [NSString stringWithFormat:@"%+.0f pt/s", signedVelocity];
+  if (![traceValue.string isEqual:reading]) traceValue.string = reading;
+  traceBox.opacity = on ? feedback.springTrace : 0;
+
+  // Stay-here completion has a gentle puff, once, even if the pointer is still held.
+  const bool stayLanding = staySettled || (finishedSettle && motion->decision == Decision::Keep && !stayDustDone);
+  if (stayLanding) stayDustDone = YES;
+  if (on && feedback.dust > 0 && (stayLanding || (landed && flightPeak > 300))) {
+    static std::mt19937 dustRng{std::random_device{}()};
+    std::uniform_real_distribution<double> unit(0, 1);
+    const double hard = stayLanding ? .08 : std::clamp((flightPeak - 300) / 2200, 0.0, 1.0);
+    const int count = 12 + int(28 * hard);
+    dust.clear();
+    for (int i = 0; i < count; ++i) {
+      // A random point on the window's perimeter, pushed out along that edge's normal.
+      const double t = unit(dustRng) * 2 * (w + h);
+      double x, y, nx = 0, ny = 0;
+      if (t < w) { x = t; y = 0; ny = -1; }
+      else if (t < w + h) { x = w; y = t - w; nx = 1; }
+      else if (t < 2 * w + h) { x = t - w - h; y = h; ny = 1; }
+      else { x = 0; y = t - 2 * w - h; nx = -1; }
+      const double speed = (40 + 180 * hard) * (.4 + .9 * unit(dustRng));
+      const double slide = (unit(dustRng) - .5) * speed * .8;
+      dust.push_back({position.x + x, position.y + y, nx * speed - ny * slide, ny * speed + nx * slide,
+          .8 + 1.8 * unit(dustRng)});
+    }
+    dustStart = now;
+  }
+  const double dustAge = now - dustStart, dustLife = .7;
+  if (!dust.empty() && dustAge > dustLife) dust.clear();
+  if (!dust.empty()) {
+    const double u = dustAge / dustLife, drag = std::exp(-4.5 * dt);
+    CGMutablePathRef specks = CGPathCreateMutable();
+    for (Speck& speck : dust) {
+      speck.vx *= drag; speck.vy *= drag; speck.x += speck.vx * dt; speck.y += speck.vy * dt;
+      const double r = speck.radius * (1 + .6 * u);
+      CGPathAddEllipseInRect(specks, nullptr, CGRectMake(speck.x - fxOrigin.x - r, speck.y - fxOrigin.y - r, 2 * r, 2 * r));
+    }
+    dustShape.path = specks; CGPathRelease(specks);
+    dustGlow.opacity = feedback.dust * std::pow(1 - u, 1.3);
+  } else dustGlow.opacity = 0;
+
+  // Recording meters: PRESS sits above the card (below near the top), SETTLE below (above near the bottom).
+  const double hudGrow = (cardScale - 1) / 2, hudX = std::round(kPad + leanX + w / 2);
+  const double cardTop = kPad + leanY + h * (1 + hudGrow), cardBottom = kPad + leanY - h * hudGrow;
+  const bool nearTop = area.y + area.height - (position.y + h) < 72, nearBottom = position.y - area.y < 72;
+  approach(pressHudAlpha, pressMode ? 1 : 0, .06, .25, dt);
+  if (pressMode) {
+    const pip_motion::Point p = motion->pressed;
+    const bool sidePress = std::abs(p.x) >= std::abs(p.y);
+    const double dock = motion->settings.press_dock, tuck = motion->settings.press_tuck;
+    const double depthShown = sidePress ? std::abs(depthNow.x) : std::abs(depthNow.y);
+    const double range = sidePress ? std::max(tuck, dock) * 1.15 : dock * 3;
+    pressHudFill = std::clamp(depthShown / range, 0.0, 1.0);
+    NSString *value = [NSString stringWithFormat:@"%.1f%%", depthShown];
+    if (![pressValue.string isEqual:value]) pressValue.string = value;
+    auto placeTick = [&](CALayer *mark, CATextLayer *caption, double at) {
+      const double x = std::round(kTrackX + kTrackW * std::min(1.0, at / range));
+      mark.position = CGPointMake(x, kTrackY + 2); caption.position = CGPointMake(x, kTrackY + 15);
+    };
+    placeTick(pressDockTick, pressDockLabel, dock);
+    placeTick(pressTuckTick, pressTuckLabel, tuck);
+    pressTuckTick.hidden = pressTuckLabel.hidden = !sidePress;
+  }
+  pressFill.bounds = CGRectMake(0, 0, kTrackW * pressHudFill, 4);
+  pressHud.position = CGPointMake(hudX, std::round(nearTop ? cardBottom - 18 - kHudH / 2 : cardTop + 18 + kHudH / 2));
+  pressHud.opacity = pressHudAlpha * feedback.meters;
+
+  approach(settleHudAlpha, meterTarget, .08, .3, dt);
+  if (dragging) settleHudDone = settleTapped;
+  settleFill.bounds = CGRectMake(0, 0, kTrackW * meterProgress, 4);
+  NSString *settleText = settleHudDone ? @"SET" : [NSString stringWithFormat:@"%.0f%%", meterProgress * 100];
+  if (![settleValue.string isEqual:settleText]) settleValue.string = settleText;
+  settleHud.position = CGPointMake(hudX, std::round(nearBottom ? cardTop + 18 + kHudH / 2 : cardBottom - 18 - kHudH / 2));
+  const double pop = rippling ? .06 * std::sin(M_PI * rippleAge / rippleTime) : 0;
+  settleHud.transform = CATransform3DMakeScale(1 + pop, 1 + pop, 1);
+  settleHud.opacity = settleHudAlpha * feedback.meters;
+
   // Screen edge in card coordinates, accounting for lean and the lift scale about the card's center.
-  const double rimScreen = side == Side::Left ? area.x : area.x + area.width;
+  const double rimScreen = side == Side::Left ? fxOrigin.x : fxOrigin.x + fxRoot.bounds.size.width;
   const double rim = w / 2 + (rimScreen - (position.x + leanX + w / 2)) / cardScale;
   const double reach = std::max(88.0, handle * 3);
+  const double bleed = 2 / (std::max(1.0, panel.backingScaleFactor) * cardScale);
   if (rimShadeStrength != feedback.edge || !rimShade.colors) {
     // Exponential falloff: dense at the rim with a long, soft tail and no visible stop.
     rimShadeStrength = feedback.edge;
@@ -999,8 +1938,11 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     }
     rimShade.colors = colors;
   }
-  rimShade.frame = side == Side::Left ? CGRectMake(rim, 0, reach, h) : CGRectMake(rim - reach, 0, reach, h);
-  rimShade.startPoint = CGPointMake(side == Side::Left ? 0 : 1, .5);
+  // Overscan the screenward edge by two backing pixels; keep peak darkness at the rim.
+  // A layer ending at the rim can leave the final physical pixel only partially covered.
+  rimShade.frame = side == Side::Left ? CGRectMake(rim - bleed, -bleed, reach + bleed, h + 2 * bleed) :
+      CGRectMake(rim - reach, -bleed, reach + bleed, h + 2 * bleed);
+  rimShade.startPoint = CGPointMake(side == Side::Left ? bleed / (reach + bleed) : reach / (reach + bleed), .5);
   rimShade.endPoint = CGPointMake(side == Side::Left ? 1 : 0, .5);
   rimShade.opacity = edgeAmount;
 
@@ -1017,7 +1959,7 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
     CGPathAddLineToPoint(path, nullptr, left ? 2 : 8, 16);
     chevron.path = path; CGPathRelease(path);
   }
-  chevron.position = CGPointMake(chevronX, 90);
+  chevron.position = CGPointMake(chevronX, h / 2);
   chevron.opacity = chevronAlpha;
 
   NSString *intent;
@@ -1073,9 +2015,26 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   }
   return !pressing && lift == liftGoal && liftVelocity == 0 && settleAmount == settleGoal && settleVelocity == 0 && glow == (on ? glowTarget : 0) &&
       edgeAmount == (on ? edgeTarget : 0) && leanX == leanTarget.x && leanY == leanTarget.y &&
-      shadowX == shadowTarget.x && shadowY == shadowTarget.y;
+      shadowX == shadowTarget.x && shadowY == shadowTarget.y && !landing && !rippling &&
+      meterAlpha == meterTarget && visVX == 0 && visVY == 0 && tiltX == 0 && tiltY == 0 &&
+      pressHudAlpha == (pressMode ? 1 : 0) && settleHudAlpha == meterTarget && threads.empty() &&
+      axisGlow[0] == (axisPressed[0] ? 1 : 0) && axisGlow[1] == (axisPressed[1] ? 1 : 0) &&
+      (axisPressed[0] || (membranes[0].bend == 0 && membranes[0].bendVelocity == 0)) &&
+      (axisPressed[1] || (membranes[1].bend == 0 && membranes[1].bendVelocity == 0)) &&
+      dust.empty();
 }
 - (void)startAnimation {
+  if (returnedToBrowser) { [self showPosition]; return; }
+  if (motion->phase == Phase::Settling) {
+    const double now = NSProcessInfo.processInfo.systemUptime;
+    flightDistance = length(motion->target - motion->position);
+    flightPeak = length(motion->velocity);
+    traceSamples.clear(); traceStart = now; tracePeak = std::max(100.0, flightPeak);
+    if (flightPeak > 1) traceDirection = motion->velocity * (1 / flightPeak);
+    else if (flightDistance > 1) traceDirection = (motion->target - motion->position) * (1 / flightDistance);
+    traceSamples.emplace_back(0, flightPeak);
+    wasSettling = YES;
+  }
   [self showPosition];
   if (motion->phase != Phase::Settling || animationTimer) return;
   lastTick = NSProcessInfo.processInfo.systemUptime;
@@ -1090,8 +2049,138 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
   [self showPosition];
   if (motion->phase != Phase::Settling) [self stopAnimation];
 }
+- (void)updateStringOcclusion {
+  // Glass remains translucent to the desktop, but the string is fully occluded by the card.
+  CGMutablePathRef mask = CGPathCreateMutable();
+  CGPathAddRect(mask, nullptr, fxRoot.bounds);
+  const double bleed = 1 / std::max(1.0, panel.backingScaleFactor);
+  const CGRect card = CGRectInset(stage.bounds, -bleed, -bleed);
+  const double radius = kCardRadius + bleed;
+  const CGPoint centers[] = {{CGRectGetMinX(card) + radius, CGRectGetMinY(card) + radius},
+      {CGRectGetMaxX(card) - radius, CGRectGetMinY(card) + radius},
+      {CGRectGetMaxX(card) - radius, CGRectGetMaxY(card) - radius},
+      {CGRectGetMinX(card) + radius, CGRectGetMaxY(card) - radius}};
+  for (int corner = 0; corner < 4; ++corner) for (int i = 0; i <= 8; ++i) {
+    const double angle = M_PI + corner * M_PI / 2 + i * M_PI / 16;
+    const CGPoint local = CGPointMake(centers[corner].x + radius * std::cos(angle),
+        centers[corner].y + radius * std::sin(angle));
+    const CGPoint inPanel = [stage convertPoint:local toLayer:panel.contentView.layer];
+    const CGPoint point = CGPointMake(inPanel.x + panel.frame.origin.x - fxOrigin.x,
+        inPanel.y + panel.frame.origin.y - fxOrigin.y);
+    if (corner == 0 && i == 0) CGPathMoveToPoint(mask, nullptr, point.x, point.y);
+    else CGPathAddLineToPoint(mask, nullptr, point.x, point.y);
+  }
+  CGPathCloseSubpath(mask);
+  stringOcclusion.path = mask; CGPathRelease(mask);
+}
+- (void)cancelReturnAnimation {
+  [controls.contentView.layer removeAnimationForKey:@"homeReturn"];
+  if (!returnTimer) return;
+  [returnTimer invalidate]; returnTimer = nil;
+  [CATransaction begin]; [CATransaction setDisableActions:YES];
+  panel.alphaValue = 1; [panel setFrame:returnFrame display:NO]; stage.transform = returnTransform;
+  [CATransaction commit];
+}
+- (void)landAtHome {
+  if (NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) return;
+  controls.contentView.wantsLayer = YES;
+  CAKeyframeAnimation *dip = [CAKeyframeAnimation animationWithKeyPath:@"transform.translation.y"];
+  dip.values = @[@0, @-3, @.5, @0]; dip.additive = YES;
+  CAKeyframeAnimation *compression = [CAKeyframeAnimation animationWithKeyPath:@"transform.scale.y"];
+  compression.values = @[@1, @.994, @1.002, @1];
+  NSArray *times = @[@0, @.22, @.55, @1];
+  NSArray *easing = @[[CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut],
+      [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut],
+      [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut]];
+  for (CAKeyframeAnimation *animation in @[dip, compression]) {
+    animation.keyTimes = times; animation.timingFunctions = easing; animation.duration = .32;
+  }
+  CAAnimationGroup *landing = [CAAnimationGroup animation];
+  landing.animations = @[dip, compression]; landing.duration = .32;
+  [controls.contentView.layer addAnimation:landing forKey:@"homeReturn"];
+}
+- (void)returnTick:(NSTimer *)timer {
+  const double u = std::clamp((NSProcessInfo.processInfo.systemUptime - returnStart) / .22, 0.0, 1.0);
+  const double ease = 1 - std::pow(1 - u, 3);
+  [CATransaction begin]; [CATransaction setDisableActions:YES];
+  [panel setFrameOrigin:NSMakePoint(returnFrame.origin.x + returnDelta.x * ease,
+      returnFrame.origin.y + returnDelta.y * ease)];
+  panel.alphaValue = 1 - ease;
+  stage.transform = CATransform3DScale(returnTransform, 1 - .16 * ease, 1 - .16 * ease, 1);
+  [CATransaction commit];
+  if (u >= 1) {
+    [panel orderOut:nil]; [self cancelReturnAnimation]; [self landAtHome];
+  }
+}
+- (void)returnToBrowser {
+  if (returnedToBrowser) return;
+  returnedToBrowser = YES; awaitingLanding = NO; consumeTrackpadMomentum = NO; pendingTrackpadPan = NO;
+  [self stopAnimation]; [visualTimer invalidate]; visualTimer = nil;
+  [fxPanel orderOut:nil];
+  const BOOL animate = panel.visible && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+  if (animate) {
+    returnFrame = panel.frame; returnTransform = stage.transform;
+    const pip_motion::Point toward{NSMidX(controls.frame) - NSMidX(panel.frame), NSMidY(controls.frame) - NSMidY(panel.frame)};
+    returnDelta = toward * (std::min(80.0, length(toward)) / std::max(1.0, length(toward)));
+    returnStart = NSProcessInfo.processInfo.systemUptime;
+    returnTimer = [NSTimer timerWithTimeInterval:1.0/120 target:self selector:@selector(returnTick:) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:returnTimer forMode:NSRunLoopCommonModes];
+  } else [panel orderOut:nil];
+  motion->reset(); [self showPosition];
+}
+- (void)layoutCardContent {
+  const CGFloat w = motion->size.width, h = motion->size.height;
+  const BOOL compact = h < 150;
+  glassSurface.frame = cardContent.frame = NSMakeRect(0, 0, w, h);
+  glassTint.frame = glassEdge.frame = glassOutline.frame = CGRectMake(0, 0, w, h);
+  CGPathRef edge = CGPathCreateWithRoundedRect(CGRectInset(glassEdge.bounds, .5, .5),
+      kCardRadius - .5, kCardRadius - .5, nullptr);
+  glassOutline.path = edge; CGPathRelease(edge);
+  cueText.hidden = compact;
+  intentText.frame = CGRectMake(compact ? 16 : 20, h - 32, w - (compact ? 32 : 40), 16);
+  cueText.frame = CGRectMake(20, 12, w - 40, 14);
+  traceBox.frame = CGRectMake(compact ? 16 : 20, compact ? 10 : 36,
+      w - (compact ? 32 : 40), std::max(38.0, h - (compact ? 52 : 78)));
+  const CGFloat tw = traceBox.bounds.size.width, th = traceBox.bounds.size.height;
+  traceTitle.hidden = tw < 180;
+  traceTitle.frame = CGRectMake(0, th - 18, 76, 14);
+  traceArrow.position = CGPointMake(traceTitle.hidden ? 8 : 86, th - 12);
+  const CGFloat valueX = traceTitle.hidden ? 26 : 106;
+  traceValue.frame = CGRectMake(valueX, th - 20, tw - valueX, 17);
+  traceBase.frame = traceLine.frame = traceDot.frame = traceBox.bounds;
+}
 - (void)showPosition {
-  [panel setFrameOrigin:NSMakePoint(motion->position.x - kPad, motion->position.y - kPad)];
+  if (returnedToBrowser) {
+    status.stringValue = @"Returned to browser · Reset position to bring card back";
+    explanation.stringValue = @"Lab simulation · no browser opened";
+    [self writeState];
+    return;
+  }
+  const CGFloat w = motion->size.width, h = motion->size.height;
+  [panel setFrame:NSMakeRect(motion->position.x - kPad, motion->position.y - kPad,
+                             w + 2 * kPad, h + 2 * kPad) display:YES];
+  if (stage.bounds.size.width != w || stage.bounds.size.height != h) {
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    cardHost.frame = NSMakeRect(kPad + leanX, kPad + leanY, w, h);
+    CGPathRef shape = CGPathCreateWithRoundedRect(stage.bounds, kCardRadius, kCardRadius, nullptr);
+    for (CALayer *shadow in @[ambientShadow, contactShadow, glowShadow]) {
+      shadow.frame = stage.bounds; shadow.shadowPath = shape;
+    }
+    CGPathRelease(shape);
+    overlay.frame = windowShade.frame = stage.bounds;
+    [self layoutCardContent];
+    CGPathRef outline = CGPathCreateWithRoundedRect(CGRectInset(stage.bounds, 1, 1), kCardRadius - 1, kCardRadius - 1, nullptr);
+    for (CAShapeLayer *line in @[rimLight, meter, ripple]) {
+      line.frame = stage.bounds; line.path = outline;
+    }
+    CGPathRelease(outline);
+    example.frame = NSMakeRect(kPad, kPad, w, h);
+    const CGRect bounds = panel.contentView.bounds;
+    cardHost.superview.frame = NSRectFromCGRect(bounds);
+    borderString.group.frame = borderString.glow.frame = borderString.fields.frame =
+        borderString.shape.frame = borderString.horizontal.frame = borderString.vertical.frame = fxRoot.bounds;
+    [CATransaction commit];
+  }
   status.stringValue = [NSString stringWithFormat:@"%@  ·  x %.0f  y %.0f  →  %.0f, %.0f",
       phaseName(motion->phase), motion->position.x, motion->position.y, motion->target.x, motion->target.y];
   if (motion->decision == Decision::Keep || motion->decision == Decision::Dock) {
@@ -1120,10 +2209,15 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)writeState {
   const NSRect cardFrame = NSInsetRect(panel.frame, kPad, kPad);
   NSDictionary *state = @{@"pid":@(NSProcessInfo.processInfo.processIdentifier),
+    @"returned_to_browser":@(returnedToBrowser),
+    @"pinch_events":@(pinchEvents), @"last_pinch_route":lastPinchRoute ?: @"none",
+    @"last_pinch_delta":@(lastPinchDelta), @"card_is_key":@(panel.isKeyWindow),
     @"phase":phaseName(motion->phase), @"x":@(motion->position.x), @"y":@(motion->position.y),
     @"target_x":@(motion->target.x), @"target_y":@(motion->target.y),
     @"tucked":@(motion->tucked != Side::None), @"settings":[self settingsDictionary],
     @"native_frame":@[@(NSMinX(cardFrame)), @(NSMinY(cardFrame)), @(NSWidth(cardFrame)), @(NSHeight(cardFrame))],
+    @"gesture":@(gestures->kind() == pip_motion::Gestures::Kind::Pan ? "pan" :
+                 gestures->kind() == pip_motion::Gestures::Kind::Pinch ? "pinch" : "none"),
     @"decision":explanation.stringValue,
     @"work_area":@[@(motion->area().x), @(motion->area().y), @(motion->area().width), @(motion->area().height)]};
   NSData *data = [NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
@@ -1209,6 +2303,8 @@ static void addHelp(NSView *parent, NSRect frame, NSString *name, NSString *text
 - (void)windowWillClose:(NSNotification *)notification { [NSApp terminate:nil]; }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender { return YES; }
 - (void)applicationWillTerminate:(NSNotification *)notification {
+  [self cancelReturnAnimation];
+  if (gestureMonitor) [NSEvent removeMonitor:gestureMonitor];
   [self stopAnimation]; [fileTimer invalidate]; [saveTimer invalidate]; [visualTimer invalidate];
 }
 @end

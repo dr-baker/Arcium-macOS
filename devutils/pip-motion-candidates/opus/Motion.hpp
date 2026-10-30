@@ -248,6 +248,7 @@ class Motion {
   void resetSettings(const Settings& defaults = {}) {
     if (phase == Phase::Resting) {
       settings = defaults;
+      resize(size);
       settle(clampVisible(position), {}, Goal::Free);
     } else {
       retune(defaults);
@@ -410,6 +411,7 @@ class Motion {
   void retune(Settings next) {
     const bool changedBounds = next.margin != settings.margin || next.docking != settings.docking;
     settings = next;
+    resize(size);
     if (phase == Phase::Dragging) {
       if (changedBounds) resistance_anchor_ = position;
       const Rect limits = dragLimits();
@@ -464,13 +466,19 @@ class Motion {
     return {area_.x + (area_.width - size.width) / 2,
             area_.y + (area_.height - size.height) / 2};
   }
+  void resize(Size dimensions) {
+    const double factor = std::min({1.0,
+        std::max(1.0, area_.width - 2 * settings.margin) / dimensions.width,
+        std::max(1.0, area_.height - 2 * settings.margin) / dimensions.height});
+    size = {dimensions.width * factor, dimensions.height * factor};
+    if (phase == Phase::Dragging) updatePressed();
+  }
   // Switching displays changes the active work area without changing global pointer offset.
   void environment(Rect area, Size dimensions, Edges edges = {}, std::optional<Rect> physical = std::nullopt) {
     area_ = area;
     presentation_area_ = physical.value_or(area);
-    size = dimensions;
     edges_ = edges;
-    if (phase == Phase::Dragging) updatePressed();
+    resize(dimensions);
   }
   void seed(Point origin, Side side = Side::None, Point restore = {}) {
     position = target = origin;
@@ -485,6 +493,8 @@ class Motion {
   Point restorePosition() const { return restoreTarget(); }
   Point rawPosition(Point pointer) const { return pointer - offset_; }
   Rect area() const { return area_; }
+  Rect physicalArea() const { return presentation_area_; }
+  Edges exteriorEdges() const { return edges_; }
 
  private:
   enum class Goal { Dock, Stash, Restore, Free };
@@ -521,17 +531,17 @@ class Motion {
         inward_speed > settings.stash_velocity;
   }
   Point tuckTarget(Side side, double y) const {
+    const auto points = corners();
     return {side == Side::Left ? area_.x - size.width + settings.handle :
                 area_.x + area_.width - settings.handle,
-            std::clamp(y, area_.y + settings.margin,
-                area_.y + area_.height - size.height - settings.margin)};
+            std::clamp(y, points[0].y, points[2].y)};
   }
   Point restoreTarget() const {
     if (exact_restore_) return restore_point_;
+    const auto points = corners();
     return {restore_side_ == Side::Left ? area_.x + settings.margin :
                 area_.x + area_.width - size.width - settings.margin,
-            std::clamp(restore_point_.y, area_.y + settings.margin,
-                area_.y + area_.height - size.height - settings.margin)};
+            std::clamp(restore_point_.y, points[0].y, points[2].y)};
   }
   Outcome unmovedOutcome() const {
     if (start_settling_ && goal_ == Goal::Restore)
@@ -565,16 +575,17 @@ class Motion {
           edges_.top ? presentation_area_.y + presentation_area_.height - settings.handle : INFINITY);
   }
   Point clampVisible(Point p) const {
-    return {std::clamp(p.x, area_.x + settings.margin,
-                      area_.x + area_.width - size.width - settings.margin),
-            std::clamp(p.y, area_.y + settings.margin,
-                      area_.y + area_.height - size.height - settings.margin)};
+    const auto points = corners();
+    return {std::clamp(p.x, points[0].x, points[1].x),
+            std::clamp(p.y, points[0].y, points[2].y)};
   }
   std::array<Point, 4> corners() const {
-    const double l = area_.x + settings.margin;
-    const double r = area_.x + area_.width - size.width - settings.margin;
-    const double b = area_.y + settings.margin;
-    const double t = area_.y + area_.height - size.height - settings.margin;
+    const double mx = std::min(settings.margin, std::max(0.0, (area_.width - size.width) / 2));
+    const double my = std::min(settings.margin, std::max(0.0, (area_.height - size.height) / 2));
+    const double l = area_.x + mx;
+    const double r = std::max(l, area_.x + area_.width - size.width - mx);
+    const double b = area_.y + my;
+    const double t = std::max(b, area_.y + area_.height - size.height - my);
     return {Point{l, b}, Point{r, b}, Point{l, t}, Point{r, t}};
   }
   void settle(Point destination, Point initial_velocity, Goal goal) {

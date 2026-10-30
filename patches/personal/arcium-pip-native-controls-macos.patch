@@ -301,7 +301,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,1914 @@
+@@ -0,0 +1,2419 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -312,11 +312,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +
 +#include <algorithm>
 +#include <cmath>
++#include <array>
++#include <random>
 +#include <utility>
 +#include <vector>
 +
 +#include "arcium_pip_geometry.h"
 +#include "arcium_pip_motion.h"
++#include "arcium_pip_gestures.h"
 +
 +namespace {
 +using arcium::pip::Action;
@@ -343,7 +346,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +CGColorRef gray(double white, double alpha) {
 +  return [NSColor colorWithWhite:white alpha:alpha].CGColor;
 +}
-+enum class GestureAxis { kPending, kHorizontal, kVertical };
++
 +
 +struct Delivery {
 +  ActionCallback callback;
@@ -585,6 +588,405 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +@end
 +
++@interface BorderString : NSObject
++@property(nonatomic, strong) CALayer *group, *glow, *fields;
++@property(nonatomic, strong) CAGradientLayer *horizontal, *vertical;
++@property(nonatomic, strong) CAShapeLayer *shape;
++@end
++@implementation BorderString
++@end
++
++// Pressure sources stay planted in screen coordinates while the card moves away.
++struct Membrane {
++  pip_motion::Point normal;
++  double center = 0, stress = 0;
++  double boundary = 0, sign = 1, lo = 0, hi = 0, anchor = 0;
++  double bend = 0, bendVelocity = 0, pressedBend = 1;
++};
++struct BorderSample {
++  pip_motion::Point point;
++  double perimeter = 0, visibility = 0;
++};
++// Arc length joins the four straights and four quarter-circles without a corner seam.
++struct BorderGeometry {
++  pip_motion::Rect bounds;
++  double radius;
++  double straightWidth() const { return std::max(0.0, bounds.width - 2 * radius); }
++  double straightHeight() const { return std::max(0.0, bounds.height - 2 * radius); }
++  double quarter() const { return M_PI * radius / 2; }
++  double perimeter() const { return 2 * (straightWidth() + straightHeight()) + 4 * quarter(); }
++  std::array<double, 8> sections() const {
++    return {straightWidth(), quarter(), straightHeight(), quarter(), straightWidth(), quarter(), straightHeight(), quarter()};
++  }
++  double source(int axis, double sign, double anchor) const {
++    const double sw = straightWidth(), sh = straightHeight(), q = quarter();
++    if (axis == 0) return sign > 0 ? sw + q + std::clamp(anchor - bounds.y - radius, 0.0, sh) :
++        2 * sw + 3 * q + sh + std::clamp(bounds.y + bounds.height - radius - anchor, 0.0, sh);
++    return sign < 0 ? std::clamp(anchor - bounds.x - radius, 0.0, sw) :
++        sw + 2 * q + sh + std::clamp(bounds.x + bounds.width - radius - anchor, 0.0, sw);
++  }
++  pip_motion::Point point(double at) const {
++    const double l = bounds.x, b = bounds.y, r = l + bounds.width, t = b + bounds.height;
++    const auto lengths = sections();
++    for (int section = 0; section < 8; ++section) {
++      if (at > lengths[section] && section != 7) { at -= lengths[section]; continue; }
++      if (section == 0) return {l + radius + at, b};
++      if (section == 2) return {r, b + radius + at};
++      if (section == 4) return {r - radius - at, t};
++      if (section == 6) return {l, t - radius - at};
++      const pip_motion::Point center = section == 1 ? pip_motion::Point{r - radius, b + radius} :
++          section == 3 ? pip_motion::Point{r - radius, t - radius} :
++          section == 5 ? pip_motion::Point{l + radius, t - radius} : pip_motion::Point{l + radius, b + radius};
++      const double angle = (section - 3) * M_PI / 4 + at / std::max(.001, radius);
++      return center + pip_motion::Point{std::cos(angle) * radius, std::sin(angle) * radius};
++    }
++    return {l + radius, b};
++  }
++};
++static double perimeterDelta(double a, double b, double perimeter) {
++  return std::remainder(a - b, perimeter);
++}
++struct Thread { double x, y, vx, vy, angle, spin, length, curl, phase; };
++// Stress runs from relaxed white through yellow and orange to red at the breaking point.
++static void stressColor(double s, double rgb[3]) {
++  static const double stops[4][4] = {{0, 1, 1, 1}, {.3, 1, .93, .55}, {.62, 1, .6, .22}, {1, 1, .27, .22}};
++  s = std::clamp(s, 0.0, 1.0);
++  int i = 1;
++  while (i < 3 && s > stops[i][0]) ++i;
++  const double t = (s - stops[i - 1][0]) / (stops[i][0] - stops[i - 1][0]);
++  for (int c = 0; c < 3; ++c) rgb[c] = stops[i - 1][c + 1] + (stops[i][c + 1] - stops[i - 1][c + 1]) * t;
++}
++static CGColorRef rgba(const double rgb[3], CGFloat alpha) {
++  return [NSColor colorWithSRGBRed:rgb[0] green:rgb[1] blue:rgb[2] alpha:alpha].CGColor;
++}
++
++@interface ArciumPiPPressureFeedback : NSObject {
++  NSWindow* _window;
++  __weak NSWindow* _parent;
++  CALayer* fxRoot;
++  CALayer* stringRoot;
++  CAShapeLayer* stringOcclusion;
++  BorderString* borderString;
++  CALayer* threadGlow;
++  CAShapeLayer* threadShape;
++  std::array<Membrane, 2> membranes;
++  std::vector<BorderSample> borderSamples;
++  std::vector<Thread> threads;
++  double axisGlow[2], breakStart, breakRGB[3];
++  BOOL axisPressed[2], wasPressing, cornerString;
++  int straightStringAxis;
++}
++- (instancetype)initWithParent:(NSWindow*)parent screen:(NSScreen*)screen;
++- (BOOL)update:(const Motion&)model frame:(NSRect)frame screen:(NSScreen*)screen
++           now:(double)now dt:(double)dt enabled:(BOOL)enabled;
++- (void)close;
++@end
++@implementation ArciumPiPPressureFeedback
++- (instancetype)initWithParent:(NSWindow*)parent screen:(NSScreen*)screen {
++  if (!(self = [super init])) return nil;
++  _parent = parent;
++  _window = [[NSPanel alloc] initWithContentRect:screen.frame
++      styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
++      backing:NSBackingStoreBuffered defer:YES];
++  _window.releasedWhenClosed = NO; _window.opaque = NO;
++  _window.backgroundColor = NSColor.clearColor; _window.hasShadow = NO;
++  _window.ignoresMouseEvents = YES; _window.hidesOnDeactivate = NO;
++  _window.collectionBehavior = parent.collectionBehavior;
++  _window.level = parent.level;
++  NSView* host = [[NSView alloc] initWithFrame:NSMakeRect(0,0,NSWidth(screen.frame),NSHeight(screen.frame))];
++  host.wantsLayer = YES; _window.contentView = host; fxRoot = host.layer;
++  const double scale = screen.backingScaleFactor;
++  stringRoot = [CALayer layer]; stringRoot.frame = fxRoot.bounds;
++  stringOcclusion = [CAShapeLayer layer]; stringOcclusion.frame = fxRoot.bounds;
++  stringOcclusion.fillRule = kCAFillRuleEvenOdd; stringOcclusion.fillColor = gray(0,1);
++  stringRoot.mask = stringOcclusion; [fxRoot addSublayer:stringRoot];
++  borderString = [BorderString new];
++  borderString.group = [CALayer layer]; borderString.group.frame = fxRoot.bounds;
++  borderString.group.opacity = 0;
++  borderString.glow = [CALayer layer]; borderString.glow.frame = fxRoot.bounds;
++  borderString.glow.shadowOffset = CGSizeZero; borderString.glow.shadowOpacity = 1;
++  borderString.glow.shadowRadius = 18;
++  borderString.fields = [CALayer layer]; borderString.fields.frame = fxRoot.bounds;
++  borderString.shape = [CAShapeLayer layer]; borderString.shape.frame = fxRoot.bounds;
++  borderString.shape.contentsScale = scale;
++  borderString.shape.fillColor = nil; borderString.shape.strokeColor = gray(1, 1);
++  borderString.shape.lineWidth = 4.5; borderString.shape.lineJoin = kCALineJoinRound;
++  borderString.fields.mask = borderString.shape;
++  borderString.horizontal = [CAGradientLayer layer];
++  borderString.vertical = [CAGradientLayer layer];
++  for (CAGradientLayer *field in @[borderString.horizontal, borderString.vertical]) {
++    field.frame = fxRoot.bounds; field.type = kCAGradientLayerRadial; field.opacity = 0;
++    [borderString.fields addSublayer:field];
++  }
++  [borderString.glow addSublayer:borderString.fields];
++  [borderString.group addSublayer:borderString.glow];
++  [stringRoot addSublayer:borderString.group];
++
++  threadGlow = [CALayer layer]; threadGlow.frame = fxRoot.bounds;
++  threadGlow.shadowOffset = CGSizeZero; threadGlow.shadowOpacity = 1;
++  threadGlow.shadowRadius = 7; threadGlow.opacity = 0;
++  threadShape = [CAShapeLayer layer]; threadShape.frame = fxRoot.bounds;
++  threadShape.contentsScale = scale; threadShape.fillColor = nil;
++  threadShape.strokeColor = gray(1,1); threadShape.lineCap = kCALineCapRound;
++  [threadGlow addSublayer:threadShape]; [stringRoot addSublayer:threadGlow];
++  return self;
++}
++- (void)close {
++  [_window.parentWindow removeChildWindow:_window];
++  [_window orderOut:nil];
++}
++- (BOOL)update:(const Motion&)model frame:(NSRect)frame screen:(NSScreen*)screen
++           now:(double)now dt:(double)dt enabled:(BOOL)enabled {
++  if (!enabled || !screen || !_parent.visible) { [self close]; return YES; }
++  [_window setFrame:screen.frame display:NO];
++  if (!_window.parentWindow) [_parent addChildWindow:_window ordered:NSWindowBelow];
++  [_window orderWindow:NSWindowBelow relativeTo:_parent.windowNumber];
++  const NSPoint fxOrigin = screen.frame.origin;
++  for (CALayer* layer in @[stringRoot,stringOcclusion,borderString.group,borderString.glow,
++      borderString.fields,borderString.shape,borderString.horizontal,borderString.vertical,threadGlow,threadShape])
++    layer.frame = fxRoot.bounds;
++  // The string cannot shine through native glass controls or video letterboxing.
++  CGMutablePathRef mask = CGPathCreateMutable();
++  CGPathAddRect(mask, nullptr, fxRoot.bounds);
++  const CGRect cutout = CGRectMake(frame.origin.x-fxOrigin.x, frame.origin.y-fxOrigin.y,
++      frame.size.width, frame.size.height);
++  CGPathAddRoundedRect(mask, nullptr, CGRectInset(cutout,-1,-1),20,20);
++  stringOcclusion.path = mask; CGPathRelease(mask);
++  const Motion* motion = &model;
++  const bool dragging = model.phase == Phase::Dragging;
++  const bool pressMode = dragging && model.settings.docking == Docking::AllEdges && model.tucked == Side::None;
++  constexpr double kPad = 0, kCardRadius = 20;
++  const pip_motion::Point position = model.position;
++  const double w = model.size.width, h = model.size.height;
++  const double cardScale = frame.size.width / std::max(1.0,w);
++  const double leanX = NSMidX(frame)-(position.x+w/2), leanY = NSMidY(frame)-(position.y+h/2);
++  // Straight edge strings join into the inset border loop only during a corner press.
++  const pip_motion::Point depthNow = motion->depth();
++  const pip_motion::Point panelOrigin{position.x - kPad, position.y - kPad};
++  const double grow = (cardScale - 1) / 2;
++  const double cardL = kPad + leanX - w * grow, cardR = kPad + leanX + w * (1 + grow);
++  const double cardB = kPad + leanY - h * grow, cardT = kPad + leanY + h * (1 + grow);
++  const pip_motion::Point pressedNow = motion->pressed;
++  auto falloff = [](double outside) { return std::exp(-outside * outside / (105.0 * 105.0)); };
++  const auto work = motion->area();
++  const double inset = motion->settings.margin;
++  double left = work.x + inset, right = work.x + work.width - inset;
++  double bottom = work.y + inset, top = work.y + work.height - inset;
++  // Preserve the resistance boundary during the rebound, including a restored tucked card.
++  for (int axis = 0; axis < 2; ++axis) if (axisGlow[axis] > 0) {
++    const auto& m = membranes[axis];
++    (axis == 0 ? (m.sign < 0 ? left : right) : (m.sign < 0 ? bottom : top)) = m.boundary;
++  }
++  auto geometry = [&]() {
++    const double width = std::max(1.0, right - left), height = std::max(1.0, top - bottom);
++    return BorderGeometry{{left, bottom, width, height}, std::min({double(kCardRadius), width / 2, height / 2})};
++  };
++
++  // A tuck consumes every visible part of the loop, including the joined corner and center.
++  if (wasPressing && !dragging && motion->decision == Decision::Tuck) {
++    static std::mt19937 rng{std::random_device{}()};
++    std::uniform_real_distribution<double> unit(0, 1);
++    auto r = [&](double a, double b) { return a + (b - a) * unit(rng); };
++    const auto border = geometry();
++    const double perimeter = border.perimeter();
++    double peakStress = -1;
++    for (int axis = 0; axis < 2; ++axis) if (axisPressed[axis] && membranes[axis].stress > peakStress) {
++      peakStress = membranes[axis].stress; stressColor(peakStress, breakRGB);
++    }
++    for (size_t first = 0; first + 1 < borderSamples.size(); first += 6) {
++      const size_t last = std::min(borderSamples.size() - 1, first + 6);
++      double visible = 0;
++      for (size_t i = first; i <= last; ++i) visible = std::max(visible, borderSamples[i].visibility);
++      if (visible < .01) continue;
++      const auto& a = borderSamples[first]; const auto& b = borderSamples[last];
++      const double at = (a.perimeter + b.perimeter) / 2;
++      int owner = 0; double strongest = -1;
++      for (int axis = 0; axis < 2; ++axis) {
++        const auto& m = membranes[axis];
++        const double distance = std::abs(perimeterDelta(at, border.source(axis, m.sign, m.anchor), perimeter));
++        const double strength = axisGlow[axis] * falloff(std::max(0.0, distance - (m.hi - m.lo) / 2));
++        if ((!cornerString && axis == straightStringAxis) || (cornerString && strength > strongest)) {
++          strongest = strength; owner = axis;
++        }
++      }
++      const auto& m = membranes[owner];
++      const double away = perimeterDelta(at, border.source(owner, m.sign, m.anchor), perimeter) < 0 ? -1 : 1;
++      const pip_motion::Point tangent = owner == 0 ? pip_motion::Point{0, m.sign} : pip_motion::Point{-m.sign, 0};
++      const double local = std::max(.25, m.stress) * (.35 + .65 * strongest);
++      const double along = away * (140 + 560 * local) * r(.6, 1.25), inward = (100 + 300 * local) * r(.55, 1.2);
++      Thread thread;
++      thread.x = a.point.x; thread.y = a.point.y;
++      thread.vx = tangent.x * along - m.normal.x * inward;
++      thread.vy = tangent.y * along - m.normal.y * inward;
++      thread.angle = std::atan2(b.point.y - a.point.y, b.point.x - a.point.x);
++      thread.length = length(b.point - a.point); thread.spin = r(-5, 5) * (.5 + local);
++      thread.curl = r(-.1, .1) * thread.length; thread.phase = r(0, 2 * M_PI);
++      threads.push_back(thread);
++    }
++    for (int axis = 0; axis < 2; ++axis) {
++      axisGlow[axis] = 0; membranes[axis].bend = membranes[axis].bendVelocity = 0;
++    }
++    borderSamples.clear(); borderString.shape.path = nil; borderString.group.opacity = 0;
++    if (peakStress >= 0) breakStart = now;
++  }
++
++  for (int axis = 0; axis < 2; ++axis) {
++    Membrane& m = membranes[axis];
++    const bool side = axis == 0;
++    const double pushed = side ? pressedNow.x : pressedNow.y;
++    const bool active = pressMode && std::abs(pushed) > .5;
++    if (active) {
++      const double lo = side ? cardB : cardL, hi = side ? cardT : cardR;
++      const double sign = pushed < 0 ? -1 : 1;
++      const double edge = pushed < 0 ? (side ? cardL : cardB) : (side ? cardR : cardT);
++      const double boundary = (pushed < 0 ? kPad : kPad + (side ? w : h)) - pushed;
++      const double center = (lo + hi) / 2 + (side ? panelOrigin.y : panelOrigin.x);
++      if (!axisPressed[axis]) m.anchor = center;
++      m.anchor = std::clamp(m.anchor, center - 120, center + 120);
++      m.boundary = boundary + (side ? panelOrigin.x : panelOrigin.y); m.sign = sign;
++      m.lo = lo + (side ? panelOrigin.y : panelOrigin.x);
++      m.hi = hi + (side ? panelOrigin.y : panelOrigin.x); m.center = center;
++      m.bend = std::max(0.0, sign * (edge - boundary) + 1.5); m.bendVelocity = 0;
++      m.pressedBend = std::max(1.0, m.bend);
++      const double depth = std::abs(side ? depthNow.x : depthNow.y);
++      m.stress = std::clamp(depth / (side ? std::max(1.0, motion->settings.press_tuck) :
++          2.5 * std::max(.5, motion->settings.press_dock)), 0.0, 1.0);
++      m.normal = side ? pip_motion::Point{sign, 0} : pip_motion::Point{0, sign};
++      (side ? (sign < 0 ? left : right) : (sign < 0 ? bottom : top)) = m.boundary;
++    } else if (m.bend != 0 || m.bendVelocity != 0) {
++      pip_motion::spring(m.bend, m.bendVelocity, 0, .24, .22, dt);
++      if (std::abs(m.bend) < .05 && std::abs(m.bendVelocity) < 1) m.bend = m.bendVelocity = 0;
++    }
++    axisPressed[axis] = active;
++    approach(axisGlow[axis], active ? 1 : 0, .05, .45, dt);
++    CAGradientLayer *field = side ? borderString.horizontal : borderString.vertical;
++    field.opacity = axisGlow[axis];
++    if (axisGlow[axis] > 0) {
++      const double span = m.hi - m.lo, reach = span / 2 + 260;
++      const double crossReach = std::max(reach, std::abs(m.bend) + 80);
++      const CGPoint center = side ? CGPointMake(m.boundary - fxOrigin.x, m.anchor - fxOrigin.y) :
++          CGPointMake(m.anchor - fxOrigin.x, m.boundary - fxOrigin.y);
++      const double fw = fxRoot.bounds.size.width, fh = fxRoot.bounds.size.height;
++      field.startPoint = CGPointMake(center.x / fw, center.y / fh);
++      field.endPoint = CGPointMake((center.x + (side ? crossReach : reach)) / fw,
++          (center.y + (side ? reach : crossReach)) / fh);
++      const double stress = active ? m.stress : m.stress * std::min(1.0, std::abs(m.bend) / m.pressedBend);
++      double rgb[3]; stressColor(stress, rgb);
++      field.colors = @[(__bridge id)rgba(rgb, 1), (__bridge id)rgba(rgb, 1),
++          (__bridge id)gray(1, .65), (__bridge id)gray(1, 0)];
++      field.locations = @[@0, @(std::min(.85, (span / 2 + 170) / reach)), @.92, @1];
++    }
++  }
++  // The rounded loop is reserved for an actual two-edge corner press. Keep the
++  // last held shape during release so its rebound or break remains continuous.
++  if (pressMode) {
++    const bool corner = axisPressed[0] && axisPressed[1] &&
++        std::abs(depthNow.x) >= motion->settings.press_dock &&
++        std::abs(depthNow.y) >= motion->settings.press_dock;
++    if (!corner && (cornerString || !axisPressed[straightStringAxis]))
++      straightStringAxis = axisPressed[0] && (!axisPressed[1] || std::abs(depthNow.x) >= std::abs(depthNow.y)) ? 0 : 1;
++    cornerString = corner;
++  }
++  borderString.horizontal.opacity = cornerString || straightStringAxis == 0 ? axisGlow[0] : 0;
++  borderString.vertical.opacity = cornerString || straightStringAxis == 1 ? axisGlow[1] : 0;
++  if (axisGlow[0] > 0 || axisGlow[1] > 0) {
++    const auto border = geometry();
++    const double perimeter = border.perimeter();
++    const auto sections = border.sections();
++    CGMutablePathRef path = CGPathCreateMutable();
++    borderSamples.clear();
++    if (cornerString) {
++      double travelled = 0;
++      for (size_t edge = 0; edge < sections.size(); ++edge) {
++        const double edgeLength = sections[edge];
++        const int count = std::max(1, int(std::ceil(edgeLength / 4)));
++        for (int i = edge == 0 ? 0 : 1; i <= count; ++i) {
++          const double t = double(i) / count, at = travelled + t * edgeLength;
++          auto point = border.point(at);
++          double visibility = 0;
++          for (int axis = 0; axis < 2; ++axis) if (axisGlow[axis] > 0) {
++            const auto& m = membranes[axis];
++            const double distance = std::abs(perimeterDelta(at, border.source(axis, m.sign, m.anchor), perimeter));
++            const double halfSpan = (m.hi - m.lo) / 2, reach = halfSpan + 260;
++            point = point + m.normal * (m.bend * falloff(std::max(0.0, distance - halfSpan)));
++            visibility = std::max(visibility, axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0));
++          }
++          const CGPoint local = CGPointMake(point.x - fxOrigin.x, point.y - fxOrigin.y);
++          if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
++          else CGPathAddLineToPoint(path, nullptr, local.x, local.y);
++          borderSamples.push_back({point, at, visibility});
++        }
++        travelled += edgeLength;
++      }
++      CGPathCloseSubpath(path);
++    } else {
++      const int axis = straightStringAxis;
++      const auto& m = membranes[axis];
++      const bool side = axis == 0;
++      const double offset = side ? fxOrigin.y : fxOrigin.x;
++      const double reach = (m.hi - m.lo) / 2 + 260;
++      const double extent = side ? fxRoot.bounds.size.height : fxRoot.bounds.size.width;
++      const double a0 = std::max(offset + 10, m.anchor - reach);
++      const double a1 = std::min(offset + extent - 10, m.anchor + reach);
++      for (double u = a0; u <= a1 + .01; u += 4) {
++        const double distance = std::abs(u - m.anchor);
++        const double bend = m.bend * falloff(std::max({0.0, m.lo - u, u - m.hi}));
++        const double cross = m.boundary + m.sign * bend;
++        const pip_motion::Point point = side ? pip_motion::Point{cross, u} : pip_motion::Point{u, cross};
++        const CGPoint local = CGPointMake(point.x - fxOrigin.x, point.y - fxOrigin.y);
++        if (borderSamples.empty()) CGPathMoveToPoint(path, nullptr, local.x, local.y);
++        else CGPathAddLineToPoint(path, nullptr, local.x, local.y);
++        const double at = border.source(axis, m.sign, m.anchor) + (side ? m.sign : -m.sign) * (u - m.anchor);
++        const double visible = axisGlow[axis] * std::clamp((reach - distance) / (reach * .44), 0.0, 1.0);
++        borderSamples.push_back({point, at, visible});
++      }
++    }
++    borderString.shape.path = path; CGPathRelease(path);
++    const int peak = cornerString ? (membranes[0].stress * axisGlow[0] > membranes[1].stress * axisGlow[1] ? 0 : 1) : straightStringAxis;
++    const auto& m = membranes[peak];
++    double rgb[3]; stressColor(m.stress * std::min(1.0, std::abs(m.bend) / m.pressedBend), rgb);
++    borderString.glow.shadowColor = rgba(rgb, 1);
++    borderString.glow.shadowRadius = 18 + 18 * m.stress;
++    borderString.group.opacity = 1.0;
++  } else {
++    borderString.shape.path = nil; borderString.group.opacity = 0; borderSamples.clear();
++  }
++  wasPressing = pressMode;
++
++  // Threads drift with drag, spin, curl and fray as they fade, staying planted in screen space.
++  const double threadLife = .85, threadAge = now - breakStart;
++  if (!threads.empty() && threadAge > threadLife) threads.clear();
++  if (!threads.empty()) {
++    const double u = threadAge / threadLife, drag = std::exp(-3.2 * dt);
++    CGMutablePathRef path = CGPathCreateMutable();
++    for (Thread& thread : threads) {
++      thread.vx *= drag; thread.vy *= drag;
++      thread.x += thread.vx * dt; thread.y += thread.vy * dt;
++      thread.angle += thread.spin * dt; thread.length *= std::exp(-1.1 * dt); thread.curl *= 1 + 1.4 * dt;
++      const double px = thread.x - fxOrigin.x, py = thread.y - fxOrigin.y;
++      const double ex = px + std::cos(thread.angle) * thread.length, ey = py + std::sin(thread.angle) * thread.length;
++      const double wobble = thread.curl * std::sin(thread.phase + 9 * u);
++      CGPathMoveToPoint(path, nullptr, px, py);
++      CGPathAddQuadCurveToPoint(path, nullptr, (px + ex) / 2 - std::sin(thread.angle) * wobble,
++          (py + ey) / 2 + std::cos(thread.angle) * wobble, ex, ey);
++    }
++    threadShape.path = path; CGPathRelease(path);
++    // Breaking releases the tension immediately; its stress color relaxes to white.
++    const double stressRemaining = std::pow(1 - std::clamp(threadAge / .12, 0.0, 1.0), 3);
++    double threadRGB[3];
++    for (int c = 0; c < 3; ++c) threadRGB[c] = 1 + (breakRGB[c] - 1) * stressRemaining;
++    threadShape.strokeColor = rgba(threadRGB, 1); threadGlow.shadowColor = rgba(threadRGB, 1);
++    threadShape.lineWidth = 3 - 1.5 * u;
++    threadGlow.opacity = 1.0 * std::pow(1 - u, 1.4);
++  } else threadGlow.opacity = 0;
++
++
++  return threads.empty() && axisGlow[0] == 0 && axisGlow[1] == 0 &&
++      membranes[0].bend == 0 && membranes[0].bendVelocity == 0 &&
++      membranes[1].bend == 0 && membranes[1].bendVelocity == 0;
++}
++@end
++
 +@interface ArciumPiPNativeOverlay : NSView {
 + @private
 +  State _state;
@@ -628,9 +1030,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  NSRect _gestureStartFrame;
 +  NSRect _resizeStartFrame;
 +  NSPoint _resizeStartMouse;
-+  GestureAxis _gestureAxis;
-+  CGFloat _gestureX;
-+  CGFloat _gestureY;
++  BOOL _pendingPan;
++  BOOL _suppressMouseUp;
++  NSMagnificationGestureRecognizer* _pinchRecognizer;
++  __weak NSWindow* _previousKeyWindow;
++  NSTimer* _returnTimer;
++  NSRect _returnFrame;
++  double _returnStart;
++  BOOL _returning;
 +  double _snapshotTime;
 +  double _aspect;
 +  BOOL _adjusting;
@@ -651,12 +1058,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  BOOL _placementReady;
 +  BOOL _magnifying;
 +  NSRect _magnifyStartFrame;
++  double _magnifyPreferredWidth;
 +  BOOL _hasPosition;
 +  NSPoint _positionFraction;
 +  std::unique_ptr<Motion> motion;
++  std::unique_ptr<pip_motion::Gestures> gestures;
 +  Feedback feedback;
 +  NSTimer* _motionTimer;
 +  NSWindow* _shadowWindow;
++  ArciumPiPPressureFeedback* _pressureFeedback;
 +  CALayer* ambientShadow;
 +  CALayer* contactShadow;
 +  CAGradientLayer* rimShade;
@@ -700,6 +1110,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  _pipWindow = window;
 +  _originalShadow = window.hasShadow;
++  feedback.settle = 1; feedback.settleEase = .10;
 +  slowSince = -1;
 +  hapticKey = pendingKey = -1;
 +  _delivery = std::make_shared<Delivery>(Delivery{std::move(callback)});
@@ -757,17 +1168,23 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                        [overlay buildChrome];
 +                        [overlay refreshChrome];
 +                      }]];
-+  _eventMonitor = [NSEvent
-+      addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
-+                                   handler:^NSEvent*(NSEvent* event) {
-+                                     ArciumPiPNativeOverlay* overlay = weakSelf;
-+                                     if (overlay &&
-+                                         event.window == overlay->_pipWindow &&
-+                                         [overlay consumeScroll:event]) {
-+                                       return nil;
-+                                     }
-+                                     return event;
-+                                   }];
++  self.allowedTouchTypes = NSTouchTypeMaskIndirect;
++  _pinchRecognizer = [[NSMagnificationGestureRecognizer alloc]
++      initWithTarget:self action:@selector(recognizePinch:)];
++  _pinchRecognizer.delaysMagnificationEvents = YES;
++  [self addGestureRecognizer:_pinchRecognizer];
++  _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
++      NSEventMaskScrollWheel | NSEventMaskMagnify handler:^NSEvent*(NSEvent* event) {
++    ArciumPiPNativeOverlay* overlay = weakSelf;
++    if (!overlay || ![overlay acceptsGestureInput]) return event;
++    // The card recognizer owns card magnification; the monitor covers events
++    // addressed to another window while the pointer remains over the card.
++    if (event.type == NSEventTypeMagnify) {
++      if (event.window == overlay->_pipWindow) return event;
++      return [overlay consumeMagnify:event] ? nil : event;
++    }
++    return [overlay consumeScroll:event] ? nil : event;
++  }];
 +  _corner = geo::Corner::kBottomRight;
 +  return self;
 +}
@@ -927,6 +1344,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return;
 +  }
 +  if (state.blocked) {
++    [self cancelReturn];
 +    [self stopMotion];
 +    [self releaseControlsFocus];
 +  }
@@ -1153,7 +1571,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                 [overlay refreshChrome];
 +                               }];
 +}
++- (BOOL)acceptsFirstResponder { return YES; }
 +- (void)mouseEntered:(NSEvent*)event {
++  if (!_invalidated && !_state.blocked && !_returning) {
++    if (!_pipWindow.keyWindow) _previousKeyWindow = NSApp.keyWindow;
++    // This Chromium window already has activation independence. Take only
++    // its gesture focus; activating the application can switch Spaces.
++    [_pipWindow makeKeyWindow];
++  }
 +  _mouseInside = YES;
 +  if (_state.blocked || _tucked != geo::Side::kNone) {
 +    return;
@@ -1173,7 +1598,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  [self armHideTimer];
 +}
++- (void)restoreGestureFocus {
++  if (_pipWindow.keyWindow && ![self hasControlsFocus]) {
++    if (_previousKeyWindow.visible) [_previousKeyWindow makeKeyWindow];
++    else [_pipWindow resignKeyWindow];
++  }
++  _previousKeyWindow = nil;
++}
 +- (void)mouseExited:(NSEvent*)event {
++  if (!_dragging && !_magnifying) [self restoreGestureFocus];
 +  _mouseInside = NO;
 +  if (!_seeking && !_dragging && ![self hasControlsFocus]) {
 +    _nativeVisible = NO;
@@ -1199,7 +1632,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    if (screen == active) index = screens.size();
 +    screens.push_back({ToRect(screen.frame), ToRect(screen.visibleFrame)});
 +  }
-+  const auto raw = motion->phase == Phase::Dragging ? motion->rawPosition({pointer.x,pointer.y}) : motion->position;
++  const auto raw = motion->phase == Phase::Dragging && !_scrolling ? motion->rawPosition({pointer.x,pointer.y}) : motion->position;
 +  const auto edges = geo::ExteriorEdges(
 +      {raw.x, raw.y, motion->size.width, motion->size.height}, screens, index);
 +  const NSRect area = active.visibleFrame;
@@ -1212,12 +1645,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                      motion->size, {edges.left, edges.right, edges.bottom, edges.top},
 +                      pip_motion::Rect{active.frame.origin.x,active.frame.origin.y,active.frame.size.width,active.frame.size.height});
 +}
-+- (void)mouseDown:(NSEvent*)event {
-+  if (_invalidated || _state.blocked || !_pipWindow) return;
-+  [self deliver:Action::kInteraction value:0];
++- (BOOL)ensureMotion {
++  if (!_pipWindow || _invalidated || _state.blocked || _returning) return NO;
 +  if (!motion) {
 +    NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
-+    if (!screen) return;
++    if (!screen) return NO;
 +    const NSRect area = screen.visibleFrame, frame = _pipWindow.frame;
 +    motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
 +    motion->settings = pip_motion::selectedSettings();
@@ -1225,7 +1657,19 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    motion->seed({frame.origin.x, frame.origin.y},
 +        _tucked == geo::Side::kNone ? Side::None : _tucked == geo::Side::kLeft ? Side::Left : Side::Right,
 +        {_restoreFrame.origin.x, _restoreFrame.origin.y});
++    gestures = std::make_unique<pip_motion::Gestures>(*motion);
 +  }
++  return YES;
++}
++- (void)mouseDown:(NSEvent*)event {
++  if (_invalidated || _state.blocked || !_pipWindow) return;
++  [self deliver:Action::kInteraction value:0];
++  _consumeMomentum = NO; _pendingPan = NO;
++  if (_returning || _magnifying) { _suppressMouseUp = YES; return; }
++  if (event.clickCount == 2) {
++    _suppressMouseUp = YES; [self returnToTab:nil]; return;
++  }
++  if (![self ensureMotion]) return;
 +  NSPoint pointer = [self screenPoint:event];
 +  [self updateMotionScreen:pointer];
 +  motion->begin({pointer.x, pointer.y}, event.timestamp);
@@ -1246,8 +1690,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self updateMotionVisuals];
 +}
 +- (void)mouseUp:(NSEvent*)event {
-+  if (!_dragging || !motion || _invalidated) return;
++  if (_suppressMouseUp) { _suppressMouseUp = NO; return; }
++  if (!_dragging || !motion || _invalidated || _magnifying || _returning) return;
 +  motion->end(event.timestamp);
++  [self finishMotionRelease];
++}
++- (void)finishMotionRelease {
 +  _dragging = NO;
 +  _tucked = motion->tucked == Side::None ? geo::Side::kNone :
 +      motion->tucked == Side::Left ? geo::Side::kLeft : geo::Side::kRight;
@@ -1294,6 +1742,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self refreshChrome];
 +  [self startMotionTimer];
 +  [self armHideTimer];
++  if (!_mouseInside) [self restoreGestureFocus];
 +}
 +- (void)rememberPlacement {
 +  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
@@ -1385,11 +1834,19 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)stopMotion {
 +  [_motionTimer invalidate]; _motionTimer = nil;
++  // Cancellation, permission blocking, hide and display reconfiguration all
++  // restore the pinch snapshot before releasing the model that owns it.
++  if (_magnifying && gestures) {
++    gestures->endPinch(true);
++    _preferredWidth = _magnifyPreferredWidth;
++  }
 +  if (motion && _pipWindow) {
 +    [self setWindowFrame:NSMakeRect(motion->position.x, motion->position.y,
 +        motion->size.width, motion->size.height) animate:NO];
 +  }
-+  motion.reset(); _dragging = NO; awaitingLanding = NO;
++  [_pressureFeedback close]; _pressureFeedback = nil;
++  gestures.reset(); motion.reset(); _dragging = NO; awaitingLanding = NO;
++  _pendingPan = NO; _scrolling = NO; _magnifying = NO;
 +  lift = liftVelocity = settleAmount = settleVelocity = 0;
 +  leanX = leanY = shadowX = shadowY = edgeAmount = 0;
 +  [_shadowWindow.parentWindow removeChildWindow:_shadowWindow];
@@ -1446,7 +1903,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  const bool settleReady = keep && now - slowSince >= feedback.settleDelay;
 +  const double settleTarget = settleReady ? 1 - smoothstep(handSpeed / std::max(1.0, gate)) : 0;
 +  double liftTarget = 0;
-+  // The held look (lift and shrink) lasts the whole drag; settling toward the desk is a separate cue.
++  // Pickup supplies the lift; deliberate settling lowers the held card toward rest.
 +  if (dragging) liftTarget = 1;
 +  else if (motion->phase == Phase::Settling && releaseDistance > 1)
 +    liftTarget = std::sqrt(std::clamp(length(motion->target - position) / releaseDistance, 0.0, 1.0));
@@ -1569,12 +2026,16 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    }
 +    rimShade.colors = colors;
 +  }
-+  rimShade.frame = side == Side::Left ? CGRectMake(rim,0,reach,frame.size.height) : CGRectMake(rim-reach,0,reach,frame.size.height);
-+  rimShade.startPoint = CGPointMake(side == Side::Left ? 0:1,.5);
++  const double bleed = 2 / std::max(1.0,_pipWindow.backingScaleFactor);
++  rimShade.frame = side == Side::Left ? CGRectMake(rim-bleed,-bleed,reach+bleed,frame.size.height+2*bleed) :
++      CGRectMake(rim-reach,-bleed,reach+bleed,frame.size.height+2*bleed);
++  rimShade.startPoint = CGPointMake(side == Side::Left ? bleed/(reach+bleed):reach/(reach+bleed),.5);
 +  rimShade.endPoint = CGPointMake(side == Side::Left ? 1:0,.5);
 +  rimShade.opacity = edgeAmount;
++  if (!_pressureFeedback) _pressureFeedback = [[ArciumPiPPressureFeedback alloc] initWithParent:_pipWindow screen:screen];
++  const BOOL pressureDone = [_pressureFeedback update:*motion frame:frame screen:screen now:now dt:dt enabled:on];
 +  [CATransaction commit];
-+  return !pressing && lift == liftGoal && liftVelocity == 0 &&
++  return pressureDone && !pressing && lift == liftGoal && liftVelocity == 0 &&
 +      std::abs(settleAmount-settleGoal)<.001 && settleVelocity == 0 &&
 +      glow == (on ? glowTarget:0) && edgeAmount == (on ? edgeTarget:0) &&
 +      leanX == leanTarget.x && leanY == leanTarget.y && shadowX == shadowTarget.x && shadowY == shadowTarget.y;
@@ -1804,101 +2265,132 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +
++- (BOOL)acceptsGestureInput {
++  return !_invalidated && !_state.blocked && !_returning && _pipWindow.visible &&
++      self.window == _pipWindow && self.superview && !self.hiddenOrHasHiddenAncestor;
++}
++- (BOOL)eventOverCard:(NSEvent*)event {
++  if (!_pipWindow || !event.window) return NO;
++  const NSPoint screen = [self screenPoint:event];
++  const NSPoint local = [self convertPoint:[_pipWindow convertPointFromScreen:screen] fromView:nil];
++  return NSPointInRect(local, self.bounds);
++}
 +- (BOOL)consumeScroll:(NSEvent*)event {
-+  if (_invalidated || _state.blocked || _seeking ||
-+      !event.hasPreciseScrollingDeltas) {
-+    return NO;
++  // Clear ownership before hit/precision filtering so another window keeps
++  // its own inertia after the previous card sequence ended without momentum.
++  if (event.momentumPhase == NSEventPhaseNone &&
++      ((event.phase & (NSEventPhaseBegan | NSEventPhaseMayBegin)) || event.phase == NSEventPhaseNone)) {
++    _consumeMomentum = NO;
++    if (!_scrolling) _pendingPan = NO;
 +  }
++  if (_invalidated || _state.blocked || _seeking || _returning || !event.hasPreciseScrollingDeltas) return NO;
 +  if (event.momentumPhase != NSEventPhaseNone) {
-+    BOOL consume = _consumeMomentum;
-+    if (event.momentumPhase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
-+      _consumeMomentum = NO;
-+    }
-+    return consume;
++    const BOOL owned = _consumeMomentum;
++    if (event.momentumPhase & (NSEventPhaseEnded | NSEventPhaseCancelled)) _consumeMomentum = NO;
++    return owned;
 +  }
-+  if (event.phase == NSEventPhaseNone) {
-+    return NO;
-+  }
-+  if (_tucked != geo::Side::kNone) {
-+    if (event.phase & NSEventPhaseBegan) {
-+      _gestureX = 0;
-+      _consumeMomentum = YES;
-+    }
-+    _gestureX += event.scrollingDeltaX;
-+    if ((event.phase & NSEventPhaseEnded) &&
-+        ((_tucked == geo::Side::kLeft && _gestureX > 30) ||
-+         (_tucked == geo::Side::kRight && _gestureX < -30))) {
-+      [self restore:nil];
-+    }
-+    return YES;
-+  }
-+  if (event.phase & NSEventPhaseBegan) {
-+    [self stopMotion];
-+    NSPoint point = [self.superview convertPoint:event.locationInWindow
-+                                        fromView:nil];
-+    if ([self hitTest:point] != self) {
-+      return NO;
-+    }
-+    [self deliver:Action::kInteraction value:0];
-+    _scrolling = YES;
-+    _gestureAxis = GestureAxis::kPending;
-+    _consumeMomentum = YES;
-+    [self rememberScreen:_pipWindow.screen ?: [self anchorScreen]];
-+    _gestureStartFrame = _pipWindow.frame;
-+    _gestureX = _gestureY = 0;
-+    _nativeVisible = NO;
-+    [self refreshChrome];
-+  }
++  if (event.phase == NSEventPhaseNone) return NO;
++  if (!_scrolling && !_pendingPan && ![self eventOverCard:event]) return NO;
++  if (_magnifying) return YES;
++  const BOOL cancelled = (event.phase & NSEventPhaseCancelled) != 0;
++  const BOOL ended = (event.phase & NSEventPhaseEnded) != 0;
 +  if (!_scrolling) {
-+    return NO;
++    if (ended || cancelled) { const BOOL owned = _pendingPan; _pendingPan = NO; return owned; }
++    if (event.phase & (NSEventPhaseBegan | NSEventPhaseMayBegin)) _pendingPan = YES;
++    // Changed after a pinch must not start another pickup. A fresh sequence
++    // owns the pan only once it produces actual displacement.
++    if (!_pendingPan) return NO;
++    _consumeMomentum = YES;
++    if (event.scrollingDeltaX == 0 && event.scrollingDeltaY == 0) return YES;
++    [self stopMotion];
++    _gestureStartFrame = _pipWindow.frame;
++    if (![self ensureMotion]) return NO;
++    [self updateMotionScreen:[self screenPoint:event]];
++    gestures->beginPan(event.timestamp);
++    _scrolling = _dragging = YES; _pendingPan = NO;
++    [self deliver:Action::kInteraction value:0];
++    hapticKey = pendingKey = -1; slowSince = -1; settleTapped = NO;
++    awaitingLanding = NO; _nativeVisible = NO;
++    [self refreshChrome]; [self haptic:NSHapticFeedbackPatternAlignment];
++    [self startMotionTimer];
 +  }
-+  _gestureX += event.scrollingDeltaX;
-+  _gestureY += event.scrollingDeltaY;
-+  if (_gestureAxis == GestureAxis::kPending &&
-+      std::max(std::abs(_gestureX), std::abs(_gestureY)) >= 8) {
-+    _gestureAxis = std::abs(_gestureX) >= std::abs(_gestureY)
-+                       ? GestureAxis::kHorizontal
-+                       : GestureAxis::kVertical;
++  _consumeMomentum = YES;
++  if (!cancelled) {
++    // AppKit scrolling Y points down; the screen-space model points up.
++    gestures->pan({event.scrollingDeltaX, -event.scrollingDeltaY}, event.timestamp);
++    [self updateMotionScreen:NSMakePoint(motion->position.x + motion->size.width / 2,
++                                        motion->position.y + motion->size.height / 2)];
 +  }
-+  if (event.phase & NSEventPhaseChanged) {
-+    NSRect frame =
-+        NSOffsetRect(_gestureStartFrame,
-+                     _gestureAxis == GestureAxis::kHorizontal ? _gestureX : 0,
-+                     _gestureAxis == GestureAxis::kVertical ? _gestureY : 0);
-+    [self setWindowFrame:frame animate:NO];
-+  }
-+  if (event.phase & (NSEventPhaseEnded | NSEventPhaseCancelled)) {
++  lastEventTimestamp = event.timestamp; lastEventUptime = NSProcessInfo.processInfo.systemUptime;
++  if (ended || cancelled) {
++    gestures->endPan(event.timestamp, cancelled);
 +    _scrolling = NO;
-+    if (event.phase & NSEventPhaseCancelled) {
-+      [self setWindowFrame:_gestureStartFrame animate:YES];
-+      _nativeVisible = YES;
-+      [self refreshChrome];
-+      [self armHideTimer];
++    if (cancelled) {
++      motion->position = {_gestureStartFrame.origin.x,_gestureStartFrame.origin.y};
++      motion->resize({_gestureStartFrame.size.width,_gestureStartFrame.size.height});
++      [self stopMotion]; _nativeVisible = YES;
++      [self refreshChrome]; [self armHideTimer];
++      if (!_mouseInside) [self restoreGestureFocus];
 +      return YES;
 +    }
-+    if (!(event.phase & NSEventPhaseCancelled)) {
-+      if (_gestureAxis == GestureAxis::kVertical && _gestureY < -90 &&
-+          std::abs(_gestureY) > std::abs(_gestureX) * 1.4) {
-+        [self deliver:Action::kClose value:0];
-+        return YES;
-+      }
-+      NSScreen* screen = [self anchorScreen];
-+      BOOL leftHalf = NSMidX(_gestureStartFrame) < NSMidX(screen.frame);
-+      BOOL outward =
-+          (leftHalf && _gestureX < -70) || (!leftHalf && _gestureX > 70);
-+      if (_gestureAxis == GestureAxis::kHorizontal && outward &&
-+          std::abs(_gestureX) > std::abs(_gestureY) * 1.3) {
-+        [self setWindowFrame:_gestureStartFrame animate:NO];
-+        [self tuckToSide:_gestureX < 0 ? geo::Side::kLeft : geo::Side::kRight];
-+        return YES;
-+      }
-+    }
-+    [self rememberPlacement];
-+    _nativeVisible = YES;
-+    [self refreshChrome];
-+    [self armHideTimer];
-+  }
++    [self finishMotionRelease];
++    if (!_mouseInside) [self restoreGestureFocus];
++  } else [self updateMotionVisuals];
 +  return YES;
++}
++- (void)applyPinch:(CGFloat)delta ended:(BOOL)ended cancelled:(BOOL)cancelled {
++  if (_invalidated || _state.blocked || _seeking || _returning || _tucked != geo::Side::kNone) return;
++  _consumeMomentum = NO; _pendingPan = NO;
++  if (!_magnifying) {
++    if (ended || cancelled) return;
++    [self stopMotion];
++    if (![self ensureMotion]) return;
++    [self updateMotionScreen:NSMakePoint(NSMidX(_pipWindow.frame), NSMidY(_pipWindow.frame))];
++    _magnifyStartFrame = _pipWindow.frame;
++    _magnifyPreferredWidth = _preferredWidth;
++    gestures->beginPinch(); _magnifying = YES;
++    [self deliver:Action::kInteraction value:0];
++  }
++  if (!cancelled) gestures->magnify(delta);
++  // Honor Chromium's minimum/maximum video dimensions as well as screen fit.
++  const double width = motion->size.width;
++  NSScreen* screen = [self anchorScreen];
++  const auto fit = geo::Resize({motion->position.x, motion->position.y, width, motion->size.height},
++      ToRect(screen.visibleFrame), _aspect, width, _sizeLimits);
++  const pip_motion::Point center{motion->position.x + width / 2,
++                                 motion->position.y + motion->size.height / 2};
++  motion->resize({fit.width, fit.height});
++  motion->placeAt({center.x - fit.width / 2, center.y - fit.height / 2});
++  if (ended || cancelled) {
++    gestures->endPinch(cancelled); _magnifying = NO;
++    _preferredWidth = cancelled ? _magnifyPreferredWidth : motion->size.width;
++  }
++  [self setWindowFrame:NSMakeRect(motion->position.x, motion->position.y,
++      motion->size.width, motion->size.height) animate:NO];
++  if (ended || cancelled) {
++    if (!cancelled) [self rememberPlacement];
++    [self armHideTimer];
++    if (!_mouseInside) [self restoreGestureFocus];
++  }
++}
++- (void)recognizePinch:(NSMagnificationGestureRecognizer*)recognizer {
++  if (![self acceptsGestureInput] || recognizer.state == NSGestureRecognizerStatePossible) return;
++  const BOOL cancelled = recognizer.state == NSGestureRecognizerStateCancelled ||
++                         recognizer.state == NSGestureRecognizerStateFailed;
++  [self applyPinch:recognizer.magnification
++             ended:recognizer.state == NSGestureRecognizerStateEnded cancelled:cancelled];
++  recognizer.magnification = 0;
++}
++- (BOOL)consumeMagnify:(NSEvent*)event {
++  if (!_magnifying && !_scrolling && !_pendingPan && ![self eventOverCard:event]) return NO;
++  if (event.phase == NSEventPhaseNone) {
++    [self applyPinch:event.magnification ended:NO cancelled:NO];
++    [self applyPinch:0 ended:YES cancelled:NO];
++  } else {
++    [self applyPinch:event.magnification ended:(event.phase & NSEventPhaseEnded) != 0
++           cancelled:(event.phase & NSEventPhaseCancelled) != 0];
++  }
++  return !_invalidated && !_state.blocked && !_returning && _tucked == geo::Side::kNone;
 +}
 +- (void)resizeEvent:(NSEvent*)event phase:(NSInteger)phase {
 +  if (_state.blocked || _tucked != geo::Side::kNone) {
@@ -1929,35 +2421,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +- (void)magnifyWithEvent:(NSEvent*)event {
-+  if (_state.blocked || _tucked != geo::Side::kNone) {
-+    return;
-+  }
-+  if (!_magnifying || (event.phase & NSEventPhaseBegan)) {
-+    [self stopMotion];
-+    _magnifying = YES;
-+    _magnifyStartFrame = _pipWindow.frame;
-+  }
-+  if (event.phase & NSEventPhaseCancelled) {
-+    _magnifying = NO;
-+    [self setWindowFrame:_magnifyStartFrame animate:NO];
-+    return;
-+  }
-+  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
-+  if (!screen) {
-+    return;
-+  }
-+  [self
-+      setWindowFrame:ToNSRect(geo::Resize(
-+                         ToRect(_pipWindow.frame), ToRect(screen.visibleFrame),
-+                         _aspect,
-+                         NSWidth(_pipWindow.frame) * (1 + event.magnification),
-+                         _sizeLimits))
-+             animate:NO];
-+  if (event.phase & NSEventPhaseEnded) {
-+    _magnifying = NO;
-+    _preferredWidth = NSWidth(_pipWindow.frame);
-+    [self rememberPlacement];
-+  }
++  // The recognizer owns events on this window. Other-window magnification is
++  // handled by the application monitor without double-applying the delta.
++  [super magnifyWithEvent:event];
 +}
 +
 +- (void)beginSeek {
@@ -2003,10 +2469,47 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self deliver:Action::kForward15 value:0];
 +  }
 +}
-+- (void)returnToTab:(id)sender {
-+  if (!_state.blocked) {
-+    [self deliver:Action::kReturn value:0];
++- (void)cancelReturn {
++  [_returnTimer invalidate]; _returnTimer = nil;
++  if (_returning && _pipWindow) {
++    _pipWindow.alphaValue = 1;
++    [self setWindowFrame:_returnFrame animate:NO];
 +  }
++  _returning = NO;
++}
++- (void)returnToTab:(id)sender {
++  if (_invalidated || _state.blocked || _returning) return;
++  [self stopMotion];
++  if (ReduceMotion() || !_openerWindow.visible) {
++    [self deliver:Action::kReturn value:0]; return;
++  }
++  _returning = YES; _returnFrame = _pipWindow.frame;
++  _returnStart = NSProcessInfo.processInfo.systemUptime;
++  const uint64_t generation = _sessionGeneration;
++  __weak ArciumPiPNativeOverlay* weakSelf = self;
++  _returnTimer = [NSTimer timerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer* timer) {
++    ArciumPiPNativeOverlay* overlay = weakSelf;
++    if (!overlay || overlay->_invalidated || !overlay->_returning ||
++        overlay->_sessionGeneration != generation) { [timer invalidate]; return; }
++    const double u = std::clamp((NSProcessInfo.processInfo.systemUptime - overlay->_returnStart) / .22, 0.0, 1.0);
++    const double ease = 1 - std::pow(1-u, 3);
++    const NSRect original = overlay->_returnFrame;
++    const NSRect home = overlay->_openerWindow.frame;
++    pip_motion::Point delta{NSMidX(home)-NSMidX(original), NSMidY(home)-NSMidY(original)};
++    delta = delta * (std::min(80.0, length(delta)) / std::max(1.0, length(delta)));
++    const double scale = 1 - .16 * ease;
++    [overlay setWindowFrame:NSMakeRect(NSMidX(original)+delta.x*ease-NSWidth(original)*scale/2,
++        NSMidY(original)+delta.y*ease-NSHeight(original)*scale/2,
++        NSWidth(original)*scale, NSHeight(original)*scale) animate:NO];
++    overlay->_pipWindow.alphaValue = 1-ease;
++    if (u >= 1) {
++      [overlay->_returnTimer invalidate]; overlay->_returnTimer = nil;
++      overlay->_pipWindow.alphaValue = 1;
++      [overlay setWindowFrame:overlay->_returnFrame animate:NO];
++      [overlay deliver:Action::kReturn value:0];
++    }
++  }];
++  [NSRunLoop.mainRunLoop addTimer:_returnTimer forMode:NSRunLoopCommonModes];
 +}
 +- (void)close:(id)sender {
 +  if (!_state.blocked) {
@@ -2085,6 +2588,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)prepareForHide {
++  [self cancelReturn];
++  [self restoreGestureFocus];
 +  if (_invalidated) {
 +    return;
 +  }
@@ -2104,9 +2609,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      }
 +    }
 +  }
-+  NSRect frame = wasTucked
-+                     ? _restoreFrame
-+                     : (_magnifying ? _magnifyStartFrame : _pipWindow.frame);
++  NSRect frame = wasTucked ? _restoreFrame : _pipWindow.frame;
 +  _tucked = geo::Side::kNone;
 +  _nativeVisible = NO;
 +  _hasSnapshot = NO;
@@ -2114,7 +2617,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _mouseInside = NO;
 +  _dragging = _resizing = _scrolling = _seeking = _magnifying = NO;
 +  _consumeMomentum = NO;
-+  _gestureAxis = GestureAxis::kPending;
++  _pendingPan = NO;
 +  [_hideTimer invalidate];
 +  _hideTimer = nil;
 +  [_progressTimer invalidate];
@@ -2129,6 +2632,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)invalidate {
++  [self cancelReturn];
++  [self restoreGestureFocus];
 +  if (_invalidated) {
 +    return;
 +  }
@@ -3317,7 +3822,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,920 @@
+@@ -0,0 +1,1067 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3350,27 +3855,40 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +- (void)endSeek;
 +- (void)snap;
 +- (BOOL)consumeScroll:(NSEvent*)event;
++- (void)recognizePinch:(NSMagnificationGestureRecognizer*)recognizer;
++- (void)applyPinch:(CGFloat)delta ended:(BOOL)ended cancelled:(BOOL)cancelled;
++- (BOOL)consumeMagnify:(NSEvent*)event;
++- (BOOL)acceptsGestureInput;
 +@end
 +
-+@interface ArciumPiPMagnificationTestEvent : NSEvent
-+@property NSEventPhase testPhase;
-+@property CGFloat testMagnitude;
++@interface ArciumPiPTestPinchRecognizer : NSMagnificationGestureRecognizer
++@property NSGestureRecognizerState testState;
 +@end
-+@implementation ArciumPiPMagnificationTestEvent
-+- (NSEventPhase)phase {
-+  return self.testPhase;
-+}
-+- (CGFloat)magnification {
-+  return self.testMagnitude;
-+}
++@implementation ArciumPiPTestPinchRecognizer
++- (NSGestureRecognizerState)state { return self.testState; }
++@end
++
++@interface ArciumPiPFallbackMagnifyEvent : NSEvent
++@property(nonatomic,weak) NSWindow* testWindow;
++@property CGFloat testDelta;
++@end
++@implementation ArciumPiPFallbackMagnifyEvent
++- (NSEventType)type { return NSEventTypeMagnify; }
++- (NSEventPhase)phase { return NSEventPhaseNone; }
++- (NSWindow*)window { return self.testWindow; }
++- (NSPoint)locationInWindow { return NSMakePoint(100,100); }
++- (CGFloat)magnification { return self.testDelta; }
 +@end
 +
 +@interface ArciumPiPDragTestEvent : NSEvent
 +@property(nonatomic, weak) NSWindow* testWindow;
 +@property NSPoint globalPoint;
 +@property double testTime;
++@property NSInteger testClicks;
 +@end
 +@implementation ArciumPiPDragTestEvent
++- (NSEventType)type { return NSEventTypeLeftMouseDown; }
++- (NSInteger)clickCount { return self.testClicks ?: 1; }
 +- (NSWindow*)window { return self.testWindow; }
 +- (NSPoint)locationInWindow { return [self.testWindow convertPointFromScreen:self.globalPoint]; }
 +- (NSTimeInterval)timestamp { return self.testTime; }
@@ -3776,18 +4294,18 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
 +  ASSERT_TRUE(Scroll(NSEventPhaseChanged, inward_dx, 0));
 +  ASSERT_TRUE(Scroll(NSEventPhaseEnded));
-+  Pump();
++  for (int i=0; i<200; ++i) Pump();
 +  ExpectSameFrame(window_.frame, original);
 +  EXPECT_FALSE(IsPresented(handle));
 +  EXPECT_EQ(Count(Action::kClose), 0u);
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, SyntheticDownwardSwipeEmitsCloseAction) {
++TEST_F(ArciumPiPNativeControlsTest, TwoFingerPlacementDoesNotAccidentallyCloseVideo) {
 +  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
 +  ASSERT_TRUE(Scroll(NSEventPhaseChanged, 0, -110));
 +  ASSERT_TRUE(Scroll(NSEventPhaseEnded));
 +  Pump();
-+  EXPECT_EQ(Count(Action::kClose), 1u);
++  EXPECT_EQ(Count(Action::kClose), 0u);
 +  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
 +}
 +
@@ -3876,19 +4394,153 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +TEST_F(ArciumPiPNativeControlsTest,
 +       CancelledMagnificationDoesNotSavePartialWidth) {
 +  NSRect original = window_.frame;
-+  auto* event = [ArciumPiPMagnificationTestEvent new];
-+  event.testPhase = NSEventPhaseBegan;
-+  [Overlay() magnifyWithEvent:event];
-+  event.testPhase = NSEventPhaseChanged;
-+  event.testMagnitude = 0.2;
-+  [Overlay() magnifyWithEvent:event];
++  auto* recognizer = [[ArciumPiPTestPinchRecognizer alloc] initWithTarget:nil action:nil];
++  recognizer.testState = NSGestureRecognizerStateBegan;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  recognizer.testState = NSGestureRecognizerStateChanged;
++  recognizer.magnification = 0.2;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
 +  EXPECT_GT(NSWidth(window_.frame), NSWidth(original));
-+  event.testPhase = NSEventPhaseCancelled;
-+  event.testMagnitude = 0;
-+  [Overlay() magnifyWithEvent:event];
++  recognizer.testState = NSGestureRecognizerStateCancelled;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
 +  Pump();
 +  ExpectSameFrame(window_.frame, original);
 +  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PrecisePanMovesBothAxesAndPreservesVerticalDirection) {
++  const NSRect original = window_.frame;
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ExpectSameFrame(window_.frame, original);
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged, 30, -25));
++  EXPECT_GT(NSMinX(window_.frame), NSMinX(original)+10);
++  EXPECT_GT(NSMinY(window_.frame), NSMinY(original)+10);
++  const NSRect moved = window_.frame;
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged, -10, 10));
++  EXPECT_LT(NSMinX(window_.frame), NSMinX(moved));
++  EXPECT_LT(NSMinY(window_.frame), NSMinY(moved));
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, RecognizedPinchGrowsShrinksAndKeepsCenter) {
++  const NSRect original = window_.frame;
++  auto* recognizer = [[ArciumPiPTestPinchRecognizer alloc] initWithTarget:nil action:nil];
++  recognizer.testState = NSGestureRecognizerStateBegan;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  recognizer.testState = NSGestureRecognizerStateChanged;
++  recognizer.magnification = .20;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(original)+10);
++  EXPECT_NEAR(NSMidX(window_.frame),NSMidX(original),1);
++  EXPECT_NEAR(NSMidY(window_.frame),NSMidY(original),1);
++  const double grown = NSWidth(window_.frame);
++  recognizer.magnification = -.15;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  EXPECT_LT(NSWidth(window_.frame),grown-10);
++  recognizer.testState = NSGestureRecognizerStateEnded;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  EXPECT_TRUE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PinchClearsPreludeAndTrailingScrollCannotPickUpCard) {
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  auto* recognizer = [[ArciumPiPTestPinchRecognizer alloc] initWithTarget:nil action:nil];
++  recognizer.testState = NSGestureRecognizerStateBegan;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  recognizer.testState = NSGestureRecognizerStateChanged;
++  recognizer.magnification = .10;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  recognizer.testState = NSGestureRecognizerStateEnded;
++  [Overlay() applyPinch:recognizer.magnification
++      ended:recognizer.testState == NSGestureRecognizerStateEnded
++      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
++  recognizer.magnification = 0;
++  const NSRect resized = window_.frame;
++  EXPECT_FALSE(Scroll(NSEventPhaseChanged,30,0));
++  ExpectSameFrame(window_.frame,resized);
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,0));
++  EXPECT_GT(NSMinX(window_.frame),NSMinX(resized));
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, HiddenAndDetachedOverlayRejectsGestureAdmission) {
++  EXPECT_FALSE([Overlay() acceptsGestureInput]);
++  const NSRect original = window_.frame;
++  auto* recognizer = [[ArciumPiPTestPinchRecognizer alloc] initWithTarget:nil action:nil];
++  recognizer.testState = NSGestureRecognizerStateBegan;
++  recognizer.magnification = .20;
++  [Overlay() recognizePinch:recognizer];
++  ExpectSameFrame(window_.frame,original);
++  NSView* overlay = Overlay();
++  [overlay removeFromSuperview];
++  EXPECT_FALSE([overlay acceptsGestureInput]);
++  [overlay recognizePinch:recognizer];
++  ExpectSameFrame(window_.frame,original);
++  MountControls();
++}
++
++TEST_F(ArciumPiPNativeControlsTest, HidingDuringPinchRollsBackSizeAndIntendedWidth) {
++  const NSRect original = window_.frame;
++  [Overlay() applyPinch:.20 ended:NO cancelled:NO];
++  EXPECT_GT(NSWidth(window_.frame),NSWidth(original));
++  controls_->RestorePlacementForHide();
++  ExpectSameFrame(window_.frame,original);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PhaseLessFallbackPinchEndsBeforeNextPan) {
++  const NSRect original = window_.frame;
++  auto* event = [ArciumPiPFallbackMagnifyEvent new];
++  event.testWindow = window_; event.testDelta = .15;
++  EXPECT_TRUE([Overlay() consumeMagnify:event]);
++  EXPECT_GT(NSWidth(window_.frame),NSWidth(original));
++  EXPECT_FALSE([[Overlay() valueForKey:@"magnifying"] boolValue]);
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,0));
++  EXPECT_TRUE([[Overlay() valueForKey:@"scrolling"] boolValue]);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, DoubleClickReturnsToBrowserWithoutResizing) {
++  const NSRect original = window_.frame;
++  auto* event = [ArciumPiPDragTestEvent new];
++  event.testWindow = window_; event.testClicks = 2;
++  event.globalPoint = NSMakePoint(NSMidX(original),NSMidY(original));
++  event.testTime = NSProcessInfo.processInfo.systemUptime;
++  [Overlay() mouseDown:event];
++  [Overlay() mouseUp:event];
++  Pump();
++  EXPECT_EQ(Count(Action::kReturn),1u);
++  EXPECT_EQ(Count(Action::kClose),0u);
++  ExpectSameFrame(window_.frame,original);
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, FinalSizeLandingIgnoresPlaceholderOrigin) {
@@ -4467,7 +5119,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
-@@ -0,0 +1,603 @@
+@@ -0,0 +1,614 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4721,6 +5373,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +  void resetSettings(const Settings& defaults = {}) {
 +    if (phase == Phase::Resting) {
 +      settings = defaults;
++      resize(size);
 +      settle(clampVisible(position), {}, Goal::Free);
 +    } else {
 +      retune(defaults);
@@ -4883,6 +5536,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +  void retune(Settings next) {
 +    const bool changedBounds = next.margin != settings.margin || next.docking != settings.docking;
 +    settings = next;
++    resize(size);
 +    if (phase == Phase::Dragging) {
 +      if (changedBounds) resistance_anchor_ = position;
 +      const Rect limits = dragLimits();
@@ -4937,13 +5591,19 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +    return {area_.x + (area_.width - size.width) / 2,
 +            area_.y + (area_.height - size.height) / 2};
 +  }
++  void resize(Size dimensions) {
++    const double factor = std::min({1.0,
++        std::max(1.0, area_.width - 2 * settings.margin) / dimensions.width,
++        std::max(1.0, area_.height - 2 * settings.margin) / dimensions.height});
++    size = {dimensions.width * factor, dimensions.height * factor};
++    if (phase == Phase::Dragging) updatePressed();
++  }
 +  // Switching displays changes the active work area without changing global pointer offset.
 +  void environment(Rect area, Size dimensions, Edges edges = {}, std::optional<Rect> physical = std::nullopt) {
 +    area_ = area;
 +    presentation_area_ = physical.value_or(area);
-+    size = dimensions;
 +    edges_ = edges;
-+    if (phase == Phase::Dragging) updatePressed();
++    resize(dimensions);
 +  }
 +  void seed(Point origin, Side side = Side::None, Point restore = {}) {
 +    position = target = origin;
@@ -4958,6 +5618,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +  Point restorePosition() const { return restoreTarget(); }
 +  Point rawPosition(Point pointer) const { return pointer - offset_; }
 +  Rect area() const { return area_; }
++  Rect physicalArea() const { return presentation_area_; }
++  Edges exteriorEdges() const { return edges_; }
 +
 + private:
 +  enum class Goal { Dock, Stash, Restore, Free };
@@ -4994,17 +5656,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +        inward_speed > settings.stash_velocity;
 +  }
 +  Point tuckTarget(Side side, double y) const {
++    const auto points = corners();
 +    return {side == Side::Left ? area_.x - size.width + settings.handle :
 +                area_.x + area_.width - settings.handle,
-+            std::clamp(y, area_.y + settings.margin,
-+                area_.y + area_.height - size.height - settings.margin)};
++            std::clamp(y, points[0].y, points[2].y)};
 +  }
 +  Point restoreTarget() const {
 +    if (exact_restore_) return restore_point_;
++    const auto points = corners();
 +    return {restore_side_ == Side::Left ? area_.x + settings.margin :
 +                area_.x + area_.width - size.width - settings.margin,
-+            std::clamp(restore_point_.y, area_.y + settings.margin,
-+                area_.y + area_.height - size.height - settings.margin)};
++            std::clamp(restore_point_.y, points[0].y, points[2].y)};
 +  }
 +  Outcome unmovedOutcome() const {
 +    if (start_settling_ && goal_ == Goal::Restore)
@@ -5038,16 +5700,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_motion.h
 +          edges_.top ? presentation_area_.y + presentation_area_.height - settings.handle : INFINITY);
 +  }
 +  Point clampVisible(Point p) const {
-+    return {std::clamp(p.x, area_.x + settings.margin,
-+                      area_.x + area_.width - size.width - settings.margin),
-+            std::clamp(p.y, area_.y + settings.margin,
-+                      area_.y + area_.height - size.height - settings.margin)};
++    const auto points = corners();
++    return {std::clamp(p.x, points[0].x, points[1].x),
++            std::clamp(p.y, points[0].y, points[2].y)};
 +  }
 +  std::array<Point, 4> corners() const {
-+    const double l = area_.x + settings.margin;
-+    const double r = area_.x + area_.width - size.width - settings.margin;
-+    const double b = area_.y + settings.margin;
-+    const double t = area_.y + area_.height - size.height - settings.margin;
++    const double mx = std::min(settings.margin, std::max(0.0, (area_.width - size.width) / 2));
++    const double my = std::min(settings.margin, std::max(0.0, (area_.height - size.height) / 2));
++    const double l = area_.x + mx;
++    const double r = std::max(l, area_.x + area_.width - size.width - mx);
++    const double b = area_.y + my;
++    const double t = std::max(b, area_.y + area_.height - size.height - my);
 +    return {Point{l, b}, Point{r, b}, Point{l, t}, Point{r, t}};
 +  }
 +  void settle(Point destination, Point initial_velocity, Goal goal) {
@@ -5108,3 +5771,89 @@ Index: src/chrome/browser/ui/views/overlay/BUILD.gn
    }
  
    if (is_win) {
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_gestures.h
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_gestures.h
+@@ -0,0 +1,81 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++
++#pragma once
++
++#include "arcium_pip_motion.h"
++
++namespace pip_motion {
++
++// A trackpad moves a held card in screen points. Cursor position is not reused
++// after pickup: the window can move beneath a stationary pointer.
++class Gestures {
++ public:
++  enum class Kind { None, Pan, Pinch };
++  explicit Gestures(Motion& motion) : motion_(motion) {}
++  Kind kind() const { return kind_; }
++
++  void beginPan(double time) {
++    if (kind_ == Kind::Pinch) return;
++    point_ = motion_.position;
++    motion_.begin(point_, time);
++    kind_ = Kind::Pan;
++  }
++  void pan(Point delta, double time) {
++    if (kind_ != Kind::Pan) return;
++    point_ = point_ + delta;
++    motion_.drag(point_, time);
++  }
++  void endPan(double time, bool cancelled = false) {
++    if (kind_ != Kind::Pan) return;
++    if (cancelled) motion_.cancel();
++    else motion_.end(time);
++    kind_ = Kind::None;
++  }
++  void beginPinch() {
++    if (motion_.tucked != Side::None) return;
++    if (kind_ == Kind::Pan) motion_.placeAt(motion_.position);
++    before_ = motion_;
++    center_ = {motion_.position.x + motion_.size.width / 2,
++               motion_.position.y + motion_.size.height / 2};
++    motion_.placeAt(motion_.position);
++    kind_ = Kind::Pinch;
++  }
++  void magnify(double delta) {
++    if (kind_ != Kind::Pinch || !std::isfinite(delta)) return;
++    resize(motion_.size.width * std::max(.01, 1 + delta));
++  }
++  void endPinch(bool cancelled = false) {
++    if (kind_ != Kind::Pinch) return;
++    if (cancelled && before_) {
++      const Settings settings = motion_.settings;
++      const Rect area = motion_.area();
++      const Rect physical = motion_.physicalArea();
++      const Edges edges = motion_.exteriorEdges();
++      motion_ = *before_;
++      motion_.settings = settings;
++      motion_.environment(area, motion_.size, edges, physical);
++      motion_.resize(motion_.size);
++      motion_.placeAt(motion_.position);
++    }
++    before_.reset();
++    kind_ = Kind::None;
++  }
++
++ private:
++  void resize(double requested) {
++    const Rect area = motion_.area();
++    const double aspect = motion_.size.width / motion_.size.height;
++    const double maxWidth = std::max(1.0, std::min(area.width - 2 * motion_.settings.margin,
++        (area.height - 2 * motion_.settings.margin) * aspect));
++    const double width = std::clamp(requested, std::min(240.0, maxWidth), maxWidth);
++    motion_.resize({width, width / aspect});
++    motion_.placeAt({center_.x - width / 2, center_.y - width / aspect / 2});
++  }
++  Motion& motion_;
++  Kind kind_ = Kind::None;
++  Point point_, center_;
++  std::optional<Motion> before_;
++};
++
++}  // namespace pip_motion

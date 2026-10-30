@@ -1,0 +1,20 @@
+{
+  "lab_baseline": "f02b96a",
+  "core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "build_evidence": "da88cb4556704236abf0f6b5305dd07c",
+  "compiled_patch_sha256": "42af1da492bd841c97aadeabd0562f2cbcf8ec5fb1fef64a64a12323bdc982ee",
+  "full_patch_replay": {
+    "applied": 590,
+    "fuzz": 0,
+    "offsets_allowed": true
+  },
+  "checks": {
+    "native_and_geometry": 51,
+    "motion": 158,
+    "gestures": 24,
+    "retries": 0
+  },
+  "astra": "GO for isolated test app; doc nits corrected",
+  "runtime": "pending independent-app native check; real browser physical pinch and focus remain manual until checked",
+  "daily_install": false
+}

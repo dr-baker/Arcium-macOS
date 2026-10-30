@@ -29,6 +29,9 @@ def main():
     run("/usr/bin/clang++", "-std=c++20", "-Wall", "-Wextra", "-pedantic",
         ROOT / "MotionTests.cpp", "-o", BUILD / "MotionTests")
     run(BUILD / "MotionTests")
+    run("/usr/bin/clang++", "-std=c++20", "-Wall", "-Wextra", "-pedantic",
+        ROOT / "GestureTests.cpp", "-o", BUILD / "GestureTests")
+    run(BUILD / "GestureTests")
     run("/usr/bin/clang++", "-std=c++20", "-Wall", "-Wextra", "-fobjc-arc",
         "-framework", "Foundation", ROOT / "SettingsSchemaTests.mm", "-o", BUILD / "SettingsSchemaTests")
     run(BUILD / "SettingsSchemaTests")

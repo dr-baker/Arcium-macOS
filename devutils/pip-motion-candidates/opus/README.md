@@ -6,6 +6,20 @@ below. The window behaves
 like a physical card: it lifts when you pick it up and sets down where it comes
 to rest. It has no video, audio, browser connection, or Chromium dependency.
 
+The card uses clear native AppKit glass on macOS 26, with a cool tint and a
+soft rim highlight. Older systems use a translucent HUD material. Reduce
+Transparency or Increase Contrast selects a solid surface. Its velocity graph
+is embedded in the card and follows its lift, tilt and resizing. The card has
+no name header; its velocity curve uses a muted cyan and restrained glow. The glass
+handle is preserved while tucked. Its screen-edge shade extends two backing
+pixels past the physical display edge to avoid a partially shaded final pixel.
+This shade sits above the composed glass window, covering its native chrome
+as well as its contents; the handle chevron stays above the shade.
+The lab card overrides AppKit's appearance-only `hasKeyAppearance` and
+`_hasKeyAppearance` hooks so native glass retains its active look independently
+of keyboard focus. This private API experiment is confined to this lab panel;
+the click-through effects window is excluded.
+
 From the Arcium-macOS repository:
 
 ```sh
@@ -16,6 +30,20 @@ python3 devutils/pip-motion-candidates/opus/build.py --run    # also launch
 Output goes to this directory's ignored `.build/`: `Opus PiP Lab.app`
 (`dev.arcium.pip-motion-lab.opus`), `settings.json`, and `state.json`. Quit the
 app before rebuilding.
+
+Two-finger panning moves the card freely on both axes. Pinching resizes it around
+its center through a native magnification recognizer. The nonactivating card
+activates for gestures and can become key while the pointer is over it, then restores the previous key
+window when the pointer leaves. This lets AppKit deliver hardware pinch events
+without raising the settings window. `state.json` records the pinch count,
+last route and delta; `app.log` records incoming magnification events. Daniel confirmed smooth hardware pinch resizing after the latest routing
+and pickup-ownership revision. Zero-delta scroll
+preludes now defer pickup, and trailing updates after pinch cannot begin a new pan.
+
+Double-click return shrinks and fades the card toward home over 0.22 seconds,
+then the home window's contents dip three points and compress slightly on
+arrival, with one small rebound over 0.32 seconds. Reduce Motion returns
+immediately. Reset cancels an unfinished return or landing before restoring the card.
 
 ## Release momentum
 
@@ -171,6 +199,71 @@ clicks in the transparent padding do not reach windows behind it; click-through
 must be resolved before browser integration. `state.json`'s `native_frame`
 reports the unscaled card's frame.
 
+## Effects
+
+An **Effects** tab holds eight lab-only visual effects. Their values live in a
+lab `Feedback` struct that extends the shared `FeedbackSettings`, and save as
+`effect_*` keys. Each follows Release feedback; tilt and stretch also follow
+Reduce Motion. The string, its flying fragments and dust draw in a separate
+click-through window covering the built-in screen, ordered just below the PiP,
+so they are not clipped to its 200-point margin. The effects window has a
+strictly lower window level than the PiP. A mask matching the card’s transformed
+outline also cuts the string and its fragments out beneath the glass, keeping
+them from showing through it.
+
+- **Settle meter** (default 0.60): a border stroke traces clockwise from the
+  top center as settle progresses, completing at the settle haptic. A ring then
+  ripples 22 points outward and fades over 0.55 s.
+- **Edge glow** (default 1): in Press any edge, a 4.5-point straight string bends
+  around the card at a single edge. When both edges reach the corner dock
+  threshold, it joins into a border loop with the PiP's 20-point corner radius.
+  Leaving the corner restores the straight string. A release keeps its last
+  shape for the spring-back or tuck break. Local light fades away from the card,
+  with shoulders reaching 260 points beyond it. The hot stress
+  color extends 170 points past each end of the card before fading to white.
+  White, yellow, orange and red show increasing pressure, with an 18–36 point
+  glow. Pressing pushes the string beyond the screen edge with the card,
+  while its long colored shoulders remain visible. Anchors stay planted until
+  the card slides more than 120 points along the edge.
+  Only tuck releases consume the original string immediately, including
+  at low brightness. Every section of the original curve, including the center
+  and each joined corner, becomes a moving fragment. Pieces recoil toward the ends and
+  inward onto the screen. Their stress color relaxes back to
+  white within 0.12 s; they then spin, curl and fade over 0.85 s.
+  Dock releases and pulling away leave the whole string intact, springing back
+  through straight with response 0.24 s and damping 0.22 while the color relaxes.
+  The pressure tick lines and lingering filament afterglow have been removed.
+- **Meters** (default 1): dark glass capsules for recordings. PRESS floats
+  above the card (below it near the top of the screen) while pressing, with a
+  glowing bar, labelled dock and tuck ticks and the exact depth. SETTLE floats
+  below the card (above near the bottom) while settling, filling to the haptic,
+  then reads SET with a small pop.
+- **Tilt** (default 5°): the card's leading edge tips away in perspective with
+  speed (tanh of velocity over 1600 pt/s) and springs flat with a slight wobble.
+- **Stretch** (default 1.5%): fast motion stretches the card along its travel
+  and narrows it by half that across, from 600 pt/s to full at 3000 pt/s.
+- **Landing shadow** (default 0.60): on landing the contact shadow flares out,
+  then tightens past rest before easing back over 0.45 s.
+- **Spring trace** (default 1): the graph inside the glass card shows the spring's
+  signed velocity during dragging and flight. Its arrow follows the hand
+  during dragging, then fixes the positive direction to the initial flight.
+  The readout gives signed points per second. Reverse travel, including the return from overshoot, dips below
+  the centered zero line. The vertical scale compresses high speeds with
+  `asinh(v / 50)` so small rebounds remain visible. The
+  display stays visible throughout dragging, throwing and rest. At rest the
+  readout returns to zero while retaining the recent curve. Motion history is
+  limited to 1.6 seconds; the visible idle graph does not keep the timer running.
+- **Dust** (default 0.70): landing after a flight that peaked above 300 pt/s
+  kicks 12–40 soft specks out from random points on the window's perimeter,
+  more and faster up to 2500 pt/s. They drift with drag, grow slightly and fade
+  over 0.7 s, emerging from beneath the window. Stay here gives a gentle
+  14-speck puff when settling reaches 95%, alongside its tap while still held.
+  Releasing a settled card does not repeat it. A stay-here release before
+  that completion gives the puff when the card lands.
+
+Tilt and stretch use velocity estimated from presented position across frames.
+They have not been reviewed in a recording.
+
 ## Feedback controls
 
 The tuning window is now 896 points tall. Its **Presets** menu contains Daniel’s tuning, Grounded,
@@ -266,3 +359,11 @@ The production adapter uses the active display's work area and exterior edge
 segments, preserving pointer offset across display seams. The model exposes
 that environment update without making the standalone lab a multi-display
 prototype; its screen-selection limitation still applies.
+
+## Return to browser simulation
+
+Double-clicking the untucked card hides the card and its effects, stops their
+animation, and reports “Returned to browser · Reset position to bring card
+back”. The lab opens no browser or URL. Reset position brings the card and
+effects back without changing tuning. Pinch still resizes the card; double-click
+does not toggle its size.
