@@ -74,6 +74,8 @@ class RoutingTest(unittest.TestCase):
         self.assertNotIn('SISO_REAPI_ADDRESS', opts['environment'])
         self.assertNotIn('SISO_CREDENTIAL_HELPER', opts['environment'])
         self.assertNotIn('RBE_service_no_security', opts['environment'])
+        self.assertEqual(opts['jobs'], 8)
+        self.assertEqual(opts['environment']['SISO_LIMITS'], 'local=8,preproc=8,scandeps=8')
 
     def test_small_and_boundary_plans_do_not_construct_cloud_client(self):
         self.enable()
@@ -165,7 +167,7 @@ class RoutingTest(unittest.TestCase):
         self.enable()
         self.run_build(execution='local')
         self.assertEqual([x[0] for x in self.events], ['build'])
-        self.assertEqual(self.events[-1][2]['jobs'], 2)
+        self.assertEqual(self.events[-1][2]['jobs'], 8)
 
     def test_auto_basis_must_be_a_real_nonempty_string(self):
         for basis in (None, '', '  ', 123, [], {}):
@@ -200,6 +202,7 @@ class RoutingTest(unittest.TestCase):
                          ['plan', 'session', 'rollback', 'build'])
         self.assertIn('--offline', self.events[-1][1])
         self.assertFalse(self.events[-1][2].get('admit_busy_cpu',False))
+        self.assertEqual(self.events[-1][2]['jobs'], 8)
 
     def test_only_remote_candidates_plan_under_cpu_pressure(self):
         self.enable()
