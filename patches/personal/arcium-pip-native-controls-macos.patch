@@ -201,7 +201,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,142 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -224,6 +224,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +#else
 +class NSWindow;
 +#endif
++
++namespace helium { struct SurfaceStyle; }
 +
 +namespace arcium::pip {
 +
@@ -326,6 +328,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  void ReleaseFocus();
 +  void SetBeforeFocusRelease(std::function<void()> callback);
 +  void Update(const State& state);
++  void SetSurfaceStyle(const helium::SurfaceStyle& style);
 +  void RestorePlacementForHide();
 +  void PreparePlacement(const Placement& placement,
 +                        NSWindow* opener,
@@ -345,7 +348,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2666 @@
+@@ -0,0 +1,2708 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -364,6 +367,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +#include "arcium_pip_geometry.h"
 +#include "arcium_pip_motion.h"
 +#include "arcium_pip_gestures.h"
++
++#include "base/functional/bind.h"
++#include "ui/gfx/color_utils.h"
++#include "chrome/browser/ui/views/omnibox/arcium_command_bar_material.h"
 +
 +namespace {
 +using arcium::pip::Action;
@@ -430,42 +437,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +              configurationWithPointSize:size
 +                                  weight:NSFontWeightMedium]];
 +}
-+NSView* Capsule(NSView* content, CGFloat radius) {
-+  NSView* surface;
-+  if (NSWorkspace.sharedWorkspace
-+          .accessibilityDisplayShouldReduceTransparency) {
-+    surface = [[NSView alloc] initWithFrame:NSZeroRect];
-+    surface.wantsLayer = YES;
-+    surface.layer.backgroundColor =
-+        [NSColor colorWithWhite:0.15 alpha:1].CGColor;
-+    surface.layer.cornerRadius = radius;
-+    [surface addSubview:content];
-+  } else if (@available(macOS 26.0, *)) {
-+    NSGlassEffectView* glass =
-+        [[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
-+    glass.style = NSGlassEffectViewStyleClear;
-+    glass.cornerRadius = radius;
-+    // A plain host keeps button alignment insets from expanding the glass.
-+    NSView* host = [[NSView alloc] initWithFrame:NSZeroRect];
-+    host.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-+    [host addSubview:content];
-+    glass.contentView = host;
-+    surface = glass;
-+  } else {
-+    NSVisualEffectView* material =
-+        [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
-+    material.material = NSVisualEffectMaterialHUDWindow;
-+    material.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-+    material.state = NSVisualEffectStateActive;
-+    material.wantsLayer = YES;
-+    material.layer.cornerRadius = radius;
-+    material.layer.masksToBounds = YES;
-+    [material addSubview:content];
-+    surface = material;
-+  }
-+  content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-+  return surface;
-+}
++NSView* Capsule(NSView* content, CGFloat radius);
 +void Present(NSView* view, BOOL visible, BOOL animate) {
 +  const CGFloat target = visible ? 1 : 0;
 +  if ((!view.hidden && view.alphaValue == target) ||
@@ -492,17 +464,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +        }
 +      }];
 +}
-+void TintCapsule(NSView* surface, NSColor* accent) {
-+  if (@available(macOS 26.0, *)) {
-+    if ([surface isKindOfClass:NSGlassEffectView.class]) {
-+      ((NSGlassEffectView*)surface).tintColor = [accent colorWithAlphaComponent:.12];
-+      return;
-+    }
-+  }
-+  surface.layer.backgroundColor = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency ?
-+      [[NSColor colorWithWhite:.15 alpha:1] blendedColorWithFraction:.12 ofColor:accent].CGColor :
-+      [accent colorWithAlphaComponent:.06].CGColor;
-+}
 +void Place(NSView* surface, NSView* content, NSRect frame) {
 +  const CGFloat radius = std::min(NSWidth(frame),NSHeight(frame))/2;
 +  if (@available(macOS 26.0, *)) {
@@ -512,6 +473,80 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  surface.layer.cornerRadius = radius;
 +  surface.frame = frame;
 +  content.frame = NSMakeRect(0, 0, frame.size.width, frame.size.height);
++}
++}  // namespace
++
++// Buttons share the MRU material, while remaining ordinary native controls.
++// Cache the recipe so playback ticks and position-only moves never reapply glass.
++@class ArciumPiPCapsule;
++namespace {
++struct CapsuleObserver { __weak ArciumPiPCapsule* view; };
++}
++@interface ArciumPiPCapsule : NSView {
++  std::unique_ptr<arcium::EmbeddedSurfaceMaterial> _material;
++  helium::SurfaceStyle _style;
++  __weak NSButton* _button;
++}
++- (instancetype)initWithContent:(NSView*)content radius:(CGFloat)radius;
++- (void)applyStyle:(const helium::SurfaceStyle&)style;
++- (void)refreshMaterial;
++@end
++@implementation ArciumPiPCapsule
++- (instancetype)initWithContent:(NSView*)content radius:(CGFloat)radius {
++  self = [super initWithFrame:NSMakeRect(0, 0, radius * 2, radius * 2)];
++  if (!self) return nil;
++  self.wantsLayer = YES;
++  self.layer.cornerRadius = radius;
++  self.layer.cornerCurve = kCACornerCurveContinuous;
++  auto observer = std::make_shared<CapsuleObserver>();
++  observer->view = self;
++  _material = arcium::CreateEmbeddedSurfaceMaterial(nullptr,
++      base::BindRepeating([](const std::shared_ptr<CapsuleObserver>& observer) {
++        [observer->view refreshMaterial];
++      }, observer));
++  NSView* material = _material->native_view().GetNativeNSView();
++  material.frame = self.bounds;
++  material.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  [self addSubview:material];
++  content.frame = self.bounds;
++  content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  [self addSubview:content];
++  if ([content isKindOfClass:NSButton.class]) _button = (NSButton*)content;
++  _style = helium::ResolveSurfaceStyle(helium::SurfaceInputs());
++  [self refreshMaterial];
++  return self;
++}
++- (void)applyStyle:(const helium::SurfaceStyle&)style {
++  if (_style == style) return;
++  _style = style;
++  [self refreshMaterial];
++}
++- (void)setFrameSize:(NSSize)size {
++  const BOOL changed = !NSEqualSizes(size, self.frame.size);
++  [super setFrameSize:size];
++  if (changed && _material) [self refreshMaterial];
++}
++- (void)refreshMaterial {
++  if (!_material) return;
++  const CGFloat radius = std::min(NSWidth(self.bounds), NSHeight(self.bounds)) / 2;
++  self.layer.cornerRadius = radius;
++  auto style = _style;
++  // MRU can use a Chromium backdrop shader. A native floating button uses
++  // the shared native Liquid fallback, just like the command bar.
++  if (style.panel_material == helium::PanelMaterial::kGlassmorphic)
++    style.panel_material = helium::PanelMaterial::kLiquid;
++  const BOOL native = _material->Update(style, radius, radius);
++  const SkColor fill = helium::PanelSolidColor(style);
++  _button.contentTintColor = color_utils::IsDark(fill) ? NSColor.whiteColor : NSColor.blackColor;
++  self.layer.backgroundColor = native ? NSColor.clearColor.CGColor :
++      [NSColor colorWithSRGBRed:SkColorGetR(fill) / 255.0
++                         green:SkColorGetG(fill) / 255.0
++                          blue:SkColorGetB(fill) / 255.0 alpha:1].CGColor;
++}
++@end
++namespace {
++NSView* Capsule(NSView* content, CGFloat radius) {
++  return [[ArciumPiPCapsule alloc] initWithContent:content radius:radius];
 +}
 +}  // namespace
 +
@@ -1105,6 +1140,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@interface ArciumPiPNativeOverlay : NSView {
 + @private
 +  State _state;
++  std::optional<helium::SurfaceStyle> _surfaceStyle;
 +  std::function<void()> _beforeFocusRelease;
 +  BOOL _releasingFocus;
 +  __weak id _axParent;
@@ -1204,6 +1240,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (instancetype)initWithWindow:(NSWindow*)window
 +                      callback:(ActionCallback)callback;
 +- (void)applyState:(const State&)state;
++- (void)applySurfaceStyle:(const helium::SurfaceStyle&)style;
 +- (BOOL)hasControlsFocus;
 +- (void)focusControls:(BOOL)reverse;
 +- (void)releaseControlsFocus;
@@ -1222,6 +1259,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@end
 +
 +@implementation ArciumPiPNativeOverlay
++- (void)applySurfaceStyle:(const helium::SurfaceStyle&)style {
++  _surfaceStyle = style;
++  for (ArciumPiPCapsule* capsule in @[_returnGlass, _tuckGlass, _closeGlass,
++       _playGlass, _backGlass, _forwardGlass, _muteGlass])
++    [capsule applyStyle:style];
++}
 +- (instancetype)initWithWindow:(NSWindow*)window
 +                      callback:(ActionCallback)callback {
 +  self = [super initWithFrame:window.contentView.bounds];
@@ -1401,6 +1444,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _backGlass = Capsule(_backButton, 18);
 +  _forwardGlass = Capsule(_forwardButton, 18);
 +  _muteGlass = Capsule(_muteButton, 14);
++  if (_surfaceStyle) [self applySurfaceStyle:*_surfaceStyle];
 +  _restoreHost = [[NSView alloc] initWithFrame:NSZeroRect];
 +  [_restoreHost addSubview:_restoreButton];
 +  _controlScale = 0;
@@ -1589,8 +1633,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _slider.enabled = _state.can_seek;
 +  NSColor* accent = Accent(_state.accent);
 +  ((ArciumPiPSliderCell*)_slider.cell).accent = accent;
-+  for (NSView* surface in @[_returnGlass,_tuckGlass,_closeGlass,_playGlass,
-+      _backGlass,_forwardGlass,_muteGlass]) TintCapsule(surface,accent);
 +  _restoreButton.image =
 +      Symbol(_tucked == geo::Side::kLeft ? @"chevron.right" : @"chevron.left", 18);
 +  [self updateProgress];
@@ -2990,6 +3032,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +void NativeControls::ReleaseFocus() {
 +  [impl_->view releaseControlsFocus];
 +}
++void NativeControls::SetSurfaceStyle(const helium::SurfaceStyle& style) {
++  [impl_->view applySurfaceStyle:style];
++}
 +void NativeControls::Update(const State& state) {
 +  [impl_->view applyState:state];
 +}
@@ -3098,7 +3143,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
-@@ -1,17 +1,46 @@
+@@ -1,17 +1,48 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -3115,6 +3160,8 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +
 +#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 +#include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/ui/views/helium/surface_style.h"
++#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
 +#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
  #include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
 +#include "components/global_media_controls/public/views/media_progress_view.h"
@@ -3150,7 +3197,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +51,318 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +53,333 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -3168,6 +3215,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +                   ->GetWeakPtr();
 +    profile_observation_.Observe(profile_.get());
 +    effects_pref_registrar_.Init(profile_->GetPrefs());
++    for (const char* pref : {arcium::kCommandBarAppearancePref,
++          helium::kArciumSurfaceSetPref, helium::kArciumSurfaceTuningPref,
++          helium::kArciumChromeAppearancePref}) {
++      if (profile_->GetPrefs()->FindPreference(pref))
++        effects_pref_registrar_.Add(pref, base::BindRepeating(
++            [](base::WeakPtr<VideoOverlayWindowNativeWidgetMac> widget) {
++              if (widget) widget->RefreshNativeControls();
++            }, weak_factory_.GetWeakPtr()));
++    }
 +    for (const auto& effect : arcium::pip::kEffectPreferences) {
 +      effects_pref_registrar_.Add(effect.pref, base::BindRepeating(
 +          [](base::WeakPtr<VideoOverlayWindowNativeWidgetMac> widget) {
@@ -3385,6 +3441,12 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +      (!video->IsTrustedForMediaPlayback() && !video->meets_user_interaction_));
 +  state.title = video->origin_->GetText();
 +  state.accent = video->GetColorProvider()->GetColor(ui::kColorSysPrimary);
++  auto* contents = video->GetController()->GetWebContents();
++  auto* opener = contents ? views::Widget::GetWidgetForNativeWindow(
++                               contents->GetTopLevelNativeWindow()) : nullptr;
++  controls_->SetSurfaceStyle(helium::ResolveSurfaceStyleForWidget(
++      opener ? opener : video, profile_ ? profile_->GetPrefs() : nullptr,
++      helium::SurfaceGroup::kContainer));
 +  controls_->Update(state);
 +  return !state.blocked;
 +}
@@ -4142,7 +4204,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1340 @@
+@@ -0,0 +1,1388 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4156,6 +4218,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +#include <vector>
 +
 +#include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
++#include "chrome/browser/ui/views/helium/surface_style.h"
 +#include "testing/gtest/include/gtest/gtest.h"
 +#include "testing/gtest_mac.h"
 +#include "ui/base/hit_test.h"
@@ -4410,6 +4473,53 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  State state_;
 +  std::vector<EmittedAction> actions_;
 +};
++
++TEST_F(ArciumPiPNativeControlsTest, SharedGlassChangesPreserveControlsAndActions) {
++  NSButton* play = Button(@"Play");
++  NSView* capsule = play.superview;
++  const NSRect original = capsule.frame;
++  helium::SurfaceInputs inputs;
++  inputs.set = helium::SurfaceSet::kCustom;
++  inputs.tuning = helium::PresetSurfaceTuning(helium::SurfaceSet::kGlass);
++  inputs.tuning.panel_tint_color = SK_ColorRED;
++  controls_->SetSurfaceStyle(helium::ResolveSurfaceStyle(inputs));
++  Pump();
++  EXPECT_EQ(play, Button(@"Play"));
++  ExpectSameFrame(capsule.frame, original);
++  // Switching to the shared opaque fallback also keeps the real control.
++  inputs.set = helium::SurfaceSet::kSolid;
++  inputs.tuning = helium::PresetSurfaceTuning(inputs.set);
++  const auto solid = helium::ResolveSurfaceStyle(inputs);
++  ASSERT_FALSE(solid.panel_glass);
++  controls_->SetSurfaceStyle(solid);
++  Pump();
++  EXPECT_EQ(play, Button(@"Play"));
++  EXPECT_TRUE(IsPresented(play));
++  NSColor* fill = [NSColor colorWithCGColor:capsule.layer.backgroundColor];
++  EXPECT_NEAR(fill.alphaComponent, 1, .001);
++  [Overlay() buildChrome];
++  Update();
++  capsule = Button(@"Play").superview;
++  fill = [NSColor colorWithCGColor:capsule.layer.backgroundColor];
++  EXPECT_NEAR(fill.alphaComponent, 1, .001);
++  play = Button(@"Play");
++  const SkColor expected = helium::PanelSolidColor(solid);
++  fill = [fill colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
++  EXPECT_NEAR(fill.redComponent, SkColorGetR(expected) / 255.0, .001);
++  auto light = solid;
++  light.neutral_base = SK_ColorWHITE;
++  light.panel_tint_color = SK_ColorWHITE;
++  controls_->SetSurfaceStyle(light);
++  EXPECT_TRUE([play.contentTintColor isEqual:NSColor.blackColor]);
++  light.neutral_base = SK_ColorBLACK;
++  light.panel_tint_color = SK_ColorBLACK;
++  controls_->SetSurfaceStyle(light);
++  EXPECT_TRUE([play.contentTintColor isEqual:NSColor.whiteColor]);
++  [play performClick:nil];
++  Pump();
++  ASSERT_FALSE(actions_.empty());
++  EXPECT_EQ(actions_.back().action, Action::kPlayPause);
++}
 +
 +TEST_F(ArciumPiPNativeControlsTest,
 +       AppearanceRebuildEndsScrubAndRejectsDetachedSlider) {
