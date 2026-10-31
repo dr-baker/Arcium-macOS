@@ -351,7 +351,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2951 @@
+@@ -0,0 +1,2953 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -481,8 +481,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if ([surface isKindOfClass:NSVisualEffectView.class]) {
 +    surface.layer.backgroundColor = [tint colorWithAlphaComponent:.12].CGColor;
 +  } else {
-+    NSColor* base = NSColor.windowBackgroundColor;
-+    surface.layer.backgroundColor = (tint ? [base blendedColorWithFraction:.18 ofColor:tint] : base).CGColor;
++    [surface.effectiveAppearance performAsCurrentDrawingAppearance:^{
++      NSColor* base = NSColor.windowBackgroundColor;
++      surface.layer.backgroundColor = (tint ? [base blendedColorWithFraction:.18 ofColor:tint] : base).CGColor;
++    }];
 +  }
 +}
 +void Present(NSView* view, BOOL visible, BOOL animate) {
