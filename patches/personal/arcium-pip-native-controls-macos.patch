@@ -345,7 +345,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2621 @@
+@@ -0,0 +1,2640 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -2301,6 +2301,27 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  frame.size.width = right - frame.origin.x;
 +  frame.size.height = top - frame.origin.y;
 +  if (NSEqualRects(_pipWindow.frame,frame)) return;
++  if (animate && _state.HasVisualEffects() && !ReduceMotion() && [self ensureMotion]) {
++    // Animated placement and effects share one frame writer. Seeding effects
++    // from an in-flight AppKit frame would otherwise cancel tuck or restore.
++    NSScreen* destination = [self anchorScreen];
++    const auto area = ToRect(destination.visibleFrame);
++    NSRect desktop = NSZeroRect;
++    for (NSScreen* screen in NSScreen.screens)
++      desktop = NSIsEmptyRect(desktop) ? screen.frame : NSUnionRect(desktop, screen.frame);
++    motion->settings.margin = std::min({pip_motion::selectedSettings().margin,
++        std::max(0.0, (area.width - frame.size.width) / 2),
++        std::max(0.0, (area.height - frame.size.height) / 2)});
++    motion->environment({area.x, area.y, area.width, area.height},
++        {frame.size.width, frame.size.height}, {},
++        pip_motion::Rect{desktop.origin.x, desktop.origin.y,
++                        desktop.size.width, desktop.size.height});
++    motion->target = {frame.origin.x, frame.origin.y};
++    motion->velocity = {};
++    motion->phase = Phase::Settling;
++    [self requestMotionFrame];
++    return;
++  }
 +  _adjusting = YES;
 +  if (!animate && NSEqualSizes(_pipWindow.frame.size,frame.size))
 +    [_pipWindow setFrameOrigin:frame.origin];
@@ -2400,8 +2421,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _nativeVisible = NO;
 +  [self refreshChrome];
 +  [self placeTuckedWindowAnimated:YES];
-+  if (_state.HasEffect(Effect::kEdgeShade) && [self ensureMotion])
-+    [self requestMotionFrame];
 +}
 +- (void)placeTuckedWindowAnimated:(BOOL)animate {
 +  NSArray<NSScreen*>* screens = NSScreen.screens;
@@ -4097,7 +4116,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1239 @@
+@@ -0,0 +1,1285 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4141,9 +4160,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +// Reports visibility for state-refresh admission without ordering a native window.
 +@interface ArciumPiPTestWindow : NSWindow
 +@property BOOL testVisible;
++@property BOOL deferAnimatedFrames;
 +@end
 +@implementation ArciumPiPTestWindow
 +- (BOOL)isVisible { return self.testVisible || [super isVisible]; }
++- (void)setFrame:(NSRect)frame display:(BOOL)display animate:(BOOL)animate {
++  if (animate && self.deferAnimatedFrames) return;
++  [super setFrame:frame display:display animate:animate];
++}
 +@end
 +
 +@interface ArciumPiPTestPinchRecognizer : NSMagnificationGestureRecognizer
@@ -4866,6 +4890,47 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_EQ(restore.superview.class,NSView.class);
 +  EXPECT_NE([Overlay() valueForKey:@"shadeView"],nil);
 +  [restore performClick:nil]; Pump();
++}
++
++TEST_F(ArciumPiPNativeControlsTest, EffectsTuckAndRestoreIgnoreDeferredAppKitAnimation) {
++  const NSRect original = window_.frame;
++  NSScreen* screen = window_.screen ?: NSScreen.mainScreen;
++  ASSERT_TRUE(screen);
++  const bool left = NSMidX(original) < NSMidX(screen.frame);
++  std::vector<geometry::Screen> layout;
++  size_t preferred = 0;
++  for (NSScreen* candidate in NSScreen.screens) {
++    if (candidate == screen) preferred = layout.size();
++    const NSRect frame = candidate.frame, area = candidate.visibleFrame;
++    layout.push_back({{frame.origin.x, frame.origin.y, frame.size.width, frame.size.height},
++                      {area.origin.x, area.origin.y, area.size.width, area.size.height}});
++  }
++  const auto expected = geometry::ExteriorTuck(
++      {original.origin.x, original.origin.y, original.size.width, original.size.height},
++      layout, preferred, left ? geometry::Side::kLeft : geometry::Side::kRight);
++  ASSERT_TRUE(expected);
++  state_.effects[static_cast<size_t>(Effect::kEdgeShade)] = true;
++  Update();
++  // Live AppKit animation initially reports the old frame. Hidden windows
++  // normally jump to the final frame and would conceal competing writers.
++  window_.deferAnimatedFrames = YES;
++  [Button(@"Tuck to screen edge") performClick:nil];
++  double now = NSProcessInfo.processInfo.systemUptime;
++  for (int i = 1; i <= 120; ++i)
++    [Overlay() renderMotionAt:now + i * .05];
++  const auto frame = expected->frame;
++  const NSRect tucked = NSMakeRect(frame.x, frame.y, frame.width, frame.height);
++  ExpectSameFrame(window_.frame, tucked);
++  ExpectPresentedWithinOverlay(Button(@"Restore Picture in Picture"));
++  EXPECT_NE([Overlay() valueForKey:@"shadeView"], nil);
++  Update();
++  ExpectSameFrame(window_.frame, tucked);
++  [Button(@"Restore Picture in Picture") performClick:nil];
++  now = NSProcessInfo.processInfo.systemUptime;
++  for (int i = 1; i <= 120; ++i)
++    [Overlay() renderMotionAt:now + i * .05];
++  ExpectSameFrame(window_.frame, original);
++  window_.deferAnimatedFrames = NO;
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, AllEffectsDefaultOffWithoutCompanionWindows) {
