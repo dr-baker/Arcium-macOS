@@ -345,7 +345,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2640 @@
+@@ -0,0 +1,2645 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1211,6 +1211,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)invalidate;
 +- (void)prepareForHide;
 +- (void)placeTuckedWindowAnimated:(BOOL)animate;
++- (void)restoreAnimated:(BOOL)animate;
 +- (void)preparePlacement:(const Placement&)placement
 +                  opener:(NSWindow*)opener
 +                  aspect:(double)aspect
@@ -1469,7 +1470,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self releaseControlsFocus];
 +  }
 +  if (state.blocked && _tucked != geo::Side::kNone) {
-+    [self restore:nil];
++    [self restoreAnimated:NO];
 +  }
 +  if ((state.blocked || !state.can_seek) && _seeking) {
 +    [self endSeek];
@@ -2292,14 +2293,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (!_pipWindow) {
 +    return;
 +  }
-+  // Chromium's native window bridge reports integral point rectangles. Round
-+  // once here rather than letting a fractional inset truncate toward an edge.
-+  const double right = std::round(NSMaxX(frame));
-+  const double top = std::round(NSMaxY(frame));
-+  frame.origin.x = std::round(NSMinX(frame));
-+  frame.origin.y = std::round(NSMinY(frame));
-+  frame.size.width = right - frame.origin.x;
-+  frame.size.height = top - frame.origin.y;
 +  if (NSEqualRects(_pipWindow.frame,frame)) return;
 +  if (animate && _state.HasVisualEffects() && !ReduceMotion() && [self ensureMotion]) {
 +    // Animated placement and effects share one frame writer. Seeding effects
@@ -2322,6 +2315,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self requestMotionFrame];
 +    return;
 +  }
++  // Chromium's native window bridge reports integral point rectangles. Round
++  // once here rather than letting a fractional inset truncate toward an edge.
++  const double right = std::round(NSMaxX(frame));
++  const double top = std::round(NSMaxY(frame));
++  frame.origin.x = std::round(NSMinX(frame));
++  frame.origin.y = std::round(NSMinY(frame));
++  frame.size.width = right - frame.origin.x;
++  frame.size.height = top - frame.origin.y;
++  if (NSEqualRects(_pipWindow.frame,frame)) return;
 +  _adjusting = YES;
 +  if (!animate && NSEqualSizes(_pipWindow.frame.size,frame.size))
 +    [_pipWindow setFrameOrigin:frame.origin];
@@ -2442,6 +2444,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self setWindowFrame:ToNSRect(placement->frame) animate:animate];
 +}
 +- (void)restore:(id)sender {
++  [self restoreAnimated:YES];
++}
++- (void)restoreAnimated:(BOOL)animate {
 +  [self stopMotion];
 +  if (_state.blocked || _tucked == geo::Side::kNone) {
 +    return;
@@ -2461,7 +2466,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +        _preferredWidth > 0 ? _preferredWidth : NSWidth(_restoreFrame),
 +        _sizeLimits);
 +    if (_placementReady && !_hasPosition) frame = geo::Anchor(frame, ToRect(screen.visibleFrame), _corner);
-+    [self setWindowFrame:ToNSRect(frame) animate:YES];
++    [self setWindowFrame:ToNSRect(frame) animate:animate];
 +  }
 +  _nativeVisible = YES;
 +  [self refreshChrome];
@@ -4116,7 +4121,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1285 @@
+@@ -0,0 +1,1298 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4661,17 +4666,28 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, PermissionBlockingRestoresTuckedWindow) {
-+  NSRect original = window_.frame;
-+  [Button(@"Tuck to screen edge") performClick:nil];
-+  Pump();
-+  ASSERT_TRUE(IsPresented(Button(@"Restore Picture in Picture")));
-+  state_.blocked = true;
-+  Update();
-+  ExpectSameFrame(window_.frame, original);
-+  NSPoint point = [Overlay() convertPoint:NSMakePoint(20, 80)
-+                                   toView:Overlay().superview];
-+  EXPECT_EQ([Overlay() hitTest:point], nil);
-+  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++  const NSRect original = window_.frame;
++  for (bool effects : {false, true}) {
++    state_.blocked = false;
++    state_.effects[static_cast<size_t>(Effect::kEdgeShade)] = effects;
++    Update();
++    [Button(@"Tuck to screen edge") performClick:nil];
++    Pump();
++    if (effects) {
++      const double now = NSProcessInfo.processInfo.systemUptime;
++      for (int i = 1; i <= 120; ++i)
++        [Overlay() renderMotionAt:now + i * .05];
++    }
++    ASSERT_TRUE(IsPresented(Button(@"Restore Picture in Picture")));
++    state_.blocked = true;
++    Update();
++    ExpectSameFrame(window_.frame, original);
++    NSPoint point = [Overlay() convertPoint:NSMakePoint(20, 80)
++                                     toView:Overlay().superview];
++    EXPECT_EQ([Overlay() hitTest:point], nil);
++    EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++    EXPECT_FALSE([[Overlay() valueForKey:@"motionFramesRunning"] boolValue]);
++  }
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, HideCancelsInputFromPreviousSession) {
@@ -4913,11 +4929,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  Update();
 +  // Live AppKit animation initially reports the old frame. Hidden windows
 +  // normally jump to the final frame and would conceal competing writers.
-+  window_.deferAnimatedFrames = YES;
++  [(ArciumPiPTestWindow*)window_ setDeferAnimatedFrames:YES];
 +  [Button(@"Tuck to screen edge") performClick:nil];
 +  double now = NSProcessInfo.processInfo.systemUptime;
 +  for (int i = 1; i <= 120; ++i)
 +    [Overlay() renderMotionAt:now + i * .05];
++  EXPECT_FALSE([[Overlay() valueForKey:@"motionFramesRunning"] boolValue]);
 +  const auto frame = expected->frame;
 +  const NSRect tucked = NSMakeRect(frame.x, frame.y, frame.width, frame.height);
 +  ExpectSameFrame(window_.frame, tucked);
@@ -4930,7 +4947,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  for (int i = 1; i <= 120; ++i)
 +    [Overlay() renderMotionAt:now + i * .05];
 +  ExpectSameFrame(window_.frame, original);
-+  window_.deferAnimatedFrames = NO;
++  EXPECT_FALSE([[Overlay() valueForKey:@"motionFramesRunning"] boolValue]);
++  [(ArciumPiPTestWindow*)window_ setDeferAnimatedFrames:NO];
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, AllEffectsDefaultOffWithoutCompanionWindows) {
