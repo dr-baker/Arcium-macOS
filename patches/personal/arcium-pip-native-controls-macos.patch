@@ -201,7 +201,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,144 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -225,7 +225,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +class NSWindow;
 +#endif
 +
-+namespace helium { struct SurfaceStyle; }
 +
 +namespace arcium::pip {
 +
@@ -313,13 +312,16 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +// Actions are delivered asynchronously on the main queue and canceled on
 +// teardown. kSeek carries a normalized fraction and preserves playback state.
 +using ActionCallback = std::function<void(Action, double)>;
++// Asynchronous, downscaled video-only luminance; a negative value means unavailable.
++using BrightnessSampler = std::function<void(std::function<void(double)>)>;
 +
 +// Construct/update/destroy on the main thread, after native widget
 +// initialization. The caller attaches the returned view with NativeViewHost
 +// and detaches it before destroying the controls. Video transport is unchanged.
 +class NativeControls {
 + public:
-+  NativeControls(NSWindow* window, ActionCallback callback);
++  NativeControls(NSWindow* window, ActionCallback callback,
++                 BrightnessSampler brightness_sampler = {});
 +  ~NativeControls();
 +  NativeControls(const NativeControls&) = delete;
 +  NativeControls& operator=(const NativeControls&) = delete;
@@ -329,7 +331,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  void ReleaseFocus();
 +  void SetBeforeFocusRelease(std::function<void()> callback);
 +  void Update(const State& state);
-+  void SetSurfaceStyle(const helium::SurfaceStyle& style);
 +  void RestorePlacementForHide();
 +  void PreparePlacement(const Placement& placement,
 +                        NSWindow* opener,
@@ -349,7 +350,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2730 @@
+@@ -0,0 +1,2825 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -370,8 +371,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +#include "arcium_pip_gestures.h"
 +
 +#include "base/functional/bind.h"
-+#include "ui/gfx/color_utils.h"
-+#include "chrome/browser/ui/views/omnibox/arcium_command_bar_material.h"
 +
 +namespace {
 +using arcium::pip::Action;
@@ -477,20 +476,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +}  // namespace
 +
-+// Buttons share the MRU material, while remaining ordinary native controls.
-+// Cache the recipe so playback ticks and position-only moves never reapply glass.
-+@class ArciumPiPCapsule;
-+namespace {
-+struct CapsuleObserver { __weak ArciumPiPCapsule* view; };
-+}
-+@interface ArciumPiPCapsule : NSView {
-+  std::unique_ptr<arcium::EmbeddedSurfaceMaterial> _material;
-+  helium::SurfaceStyle _style;
-+  __weak NSButton* _button;
-+}
++// PiP prioritizes the video: clear material and a stable white foreground.
++@interface ArciumPiPCapsule : NSView
 +- (instancetype)initWithContent:(NSView*)content radius:(CGFloat)radius;
-+- (void)applyStyle:(const helium::SurfaceStyle&)style;
-+- (void)refreshMaterial;
 +@end
 +@implementation ArciumPiPCapsule
 +- (instancetype)initWithContent:(NSView*)content radius:(CGFloat)radius {
@@ -499,50 +487,38 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  self.wantsLayer = YES;
 +  self.layer.cornerRadius = radius;
 +  self.layer.cornerCurve = kCACornerCurveContinuous;
-+  auto observer = std::make_shared<CapsuleObserver>();
-+  observer->view = self;
-+  _material = arcium::CreateEmbeddedSurfaceMaterial(nullptr,
-+      base::BindRepeating([](const std::shared_ptr<CapsuleObserver>& observer) {
-+        [observer->view refreshMaterial];
-+      }, observer));
-+  NSView* material = _material->native_view().GetNativeNSView();
-+  material.frame = self.bounds;
-+  material.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-+  [self addSubview:material];
 +  content.frame = self.bounds;
 +  content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  if ([content isKindOfClass:NSButton.class])
++    ((NSButton*)content).contentTintColor = NSColor.whiteColor;
++  if (@available(macOS 26.0, *)) {
++    if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency &&
++        !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast) {
++      NSGlassEffectView* glass = [[NSGlassEffectView alloc] initWithFrame:self.bounds];
++      glass.style = NSGlassEffectViewStyleClear;
++      glass.cornerRadius = radius;
++      glass.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++      glass.contentView = content;
++      [self addSubview:glass];
++      return self;
++    }
++  }
++  // Opaque accessibility fallback; older systems retain a quiet dark backing.
++  const BOOL opaque = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency ||
++      NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast;
++  self.layer.backgroundColor = gray(.12, opaque ? 1 : .35);
 +  [self addSubview:content];
-+  if ([content isKindOfClass:NSButton.class]) _button = (NSButton*)content;
-+  _style = helium::ResolveSurfaceStyle(helium::SurfaceInputs());
-+  [self refreshMaterial];
 +  return self;
 +}
-+- (void)applyStyle:(const helium::SurfaceStyle&)style {
-+  if (_style == style) return;
-+  _style = style;
-+  [self refreshMaterial];
-+}
 +- (void)setFrameSize:(NSSize)size {
-+  const BOOL changed = !NSEqualSizes(size, self.frame.size);
 +  [super setFrameSize:size];
-+  if (changed && _material) [self refreshMaterial];
-+}
-+- (void)refreshMaterial {
-+  if (!_material) return;
-+  const CGFloat radius = std::min(NSWidth(self.bounds), NSHeight(self.bounds)) / 2;
++  const CGFloat radius = std::min(size.width, size.height) / 2;
 +  self.layer.cornerRadius = radius;
-+  auto style = _style;
-+  // MRU can use a Chromium backdrop shader. A native floating button uses
-+  // the shared native Liquid fallback, just like the command bar.
-+  if (style.panel_material == helium::PanelMaterial::kGlassmorphic)
-+    style.panel_material = helium::PanelMaterial::kLiquid;
-+  const BOOL native = _material->Update(style, radius, radius);
-+  const SkColor fill = helium::PanelSolidColor(style);
-+  _button.contentTintColor = color_utils::IsDark(fill) ? NSColor.whiteColor : NSColor.blackColor;
-+  self.layer.backgroundColor = native ? NSColor.clearColor.CGColor :
-+      [NSColor colorWithSRGBRed:SkColorGetR(fill) / 255.0
-+                         green:SkColorGetG(fill) / 255.0
-+                          blue:SkColorGetB(fill) / 255.0 alpha:1].CGColor;
++  if (@available(macOS 26.0, *)) {
++    NSView* glass = self.subviews.firstObject;
++    if ([glass isKindOfClass:NSGlassEffectView.class])
++      ((NSGlassEffectView*)glass).cornerRadius = radius;
++  }
 +}
 +@end
 +namespace {
@@ -1141,10 +1117,18 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@interface ArciumPiPNativeOverlay : NSView {
 + @private
 +  State _state;
-+  std::optional<helium::SurfaceStyle> _surfaceStyle;
++  arcium::pip::BrightnessSampler _brightnessSampler;
++  NSTimer* _brightnessTimer;
++  NSView* _contrastBacking;
++  BOOL _brightnessPending;
++  BOOL _liveResizing;
++  NSUInteger _brightnessGeneration;
++  double _videoBrightness;
++  double _lastBrightnessRequest;
 +  std::optional<NSRect> _pendingResizeFrame;
 +  std::function<void()> _beforeFocusRelease;
 +  BOOL _releasingFocus;
++  BOOL _keyboardControlsFocus;
 +  __weak id _axParent;
 +  std::shared_ptr<Delivery> _delivery;
 +  __weak NSWindow* _pipWindow;
@@ -1240,10 +1224,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +
 +}
 +- (instancetype)initWithWindow:(NSWindow*)window
-+                      callback:(ActionCallback)callback;
++                      callback:(ActionCallback)callback
++             brightnessSampler:(arcium::pip::BrightnessSampler)sampler;
 +- (void)applyState:(const State&)state;
-+- (void)applySurfaceStyle:(const helium::SurfaceStyle&)style;
++- (BOOL)chromeSuppressed;
++- (void)sampleBrightness;
 +- (BOOL)hasControlsFocus;
++- (BOOL)keepsKeyboardControlsVisible;
++- (void)pointerInteraction;
 +- (void)focusControls:(BOOL)reverse;
 +- (void)releaseControlsFocus;
 +- (void)setBeforeFocusRelease:(std::function<void()>)callback;
@@ -1261,19 +1249,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@end
 +
 +@implementation ArciumPiPNativeOverlay
-+- (void)applySurfaceStyle:(const helium::SurfaceStyle&)style {
-+  _surfaceStyle = style;
-+  for (ArciumPiPCapsule* capsule in @[_returnGlass, _tuckGlass, _closeGlass,
-+       _playGlass, _backGlass, _forwardGlass, _muteGlass])
-+    [capsule applyStyle:style];
-+}
 +- (instancetype)initWithWindow:(NSWindow*)window
-+                      callback:(ActionCallback)callback {
++                      callback:(ActionCallback)callback
++             brightnessSampler:(arcium::pip::BrightnessSampler)sampler {
 +  self = [super initWithFrame:window.contentView.bounds];
 +  if (!self) {
 +    return nil;
 +  }
 +  _pipWindow = window;
++  _brightnessSampler = std::move(sampler);
++  _videoBrightness = -1;
++  _lastBrightnessRequest = -1;
 +  _originalShadow = window.hasShadow;
 +  [self configureEffects];
 +  slowSince = -1;
@@ -1340,9 +1326,23 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _pinchRecognizer.delaysMagnificationEvents = YES;
 +  [self addGestureRecognizer:_pinchRecognizer];
 +  _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
-+      NSEventMaskScrollWheel | NSEventMaskMagnify handler:^NSEvent*(NSEvent* event) {
++      NSEventMaskScrollWheel | NSEventMaskMagnify | NSEventMaskLeftMouseDown |
++      NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown | NSEventMaskKeyDown handler:^NSEvent*(NSEvent* event) {
 +    ArciumPiPNativeOverlay* overlay = weakSelf;
 +    if (!overlay || ![overlay acceptsGestureInput]) return event;
++    if (event.type == NSEventTypeLeftMouseDown || event.type == NSEventTypeRightMouseDown ||
++        event.type == NSEventTypeOtherMouseDown) {
++      if (event.window == overlay->_pipWindow) [overlay pointerInteraction];
++      else if (overlay->_keyboardControlsFocus) [overlay releaseControlsFocus];
++      return event;
++    }
++    if (event.type == NSEventTypeKeyDown) {
++      if (event.window == overlay->_pipWindow && [overlay hasControlsFocus]) {
++        overlay->_keyboardControlsFocus = YES;
++        [overlay armHideTimer];
++      }
++      return event;
++    }
 +    // The card recognizer owns card magnification; the monitor covers events
 +    // addressed to another window while the pointer remains over the card.
 +    if (event.type == NSEventTypeMagnify) {
@@ -1385,13 +1385,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)buildChrome {
-+  BOOL restoreFocus = [self hasControlsFocus];
++  BOOL restoreFocus = [self keepsKeyboardControlsVisible];
 +  [self releaseControlsFocus];
 +  [self endSeek];
 +  _slider.beginDrag = nil;
 +  _slider.endDrag = nil;
 +  _resizeView.resizeEvent = nil;
 +  _resizing = NO;
++  [_contrastBacking removeFromSuperview];
 +  [_glassContainer removeFromSuperview];
 +  [_slider removeFromSuperview];
 +  [_title removeFromSuperview];
@@ -1405,6 +1406,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _glassContainer = [[NSView alloc] initWithFrame:self.bounds];
 +  [_glassContainer addSubview:_glassContent];
 +  _glassContainer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  _contrastBacking = [[NSView alloc] initWithFrame:self.bounds];
++  _contrastBacking.wantsLayer = YES;
++  _contrastBacking.layer.backgroundColor = NSColor.blackColor.CGColor;
++  _contrastBacking.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
++  _contrastBacking.alphaValue = 0;
++  [self addSubview:_contrastBacking];
 +  [self addSubview:_glassContainer];
 +  _returnButton = [self button:@"pip.exit"
 +                         label:@"Return to tab"
@@ -1441,7 +1448,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _backGlass = Capsule(_backButton, 18);
 +  _forwardGlass = Capsule(_forwardButton, 18);
 +  _muteGlass = Capsule(_muteButton, 14);
-+  if (_surfaceStyle) [self applySurfaceStyle:*_surfaceStyle];
 +  _restoreHost = [[NSView alloc] initWithFrame:NSZeroRect];
 +  [_restoreHost addSubview:_restoreButton];
 +  _controlScale = 0;
@@ -1545,13 +1551,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self reanchor:_aspect limits:_sizeLimits];
 +  }
 +  [self refreshChrome];
-+  if ([self hasControlsFocus]) {
++  if ([self hasControlsFocus] && ![self chromeSuppressed]) {
 +    [self layoutSubtreeIfNeeded];
 +    NSView* focused = (NSView*)_pipWindow.firstResponder;
 +    if (focused.hiddenOrHasHiddenAncestor ||
 +        ([focused isKindOfClass:NSControl.class] &&
 +         !((NSControl*)focused).enabled)) {
-+      [self focusControls:NO];
++      if ([self keepsKeyboardControlsVisible]) [self focusControls:NO];
++      else [self releaseControlsFocus];
 +    }
 +  }
 +  const bool needs_presentation = !motion && _state.HasVisualEffects() &&
@@ -1594,32 +1601,79 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      [NSString stringWithFormat:@"%@ of %@", TimeLabel(position),
 +                                 TimeLabel(_state.duration)];
 +}
++- (BOOL)chromeSuppressed {
++  return _dragging || _scrolling || _magnifying || _resizing || _liveResizing ||
++      _pipWindow.inLiveResize || _returning ||
++      (motion && motion->phase == Phase::Settling);
++}
++- (void)sampleBrightness {
++  if (_invalidated || _brightnessPending || !_brightnessSampler ||
++      [self chromeSuppressed] || !_nativeVisible || _state.blocked ||
++      _tucked != geo::Side::kNone || !_pipWindow.visible) return;
++  const double now = NSProcessInfo.processInfo.systemUptime;
++  if (_lastBrightnessRequest >= 0 && now - _lastBrightnessRequest < 1) return;
++  _lastBrightnessRequest = now;
++  _brightnessPending = YES;
++  const NSUInteger generation = _brightnessGeneration;
++  __weak ArciumPiPNativeOverlay* weakSelf = self;
++  _brightnessSampler([weakSelf, generation](double brightness) {
++    ArciumPiPNativeOverlay* view = weakSelf;
++    if (!view || view->_invalidated) return;
++    view->_brightnessPending = NO;
++    if (generation != view->_brightnessGeneration || [view chromeSuppressed]) return;
++    view->_videoBrightness = std::isfinite(brightness) ? brightness : -1;
++    [view refreshChrome];
++  });
++}
 +- (void)refreshChrome {
 +  if (_invalidated) {
 +    return;
 +  }
-+  const BOOL visible =
-+      _nativeVisible && !_state.blocked && _tucked == geo::Side::kNone;
-+  _glassContainer.hidden = _state.blocked;
-+  const BOOL animate = !_state.blocked && _tucked == geo::Side::kNone;
++  const BOOL suppressed = [self chromeSuppressed];
++  const BOOL visible = _nativeVisible && !_state.blocked && !suppressed &&
++      _tucked == geo::Side::kNone;
++  // GPU-downscaled video samples only while stationary chrome is visible.
++  if (!visible) {
++    if (_brightnessTimer) ++_brightnessGeneration;
++    [_brightnessTimer invalidate]; _brightnessTimer = nil;
++  } else if (_brightnessSampler && !_brightnessTimer) {
++    __weak ArciumPiPNativeOverlay* weakSelf = self;
++    _brightnessTimer = [NSTimer timerWithTimeInterval:1 repeats:YES block:^(NSTimer*) {
++      [weakSelf sampleBrightness];
++    }];
++    _brightnessTimer.tolerance = .2;
++    [NSRunLoop.mainRunLoop addTimer:_brightnessTimer forMode:NSRunLoopCommonModes];
++    [self sampleBrightness];
++  }
++  // No dimming over dark footage; gently reach 35% over very bright footage.
++  const double shade = _videoBrightness < 0 ? .15 :
++      .35 * smoothstep((_videoBrightness - .60) / .25);
++  _contrastBacking.hidden = !visible;
++  if (suppressed || ReduceMotion()) _contrastBacking.alphaValue = visible ? shade : 0;
++  else [NSAnimationContext runAnimationGroup:^(NSAnimationContext* context) {
++    context.duration = .25;
++    _contrastBacking.animator.alphaValue = visible ? shade : 0;
++  } completionHandler:nil];
++  _glassContainer.hidden = _state.blocked || suppressed;
++  const BOOL animate = !suppressed && !_state.blocked && _tucked == geo::Side::kNone;
 +  for (NSView* view in @[ _returnGlass, _tuckGlass, _closeGlass ]) {
 +    Present(view, visible, animate);
 +  }
-+  _restoreHost.hidden = _state.blocked || _tucked == geo::Side::kNone;
++  _restoreHost.hidden = suppressed || _state.blocked || _tucked == geo::Side::kNone;
 +  Present(_slider, visible && _state.can_seek, animate);
 +  Present(_timestamp, visible && _state.can_seek, animate);
 +  Present(_title,
-+          !_state.blocked && _tucked == geo::Side::kNone &&
++          !suppressed && !_state.blocked && _tucked == geo::Side::kNone &&
 +              (visible || _state.show_title) && !_state.title.empty(),
 +          animate);
 +  Present(_resizeView, visible, animate);
 +  Present(_playGlass, visible && _state.can_play, animate);
 +  Present(_muteGlass, visible && _state.can_mute, animate);
-+  _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill", 20 * std::max(.8,_controlScale));
++  if (visible) _playButton.image = Symbol(_state.playing ? @"pause.fill" : @"play.fill", 20 * std::max(.8,_controlScale));
 +  _playButton.accessibilityLabel = _state.playing ? @"Pause" : @"Play";
 +  _playButton.cell.accessibilityLabel = _playButton.accessibilityLabel;
 +  _playButton.toolTip = _playButton.accessibilityLabel;
-+  _muteButton.image =
++  if (visible) _muteButton.image =
 +      Symbol(_state.muted ? @"speaker.slash.fill" : @"speaker.wave.2.fill", 13 * std::max(.8,_controlScale));
 +  _muteButton.accessibilityLabel = _state.muted ? @"Unmute" : @"Mute";
 +  _muteButton.cell.accessibilityLabel = _muteButton.accessibilityLabel;
@@ -1630,9 +1684,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _slider.enabled = _state.can_seek;
 +  NSColor* accent = Accent(_state.accent);
 +  ((ArciumPiPSliderCell*)_slider.cell).accent = accent;
-+  _restoreButton.image =
++  if (!suppressed) _restoreButton.image =
 +      Symbol(_tucked == geo::Side::kLeft ? @"chevron.right" : @"chevron.left", 18);
-+  [self updateProgress];
++  if (visible) [self updateProgress];
 +  BOOL tick = visible && _state.playing && _state.can_seek && !_seeking &&
 +              self.window.visible;
 +  if (!tick) {
@@ -1661,6 +1715,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +
 +- (void)layout {
 +  [super layout];
++  if ([self chromeSuppressed]) return;
 +  const CGFloat w = NSWidth(self.bounds), h = NSHeight(self.bounds);
 +  _glassContainer.frame = self.bounds;
 +  _glassContent.frame = self.bounds;
@@ -1686,9 +1741,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  Place(_backGlass,_backButton,NSMakeRect(w*.5-80*scale,centerY-18*scale,36*scale,36*scale));
 +  Place(_forwardGlass,_forwardButton,NSMakeRect(w*.5+44*scale,centerY-18*scale,36*scale,36*scale));
 +  const BOOL seekButtons = w >= 320 && h >= 180 && _state.can_seek &&
-+      _nativeVisible && !_state.blocked && _tucked == geo::Side::kNone;
-+  Present(_backGlass,seekButtons,!_state.blocked && _tucked == geo::Side::kNone);
-+  Present(_forwardGlass,seekButtons,!_state.blocked && _tucked == geo::Side::kNone);
++      ![self chromeSuppressed] && _nativeVisible && !_state.blocked && _tucked == geo::Side::kNone;
++  Present(_backGlass,seekButtons,![self chromeSuppressed] && !_state.blocked && _tucked == geo::Side::kNone);
++  Present(_forwardGlass,seekButtons,![self chromeSuppressed] && !_state.blocked && _tucked == geo::Side::kNone);
 +  Place(_muteGlass,_muteButton,NSMakeRect(pad,pad,28*scale,28*scale));
 +  _slider.frame = NSMakeRect(16*scale,40*scale,std::max(0.0,w-32*scale),24*scale);
 +  _timestamp.frame = NSMakeRect(48*scale,13*scale,std::max(0.0,w-96*scale),14*scale);
@@ -1743,7 +1798,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)armHideTimer {
 +  [_hideTimer invalidate];
-+  if (_seeking || [self hasControlsFocus] || _state.blocked ||
++  if (!_nativeVisible || _seeking || [self keepsKeyboardControlsVisible] || _state.blocked ||
 +      _tucked != geo::Side::kNone) {
 +    return;
 +  }
@@ -1755,10 +1810,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                 ArciumPiPNativeOverlay* overlay = weakSelf;
 +                                 if (!overlay || overlay->_invalidated ||
 +                                     overlay->_seeking ||
-+                                     [overlay hasControlsFocus]) {
++                                     [overlay keepsKeyboardControlsVisible]) {
 +                                   return;
 +                                 }
 +                                 overlay->_nativeVisible = NO;
++                                 [overlay releaseControlsFocus];
 +                                 [overlay refreshChrome];
 +                               }];
 +}
@@ -1790,7 +1846,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self armHideTimer];
 +}
 +- (void)restoreGestureFocus {
-+  if (_pipWindow.keyWindow && ![self hasControlsFocus]) {
++  if (_pipWindow.keyWindow && ![self keepsKeyboardControlsVisible]) {
 +    if (_previousKeyWindow.visible) [_previousKeyWindow makeKeyWindow];
 +    else [_pipWindow resignKeyWindow];
 +  }
@@ -1799,7 +1855,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)mouseExited:(NSEvent*)event {
 +  if (!_dragging && !_magnifying) [self restoreGestureFocus];
 +  _mouseInside = NO;
-+  if (!_seeking && !_dragging && ![self hasControlsFocus]) {
++  if (!_seeking && !_dragging && ![self keepsKeyboardControlsVisible]) {
++    [self releaseControlsFocus];
 +    _nativeVisible = NO;
 +    [self refreshChrome];
 +  }
@@ -1853,6 +1910,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  return YES;
 +}
 +- (void)mouseDown:(NSEvent*)event {
++  [self pointerInteraction];
 +  if (_invalidated || _state.blocked || !_pipWindow) return;
 +  [self deliver:Action::kInteraction value:0];
 +  _consumeMomentum = NO; _pendingPan = NO;
@@ -1929,7 +1987,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  releaseDistance = length(motion->target - motion->position);
 +  awaitingLanding = YES;
-+  _nativeVisible = _tucked == geo::Side::kNone;
++  _nativeVisible = _tucked == geo::Side::kNone &&
++      (_mouseInside || [self keepsKeyboardControlsVisible]);
 +  [self refreshChrome];
 +  [self startMotionTimer];
 +  [self armHideTimer];
@@ -2090,6 +2149,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _motionRenderTime = 0;
 +  if (done && !_motionFrameDirty && motion->phase != Phase::Dragging && motion->phase != Phase::Settling) {
 +    [self pauseMotionFrames];
++    [self refreshChrome];
 +    if (_tucked == geo::Side::kNone) [self rememberPlacement];
 +  }
 +}
@@ -2550,7 +2610,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self setNeedsLayout:YES];
 +  if ([note.name isEqual:NSWindowWillStartLiveResizeNotification]) {
 +    [self stopMotion];
++    _liveResizing = YES;
++    [self refreshChrome];
 +    return;
++  }
++  if ([note.name isEqual:NSWindowDidEndLiveResizeNotification]) {
++    _liveResizing = NO;
++    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
++    [self refreshChrome];
 +  }
 +  if ([note.name isEqual:NSWindowDidEndLiveResizeNotification] &&
 +      !_adjusting && !_dragging && !_scrolling && !_resizing && !_magnifying &&
@@ -2671,7 +2738,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    if (cancelled) {
 +      motion->position = {_gestureStartFrame.origin.x,_gestureStartFrame.origin.y};
 +      motion->resize({_gestureStartFrame.size.width,_gestureStartFrame.size.height});
-+      [self stopMotion]; _nativeVisible = YES;
++      [self stopMotion]; _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
 +      [self refreshChrome]; [self armHideTimer];
 +      if (!_mouseInside) [self restoreGestureFocus];
 +      return YES;
@@ -2692,6 +2759,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    _magnifyStartFrame = _pipWindow.frame;
 +    _magnifyPreferredWidth = _preferredWidth;
 +    gestures->beginPinch(); _magnifying = YES;
++    [self refreshChrome];
 +    [self deliver:Action::kInteraction value:0];
 +  }
 +  if (!cancelled) gestures->magnify(delta);
@@ -2720,6 +2788,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (ended || cancelled) {
 +    if (![self updateMotionVisuals]) [self startMotionTimer];
 +    if (!cancelled) [self rememberPlacement];
++    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
++    [self refreshChrome];
 +    [self armHideTimer];
 +    if (!_mouseInside) [self restoreGestureFocus];
 +  }
@@ -2750,6 +2820,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (phase == 0) {
 +    [self stopMotion];
 +    _resizing = YES;
++    [self refreshChrome];
 +    _resizeStartFrame = _pipWindow.frame;
 +    _resizeStartMouse = event.window ? [self screenPoint:event] : NSEvent.mouseLocation;
 +  } else if (phase == 1 && _resizing) {
@@ -2768,6 +2839,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self flushResizeFrame];
 +    [self pauseMotionFrames];
 +    _resizing = NO;
++    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
++    [self refreshChrome];
++    [self armHideTimer];
 +    _preferredWidth = NSWidth(_pipWindow.frame);
 +    if (_state.HasVisualEffects() && [self ensureMotion] && ![self updateMotionVisuals])
 +      [self startMotionTimer];
@@ -2794,6 +2868,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return;
 +  }
 +  _seeking = NO;
++  _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
 +  [self refreshChrome];
 +  [self armHideTimer];
 +}
@@ -2838,6 +2913,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self deliver:Action::kReturn value:0]; return;
 +  }
 +  _returning = YES; _returnFrame = _pipWindow.frame;
++  [self refreshChrome];
 +  _returnStart = NSProcessInfo.processInfo.systemUptime;
 +  const uint64_t generation = _sessionGeneration;
 +  __weak ArciumPiPNativeOverlay* weakSelf = self;
@@ -2883,9 +2959,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _axParent = parent;
 +}
 +
++- (BOOL)keepsKeyboardControlsVisible {
++  return _keyboardControlsFocus && [self hasControlsFocus];
++}
++- (void)pointerInteraction {
++  _keyboardControlsFocus = NO;
++  [self releaseControlsFocus];
++  [self armHideTimer];
++}
 +- (BOOL)hasControlsFocus {
 +  NSResponder* responder = _pipWindow.firstResponder;
-+  return [responder isKindOfClass:NSView.class] &&
++  return responder != self && [responder isKindOfClass:NSView.class] &&
 +         [(NSView*)responder isDescendantOf:self];
 +}
 +- (NSArray<NSView*>*)focusableControls {
@@ -2910,6 +2994,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (_invalidated || _state.blocked || _releasingFocus) {
 +    return;
 +  }
++  NSEvent* event = NSApp.currentEvent;
++  _keyboardControlsFocus = !event || (event.type != NSEventTypeLeftMouseDown &&
++      event.type != NSEventTypeRightMouseDown && event.type != NSEventTypeOtherMouseDown &&
++      event.type != NSEventTypeLeftMouseUp && event.type != NSEventTypeRightMouseUp &&
++      event.type != NSEventTypeOtherMouseUp && event.type != NSEventTypeLeftMouseDragged &&
++      event.type != NSEventTypeRightMouseDragged && event.type != NSEventTypeOtherMouseDragged &&
++      event.type != NSEventTypeScrollWheel && event.type != NSEventTypeMagnify);
 +  _nativeVisible = YES;
 +  [self refreshChrome];
 +  [self layoutSubtreeIfNeeded];
@@ -2918,13 +3009,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [_pipWindow makeFirstResponder:reverse ? controls.lastObject
 +                                           : controls.firstObject];
 +  }
-+  [_hideTimer invalidate];
-+  _hideTimer = nil;
++  [self armHideTimer];
 +}
 +- (void)setBeforeFocusRelease:(std::function<void()>)callback {
 +  _beforeFocusRelease = std::move(callback);
 +}
 +- (void)releaseControlsFocus {
++  _keyboardControlsFocus = NO;
 +  if (_releasingFocus || ![self hasControlsFocus])
 +    return;
 +  __attribute__((objc_precise_lifetime)) ArciumPiPNativeOverlay* keepAlive =
@@ -2969,9 +3060,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _hasSnapshot = NO;
 +  _placementReady = NO;
 +  _mouseInside = NO;
-+  _dragging = _resizing = _scrolling = _seeking = _magnifying = NO;
++  _dragging = _resizing = _scrolling = _seeking = _magnifying = _liveResizing = NO;
++  _videoBrightness = -1;
 +  _consumeMomentum = NO;
 +  _pendingPan = NO;
++  [_brightnessTimer invalidate]; _brightnessTimer = nil;
++  ++_brightnessGeneration;
 +  [_hideTimer invalidate];
 +  _hideTimer = nil;
 +  [_progressTimer invalidate];
@@ -3004,6 +3098,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _delivery.reset();
 +  [_progressTimer invalidate];
 +  _progressTimer = nil;
++  [_brightnessTimer invalidate]; _brightnessTimer = nil;
++  ++_brightnessGeneration;
 +  [_hideTimer invalidate];
 +  _hideTimer = nil;
 +  if (_eventMonitor) {
@@ -3026,13 +3122,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +struct NativeControls::Impl {
 +  __strong ArciumPiPNativeOverlay* view;
 +};
-+NativeControls::NativeControls(NSWindow* window, ActionCallback callback)
++NativeControls::NativeControls(NSWindow* window, ActionCallback callback,
++                               BrightnessSampler brightness_sampler)
 +    : impl_(std::make_unique<Impl>()) {
 +  NSCAssert(NSThread.isMainThread,
 +            @"PiP controls must be created on the main thread");
 +  impl_->view =
 +      [[ArciumPiPNativeOverlay alloc] initWithWindow:window
-+                                            callback:std::move(callback)];
++                                            callback:std::move(callback)
++                                   brightnessSampler:std::move(brightness_sampler)];
 +}
 +NativeControls::~NativeControls() {
 +  NSCAssert(NSThread.isMainThread,
@@ -3055,9 +3153,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +void NativeControls::ReleaseFocus() {
 +  [impl_->view releaseControlsFocus];
 +}
-+void NativeControls::SetSurfaceStyle(const helium::SurfaceStyle& style) {
-+  [impl_->view applySurfaceStyle:style];
-+}
++
 +void NativeControls::Update(const State& state) {
 +  [impl_->view applyState:state];
 +}
@@ -3166,7 +3262,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.mm
-@@ -1,17 +1,48 @@
+@@ -1,17 +1,46 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -3183,8 +3279,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +
 +#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 +#include "chrome/browser/profiles/profile.h"
-+#include "chrome/browser/ui/views/helium/surface_style.h"
-+#include "chrome/browser/ui/helium/arcium_appearance_prefs.h"
 +#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
  #include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
 +#include "components/global_media_controls/public/views/media_progress_view.h"
@@ -3220,7 +3314,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +53,333 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +51,324 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -3238,15 +3332,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +                   ->GetWeakPtr();
 +    profile_observation_.Observe(profile_.get());
 +    effects_pref_registrar_.Init(profile_->GetPrefs());
-+    for (const char* pref : {arcium::kCommandBarAppearancePref,
-+          helium::kArciumSurfaceSetPref, helium::kArciumSurfaceTuningPref,
-+          helium::kArciumChromeAppearancePref}) {
-+      if (profile_->GetPrefs()->FindPreference(pref))
-+        effects_pref_registrar_.Add(pref, base::BindRepeating(
-+            [](base::WeakPtr<VideoOverlayWindowNativeWidgetMac> widget) {
-+              if (widget) widget->RefreshNativeControls();
-+            }, weak_factory_.GetWeakPtr()));
-+    }
 +    for (const auto& effect : arcium::pip::kEffectPreferences) {
 +      effects_pref_registrar_.Add(effect.pref, base::BindRepeating(
 +          [](base::WeakPtr<VideoOverlayWindowNativeWidgetMac> widget) {
@@ -3260,6 +3345,12 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +        if (weak) {
 +          weak->OnNativeAction(action, value);
 +        }
++      }, [video = video_](std::function<void(double)> callback) {
++        if (video) video->SampleNativeControlsBrightness(base::BindOnce(
++            [](std::function<void(double)> completion, double brightness) {
++              completion(brightness);
++            }, std::move(callback)));
++        else callback(-1);
 +      });
 +  controls_->SetBeforeFocusRelease([weak = weak_factory_.GetWeakPtr()] {
 +    if (weak)
@@ -3464,12 +3555,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +      (!video->IsTrustedForMediaPlayback() && !video->meets_user_interaction_));
 +  state.title = video->origin_->GetText();
 +  state.accent = video->GetColorProvider()->GetColor(ui::kColorSysPrimary);
-+  auto* contents = video->GetController()->GetWebContents();
-+  auto* opener = contents ? views::Widget::GetWidgetForNativeWindow(
-+                               contents->GetTopLevelNativeWindow()) : nullptr;
-+  controls_->SetSurfaceStyle(helium::ResolveSurfaceStyleForWidget(
-+      opener ? opener : video, profile_ ? profile_->GetPrefs() : nullptr,
-+      helium::SurfaceGroup::kContainer));
 +  controls_->Update(state);
 +  return !state.blocked;
 +}
@@ -3574,7 +3659,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "base/memory/ptr_util.h"
  #include "base/memory/raw_ptr.h"
  #include "base/notreached.h"
-@@ -65,6 +67,9 @@
+@@ -65,12 +67,18 @@
  #include "services/media_session/public/cpp/media_image_manager.h"
  #include "third_party/blink/public/mojom/picture_in_picture/picture_in_picture.mojom.h"
  #include "ui/base/hit_test.h"
@@ -3584,7 +3669,16 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "ui/base/l10n/l10n_util.h"
  #include "ui/base/metadata/metadata_header_macros.h"
  #include "ui/base/metadata/metadata_impl_macros.h"
-@@ -215,6 +220,28 @@ class GradientBackground : public views:
+ #include "ui/base/mojom/ui_base_types.mojom-shared.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/compositor/compositor.h"
++#include "base/task/single_thread_task_runner.h"
++#include "components/viz/common/frame_sinks/copy_output_request.h"
++#include "components/viz/common/frame_sinks/copy_output_result.h"
+ #include "ui/compositor/layer_surface.h"
+ #include "ui/display/display.h"
+ #include "ui/display/screen.h"
+@@ -215,6 +223,28 @@ class GradientBackground : public views:
  }  // namespace
  
  // OverlayWindow implementation of FrameView.
@@ -3613,7 +3707,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  class OverlayWindowFrameView : public views::FrameView {
    METADATA_HEADER(OverlayWindowFrameView, views::FrameView)
  
-@@ -238,6 +265,10 @@ class OverlayWindowFrameView : public vi
+@@ -238,6 +268,10 @@ class OverlayWindowFrameView : public vi
        return HTNOWHERE;
      }
  
@@ -3624,7 +3718,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
      constexpr int kResizeAreaCornerSize = 16;
      int window_component = GetHTComponentForFrame(
          point, gfx::Insets(kOverlayBorderThickness), kResizeAreaCornerSize,
-@@ -392,8 +423,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+@@ -392,8 +426,9 @@ std::unique_ptr<VideoOverlayWindowViews>
    // On Mac, we override the default native widget with our own subclass, which
    // allows us to get the default window styling (e.g. corner radius) even
    // though we're using `views::Widget::InitParams::remove_standard_frame`.
@@ -3635,7 +3729,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #endif  // BUILDFLAG(IS_MAC)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -484,6 +516,9 @@ VideoOverlayWindowViews::VideoOverlayWin
+@@ -484,6 +519,9 @@ VideoOverlayWindowViews::VideoOverlayWin
  }
  
  VideoOverlayWindowViews::~VideoOverlayWindowViews() {
@@ -3645,7 +3739,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (overlay_view_) {
      overlay_view_->RemoveObserver(this);
    }
-@@ -574,6 +609,9 @@ void VideoOverlayWindowViews::OnNativeFo
+@@ -574,6 +612,9 @@ void VideoOverlayWindowViews::OnNativeFo
  }
  
  void VideoOverlayWindowViews::OnNativeBlur() {
@@ -3655,7 +3749,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Controls should be hidden when there is no more focus on the window. This
    // is used for tabbing and touch interactions. For mouse interactions, the
    // window cannot be blurred before the ui::EventType::kMouseExited event is
-@@ -628,6 +666,10 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -628,6 +669,10 @@ void VideoOverlayWindowViews::OnNativeWi
  
  void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
      const gfx::Size& new_size) {
@@ -3666,7 +3760,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Hide the controls when the window is being resized. The controls will
    // reappear when the user interacts with the window again.
    UpdateControlsVisibility(false);
-@@ -639,6 +681,15 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -639,6 +684,15 @@ void VideoOverlayWindowViews::OnNativeWi
  }
  
  void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
@@ -3682,7 +3776,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Every time a user uses a keyboard to interact on the window, restart the
    // timer to automatically hide the controls.
    hide_controls_timer_.Reset();
-@@ -670,11 +721,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+@@ -670,11 +724,11 @@ void VideoOverlayWindowViews::OnKeyEvent
        TogglePlayPause();
        event->SetHandled();
      } else if (event->key_code() == ui::VKEY_LEFT &&
@@ -3696,7 +3790,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
        Forward15Seconds();
        event->SetHandled();
      }
-@@ -802,6 +853,11 @@ void VideoOverlayWindowViews::FireEnable
+@@ -802,6 +856,11 @@ void VideoOverlayWindowViews::FireEnable
  }
  
  bool VideoOverlayWindowViews::AreControlsVisible() const {
@@ -3708,7 +3802,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If we're animating to a visibility state, then we'll act as if we're in
    // that state.
    if (fade_animation_) {
-@@ -863,6 +919,14 @@ void VideoOverlayWindowViews::UpdateCont
+@@ -863,6 +922,14 @@ void VideoOverlayWindowViews::UpdateCont
            : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
                  !can_hide_title_and_scrim;
  
@@ -3723,7 +3817,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (should_animate) {
      // Animate the title and top scrim.
      if (title_is_visible != AreTitleAndScrimVisible()) {
-@@ -960,6 +1024,9 @@ void VideoOverlayWindowViews::OnViewVisi
+@@ -960,6 +1027,9 @@ void VideoOverlayWindowViews::OnViewVisi
  
    // The visibility of `overlay_view_` affects our minimum size.
    OnSizeConstraintsChanged();
@@ -3733,12 +3827,50 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
-@@ -975,6 +1042,63 @@ void VideoOverlayWindowViews::SetForcedT
+@@ -975,6 +1045,101 @@ void VideoOverlayWindowViews::SetForcedT
  }
  
  #if BUILDFLAG(IS_MAC)
 +void VideoOverlayWindowViews::UseLegacyControlsForTesting() {
 +  if (native_controls_widget_) native_controls_widget_->UseLegacyControlsForTesting();
++}
++
++void VideoOverlayWindowViews::SampleNativeControlsBrightness(
++    base::OnceCallback<void(double)> callback) {
++  auto* layer = video_view_ ? video_view_->layer() : nullptr;
++  if (!layer || !GetCompositor() || !IsVisible() || layer->bounds().IsEmpty()) {
++    std::move(callback).Run(-1);
++    return;
++  }
++  // Copy the video layer alone, downscaled on the GPU before CPU access.
++  // Controls and private browser tabs are never part of this sample.
++  auto request = std::make_unique<viz::CopyOutputRequest>(
++      viz::CopyOutputRequest::ResultFormat::RGBA,
++      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
++      base::BindOnce([](base::OnceCallback<void(double)> callback,
++                        std::unique_ptr<viz::CopyOutputResult> result) {
++        if (result->IsEmpty()) { std::move(callback).Run(-1); return; }
++        auto pixels = result->ScopedAccessSkBitmap();
++        const auto& bitmap = pixels.bitmap();
++        if (bitmap.width() != 16 || bitmap.height() != 9) {
++          std::move(callback).Run(-1); return;
++        }
++        double luminance = 0;
++        for (int y = 0; y < bitmap.height(); ++y)
++          for (int x = 0; x < bitmap.width(); ++x) {
++            const SkColor color = bitmap.getColor(x, y);
++            luminance += .2126 * SkColorGetR(color) +
++                         .7152 * SkColorGetG(color) + .0722 * SkColorGetB(color);
++          }
++        std::move(callback).Run(luminance / (255 * bitmap.width() * bitmap.height()));
++      }, std::move(callback)));
++  request->set_result_task_runner(base::SingleThreadTaskRunner::GetCurrentDefault());
++  // ui::Layer transforms area and scale together into device coordinates.
++  const gfx::Size source = layer->bounds().size();
++  request->set_area(gfx::Rect(source));
++  request->SetScaleRatio(gfx::Vector2d(source.width(), source.height()), {16, 9});
++  request->set_result_selection(gfx::Rect(16, 9));
++  layer->RequestCopyOfOutput(std::move(request));
 +}
 +
 +void VideoOverlayWindowViews::RefreshNativeControls() {
@@ -3797,7 +3929,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
    MoveToActiveFullscreenSpace();
  }
-@@ -1460,6 +1584,19 @@ void VideoOverlayWindowViews::OnRootView
+@@ -1460,6 +1625,19 @@ void VideoOverlayWindowViews::OnRootView
    }
    view_holder_.clear();
  
@@ -3817,7 +3949,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Don't show the controls until the mouse hovers over the window.
    UpdateControlsVisibility(false, /*should_animate=*/false);
  }
-@@ -1521,6 +1658,12 @@ void VideoOverlayWindowViews::UpdateLaye
+@@ -1521,6 +1699,12 @@ void VideoOverlayWindowViews::UpdateLaye
  }
  
  void VideoOverlayWindowViews::OnUpdateControlsBounds() {
@@ -3830,7 +3962,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    controls_container_view_->SetSize(GetBounds().size());
  
    // Adding an extra pixel to width/height makes sure the scrim covers the
-@@ -1770,6 +1913,11 @@ bool VideoOverlayWindowViews::IsActive()
+@@ -1770,6 +1954,11 @@ bool VideoOverlayWindowViews::IsActive()
  }
  
  void VideoOverlayWindowViews::Close() {
@@ -3842,7 +3974,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1818,6 +1966,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1818,6 +2007,11 @@ void VideoOverlayWindowViews::ShowInacti
      overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
      overlay_view_->ShowBubble(GetNativeView());
      SetBounds(CalculateAndUpdateWindowBounds());
@@ -3854,7 +3986,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    }
  
    // When the window is first shown, make the title and top controls
-@@ -1851,6 +2004,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1851,6 +2045,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -3866,7 +3998,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1884,6 +2042,15 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1884,6 +2083,15 @@ void VideoOverlayWindowViews::UpdateNatu
    // Update the views::Widget bounds to adhere to sizing spec. This will also
    // update the layout of the controls.
    SetBounds(CalculateAndUpdateWindowBounds());
@@ -3882,7 +4014,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (is_tucking_forced_) {
      tucker_->Tuck();
    }
-@@ -1892,6 +2059,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1892,6 +2100,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -3892,7 +4024,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1962,6 +2132,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1962,6 +2173,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -3902,7 +4034,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1997,11 +2170,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1997,11 +2211,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -3920,7 +4052,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2235,7 +2414,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2235,7 +2455,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -3929,7 +4061,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2413,6 +2592,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2413,6 +2633,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -3939,7 +4071,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2518,6 +2700,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2518,6 +2741,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
@@ -3977,13 +4109,14 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
    void FinishTuckAnimationForTesting();
  
    bool AreTitleAndScrimVisibleForTesting() const;
-@@ -590,6 +598,18 @@ class VideoOverlayWindowViews : public c
+@@ -590,6 +598,19 @@ class VideoOverlayWindowViews : public c
    // True if the playback controls should be visible.
    bool show_playback_controls_ = true;
  
 +#if BUILDFLAG(IS_MAC)
 +  friend class VideoOverlayWindowNativeWidgetMac;
 +  void RefreshNativeControls();
++  void SampleNativeControlsBrightness(base::OnceCallback<void(double)> callback);
 +  void DetachNativeControlsHost();
 +  void FocusNativeControls(bool reverse);
 +  raw_ptr<views::NativeViewHost> native_controls_host_ = nullptr;
@@ -4227,7 +4360,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1461 @@
+@@ -0,0 +1,1583 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4241,7 +4374,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +#include <vector>
 +
 +#include "chrome/browser/ui/views/overlay/video_overlay_window_views.h"
-+#include "chrome/browser/ui/views/helium/surface_style.h"
 +#include "testing/gtest/include/gtest/gtest.h"
 +#include "testing/gtest_mac.h"
 +#include "ui/base/hit_test.h"
@@ -4256,6 +4388,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +// frames.
 +@interface NSView (ArciumPiPNativeControlsTestInput)
 +- (void)beginSeek;
++- (void)pointerInteraction;
++- (void)sampleBrightness;
 +- (void)buildChrome;
 +- (void)seek:(id)sender;
 +- (void)endSeek;
@@ -4389,6 +4523,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +    state_.duration = 100;
 +    state_.playback_rate = 0;
 +    state_.title = u"Native PiP test";
++    [Overlay() mouseMoved:nil];
 +    Update();
 +    ASSERT_FALSE(window_.visible);
 +    ASSERT_TRUE(Overlay());
@@ -4545,66 +4680,186 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_TRUE(overlay.needsLayout);
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, GlassDoesNotElevateAboveButtonSymbols) {
++TEST_F(ArciumPiPNativeControlsTest, ClearGlassKeepsWhiteSymbolsInForeground) {
 +  for (NSString* label in @[@"Play", @"Return to tab", @"Tuck to screen edge",
 +       @"Close Picture in Picture", @"Back 15 seconds", @"Forward 15 seconds", @"Mute"]) {
 +    NSButton* button = Button(label);
 +    ASSERT_TRUE(button);
-+    // Plain view ordering keeps foreground above the material. An ancestor
-+    // glass container would instead elevate the nested effect above it.
-+    EXPECT_EQ(button.superview.subviews.lastObject, button);
++    EXPECT_TRUE([button.contentTintColor isEqual:NSColor.whiteColor]);
 +    if (@available(macOS 26.0, *)) {
++      if ([button.superview isKindOfClass:NSGlassEffectView.class]) {
++        auto* glass = (NSGlassEffectView*)button.superview;
++        EXPECT_EQ(glass.contentView, button);
++        EXPECT_EQ(glass.style, NSGlassEffectViewStyleClear);
++        EXPECT_FALSE(glass.tintColor);
++      }
 +      for (NSView* ancestor = button.superview; ancestor; ancestor = ancestor.superview)
 +        EXPECT_FALSE([ancestor isKindOfClass:NSGlassEffectContainerView.class]);
 +    }
 +  }
++  [Button(@"Play") performClick:nil];
++  Pump();
++  EXPECT_EQ(Count(Action::kPlayPause), 1u);
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, SharedGlassChangesPreserveControlsAndActions) {
-+  NSButton* play = Button(@"Play");
-+  NSView* capsule = play.superview;
-+  const NSRect original = capsule.frame;
-+  helium::SurfaceInputs inputs;
-+  inputs.set = helium::SurfaceSet::kCustom;
-+  inputs.tuning = helium::PresetSurfaceTuning(helium::SurfaceSet::kGlass);
-+  inputs.tuning.panel_tint_color = SK_ColorRED;
-+  controls_->SetSurfaceStyle(helium::ResolveSurfaceStyle(inputs));
-+  Pump();
-+  EXPECT_EQ(play, Button(@"Play"));
-+  ExpectSameFrame(capsule.frame, original);
-+  // Switching to the shared opaque fallback also keeps the real control.
-+  inputs.set = helium::SurfaceSet::kSolid;
-+  inputs.tuning = helium::PresetSurfaceTuning(inputs.set);
-+  const auto solid = helium::ResolveSurfaceStyle(inputs);
-+  ASSERT_FALSE(solid.panel_glass);
-+  controls_->SetSurfaceStyle(solid);
-+  Pump();
-+  EXPECT_EQ(play, Button(@"Play"));
-+  EXPECT_TRUE(IsPresented(play));
-+  NSColor* fill = [NSColor colorWithCGColor:capsule.layer.backgroundColor];
-+  EXPECT_NEAR(fill.alphaComponent, 1, .001);
-+  [Overlay() buildChrome];
++TEST_F(ArciumPiPNativeControlsTest, BrightVideoDimsOnlyVisibleChrome) {
++  NSView* backing = [Overlay() valueForKey:@"contrastBacking"];
++  ASSERT_TRUE(backing);
++  [Overlay() setValue:@0.2 forKey:@"videoBrightness"];
 +  Update();
-+  capsule = Button(@"Play").superview;
-+  fill = [NSColor colorWithCGColor:capsule.layer.backgroundColor];
-+  EXPECT_NEAR(fill.alphaComponent, 1, .001);
-+  play = Button(@"Play");
-+  const SkColor expected = helium::PanelSolidColor(solid);
-+  fill = [fill colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-+  EXPECT_NEAR(fill.redComponent, SkColorGetR(expected) / 255.0, .001);
-+  auto light = solid;
-+  light.neutral_base = SK_ColorWHITE;
-+  light.panel_tint_color = SK_ColorWHITE;
-+  controls_->SetSurfaceStyle(light);
-+  EXPECT_TRUE([play.contentTintColor isEqual:NSColor.blackColor]);
-+  light.neutral_base = SK_ColorBLACK;
-+  light.panel_tint_color = SK_ColorBLACK;
-+  controls_->SetSurfaceStyle(light);
-+  EXPECT_TRUE([play.contentTintColor isEqual:NSColor.whiteColor]);
-+  [play performClick:nil];
++  // Let the contrast transition complete without displaying a window.
++  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.3]];
++  EXPECT_NEAR(backing.alphaValue, 0, .01);
++  [Overlay() setValue:@0.95 forKey:@"videoBrightness"];
++  Update();
++  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.3]];
++  EXPECT_NEAR(backing.alphaValue, .35, .01);
++  EXPECT_TRUE([Button(@"Play").contentTintColor isEqual:NSColor.whiteColor]);
++  [Overlay() applyPinch:.1 ended:NO cancelled:NO];
 +  Pump();
-+  ASSERT_FALSE(actions_.empty());
-+  EXPECT_EQ(actions_.back().action, Action::kPlayPause);
++  EXPECT_TRUE(backing.hidden);
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  EXPECT_FALSE(IsPresented(Slider()));
++  EXPECT_FALSE(IsPresented([Overlay() valueForKey:@"title"]));
++  [Overlay() mouseMoved:nil];
++  Update();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  EXPECT_FALSE(IsPresented(Button(@"Back 15 seconds")));
++  [Overlay() applyPinch:0 ended:YES cancelled:NO];
++  Pump();
++  EXPECT_TRUE(IsPresented(Button(@"Play")));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, HoverCannotRevealChromeDuringPanOrNativeResize) {
++  EXPECT_TRUE(Scroll(NSEventPhaseBegan, 4, 3));
++  [Overlay() mouseMoved:nil];
++  Update();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  EXPECT_FALSE(IsPresented(Button(@"Forward 15 seconds")));
++  EXPECT_FALSE(IsPresented([Overlay() valueForKey:@"title"]));
++  EXPECT_TRUE(Scroll(NSEventPhaseCancelled));
++  [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillStartLiveResizeNotification object:window_];
++  [Overlay() mouseMoved:nil];
++  Update();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  EXPECT_FALSE(IsPresented(Slider()));
++  EXPECT_FALSE(IsPresented([Overlay() valueForKey:@"title"]));
++  [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidEndLiveResizeNotification object:window_];
++  Update();
++  EXPECT_TRUE(IsPresented(Button(@"Play")));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PointerFocusDoesNotPinControlsAfterExit) {
++  ASSERT_TRUE([window_ makeFirstResponder:Overlay()]);
++  [Overlay() mouseExited:nil];
++  Pump();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  [Overlay() mouseMoved:nil];
++  ASSERT_TRUE([window_ makeFirstResponder:Button(@"Play")]);
++  [Overlay() mouseExited:nil];
++  Pump();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  EXPECT_FALSE(IsPresented(Slider()));
++  [Overlay() mouseMoved:nil];
++  controls_->FocusControls(false);
++  [Overlay() mouseExited:nil];
++  Pump();
++  EXPECT_TRUE(IsPresented(Button(@"Play")));
++  [Overlay() pointerInteraction];
++  [Overlay() mouseExited:nil];
++  Pump();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, CapabilityChangesPreservePointerAndKeyboardIntent) {
++  ASSERT_TRUE([window_ makeFirstResponder:Slider()]);
++  state_.can_seek = false;
++  Update();
++  [Overlay() mouseExited:nil];
++  Pump();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  state_.can_seek = true;
++  [Overlay() mouseMoved:nil];
++  Update();
++  controls_->FocusControls(true);  // Playback slider is the last visible control.
++  ASSERT_EQ(window_.firstResponder, Slider());
++  state_.can_seek = false;
++  Update();
++  [Overlay() mouseExited:nil];
++  Pump();
++  EXPECT_TRUE(IsPresented(Button(@"Play")));
++  EXPECT_NE(window_.firstResponder, Slider());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ReturnAnimationImmediatelyHidesChromeAndStopsProgress) {
++  auto* home = [[ArciumPiPTestWindow alloc] initWithContentRect:window_.frame
++      styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:YES];
++  home.releasedWhenClosed = NO;
++  home.testVisible = YES;
++  ((ArciumPiPTestWindow*)window_).testVisible = YES;
++  controls_->PreparePlacement({}, home, 16.0 / 9.0, {});
++  state_.effects[static_cast<size_t>(Effect::kReturn)] = true;
++  state_.playing = true;
++  state_.playback_rate = 1;
++  Update();
++  ASSERT_TRUE([Overlay() valueForKey:@"progressTimer"]);
++  [Button(@"Return to tab") performClick:nil];
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  EXPECT_FALSE(IsPresented(Button(@"Back 15 seconds")));
++  EXPECT_FALSE(IsPresented(Slider()));
++  EXPECT_FALSE([Overlay() valueForKey:@"progressTimer"]);
++  controls_->RestorePlacementForHide();
++  ((ArciumPiPTestWindow*)window_).testVisible = NO;
++  home.testVisible = NO;
++  [home close];
++}
++
++TEST_F(ArciumPiPNativeControlsTest, TuckedChevronIsHiddenDuringPan) {
++  [Button(@"Tuck to screen edge") performClick:nil];
++  Pump();
++  ASSERT_TRUE(IsPresented(Button(@"Restore Picture in Picture")));
++  EXPECT_TRUE(Scroll(NSEventPhaseBegan, 1, 0));
++  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++  EXPECT_TRUE(Scroll(NSEventPhaseCancelled));
++  EXPECT_TRUE(IsPresented(Button(@"Restore Picture in Picture")));
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ContrastSamplingSurvivesFocusAndRejectsStaleResults) {
++  DestroyControls();
++  std::vector<std::function<void(double)>> completions;
++  controls_ = std::make_unique<NativeControls>(window_, [](Action, double) {},
++      [&completions](std::function<void(double)> callback) {
++        completions.push_back(std::move(callback));
++      });
++  MountControls();
++  ((ArciumPiPTestWindow*)window_).testVisible = YES;
++  [Overlay() mouseMoved:nil];
++  Update();
++  ASSERT_EQ(completions.size(), 1u);
++  controls_->FocusControls(false);
++  EXPECT_TRUE([Overlay() valueForKey:@"brightnessTimer"]);
++  completions[0](.1);
++  EXPECT_NEAR([[Overlay() valueForKey:@"videoBrightness"] doubleValue], .1, .001);
++  [Overlay() pointerInteraction];
++  [Overlay() mouseExited:nil];
++  [Overlay() mouseMoved:nil];
++  [Overlay() sampleBrightness];
++  EXPECT_EQ(completions.size(), 1u);
++  // Advance the sampling boundary without delaying the suite or showing UI.
++  [Overlay() setValue:@(NSProcessInfo.processInfo.systemUptime - 1.01) forKey:@"lastBrightnessRequest"];
++  [Overlay() sampleBrightness];
++  ASSERT_EQ(completions.size(), 2u);
++  [Overlay() applyPinch:.1 ended:NO cancelled:NO];
++  EXPECT_FALSE([Overlay() valueForKey:@"brightnessTimer"]);
++  completions[1](.95);
++  EXPECT_NEAR([[Overlay() valueForKey:@"videoBrightness"] doubleValue], .1, .001);
++  [Overlay() applyPinch:0 ended:YES cancelled:NO];
++  [Overlay() setValue:@(NSProcessInfo.processInfo.systemUptime - 1.01) forKey:@"lastBrightnessRequest"];
++  [Overlay() sampleBrightness];
++  ASSERT_EQ(completions.size(), 3u);
++  DestroyControls();
++  completions[2](.95);  // Weak completion after teardown is harmless.
++  ((ArciumPiPTestWindow*)window_).testVisible = NO;
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest,
