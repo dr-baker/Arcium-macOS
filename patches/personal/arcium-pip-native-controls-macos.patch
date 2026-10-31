@@ -350,7 +350,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2866 @@
+@@ -0,0 +1,2894 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -555,7 +555,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}  // namespace
 +
 +@interface ArciumPiPButton : NSButton
-+@property(nonatomic, copy) void (^dragEvent)(NSEvent*, NSInteger);
 +@end
 +namespace {
 +bool HandleNativeTab(NSView* control, NSEvent* event) {
@@ -572,9 +571,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +}  // namespace
 +@implementation ArciumPiPButton
-+- (void)mouseDown:(NSEvent*)event { if (self.dragEvent) self.dragEvent(event, 0); else [super mouseDown:event]; }
-+- (void)mouseDragged:(NSEvent*)event { if (self.dragEvent) self.dragEvent(event, 1); else [super mouseDragged:event]; }
-+- (void)mouseUp:(NSEvent*)event { if (self.dragEvent) self.dragEvent(event, 2); else [super mouseUp:event]; }
 +- (BOOL)acceptsFirstResponder {
 +  return YES;
 +}
@@ -1255,6 +1251,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)applyState:(const State&)state;
 +- (BOOL)chromeSuppressed;
 +- (void)sampleBrightness;
++- (BOOL)consumeMouseInput:(NSEvent*)event;
 +- (NSArray<ArciumPiPCapsule*>*)contrastCapsules;
 +- (ContrastRequest)contrastRequest;
 +- (BOOL)hasControlsFocus;
@@ -1355,9 +1352,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self addGestureRecognizer:_pinchRecognizer];
 +  _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
 +      NSEventMaskScrollWheel | NSEventMaskMagnify | NSEventMaskLeftMouseDown |
-+      NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown | NSEventMaskKeyDown handler:^NSEvent*(NSEvent* event) {
++      NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown | NSEventMaskKeyDown |
++      NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp handler:^NSEvent*(NSEvent* event) {
 +    ArciumPiPNativeOverlay* overlay = weakSelf;
 +    if (!overlay || ![overlay acceptsGestureInput]) return event;
++    // Pointer ownership outlives hidden glyphs and re-hit-tests outside the card.
++    if ([overlay consumeMouseInput:event]) return nil;
++    if (event.type == NSEventTypeLeftMouseDragged || event.type == NSEventTypeLeftMouseUp)
++      return event;
 +    if (event.type == NSEventTypeLeftMouseDown || event.type == NSEventTypeRightMouseDown ||
 +        event.type == NSEventTypeOtherMouseDown) {
 +      if (event.window == overlay->_pipWindow) [overlay pointerInteraction];
@@ -1524,11 +1526,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [weakSelf resizeEvent:event phase:phase];
 +  };
 +  [self addSubview:_resizeView];
-+  ((ArciumPiPButton*)_restoreButton).dragEvent = ^(NSEvent* event, NSInteger phase) {
-+    if (phase == 0) [weakSelf mouseDown:event];
-+    else if (phase == 1) [weakSelf mouseDragged:event];
-+    else [weakSelf mouseUp:event];
-+  };
 +  [self setNeedsLayout:YES];
 +  if (restoreFocus) {
 +    [self focusControls:NO];
@@ -1800,12 +1797,16 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return nil;
 +  }
 +  NSPoint local = [self convertPoint:point fromView:self.superview];
++  if (_resizing || (_dragging && !_scrolling)) return self;
 +  if (!NSPointInRect(local, self.bounds)) {
 +    return nil;
 +  }
-+  if (!_nativeVisible && _tucked == geo::Side::kNone) {
-+    return self;
++  if (_tucked != geo::Side::kNone) {
++    const CGFloat x = _tucked == geo::Side::kLeft ? NSWidth(self.bounds) - geo::kHandleWidth : 0;
++    const NSRect strip = NSMakeRect(x, 0, geo::kHandleWidth, NSHeight(self.bounds));
++    return NSPointInRect(local, strip) ? self : nil;
 +  }
++  if (!_nativeVisible) return self;
 +  for (NSView* control in @[
 +         _slider, _resizeView, _restoreButton, _returnButton, _tuckButton,
 +         _closeButton, _playButton, _backButton, _forwardButton, _muteButton
@@ -1950,7 +1951,31 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  return YES;
 +}
++- (BOOL)consumeMouseInput:(NSEvent*)event {
++  if (_invalidated || _state.blocked) return NO;
++  const BOOL ownsPointer = _resizing || (_dragging && !_scrolling);
++  if (event.type == NSEventTypeLeftMouseDown) {
++    // A fresh physical press cannot belong to an unfinished older sequence.
++    if (ownsPointer) {
++      if (_resizing) [self resizeEvent:event phase:2];
++      else [self stopMotion];
++      [self refreshChrome];
++    }
++    return NO;
++  }
++  if (!ownsPointer || event.window != _pipWindow) return NO;
++  if (event.type == NSEventTypeLeftMouseDragged) {
++    [self mouseDragged:event];
++    return YES;
++  }
++  if (event.type == NSEventTypeLeftMouseUp) {
++    [self mouseUp:event];
++    return YES;
++  }
++  return NO;
++}
 +- (void)mouseDown:(NSEvent*)event {
++  _suppressMouseUp = NO;
 +  [self pointerInteraction];
 +  if (_invalidated || _state.blocked || !_pipWindow) return;
 +  [self deliver:Action::kInteraction value:0];
@@ -1972,6 +1997,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self startMotionTimer];
 +}
 +- (void)mouseDragged:(NSEvent*)event {
++  if (_resizing && !_invalidated && !_state.blocked) { [self resizeEvent:event phase:1]; return; }
 +  if (!_dragging || !motion || _invalidated || _state.blocked) return;
 +  const NSPoint pointer = [self screenPoint:event];
 +  [self updateMotionScreen:pointer];
@@ -1981,6 +2007,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)mouseUp:(NSEvent*)event {
 +  if (_suppressMouseUp) { _suppressMouseUp = NO; return; }
++  if (_resizing && !_invalidated && !_state.blocked) { [self resizeEvent:event phase:2]; return; }
 +  if (!_dragging || !motion || _invalidated || _magnifying || _returning) return;
 +  motion->end(event.timestamp);
 +  [self finishMotionRelease];
@@ -2209,7 +2236,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  [_pressureFeedback close]; _pressureFeedback = nil;
 +  gestures.reset(); motion.reset(); _dragging = NO; awaitingLanding = NO;
-+  _pendingPan = NO; _scrolling = NO; _magnifying = NO;
++  _pendingPan = NO; _scrolling = NO; _magnifying = NO; _resizing = NO;
 +  lift = liftVelocity = settleAmount = settleVelocity = 0;
 +  leanX = leanY = shadowX = shadowY = edgeAmount = 0;
 +  [_shadowWindow.parentWindow removeChildWindow:_shadowWindow];
@@ -2860,6 +2887,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  if (phase == 0) {
 +    [self stopMotion];
++    _suppressMouseUp = NO;
 +    _resizing = YES;
 +    [self refreshChrome];
 +    _resizeStartFrame = _pipWindow.frame;
@@ -3074,6 +3102,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)prepareForHide {
++  _suppressMouseUp = NO;
 +  [self cancelReturn];
 +  [self restoreGestureFocus];
 +  if (_invalidated) {
@@ -3155,7 +3184,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _slider.beginDrag = nil;
 +  _slider.endDrag = nil;
 +  _resizeView.resizeEvent = nil;
-+  ((ArciumPiPButton*)_restoreButton).dragEvent = nil;
 +}
 +@end
 +
@@ -4426,7 +4454,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1684 @@
+@@ -0,0 +1,1825 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4456,6 +4484,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +- (void)beginSeek;
 +- (void)pointerInteraction;
 +- (void)sampleBrightness;
++- (BOOL)consumeMouseInput:(NSEvent*)event;
++- (void)tuckToSide:(arcium::pip::geometry::Side)side;
 +- (void)buildChrome;
 +- (void)seek:(id)sender;
 +- (void)endSeek;
@@ -4507,9 +4537,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +@property NSPoint globalPoint;
 +@property double testTime;
 +@property NSInteger testClicks;
++@property NSEventType testType;
 +@end
 +@implementation ArciumPiPDragTestEvent
-+- (NSEventType)type { return NSEventTypeLeftMouseDown; }
++- (NSEventType)type { return self.testType == 0 ? NSEventTypeLeftMouseDown : self.testType; }
 +- (NSInteger)clickCount { return self.testClicks ?: 1; }
 +- (NSWindow*)window { return self.testWindow; }
 +- (NSPoint)locationInWindow { return [self.testWindow convertPointFromScreen:self.globalPoint]; }
@@ -5139,18 +5170,156 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_FALSE(Overlay());
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, MouseHandleRestoresFreelyPlacedWindow) {
++TEST_F(ArciumPiPNativeControlsTest, RehitTestedHandleRestoresFreelyPlacedWindow) {
 +  const NSRect start = window_.frame;
-+  [Button(@"Tuck to screen edge") performClick:nil]; Pump();
-+  ArciumPiPDragTestEvent* event = [[ArciumPiPDragTestEvent alloc] init];
-+  event.testWindow = window_; event.testTime = NSProcessInfo.processInfo.systemUptime;
-+  NSButton* handle = Button(@"Restore Picture in Picture");
-+  NSPoint local = [handle convertPoint:NSMakePoint(NSMidX(handle.bounds),NSMidY(handle.bounds)) toView:nil];
-+  event.globalPoint = [window_ convertPointToScreen:local];
-+  [handle mouseDown:event]; event.testTime += .1; [handle mouseUp:event];
-+  for (int i=0;i<250;++i) Pump();
-+  ExpectSameFrame(window_.frame,start);
++  for (auto side : {geometry::Side::kLeft, geometry::Side::kRight}) {
++    [Overlay() tuckToSide:side];
++    Pump();
++    auto* event = [[ArciumPiPDragTestEvent alloc] init];
++    event.testWindow = window_;
++    event.testTime = NSProcessInfo.processInfo.systemUptime;
++    NSButton* handle = Button(@"Restore Picture in Picture");
++    ASSERT_TRUE(IsPresented(handle));
++    const NSPoint center = [handle convertPoint:NSMakePoint(NSMidX(handle.bounds), NSMidY(handle.bounds)) toView:nil];
++    event.globalPoint = [window_ convertPointToScreen:center];
++    NSView* down = [window_.contentView hitTest:event.locationInWindow];
++    ASSERT_TRUE(down);
++    [down mouseDown:event];
++    EXPECT_FALSE(IsPresented(handle));
++    // NSWindow resolves the target again for mouse-up; the hidden glyph must
++    // never remove the input surface that completes the click.
++    NSView* up = [window_.contentView hitTest:event.locationInWindow];
++    ASSERT_TRUE(up) << "Hiding the tucked glyph lost the mouse-up target";
++    event.testTime += .1;
++    [up mouseUp:event];
++    EXPECT_FALSE([[Overlay() valueForKey:@"dragging"] boolValue]);
++    for (int i = 0; i < 250; ++i) Pump();
++    ExpectSameFrame(window_.frame, start);
++  }
 +}
++TEST_F(ArciumPiPNativeControlsTest, ExposedStripOutsideChevronCanRestore) {
++  const NSRect start = window_.frame;
++  for (auto side : {geometry::Side::kLeft, geometry::Side::kRight}) {
++    [Overlay() tuckToSide:side];
++    Pump();
++    NSButton* handle = Button(@"Restore Picture in Picture");
++    const NSRect glyph = [handle convertRect:handle.bounds toView:Overlay()];
++    const NSPoint point = NSMakePoint(NSMidX(glyph), 8);
++    ASSERT_FALSE(NSPointInRect(point, glyph));
++    auto* event = [[ArciumPiPDragTestEvent alloc] init];
++    event.testWindow = window_;
++    event.testTime = NSProcessInfo.processInfo.systemUptime;
++    event.globalPoint = [window_ convertPointToScreen:[Overlay() convertPoint:point toView:nil]];
++    NSView* target = [window_.contentView hitTest:event.locationInWindow];
++    ASSERT_EQ(target, Overlay());
++    [target mouseDown:event];
++    target = [window_.contentView hitTest:event.locationInWindow];
++    ASSERT_TRUE(target);
++    event.testTime += .1;
++    [target mouseUp:event];
++    for (int i = 0; i < 250; ++i) Pump();
++    ExpectSameFrame(window_.frame, start);
++  }
++}
++
++TEST_F(ArciumPiPNativeControlsTest, OwnedMouseReleaseOutsideCardEndsDragExactlyOnce) {
++  auto* event = [[ArciumPiPDragTestEvent alloc] init];
++  event.testWindow = window_;
++  event.testType = NSEventTypeLeftMouseUp;
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++  event.testType = NSEventTypeLeftMouseDown;
++  event.testTime = NSProcessInfo.processInfo.systemUptime;
++  event.globalPoint = NSMakePoint(NSMinX(window_.frame) + 20, NSMinY(window_.frame) + 80);
++  [Overlay() mouseDown:event];
++  event.testType = NSEventTypeLeftMouseDragged;
++  event.globalPoint = NSMakePoint(NSMinX(window_.frame) - 80, event.globalPoint.y);
++  event.testTime += .2;
++  EXPECT_TRUE([Overlay() consumeMouseInput:event]);
++  Pump();
++  event.testType = NSEventTypeLeftMouseUp;
++  event.testTime += .1;
++  EXPECT_TRUE([Overlay() consumeMouseInput:event]);
++  EXPECT_FALSE([[Overlay() valueForKey:@"dragging"] boolValue]);
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++  EXPECT_EQ(Count(Action::kPlayPause), 0u);
++  EXPECT_EQ(Count(Action::kSeek), 0u);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, OwnedResizeReleaseSurvivesHiddenGrip) {
++  const NSRect start = window_.frame;
++  auto* event = [[ArciumPiPDragTestEvent alloc] init];
++  event.testWindow = window_;
++  event.testTime = NSProcessInfo.processInfo.systemUptime;
++  event.globalPoint = NSMakePoint(NSMaxX(start) - 8, NSMinY(start) + 8);
++  // A prior interrupted press must not suppress this resize release.
++  [Overlay() setValue:@YES forKey:@"suppressMouseUp"];
++  [Overlay() resizeEvent:event phase:0];
++  EXPECT_FALSE(IsPresented([Overlay() valueForKey:@"resizeView"]));
++  event.testType = NSEventTypeLeftMouseDragged;
++  event.testTime += .1;
++  event.globalPoint = NSMakePoint(event.globalPoint.x + 80, event.globalPoint.y - 45);
++  EXPECT_TRUE([Overlay() consumeMouseInput:event]);
++  event.testType = NSEventTypeLeftMouseUp;
++  event.testTime += .1;
++  EXPECT_TRUE([Overlay() consumeMouseInput:event]);
++  EXPECT_FALSE([[Overlay() valueForKey:@"resizing"] boolValue]);
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(start));
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, FreshMousePressCancelsOldPointerOwnership) {
++  auto* event = [[ArciumPiPDragTestEvent alloc] init];
++  event.testWindow = window_;
++  event.testTime = NSProcessInfo.processInfo.systemUptime;
++  event.globalPoint = NSMakePoint(NSMinX(window_.frame) + 20, NSMinY(window_.frame) + 80);
++  [Overlay() mouseDown:event];
++  ASSERT_TRUE([[Overlay() valueForKey:@"dragging"] boolValue]);
++  event.testTime += 1;
++  NSWindow* __attribute__((objc_precise_lifetime)) foreign = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100)
++      styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:YES];
++  event.testWindow = foreign;
++  ASSERT_NE(event.window, nil);
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++  EXPECT_FALSE([[Overlay() valueForKey:@"dragging"] boolValue]);
++  event.testType = NSEventTypeLeftMouseUp;
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ForeignWindowCannotContinueOwnedDrag) {
++  auto* event = [[ArciumPiPDragTestEvent alloc] init];
++  event.testWindow = window_;
++  event.testTime = NSProcessInfo.processInfo.systemUptime;
++  event.globalPoint = NSMakePoint(NSMinX(window_.frame) + 20, NSMinY(window_.frame) + 80);
++  [Overlay() mouseDown:event];
++  ASSERT_TRUE([[Overlay() valueForKey:@"dragging"] boolValue]);
++  NSWindow* __attribute__((objc_precise_lifetime)) foreign = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100)
++      styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:YES];
++  event.testWindow = foreign;
++  event.testType = NSEventTypeLeftMouseDragged;
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++  event.testType = NSEventTypeLeftMouseUp;
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++  EXPECT_TRUE([[Overlay() valueForKey:@"dragging"] boolValue]);
++  event.testWindow = window_;
++  EXPECT_TRUE([Overlay() consumeMouseInput:event]);
++  EXPECT_FALSE([[Overlay() valueForKey:@"dragging"] boolValue]);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, BlockingCancelsResizeOwnership) {
++  auto* event = [[ArciumPiPDragTestEvent alloc] init];
++  event.testWindow = window_;
++  event.globalPoint = NSMakePoint(NSMaxX(window_.frame) - 8, NSMinY(window_.frame) + 8);
++  [Overlay() resizeEvent:event phase:0];
++  ASSERT_TRUE([[Overlay() valueForKey:@"resizing"] boolValue]);
++  state_.blocked = true;
++  Update();
++  EXPECT_FALSE([[Overlay() valueForKey:@"resizing"] boolValue]);
++  state_.blocked = false;
++  Update();
++  event.testType = NSEventTypeLeftMouseUp;
++  EXPECT_FALSE([Overlay() consumeMouseInput:event]);
++}
++
 +TEST_F(ArciumPiPNativeControlsTest, SlowInteriorDropKeepsItsLocation) {
 +  const NSRect start = window_.frame;
 +  ArciumPiPDragTestEvent* event = [[ArciumPiPDragTestEvent alloc] init];
