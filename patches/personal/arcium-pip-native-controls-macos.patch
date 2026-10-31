@@ -348,7 +348,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2708 @@
+@@ -0,0 +1,2735 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1141,6 +1141,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 + @private
 +  State _state;
 +  std::optional<helium::SurfaceStyle> _surfaceStyle;
++  std::optional<NSRect> _pendingResizeFrame;
 +  std::function<void()> _beforeFocusRelease;
 +  BOOL _releasingFocus;
 +  __weak id _axParent;
@@ -2021,6 +2022,16 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self renderMotionAt:now];
 +}
 +- (void)startMotionTimer { [self requestMotionFrame]; }
++- (void)queueResizeFrame:(NSRect)frame {
++  _pendingResizeFrame = frame;
++  [self startMotionFrames];
++}
++- (void)flushResizeFrame {
++  if (!_pendingResizeFrame) return;
++  const NSRect frame = *_pendingResizeFrame;
++  _pendingResizeFrame.reset();
++  [self setWindowFrame:frame animate:NO];
++}
 +- (void)startMotionFrames {
 +  if (_motionFramesRunning) return;
 +  _motionFramesRunning = YES;
@@ -2061,8 +2072,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self renderMotionAt:NSProcessInfo.processInfo.systemUptime];
 +}
 +- (void)renderMotionAt:(double)target {
-+  if (_invalidated || !motion || _state.blocked) { [self stopMotion]; return; }
-+  if (_magnifying || _resizing || _pipWindow.inLiveResize) { [self pauseMotionFrames]; return; }
++  if (_invalidated || _state.blocked) { [self stopMotion]; return; }
++  _lastRenderAt = NSProcessInfo.processInfo.systemUptime;
++  if (_magnifying || _resizing) {
++    [self flushResizeFrame];
++    return;
++  }
++  if (!motion || _pipWindow.inLiveResize) { [self pauseMotionFrames]; return; }
 +  _motionFrameDirty = NO;
 +  _lastRenderAt = NSProcessInfo.processInfo.systemUptime;
 +  if (motion->phase == Phase::Settling) {
@@ -2082,6 +2098,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +- (void)stopMotion {
++  _pendingResizeFrame.reset();
 +  [self pauseMotionFrames];
 +  // Cancellation, permission blocking, hide and display reconfiguration all
 +  // restore the pinch snapshot before releasing the model that owns it.
@@ -2371,7 +2388,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _adjusting = YES;
 +  if (!animate && NSEqualSizes(_pipWindow.frame.size,frame.size))
 +    [_pipWindow setFrameOrigin:frame.origin];
-+  else [_pipWindow setFrame:frame display:YES animate:animate && !ReduceMotion()];
++  else [_pipWindow setFrame:frame display:NO animate:animate && !ReduceMotion()];
 +  _adjusting = NO;
 +}
 +- (void)preparePlacement:(const Placement&)placement
@@ -2532,7 +2549,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (_invalidated) {
 +    return;
 +  }
-+  [self setNeedsLayout:YES];
++  // A position-only move does not change any control geometry.
++  if (![note.name isEqual:NSWindowDidMoveNotification])
++    [self setNeedsLayout:YES];
 +  if ([note.name isEqual:NSWindowWillStartLiveResizeNotification]) {
 +    [self stopMotion];
 +    return;
@@ -2693,8 +2712,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    gestures->endPinch(cancelled); _magnifying = NO;
 +    _preferredWidth = cancelled ? _magnifyPreferredWidth : motion->size.width;
 +  }
-+  [self setWindowFrame:NSMakeRect(motion->position.x, motion->position.y,
-+      motion->size.width, motion->size.height) animate:NO];
++  const NSRect frame = NSMakeRect(motion->position.x, motion->position.y,
++                                  motion->size.width, motion->size.height);
++  if (ended || cancelled) {
++    _pendingResizeFrame.reset();
++    [self pauseMotionFrames];
++    [self setWindowFrame:frame animate:NO];
++  } else {
++    [self queueResizeFrame:frame];
++  }
 +  if (ended || cancelled) {
 +    if (![self updateMotionVisuals]) [self startMotionTimer];
 +    if (!cancelled) [self rememberPlacement];
@@ -2739,11 +2765,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    double dx = mouse.x - _resizeStartMouse.x;
 +    double dy = _resizeStartMouse.y - mouse.y;
 +    double width = NSWidth(_resizeStartFrame) + (dx + dy * _aspect) * 0.5;
-+    [self setWindowFrame:ToNSRect(geo::Resize(ToRect(_resizeStartFrame),
++    [self queueResizeFrame:ToNSRect(geo::Resize(ToRect(_resizeStartFrame),
 +                                              ToRect(screen.visibleFrame),
-+                                              _aspect, width, _sizeLimits))
-+                 animate:NO];
++                                              _aspect, width, _sizeLimits))];
 +  } else if (phase == 2 && _resizing) {
++    [self flushResizeFrame];
++    [self pauseMotionFrames];
 +    _resizing = NO;
 +    _preferredWidth = NSWidth(_pipWindow.frame);
 +    if (_state.HasVisualEffects() && [self ensureMotion] && ![self updateMotionVisuals])
@@ -4204,7 +4231,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1388 @@
+@@ -0,0 +1,1446 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4244,6 +4271,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +- (BOOL)consumeMagnify:(NSEvent*)event;
 +- (BOOL)acceptsGestureInput;
 +- (void)renderMotionAt:(double)target;
++- (void)windowGeometryChanged:(NSNotification*)note;
 +@end
 +
 +// Reports visibility for state-refresh admission without ordering a native window.
@@ -4414,7 +4442,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +    // NativeControls posts onto the main dispatch queue. CocoaTest initializes
 +    // AppKit; its native run loop delivers these blocks without displaying UI.
 +    [window_.contentView layoutSubtreeIfNeeded];
-+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    // Delivery uses the main dispatch queue. Wait for a FIFO barrier rather
++    // than assuming a single 10 ms native-loop turn drained every callback.
++    __block BOOL delivered = NO;
++    dispatch_async(dispatch_get_main_queue(), ^{ delivered = YES; });
++    for (int turn = 0; turn < 50 && !delivered; ++turn)
++      CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    EXPECT_TRUE(delivered);
 +    // Hidden test windows may not receive display-link callbacks. Deliver a
 +    // display frame explicitly; hardware/display delivery remains a native gate.
 +    if ([[Overlay() valueForKey:@"motionFramesRunning"] boolValue])
@@ -4473,6 +4507,47 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  State state_;
 +  std::vector<EmittedAction> actions_;
 +};
++
++TEST_F(ArciumPiPNativeControlsTest, CancelBeforeResizeFrameDiscardsQueuedSize) {
++  const NSRect original = window_.frame;
++  [Overlay() applyPinch:.20 ended:NO cancelled:NO];
++  ExpectSameFrame(window_.frame, original);
++  [Overlay() applyPinch:0 ended:NO cancelled:YES];
++  Pump();
++  ExpectSameFrame(window_.frame, original);
++  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PinchCoalescesNativeResizesUntilDisplayFrame) {
++  NSView* overlay = Overlay();
++  const NSRect start = window_.frame;
++  [overlay applyPinch:.05 ended:NO cancelled:NO];
++  [overlay applyPinch:.05 ended:NO cancelled:NO];
++  ExpectSameFrame(window_.frame, start);
++  [overlay renderMotionAt:NSProcessInfo.processInfo.systemUptime];
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(start));
++  const NSRect expanded = window_.frame;
++  [overlay applyPinch:.05 ended:NO cancelled:NO];
++  ExpectSameFrame(window_.frame, expanded);
++  // A final event flushes the newest size even before the next display frame.
++  [overlay applyPinch:0 ended:YES cancelled:NO];
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(expanded));
++  const NSRect final = window_.frame;
++  [overlay renderMotionAt:NSProcessInfo.processInfo.systemUptime];
++  ExpectSameFrame(window_.frame, final);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, PositionOnlyMoveDoesNotRelayoutControls) {
++  Pump();
++  NSView* overlay = Overlay();
++  overlay.needsLayout = NO;
++  [overlay windowGeometryChanged:[NSNotification
++      notificationWithName:NSWindowDidMoveNotification object:window_]];
++  EXPECT_FALSE(overlay.needsLayout);
++  [overlay windowGeometryChanged:[NSNotification
++      notificationWithName:NSWindowDidResizeNotification object:window_]];
++  EXPECT_TRUE(overlay.needsLayout);
++}
 +
 +TEST_F(ArciumPiPNativeControlsTest, SharedGlassChangesPreserveControlsAndActions) {
 +  NSButton* play = Button(@"Play");
@@ -4868,6 +4943,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +      ended:recognizer.testState == NSGestureRecognizerStateEnded
 +      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
 +  recognizer.magnification = 0;
++  [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
 +  EXPECT_GT(NSWidth(window_.frame), NSWidth(original));
 +  recognizer.testState = NSGestureRecognizerStateCancelled;
 +  [Overlay() applyPinch:recognizer.magnification
@@ -4907,6 +4983,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +      ended:recognizer.testState == NSGestureRecognizerStateEnded
 +      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
 +  recognizer.magnification = 0;
++  [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
 +  EXPECT_GT(NSWidth(window_.frame), NSWidth(original)+10);
 +  EXPECT_NEAR(NSMidX(window_.frame),NSMidX(original),1);
 +  EXPECT_NEAR(NSMidY(window_.frame),NSMidY(original),1);
@@ -4916,6 +4993,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +      ended:recognizer.testState == NSGestureRecognizerStateEnded
 +      cancelled:recognizer.testState == NSGestureRecognizerStateCancelled];
 +  recognizer.magnification = 0;
++  [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
 +  EXPECT_LT(NSWidth(window_.frame),grown-10);
 +  recognizer.testState = NSGestureRecognizerStateEnded;
 +  [Overlay() applyPinch:recognizer.magnification
@@ -4972,6 +5050,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +TEST_F(ArciumPiPNativeControlsTest, HidingDuringPinchRollsBackSizeAndIntendedWidth) {
 +  const NSRect original = window_.frame;
 +  [Overlay() applyPinch:.20 ended:NO cancelled:NO];
++  [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
 +  EXPECT_GT(NSWidth(window_.frame),NSWidth(original));
 +  controls_->RestorePlacementForHide();
 +  ExpectSameFrame(window_.frame,original);
@@ -5563,7 +5642,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +    ASSERT_EQ(focus->GetStoredFocusView(), host);
 +    NSResponder* outgoing = native.firstResponder;
 +    [overlay buildChrome];
-+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    // Delivery uses the main dispatch queue. Wait for a FIFO barrier rather
++    // than assuming a single 10 ms native-loop turn drained every callback.
++    __block BOOL delivered = NO;
++    dispatch_async(dispatch_get_main_queue(), ^{ delivered = YES; });
++    for (int turn = 0; turn < 50 && !delivered; ++turn)
++      CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, false);
++    EXPECT_TRUE(delivered);
 +    ASSERT_TRUE([native.firstResponder isKindOfClass:NSView.class]);
 +    EXPECT_NE(native.firstResponder, outgoing);
 +    EXPECT_TRUE([(NSView*)native.firstResponder isDescendantOf:overlay]);
