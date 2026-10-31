@@ -201,7 +201,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,142 @@
+@@ -0,0 +1,143 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -269,6 +269,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  const char* key;
 +  const char* title;
 +  const char* description;
++  bool default_enabled = false;
 +};
 +inline constexpr std::array<EffectPreference, static_cast<size_t>(Effect::kCount)>
 +    kEffectPreferences = {{
@@ -277,7 +278,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  {"arcium.pip.effects.dock_lean", "pip_effect_dock_lean", "Dock lean", "Lean toward the edge where the window will dock."},
 +  {"arcium.pip.effects.shadows", "pip_effect_shadows", "Custom shadows", "Draw soft shadows that respond to window movement."},
 +  {"arcium.pip.effects.dock_shadow", "pip_effect_dock_shadow", "Projected dock shadow", "Move the custom shadow toward the docking destination. Requires custom shadows."},
-+  {"arcium.pip.effects.edge_shade", "pip_effect_edge_shade", "Edge shading", "Shade the window as it moves into a screen edge."},
++  {"arcium.pip.effects.edge_shade", "pip_effect_edge_shade", "Edge shading", "Shade the window as it moves into a screen edge.", true},
 +  {"arcium.pip.effects.strings", "pip_effect_strings", "Pressure strings", "Show elastic pressure strings along edges and around corners."},
 +  {"arcium.pip.effects.landing", "pip_effect_landing", "Landing press", "Dip slightly when the window comes to rest."},
 +  {"arcium.pip.effects.haptics", "pip_effect_haptics", "Haptic feedback", "Play light Force Touch trackpad taps for movement decisions."},
@@ -5900,7 +5901,7 @@ Index: src/chrome/browser/ui/browser_ui_prefs.cc
 +#if BUILDFLAG(IS_MAC)
 +  registry->RegisterDictionaryPref(arcium::pip::kPlacementPref);
 +  for (const auto& effect : arcium::pip::kEffectPreferences)
-+    registry->RegisterBooleanPref(effect.pref, false);
++    registry->RegisterBooleanPref(effect.pref, effect.default_enabled);
 +#endif
    registry->RegisterBooleanPref(prefs::kHomePageIsNewTabPage, true,
                                  pref_registration_flags);
@@ -6897,32 +6898,37 @@ Index: src/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
  #include "chrome/browser/ui/helium/helium_space.h"
  #include "chrome/browser/ui/helium/helium_space_service.h"
  #include "chrome/browser/ui/helium/helium_space_service_factory.h"
-@@ -40,6 +42,31 @@ class ArciumSystemAppearanceModelTest :
+@@ -40,6 +42,36 @@ class ArciumSystemAppearanceModelTest :
    raw_ptr<helium::HeliumSpaceService> service_ = nullptr;
  };
  
-+TEST_F(ArciumSystemAppearanceModelTest, PiPEffectsDefaultOffAndNotifyNativeSettings) {
++TEST_F(ArciumSystemAppearanceModelTest, PiPEffectsDefaultToEdgeShadingAndNotifyNativeSettings) {
 +  int changes = 0;
++  int enabled_defaults = 0;
 +  ArciumSettingsModel model(profile(),
 +      base::BindLambdaForTesting([&] { ++changes; }), base::DoNothing());
 +  for (const auto& effect : arcium::pip::kEffectPreferences) {
 +    SCOPED_TRACE(effect.pref);
 +    ASSERT_TRUE(model.HasPreference(effect.pref));
-+    EXPECT_FALSE(model.GetBoolean(effect.pref));
-+    EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(effect.pref));
++    enabled_defaults += effect.default_enabled;
++    EXPECT_EQ(model.GetBoolean(effect.pref), effect.default_enabled);
++    EXPECT_EQ(profile()->GetPrefs()->GetBoolean(effect.pref), effect.default_enabled);
 +    int before = changes;
-+    model.SetBoolean(effect.pref,true);
-+    EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(effect.pref));
++    model.SetBoolean(effect.pref,!effect.default_enabled);
++    EXPECT_EQ(profile()->GetPrefs()->GetBoolean(effect.pref), !effect.default_enabled);
 +    EXPECT_GT(changes,before);
 +    before = changes;
-+    profile()->GetPrefs()->SetBoolean(effect.pref,false);
-+    EXPECT_FALSE(model.GetBoolean(effect.pref));
++    profile()->GetPrefs()->SetBoolean(effect.pref,effect.default_enabled);
++    EXPECT_EQ(model.GetBoolean(effect.pref), effect.default_enabled);
 +    EXPECT_GT(changes,before);
 +  }
++  EXPECT_EQ(enabled_defaults, 1);
++  EXPECT_TRUE(arcium::pip::kEffectPreferences[
++      static_cast<size_t>(arcium::pip::Effect::kEdgeShade)].default_enabled);
 +  model.Shutdown();
 +  const int stopped = changes;
 +  for (const auto& effect : arcium::pip::kEffectPreferences)
-+    profile()->GetPrefs()->SetBoolean(effect.pref,true);
++    profile()->GetPrefs()->SetBoolean(effect.pref,!effect.default_enabled);
 +  EXPECT_EQ(stopped,changes);
 +}
 +
