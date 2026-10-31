@@ -345,7 +345,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2645 @@
+@@ -0,0 +1,2666 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -620,6 +620,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +@end
 +@implementation ArciumPiPResizeView
 +@synthesize resizeEvent = _resizeEvent;
++- (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
 +- (void)drawRect:(NSRect)dirtyRect {
 +  [[NSColor colorWithWhite:1 alpha:0.65] setStroke];
 +  for (int i = 0; i < 3; ++i) {
@@ -1246,6 +1247,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  NSNotificationCenter* center = NSNotificationCenter.defaultCenter;
 +  for (NSNotificationName name in @[
 +         NSWindowDidResizeNotification, NSWindowDidMoveNotification,
++         NSWindowWillStartLiveResizeNotification, NSWindowDidEndLiveResizeNotification,
 +         NSWindowDidChangeScreenNotification
 +       ]) {
 +    [_observers addObject:[center addObserverForName:name
@@ -1513,7 +1515,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  const bool needs_presentation = !motion && _state.HasVisualEffects() &&
 +      _pipWindow.visible && self.window == _pipWindow && !_state.blocked &&
-+      !_returning && !_resizing;
++      !_returning && !_resizing && !_pipWindow.inLiveResize;
 +  if (effects_changed || needs_presentation) {
 +    if (_magnifying || _resizing) {
 +      // Keep resize ownership intact. Recreate decoration at the final size
@@ -1967,7 +1969,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +// Coalesce active input into the next display frame. Idle input responds
 +// immediately; a stalled display link must not leave the window frozen.
 +- (void)requestMotionFrame {
-+  if (_invalidated || !motion || _state.blocked || _magnifying || _resizing || _returning) return;
++  if (_invalidated || !motion || _state.blocked || _magnifying || _resizing || _returning || _pipWindow.inLiveResize) return;
 +  _motionFrameDirty = YES;
 +  const double now = NSProcessInfo.processInfo.systemUptime;
 +  if (_motionFramesRunning && now - _lastRenderAt < .1) return;
@@ -2018,7 +2020,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)renderMotionAt:(double)target {
 +  if (_invalidated || !motion || _state.blocked) { [self stopMotion]; return; }
-+  if (_magnifying || _resizing) { [self pauseMotionFrames]; return; }
++  if (_magnifying || _resizing || _pipWindow.inLiveResize) { [self pauseMotionFrames]; return; }
 +  _motionFrameDirty = NO;
 +  _lastRenderAt = NSProcessInfo.processInfo.systemUptime;
 +  if (motion->phase == Phase::Settling) {
@@ -2489,6 +2491,25 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return;
 +  }
 +  [self setNeedsLayout:YES];
++  if ([note.name isEqual:NSWindowWillStartLiveResizeNotification]) {
++    [self stopMotion];
++    return;
++  }
++  if ([note.name isEqual:NSWindowDidEndLiveResizeNotification] &&
++      !_adjusting && !_dragging && !_scrolling && !_resizing && !_magnifying &&
++      !_returning && !_state.blocked && _tucked == geo::Side::kNone) {
++    const NSRect frame = _pipWindow.frame;
++    if (motion) {
++      motion->position = {frame.origin.x, frame.origin.y};
++      motion->size = {frame.size.width, frame.size.height};
++    }
++    [self stopMotion];
++    _preferredWidth = frame.size.width;
++    if (_state.HasVisualEffects() && [self ensureMotion] && ![self updateMotionVisuals])
++      [self startMotionTimer];
++    [self rememberPlacement];
++    return;
++  }
 +  if (_adjusting || _dragging || _motionFramesRunning || _scrolling || _resizing) {
 +    return;
 +  }
@@ -2666,13 +2687,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self stopMotion];
 +    _resizing = YES;
 +    _resizeStartFrame = _pipWindow.frame;
-+    _resizeStartMouse = NSEvent.mouseLocation;
++    _resizeStartMouse = event.window ? [self screenPoint:event] : NSEvent.mouseLocation;
 +  } else if (phase == 1 && _resizing) {
 +    NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
 +    if (!screen) {
 +      return;
 +    }
-+    NSPoint mouse = NSEvent.mouseLocation;
++    NSPoint mouse = event.window ? [self screenPoint:event] : NSEvent.mouseLocation;
 +    double dx = mouse.x - _resizeStartMouse.x;
 +    double dy = _resizeStartMouse.y - mouse.y;
 +    double width = NSWidth(_resizeStartFrame) + (dx + dy * _aspect) * 0.5;
@@ -4121,7 +4142,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1298 @@
+@@ -0,0 +1,1338 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4949,6 +4970,46 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  ExpectSameFrame(window_.frame, original);
 +  EXPECT_FALSE([[Overlay() valueForKey:@"motionFramesRunning"] boolValue]);
 +  [(ArciumPiPTestWindow*)window_ setDeferAnimatedFrames:NO];
++}
++
++TEST_F(ArciumPiPNativeControlsTest, NativeBorderResizePreservesWidthOnNextPan) {
++  for (bool effects : {false, true}) {
++    state_.effects[static_cast<size_t>(Effect::kEdgeShade)] = effects;
++    Update();
++    // Leave a prior preferred size and cached model before the system resize.
++    [Overlay() applyPinch:.05 ended:NO cancelled:NO];
++    [Overlay() applyPinch:0 ended:YES cancelled:NO];
++    [NSNotificationCenter.defaultCenter postNotificationName:NSWindowWillStartLiveResizeNotification
++                                                      object:window_];
++    Resize(NSMakeSize(512,288));
++    [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidEndLiveResizeNotification
++                                                      object:window_];
++    Pump();
++    EXPECT_NEAR(NSWidth(window_.frame),512,.5);
++    ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++    ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++    EXPECT_NEAR(NSWidth(window_.frame),512,.5);
++    EXPECT_NEAR(NSHeight(window_.frame),288,.5);
++    ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
++  }
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ResizeGripUsesDeliveredEventPosition) {
++  const NSRect original = window_.frame;
++  ArciumPiPDragTestEvent* event = [[ArciumPiPDragTestEvent alloc] init];
++  event.testWindow = window_;
++  event.globalPoint = NSMakePoint(NSMaxX(original)-5,NSMinY(original)+5);
++  [Overlay() resizeEvent:event phase:0];
++  event.globalPoint = NSMakePoint(event.globalPoint.x+112,event.globalPoint.y-63);
++  [Overlay() resizeEvent:event phase:1];
++  [Overlay() resizeEvent:event phase:2];
++  Pump();
++  EXPECT_NEAR(NSWidth(window_.frame),512,.5);
++  EXPECT_NEAR(NSHeight(window_.frame),288,.5);
++  ASSERT_TRUE(Scroll(NSEventPhaseBegan));
++  ASSERT_TRUE(Scroll(NSEventPhaseChanged,20,-10));
++  EXPECT_NEAR(NSWidth(window_.frame),512,.5);
++  ASSERT_TRUE(Scroll(NSEventPhaseCancelled));
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, AllEffectsDefaultOffWithoutCompanionWindows) {
