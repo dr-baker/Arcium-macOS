@@ -4142,7 +4142,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1338 @@
+@@ -0,0 +1,1340 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4995,6 +4995,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, ResizeGripUsesDeliveredEventPosition) {
++  controls_->PreparePlacement({}, nil, 16.0 / 9.0, {});
++  Pump();
 +  const NSRect original = window_.frame;
 +  ArciumPiPDragTestEvent* event = [[ArciumPiPDragTestEvent alloc] init];
 +  event.testWindow = window_;
