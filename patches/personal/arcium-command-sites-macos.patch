@@ -1,0 +1,878 @@
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/BUILD.gn
+@@ -38,6 +38,7 @@ action("build") {
+     "Package.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsModels.swift",
+     "Sources/ArciumSettingsUI/ArciumCommandDesign.swift",
++    "Sources/ArciumSettingsUI/ArciumCommandSites.swift",
+     "Sources/ArciumSettingsUI/ArciumChromeAppearanceAdapter.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsViews.swift",
+     "Sources/ArciumSettingsUI/ArciumSettingsUIController.swift",
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandSites.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandSites.swift
+@@ -0,0 +1,579 @@
++import Combine
++import Foundation
++import SettingsUI
++import SettingsUIStyle
++import SwiftUI
++
++// Mirrors the sparse "arcium.command_bar.sites" preference. The browser owns
++// validation; this editor never writes resolved built-in defaults back.
++nonisolated struct ArciumCommandSiteShortcut: Equatable, Hashable, Sendable {
++    var title: String
++    var url: String
++
++    init(title: String, url: String) {
++        self.title = title
++        self.url = url
++    }
++
++    init?(_ value: Any?) {
++        guard let dictionary = value as? [String: Any],
++              let title = dictionary["title"] as? String,
++              let url = dictionary["url"] as? String else { return nil }
++        self.init(title: title, url: url)
++    }
++
++    var dictionary: [String: Any] { ["title": title, "url": url] }
++    var isValid: Bool { ArciumCommandSite.isLabel(title) && ArciumCommandSite.isWebURL(url) }
++}
++
++nonisolated struct ArciumCommandSite: Equatable, Identifiable, Sendable {
++    static let maxShortcuts = 8
++    static let maxDomains = 4
++
++    var id: String
++    var label: String
++    var domains: [String] = []
++    var search = ""
++    var verb = "search"
++    var tint = ""
++    var shortcuts: [ArciumCommandSiteShortcut] = []
++    var builtin = false
++
++    init(id: String, label: String, builtin: Bool = false) {
++        self.id = id
++        self.label = label
++        self.builtin = builtin
++    }
++
++    init?(id: String, _ dictionary: [String: Any], builtin: Bool) {
++        guard let label = dictionary["label"] as? String else { return nil }
++        self.init(id: id, label: label, builtin: builtin)
++        domains = (dictionary["domains"] as? [Any] ?? []).compactMap { $0 as? String }
++        search = dictionary["search"] as? String ?? ""
++        verb = dictionary["verb"] as? String == "ask" ? "ask" : "search"
++        tint = dictionary["tint"] as? String ?? ""
++        shortcuts = (dictionary["shortcuts"] as? [Any] ?? []).compactMap(ArciumCommandSiteShortcut.init)
++    }
++
++    var detail: String {
++        if let domain = domains.first { return domain }
++        return URL(string: search.replacingOccurrences(of: "%s", with: "q"))?.host() ?? ""
++    }
++
++    // Custom sites store every field; tint stays optional so the browser can
++    // assign its default color.
++    var customDictionary: [String: Any] {
++        var result: [String: Any] = ["label": label.trimmingCharacters(in: .whitespaces)]
++        if !domains.isEmpty { result["domains"] = domains }
++        if !search.isEmpty { result["search"] = search }
++        if verb == "ask" { result["verb"] = verb }
++        if !tint.isEmpty { result["tint"] = tint }
++        if !shortcuts.isEmpty { result["shortcuts"] = shortcuts.map(\.dictionary) }
++        return result
++    }
++
++    // The browser measures labels in UTF-16 code units after trimming.
++    static func isLabel(_ text: String) -> Bool {
++        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
++        return !trimmed.isEmpty && trimmed.utf16.count <= 40
++    }
++
++    static func isWebURL(_ text: String) -> Bool {
++        guard text.utf8.count <= 2048, let url = URL(string: text),
++              let scheme = url.scheme?.lowercased(), scheme == "https" || scheme == "http",
++              let host = url.host(), !host.isEmpty else { return false }
++        return url.user() == nil && url.password() == nil
++    }
++
++    static func isIPAddress(_ host: String) -> Bool {
++        host.contains(":") || host.hasPrefix("[")
++            || host.split(separator: ".").last.map { $0.allSatisfy(\.isNumber) } == true
++    }
++
++    // Canonical ASCII hostnames only, as the browser requires.
++    static func isDomain(_ text: String) -> Bool {
++        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
++        return parts.count >= 2 && text.utf8.count <= 253 && !isIPAddress(text)
++            && parts.allSatisfy { part in
++                !part.isEmpty && part.unicodeScalars.allSatisfy {
++                    ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "-"
++                }
++            }
++    }
++
++    /// Mirrors browser URL canonicalization for duplicate detection: case-
++    /// insensitive scheme and host, default ports dropped, empty path as "/".
++    static func canonicalURL(_ text: String) -> String {
++        guard var components = URLComponents(string: text) else { return text }
++        components.scheme = components.scheme?.lowercased()
++        components.host = components.host?.lowercased()
++        if (components.scheme == "https" && components.port == 443)
++            || (components.scheme == "http" && components.port == 80) {
++            components.port = nil
++        }
++        if components.path.isEmpty { components.path = "/" }
++        return components.string ?? text
++    }
++
++    // One %s, as a query value: "https://example.com/search?q=%s".
++    static func isSearchTemplate(_ text: String) -> Bool {
++        let pieces = text.components(separatedBy: "%s")
++        let probe = text.replacingOccurrences(of: "%s", with: "q")
++        guard pieces.count == 2, isWebURL(probe),
++              let host = URL(string: probe)?.host(), !isIPAddress(host),
++              let question = pieces[0].firstIndex(of: "?") else { return false }
++        return pieces[0].hasSuffix("=") && !pieces[0].contains("#")
++            && pieces[0].index(after: question) < pieces[0].index(before: pieces[0].endIndex)
++    }
++
++    /// Mirrors the browser's write rules closely enough to disable Save; the
++    /// browser still validates every write.
++    var isValid: Bool {
++        guard Self.isLabel(label),
++              shortcuts.count <= Self.maxShortcuts,
++              shortcuts.allSatisfy(\.isValid),
++              Set(shortcuts.map { Self.canonicalURL($0.url) }).count == shortcuts.count,
++              tint.isEmpty || tint.range(of: "^#[0-9a-fA-F]{6}$", options: .regularExpression) != nil
++        else { return false }
++        if builtin { return true }
++        return (!domains.isEmpty || !search.isEmpty)
++            && domains.count <= Self.maxDomains && domains.allSatisfy(Self.isDomain)
++            && Set(domains).count == domains.count
++            && (search.isEmpty || Self.isSearchTemplate(search))
++    }
++}
++
++nonisolated struct ArciumCommandSites: Equatable, Sendable {
++    static let maxVisible = 8
++    static let maxCustom = 8
++
++    nonisolated struct Override: Equatable, Sendable {
++        var label: String?
++        var tint: String?
++        var shortcuts: [ArciumCommandSiteShortcut]?
++    }
++
++    var builtins: [ArciumCommandSite] = []
++    var order: [String]?
++    var hidden: [String] = []
++    var overrides: [String: Override] = [:]
++    var customs: [String: ArciumCommandSite] = [:]
++
++    init() {}
++
++    init(_ dictionary: [String: Any]) {
++        builtins = (dictionary["builtins"] as? [Any] ?? []).compactMap { value in
++            guard let item = value as? [String: Any], let id = item["id"] as? String else { return nil }
++            return ArciumCommandSite(id: id, item, builtin: true)
++        }
++        let saved = dictionary["sites"] as? [String: Any] ?? [:]
++        for (id, value) in saved["sites"] as? [String: Any] ?? [:] {
++            guard let item = value as? [String: Any] else { continue }
++            if builtins.contains(where: { $0.id == id }) {
++                overrides[id] = Override(
++                    label: item["label"] as? String, tint: item["tint"] as? String,
++                    shortcuts: (item["shortcuts"] as? [Any]).map {
++                        $0.compactMap(ArciumCommandSiteShortcut.init)
++                    })
++            } else if let site = ArciumCommandSite(id: id, item, builtin: false) {
++                customs[id] = site
++            }
++        }
++        let known = Set(builtins.map(\.id)).union(customs.keys)
++        order = (saved["order"] as? [Any])?.compactMap { $0 as? String }.filter(known.contains)
++        hidden = (saved["hidden"] as? [Any] ?? []).compactMap { $0 as? String }.filter(known.contains)
++    }
++
++    /// Every editable site in rail order, including hidden ones.
++    var sites: [ArciumCommandSite] {
++        var ids: [String] = []
++        for id in (order ?? []) + builtins.map(\.id) + customs.keys.sorted() where !ids.contains(id) {
++            ids.append(id)
++        }
++        return ids.compactMap(site)
++    }
++
++    var visibleCount: Int { sites.filter { !hidden.contains($0.id) }.count }
++    var visibleSummary: String {
++        let labels = sites.filter { !hidden.contains($0.id) }.map(\.label)
++        return labels.isEmpty ? "No sites" : labels.joined(separator: ", ")
++    }
++
++    func site(_ id: String) -> ArciumCommandSite? {
++        if let custom = customs[id] { return custom }
++        guard var site = builtins.first(where: { $0.id == id }) else { return nil }
++        if let override = overrides[id] {
++            site.label = override.label ?? site.label
++            site.tint = override.tint ?? site.tint
++            site.shortcuts = override.shortcuts ?? site.shortcuts
++        }
++        return site
++    }
++
++    func isCustomized(_ id: String) -> Bool { overrides[id] != nil }
++
++    // MARK: Edits. Each returns the complete sparse preference to write.
++
++    func setting(_ id: String, visible: Bool) -> ArciumCommandSites {
++        var copy = self
++        copy.hidden.removeAll { $0 == id }
++        if !visible { copy.hidden.append(id) }
++        return copy
++    }
++
++    func moving(_ id: String, by offset: Int) -> ArciumCommandSites {
++        var ids = sites.map(\.id)
++        guard let index = ids.firstIndex(of: id) else { return self }
++        let target = min(max(index + offset, 0), ids.count - 1)
++        ids.remove(at: index)
++        ids.insert(id, at: target)
++        var copy = self
++        copy.order = ids
++        return copy
++    }
++
++    func replacing(_ site: ArciumCommandSite) -> ArciumCommandSites {
++        var copy = self
++        guard site.builtin else {
++            copy.customs[site.id] = site
++            return copy
++        }
++        guard let defaults = builtins.first(where: { $0.id == site.id }) else { return self }
++        let label = site.label.trimmingCharacters(in: .whitespaces)
++        let override = Override(
++            label: label == defaults.label ? nil : label,
++            tint: site.tint == defaults.tint ? nil : site.tint,
++            shortcuts: site.shortcuts == defaults.shortcuts ? nil : site.shortcuts)
++        copy.overrides[site.id] = override == Override() ? nil : override
++        return copy
++    }
++
++    /// Deletes a custom site, or restores a built-in site's defaults.
++    func removing(_ id: String) -> ArciumCommandSites {
++        var copy = self
++        if copy.customs.removeValue(forKey: id) != nil {
++            copy.order?.removeAll { $0 == id }
++            copy.hidden.removeAll { $0 == id }
++        } else {
++            copy.overrides[id] = nil
++        }
++        return copy
++    }
++
++    var dictionary: [String: Any] {
++        var result: [String: Any] = [:]
++        if let order { result["order"] = order }
++        if !hidden.isEmpty { result["hidden"] = hidden }
++        var entries: [String: Any] = [:]
++        for (id, override) in overrides {
++            var item: [String: Any] = [:]
++            if let label = override.label { item["label"] = label }
++            if let tint = override.tint { item["tint"] = tint }
++            if let shortcuts = override.shortcuts { item["shortcuts"] = shortcuts.map(\.dictionary) }
++            entries[id] = item
++        }
++        for (id, site) in customs { entries[id] = site.customDictionary }
++        if !entries.isEmpty { result["sites"] = entries }
++        return result
++    }
++}
++
++extension ArciumSettingsStore {
++    var canEditCommandSites: Bool {
++        snapshot.appearance.commandSitesAvailable && !snapshot.appearance.commandSitesManaged
++    }
++
++    func setCommandSites(_ sites: ArciumCommandSites) {
++        guard canEditCommandSites else { return }
++        settingChanged(key: "command_sites", value: sites.dictionary)
++    }
++
++    func addCommandSite(_ site: ArciumCommandSite) {
++        guard canEditCommandSites, !site.builtin, site.isValid else { return }
++        actionInvoked(name: "add_command_site", payload: site.customDictionary)
++    }
++}
++
++// The Sites row of command bar Settings; the caller supplies the Section.
++struct ArciumCommandSitesSummary: View {
++    @ObservedObject var store: ArciumSettingsStore
++    @State private var showingEditor = false
++    @Environment(\.settingsTheme) private var theme
++
++    var body: some View {
++        HStack(alignment: .firstTextBaseline) {
++            VStack(alignment: .leading, spacing: 2) {
++                Text("Scopes").settingsFont(\.body).foregroundStyle(theme.textPrimary)
++                Text(store.snapshot.appearance.commandSites.visibleSummary)
++                    .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                    .lineLimit(2)
++            }
++            Spacer()
++            Button("Edit…") { showingEditor = true }
++                .accessibilityIdentifier("command-bar-sites-edit")
++        }
++        .disabled(!store.canEditCommandSites)
++        .sheet(isPresented: $showingEditor) {
++            ArciumLiveSettingsSheet(title: "Sites", minimumHeight: 380, idealHeight: 540) {
++                ArciumCommandSitesEditor(store: store)
++            }
++        }
++    }
++}
++
++private struct ArciumCommandSitesEditor: View {
++    @ObservedObject var store: ArciumSettingsStore
++    @State private var editing: ArciumCommandSite?
++    @Environment(\.settingsTheme) private var theme
++
++    private var sites: ArciumCommandSites { store.snapshot.appearance.commandSites }
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 12) {
++            Text("Each site gets a scope in the command bar. It searches the site and lists matching tabs, saved items and shortcuts.")
++                .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++            VStack(spacing: 0) {
++                let all = sites.sites
++                ForEach(Array(all.enumerated()), id: \.element.id) { index, site in
++                    row(site, index: index, count: all.count)
++                    if index < all.count - 1 { Divider() }
++                }
++            }
++            .padding(.horizontal, 12)
++            .settingsInteractiveControlSurface(isSelected: false)
++            HStack {
++                Button("Add Site…") {
++                    editing = ArciumCommandSite(id: "", label: "")
++                }
++                .disabled(sites.customs.count >= ArciumCommandSites.maxCustom
++                          || sites.visibleCount >= ArciumCommandSites.maxVisible)
++                .accessibilityIdentifier("command-bar-sites-add")
++                Spacer()
++                Text("\(sites.visibleCount) of \(ArciumCommandSites.maxVisible) shown")
++                    .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++            }
++        }
++        .disabled(!store.canEditCommandSites)
++        .sheet(item: $editing) { site in
++            ArciumCommandSiteEditor(store: store, site: site,
++                                    defaults: sites.builtins.first { $0.id == site.id })
++        }
++    }
++
++    private func row(_ site: ArciumCommandSite, index: Int, count: Int) -> some View {
++        let visible = !sites.hidden.contains(site.id)
++        return HStack(spacing: 10) {
++            Toggle(isOn: Binding(get: { visible },
++                                 set: { store.setCommandSites(sites.setting(site.id, visible: $0)) })) {
++                EmptyView()
++            }
++            .labelsHidden()
++            .toggleStyle(.switch)
++            .controlSize(.small)
++            .disabled(!visible && sites.visibleCount >= ArciumCommandSites.maxVisible)
++            .accessibilityLabel("Show \(site.label)")
++            VStack(alignment: .leading, spacing: 2) {
++                Text(site.label).settingsFont(\.body).foregroundStyle(theme.textPrimary)
++                Text(rowDetail(site)).settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++            }
++            Spacer()
++            Button("Edit…") { editing = site }
++                .accessibilityIdentifier("command-bar-site-edit-" + site.id)
++            Menu {
++                Button("Move Up") { store.setCommandSites(sites.moving(site.id, by: -1)) }
++                    .disabled(index == 0)
++                Button("Move Down") { store.setCommandSites(sites.moving(site.id, by: 1)) }
++                    .disabled(index == count - 1)
++                Divider()
++                if site.builtin {
++                    Button("Restore Defaults") { store.setCommandSites(sites.removing(site.id)) }
++                        .disabled(!sites.isCustomized(site.id))
++                } else {
++                    Button("Delete", role: .destructive) { store.setCommandSites(sites.removing(site.id)) }
++                }
++            } label: {
++                Image(systemName: "ellipsis.circle")
++            }
++            .menuStyle(.button)
++            .buttonStyle(.borderless)
++            .menuIndicator(.hidden)
++            .fixedSize()
++            .accessibilityLabel("More for \(site.label)")
++        }
++        .padding(.vertical, 8)
++    }
++
++    private func rowDetail(_ site: ArciumCommandSite) -> String {
++        let shortcuts = site.shortcuts.count == 1 ? "1 shortcut" : "\(site.shortcuts.count) shortcuts"
++        return [site.detail, shortcuts].filter { !$0.isEmpty }.joined(separator: " · ")
++    }
++}
++
++private struct ArciumCommandSiteEditor: View {
++    @ObservedObject var store: ArciumSettingsStore
++    @State var site: ArciumCommandSite
++    let defaults: ArciumCommandSite?
++    @State private var domainsText: String
++    // The browser validates every write. Keep the draft open until a snapshot
++    // shows the saved site, and say so if the browser rejected it.
++    @State private var pending: ArciumCommandSiteSave?
++    @State private var rejected = false
++    @Environment(\.dismiss) private var dismiss
++    @Environment(\.settingsTheme) private var theme
++
++    init(store: ArciumSettingsStore, site: ArciumCommandSite, defaults: ArciumCommandSite?) {
++        self.store = store
++        _site = State(initialValue: site)
++        _domainsText = State(initialValue: site.domains.joined(separator: ", "))
++        self.defaults = defaults
++    }
++
++    private func save() {
++        let sites = store.snapshot.appearance.commandSites
++        let draft = edited
++        rejected = false
++        if draft.id.isEmpty {
++            pending = .added(before: Set(sites.customs.keys))
++            store.addCommandSite(draft)
++        } else {
++            let expected = sites.replacing(draft)
++            pending = .edited(expected)
++            store.setCommandSites(expected)
++        }
++    }
++
++    private func settle(_ sites: ArciumCommandSites) {
++        guard let pending else { return }
++        self.pending = nil
++        if pending.accepted(by: sites) {
++            dismiss()
++        } else {
++            rejected = true
++        }
++    }
++
++    private var edited: ArciumCommandSite {
++        var result = site
++        if !result.builtin {
++            result.domains = domainsText.split(separator: ",")
++                .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
++                .filter { !$0.isEmpty }
++            result.search = result.search.trimmingCharacters(in: .whitespaces)
++        }
++        result.shortcuts = result.shortcuts.map {
++            ArciumCommandSiteShortcut(title: $0.title.trimmingCharacters(in: .whitespaces),
++                                      url: $0.url.trimmingCharacters(in: .whitespaces))
++        }
++        return result
++    }
++
++    var body: some View {
++        VStack(alignment: .leading, spacing: 0) {
++            Text(site.id.isEmpty ? "Add Site" : site.label)
++                .settingsFont(\.section).foregroundStyle(theme.textPrimary)
++                .padding(.horizontal, 24).padding(.vertical, 16)
++            ScrollView {
++                VStack(alignment: .leading, spacing: 14) {
++                    LabeledContent("Name") {
++                        TextField("Name", text: $site.label, prompt: Text("Docs"))
++                            .labelsHidden()
++                            .accessibilityIdentifier("command-bar-site-name")
++                    }
++                    if site.builtin {
++                        LabeledContent("Searches") {
++                            Text(site.search.replacingOccurrences(of: "%s", with: "…"))
++                                .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                                .textSelection(.enabled)
++                        }
++                    } else {
++                        LabeledContent("Domains") {
++                            TextField("Domains", text: $domainsText, prompt: Text("docs.rs, crates.io"))
++                                .labelsHidden()
++                                .accessibilityIdentifier("command-bar-site-domains")
++                        }
++                        LabeledContent("Search URL") {
++                            TextField("Search URL", text: $site.search,
++                                      prompt: Text("https://example.com/search?q=%s"))
++                                .labelsHidden()
++                                .accessibilityIdentifier("command-bar-site-search")
++                        }
++                        Picker("Typing", selection: $site.verb) {
++                            Text("Searches the site").tag("search")
++                            Text("Asks the site").tag("ask")
++                        }
++                        Text("Tabs on these domains appear in the scope. Use %s where the query goes.")
++                            .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                    }
++                    Divider()
++                    Text("Shortcuts").settingsFont(\.body).foregroundStyle(theme.textPrimary)
++                    Text("Shown when the scope opens with nothing typed.")
++                        .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                    ForEach(site.shortcuts.indices, id: \.self) { index in
++                        HStack {
++                            TextField("Title", text: $site.shortcuts[index].title)
++                                .frame(width: 150)
++                                .accessibilityLabel("Shortcut \(index + 1) title")
++                            TextField("URL", text: $site.shortcuts[index].url,
++                                      prompt: Text("https://"))
++                                .accessibilityLabel("Shortcut \(index + 1) URL")
++                            Button {
++                                site.shortcuts.remove(at: index)
++                            } label: {
++                                Image(systemName: "minus.circle")
++                            }
++                            .buttonStyle(.borderless)
++                            .accessibilityLabel("Remove shortcut \(index + 1)")
++                        }
++                    }
++                    HStack {
++                        Button("Add Shortcut") {
++                            site.shortcuts.append(ArciumCommandSiteShortcut(title: "", url: "https://"))
++                        }
++                        .disabled(site.shortcuts.count >= ArciumCommandSite.maxShortcuts)
++                        if let defaults {
++                            Button("Restore Default Shortcuts") { site.shortcuts = defaults.shortcuts }
++                                .disabled(site.shortcuts == defaults.shortcuts)
++                        }
++                    }
++                }
++                .padding(.horizontal, 24).padding(.vertical, 8)
++            }
++            HStack {
++                if rejected {
++                    Text("Arcium couldn't save this site. Check its links and try again.")
++                        .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                        .accessibilityIdentifier("command-bar-site-rejected")
++                } else if !edited.isValid {
++                    Text("Check the name, domains, search URL and shortcut links.")
++                        .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
++                }
++                Spacer()
++                Button("Cancel") { dismiss() }
++                    .keyboardShortcut(.cancelAction)
++                Button(site.id.isEmpty ? "Add" : "Save") { save() }
++                    .keyboardShortcut(.defaultAction)
++                    .disabled(!edited.isValid || pending != nil)
++                    .accessibilityIdentifier("command-bar-site-save")
++            }
++            .padding(.horizontal, 24).padding(.vertical, 16)
++        }
++        .settingsSheetSurface()
++        .frame(minWidth: 520, idealWidth: 600, minHeight: 360, idealHeight: 480)
++        // The host republishes after every site write, accepted or not.
++        .onReceive(store.$snapshot.dropFirst()) { settle($0.appearance.commandSites) }
++    }
++}
++
++nonisolated enum ArciumCommandSiteSave: Equatable, Sendable {
++    case added(before: Set<String>)
++    case edited(ArciumCommandSites)
++
++    func accepted(by sites: ArciumCommandSites) -> Bool {
++        switch self {
++        case .added(let before):
++            return !Set(sites.customs.keys).subtracting(before).isEmpty
++        case .edited(let expected):
++            return NSDictionary(dictionary: expected.dictionary).isEqual(to: sites.dictionary)
++        }
++    }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
+@@ -709,6 +709,9 @@ struct ArciumAppearanceSnapshot: Equatab
+     var commandPanelLayout = ArciumCommandPanelLayout()
+     var commandPanelLayoutAvailable = false
+     var commandPanelLayoutManaged = false
++    var commandSites = ArciumCommandSites()
++    var commandSitesAvailable = false
++    var commandSitesManaged = false
+     var commandBarAppearance = 0
+     var commandBarAppearanceAvailable = false
+     var commandBarAppearanceManaged = false
+@@ -769,6 +772,9 @@ struct ArciumAppearanceSnapshot: Equatab
+         commandPanelLayout = ArciumCommandPanelLayout(dictionaryValues(dictionary["commandPanelLayout"]))
+         commandPanelLayoutAvailable = strictBoolean(dictionary["commandPanelLayoutAvailable"]) ?? false
+         commandPanelLayoutManaged = strictBoolean(dictionary["commandPanelLayoutManaged"]) ?? false
++        commandSites = ArciumCommandSites(dictionaryValues(dictionary["commandSites"]))
++        commandSitesAvailable = strictBoolean(dictionary["commandSitesAvailable"]) ?? false
++        commandSitesManaged = strictBoolean(dictionary["commandSitesManaged"]) ?? false
+         // 0 is Solid, 1 Glass, and 2 Automatic (follows the surface set).
+         // Malformed values never become glass.
+         let commandBarValue = exactIntegerOptional(dictionary["commandBarAppearance"])
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -367,7 +367,7 @@ struct ArciumSpaceThemeDraftView: View {
+ 
+ /// These controls apply live through the existing profile-bound settings store.
+ /// Dismissal closes the editor; it does not promise to roll back saved changes.
+-private struct ArciumLiveSettingsSheet<Content: View>: View {
++struct ArciumLiveSettingsSheet<Content: View>: View {
+     let title: String
+     var onClose: (() -> Void)? = nil
+     var onCancel: (() -> Void)? = nil
+@@ -1684,6 +1684,9 @@ private struct ArciumCommandBarControls:
+                         options: (1...20).map { (value: $0, label: String($0)) })
+                 SToggle("Activity dots", isOn: commandLayoutBinding(\.activityDots))
+             }
++            Section("Sites") {
++                ArciumCommandSitesSummary(store: store)
++            }
+             Section("Lighting") {
+                 SToggle("Scope tints", isOn: commandLayoutBinding(\.scopeTints))
+                 if store.snapshot.appearance.commandPanelLayout.scopeTints {
+Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandSitesTests.swift
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandSitesTests.swift
+@@ -0,0 +1,172 @@
++import XCTest
++@testable import ArciumSettingsUI
++
++final class ArciumCommandSitesTests: XCTestCase {
++    private final class Delegate: NSObject, ArciumSettingsUIDelegate {
++        var settings: [(key: String, value: Any)] = []
++        var actions: [(name: String, payload: NSDictionary)] = []
++        func settingChanged(key: String, value: Any) { settings.append((key, value)) }
++        func actionInvoked(name: String, payload: NSDictionary) { actions.append((name, payload)) }
++    }
++
++    private static var builtins: [[String: Any]] { [
++        ["id": "youtube", "label": "YouTube", "domains": ["youtube.com", "youtu.be"],
++         "search": "https://www.youtube.com/results?search_query=%s", "verb": "search",
++         "tint": "#e34b49",
++         "shortcuts": [["title": "Subscriptions", "url": "https://www.youtube.com/feed/subscriptions"]]],
++        ["id": "x", "label": "X", "domains": ["x.com"], "search": "https://x.com/search?q=%s",
++         "verb": "search", "tint": "#748ca6",
++         "shortcuts": [["title": "Home", "url": "https://x.com/home"]]],
++        ["id": "chatgpt", "label": "ChatGPT", "domains": ["chatgpt.com"],
++         "search": "https://chatgpt.com/?q=%s", "verb": "ask", "tint": "#53a98c",
++         "shortcuts": [["title": "New chat", "url": "https://chatgpt.com/"]]],
++    ] }
++
++    private func sites(_ saved: [String: Any] = [:]) -> ArciumCommandSites {
++        ArciumCommandSites(["builtins": Self.builtins, "sites": saved])
++    }
++
++    func testDefaultsListBuiltinsInOrderAndWriteNothing() {
++        let sites = sites()
++        XCTAssertEqual(sites.sites.map(\.id), ["youtube", "x", "chatgpt"])
++        XCTAssertEqual(sites.visibleSummary, "YouTube, X, ChatGPT")
++        XCTAssertTrue(sites.dictionary.isEmpty)
++        XCTAssertEqual(sites.site("chatgpt")?.verb, "ask")
++    }
++
++    func testSavedOrderHiddenOverridesAndCustomSitesResolve() {
++        let sites = sites([
++            "order": ["chatgpt", "docs", "missing"],
++            "hidden": ["x", "missing"],
++            "sites": [
++                "youtube": ["label": "Videos"],
++                "docs": ["label": "Docs", "domains": ["docs.rs"]],
++            ],
++        ])
++        XCTAssertEqual(sites.sites.map(\.id), ["chatgpt", "docs", "youtube", "x"])
++        XCTAssertEqual(sites.hidden, ["x"])
++        XCTAssertEqual(sites.site("youtube")?.label, "Videos")
++        XCTAssertEqual(sites.site("youtube")?.shortcuts.count, 1)
++        XCTAssertTrue(sites.isCustomized("youtube"))
++        XCTAssertEqual(sites.visibleSummary, "ChatGPT, Docs, Videos")
++        XCTAssertEqual(sites.visibleCount, 3)
++    }
++
++    func testBuiltinEditsWriteOnlyChangedFields() {
++        var youtube = sites().site("youtube")!
++        youtube.label = "YouTube"
++        var written = sites().replacing(youtube).dictionary
++        XCTAssertTrue(written.isEmpty)
++
++        youtube.label = " Videos "
++        youtube.shortcuts.append(ArciumCommandSiteShortcut(title: "Later", url: "https://www.youtube.com/playlist?list=WL"))
++        written = sites().replacing(youtube).dictionary
++        let entry = (written["sites"] as? [String: Any])?["youtube"] as? [String: Any]
++        XCTAssertEqual(entry?["label"] as? String, "Videos")
++        XCTAssertNil(entry?["tint"])
++        XCTAssertEqual((entry?["shortcuts"] as? [[String: Any]])?.count, 2)
++        XCTAssertNil(entry?["search"])
++        XCTAssertNil(entry?["domains"])
++
++        let restored = ArciumCommandSites(["builtins": Self.builtins, "sites": written]).removing("youtube")
++        XCTAssertTrue(restored.dictionary.isEmpty)
++    }
++
++    func testVisibilityOrderAndDeletion() {
++        var sites = sites(["sites": ["docs": ["label": "Docs", "domains": ["docs.rs"]]]])
++        sites = sites.setting("x", visible: false)
++        XCTAssertEqual(sites.dictionary["hidden"] as? [String], ["x"])
++        sites = sites.moving("docs", by: -3)
++        XCTAssertEqual(sites.dictionary["order"] as? [String], ["docs", "youtube", "x", "chatgpt"])
++        sites = sites.setting("docs", visible: false).removing("docs")
++        XCTAssertEqual(sites.dictionary["order"] as? [String], ["youtube", "x", "chatgpt"])
++        XCTAssertEqual(sites.dictionary["hidden"] as? [String], ["x"])
++        XCTAssertNil(sites.dictionary["sites"])
++        sites = sites.setting("x", visible: true)
++        XCTAssertNil(sites.dictionary["hidden"])
++    }
++
++    func testCustomSiteValidation() {
++        var site = ArciumCommandSite(id: "", label: "Docs")
++        XCTAssertFalse(site.isValid)
++        site.domains = ["docs.rs"]
++        XCTAssertTrue(site.isValid)
++        for template in ["https://docs.rs/%s", "https://%s.docs.rs/", "https://docs.rs/?q=%s&r=%s",
++                         "javascript:alert(%s)", "https://docs.rs/?%s", "https://docs.rs/#q=%s"] {
++            site.search = template
++            XCTAssertFalse(site.isValid, template)
++        }
++        site.search = "https://docs.rs/releases/search?query=%s"
++        XCTAssertTrue(site.isValid)
++        site.domains = ["Docs.rs"]
++        XCTAssertFalse(site.isValid)
++        site.domains = []
++        XCTAssertTrue(site.isValid)
++        site.shortcuts = [ArciumCommandSiteShortcut(title: "Bad", url: "file:///etc/hosts")]
++        XCTAssertFalse(site.isValid)
++        site.shortcuts = [ArciumCommandSiteShortcut(title: "Releases", url: "https://docs.rs/releases"),
++                          ArciumCommandSiteShortcut(title: "Again", url: "https://docs.rs/releases")]
++        XCTAssertFalse(site.isValid)
++        site.shortcuts = [ArciumCommandSiteShortcut(title: "Root", url: "https://Docs.rs"),
++                          ArciumCommandSiteShortcut(title: "Slash", url: "https://docs.rs:443/")]
++        XCTAssertFalse(site.isValid)
++        site.shortcuts = [ArciumCommandSiteShortcut(title: "Releases", url: "https://docs.rs/releases")]
++        XCTAssertTrue(site.isValid)
++        site.label = String(repeating: "🙂", count: 21)
++        XCTAssertFalse(site.isValid)
++        site.label = String(repeating: "🙂", count: 20)
++        XCTAssertTrue(site.isValid)
++        site.label = "Docs"
++        for domain in ["192.168.0.1", "docs.123", "dócs.rs", "[::1]"] {
++            site.domains = [domain]
++            XCTAssertFalse(site.isValid, domain)
++        }
++        site.domains = []
++        site.search = "https://127.0.0.1/?q=%s"
++        XCTAssertFalse(site.isValid)
++        site.search = "https://docs.rs/releases/search?query=%s"
++        XCTAssertEqual(site.customDictionary["search"] as? String, "https://docs.rs/releases/search?query=%s")
++        XCTAssertNil(site.customDictionary["tint"])
++        XCTAssertNil(site.customDictionary["verb"])
++    }
++
++    func testSaveIsAcceptedOnlyWhenTheBrowserPublishesIt() {
++        var youtube = sites().site("youtube")!
++        youtube.label = "Videos"
++        let expected = sites().replacing(youtube)
++        XCTAssertTrue(ArciumCommandSiteSave.edited(expected).accepted(by: expected))
++        XCTAssertFalse(ArciumCommandSiteSave.edited(expected).accepted(by: sites()))
++        let added = sites(["sites": ["site-1": ["label": "Docs", "domains": ["docs.rs"]]]])
++        XCTAssertTrue(ArciumCommandSiteSave.added(before: []).accepted(by: added))
++        XCTAssertFalse(ArciumCommandSiteSave.added(before: ["site-1"]).accepted(by: added))
++    }
++
++    @MainActor
++    func testStoreSendsSparseSitesAndAddsThroughTheBrowser() {
++        let delegate = Delegate()
++        let store = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "commandSitesAvailable": true,
++            "commandSites": ["builtins": Self.builtins, "sites": ["hidden": ["x"]]],
++        ]], delegate: delegate)
++        XCTAssertEqual(store.snapshot.appearance.commandSites.hidden, ["x"])
++        store.setCommandSites(store.snapshot.appearance.commandSites.setting("x", visible: true))
++        XCTAssertEqual(delegate.settings.map(\.key), ["command_sites"])
++        XCTAssertTrue((delegate.settings.first?.value as? [String: Any])?.isEmpty ?? false)
++
++        var site = ArciumCommandSite(id: "", label: "Docs")
++        site.domains = ["docs.rs"]
++        store.addCommandSite(site)
++        XCTAssertEqual(delegate.actions.map(\.name), ["add_command_site"])
++        XCTAssertEqual(delegate.actions.first?.payload["label"] as? String, "Docs")
++        store.addCommandSite(ArciumCommandSite(id: "", label: ""))
++        XCTAssertEqual(delegate.actions.count, 1)
++
++        let managed = ArciumSettingsStore(snapshot: ["available": true, "appearance": [
++            "commandSitesAvailable": true, "commandSitesManaged": true,
++        ]], delegate: delegate)
++        managed.setCommandSites(ArciumCommandSites())
++        managed.addCommandSite(site)
++        XCTAssertEqual(delegate.settings.count, 1)
++        XCTAssertEqual(delegate.actions.count, 1)
++    }
++}
+Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+===================================================================
+--- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -129,6 +129,7 @@ NSString* const kKeySurfaceSet = @"surfa
+ NSString* const kKeySurfaceTuning = @"surface_tuning";
+ NSString* const kKeySurfacePreview = @"surface_preview";
+ NSString* const kKeyCommandPanelLayout = @"command_panel_layout";
++NSString* const kKeyCommandSites = @"command_sites";
+ NSString* const kKeySidebarWidth = @"sidebar_width";
+ NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
+ NSString* const kKeySidebarFooterAction = @"sidebar_footer_action";
+@@ -1805,6 +1806,12 @@ void SettingsModelProfileWillBeDestroyed
+         @(model && model->HasPreference(arcium::kCommandPanelLayoutPref)),
+     @"commandPanelLayoutManaged" :
+         @(model && model->IsManaged(arcium::kCommandPanelLayoutPref)),
++    @"commandSites" : NSDictionaryFromBaseDict(
++        model ? model->GetCommandSites() : base::DictValue()),
++    @"commandSitesAvailable" :
++        @(model && model->HasPreference(arcium::kCommandSitesPref)),
++    @"commandSitesManaged" :
++        @(model && model->IsManaged(arcium::kCommandSitesPref)),
+     @"commandBarAppearance" : @(command_bar_appearance),
+     @"commandBarAppearanceAvailable" : @(command_bar_appearance_available),
+     @"commandBarAppearanceManaged" : @(command_bar_appearance_managed),
+@@ -2678,6 +2685,18 @@ void SettingsModelProfileWillBeDestroyed
+     }
+     return;
+   }
++  if ([key isEqualToString:kKeyCommandSites]) {
++    // The browser validates the whole sparse value; a rejected edit leaves the
++    // saved sites unchanged and republishes them.
++    const auto sites = [value isKindOfClass:[NSDictionary class]]
++                           ? BaseDictFromNSObject((NSDictionary*)value)
++                           : std::nullopt;
++    if (sites) {
++      model_->SetCommandSites(*sites);
++    }
++    [self modelDidChange];
++    return;
++  }
+   if ([key isEqualToString:kKeyCommandPanelLayout]) {
+     if ([value isKindOfClass:[NSDictionary class]]) {
+       const auto layout = arcium_settings::CommandPanelLayoutFromNSObject(value);
+@@ -2811,6 +2830,13 @@ void SettingsModelProfileWillBeDestroyed
+     [self closeCommandBarEditor];
+     return;
+   }
++  if ([name isEqualToString:@"add_command_site"]) {
++    if (const auto site = BaseDictFromNSObject(payload)) {
++      model_->AddCommandSite(*site);
++    }
++    [self modelDidChange];
++    return;
++  }
+   if ([name isEqualToString:@"reset_chrome_ui_scale"]) {
+     model_->ClearPreference(arcium::kChromeUIScalePref);
+     [self modelDidChange];
