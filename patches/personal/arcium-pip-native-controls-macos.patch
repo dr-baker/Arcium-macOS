@@ -349,7 +349,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2735 @@
+@@ -0,0 +1,2730 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1399,16 +1399,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [_resizeView removeFromSuperview];
 +  _glassContent = [[NSView alloc] initWithFrame:self.bounds];
 +  _glassContent.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-+  if (@available(macOS 26.0, *)) {
-+    NSGlassEffectContainerView* container =
-+        [[NSGlassEffectContainerView alloc] initWithFrame:self.bounds];
-+    container.spacing = 0;
-+    container.contentView = _glassContent;
-+    _glassContainer = container;
-+  } else {
-+    _glassContainer = [[NSView alloc] initWithFrame:self.bounds];
-+    [_glassContainer addSubview:_glassContent];
-+  }
++  // Glass containers elevate descendant effects above sibling content.
++  // These independent capsules already own their material and foreground;
++  // grouping them would lift glass over the button symbols.
++  _glassContainer = [[NSView alloc] initWithFrame:self.bounds];
++  [_glassContainer addSubview:_glassContent];
 +  _glassContainer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 +  [self addSubview:_glassContainer];
 +  _returnButton = [self button:@"pip.exit"
@@ -4232,7 +4227,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1446 @@
+@@ -0,0 +1,1461 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4548,6 +4543,21 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  [overlay windowGeometryChanged:[NSNotification
 +      notificationWithName:NSWindowDidResizeNotification object:window_]];
 +  EXPECT_TRUE(overlay.needsLayout);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, GlassDoesNotElevateAboveButtonSymbols) {
++  for (NSString* label in @[@"Play", @"Return to tab", @"Tuck to screen edge",
++       @"Close Picture in Picture", @"Back 15 seconds", @"Forward 15 seconds", @"Mute"]) {
++    NSButton* button = Button(label);
++    ASSERT_TRUE(button);
++    // Plain view ordering keeps foreground above the material. An ancestor
++    // glass container would instead elevate the nested effect above it.
++    EXPECT_EQ(button.superview.subviews.lastObject, button);
++    if (@available(macOS 26.0, *)) {
++      for (NSView* ancestor = button.superview; ancestor; ancestor = ancestor.superview)
++        EXPECT_FALSE([ancestor isKindOfClass:NSGlassEffectContainerView.class]);
++    }
++  }
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, SharedGlassChangesPreserveControlsAndActions) {
