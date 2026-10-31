@@ -18,7 +18,7 @@ def compile_prepared(paths, targets, *, arch, jobs=None):
     with evidence.phase('ci_preflight'):
         if list(paths.out.glob('siso_*')) or list(paths.out.glob('.siso*')):
             raise HeError('CI archive contains Siso state; refusing to switch it to Ninja')
-        result = subprocess.run([str(paths.out / 'gn'), 'args', str(paths.out), '--list', '--json'],
+        result = subprocess.run([str(paths.src / 'buildtools/mac/gn'), 'args', str(paths.out), '--list', '--json'],
                                 cwd=paths.src, env=remote.environment(),
                                 capture_output=True, text=True, timeout=30, check=True)
         values = {item['name']: item.get('current', item.get('default', {})).get('value')

@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Page edge — dark</title>
+<style>
+  :root { color-scheme: dark; background: #141414; color: #e8e8e8; font: 16px system-ui; }
+  body { margin: 48px; }
+  h1 { font-size: 24px; font-weight: 500; }
+  p { color: #aaa; }
+  .measure { width: 320px; height: 2px; background: #999; margin-top: 32px; }
+</style>
+<h1>Dark page</h1>
+<p id="size"></p>
+<div class="measure"></div>
+<script>
+function measure() { document.querySelector('#size').textContent = `Viewport: ${innerWidth} × ${innerHeight}`; }
+addEventListener('resize', measure); measure();
+</script>

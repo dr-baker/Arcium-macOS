@@ -54,16 +54,66 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.assertEqual("apply", arguments[1])
         self.assertEqual("--no-fuzz", arguments[2])
 
+    @unittest.skipUnless(shutil.which("timeout"), "needs GNU timeout")
+    def test_smoke_timeout_waits_for_supervised_shutdown(self) -> None:
+        for name in ("sudo", "brew", "pip3.14"):
+            self.write_executable(self.bin_dir / name, "#!/bin/sh\nexit 0\n")
+        (self.root / "devutils").symlink_to(ROOT / "devutils", target_is_directory=True)
+        (self.root / "dev.sh").write_text(
+            '_root_dir="$PWD"\n'
+            'HELIUM_DEV_BUILD_ROOT="$PWD/build"\n'
+            '_he_build_mode=diagnostics\n'
+            'he() { (\n'
+            '  if [ "$1" = setup ]; then exit 0; fi\n'
+            '  python3 "$PWD/build-worker.py"\n'
+            '); }\n'
+        )
+        (self.root / "build-worker.py").write_text(
+            'from datetime import datetime, timezone\n'
+            'import json, signal, time\n'
+            'from pathlib import Path\n'
+            'path = Path("build/.arcium/build-evidence/smoke/manifest.json")\n'
+            'path.parent.mkdir(parents=True, exist_ok=True)\n'
+            'value = {"started_at": datetime.now(timezone.utc).isoformat(),\n'
+            '         "phases": [{"name": "build", "attributes": {"child_started_offset_nanos": 0}}]}\n'
+            'def finish(signum, frame):\n'
+            '    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n'
+            '    time.sleep(1)\n'
+            '    value.update(finished_at=datetime.now(timezone.utc).isoformat(), returncode=143)\n'
+            '    path.write_text(json.dumps(value))\n'
+            '    raise SystemExit(143)\n'
+            'signal.signal(signal.SIGTERM, finish)\n'
+            'path.write_text(json.dumps(value))\n'
+            'while True: time.sleep(.1)\n'
+        )
+        self.write_executable(
+            self.bin_dir / "timeout",
+            f'#!{sys.executable}\nimport os, sys\n'
+            f'command = {shutil.which("timeout")!r}\n'
+            'args = ["1s" if arg == "120s" else arg for arg in sys.argv[1:]]\n'
+            'os.execv(command, [command, *args])\n',
+        )
+        result = subprocess.run([str(SANITY_SCRIPT)], cwd=self.root,
+                                env=self.entrypoint_environment(), capture_output=True,
+                                text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / "build/.arcium/lane.lock").exists())
+        self.assertFalse((self.root / "build/.arcium/lane-command.json").exists())
+
     def test_sanity_check_build_exit_statuses_and_setup(self) -> None:
         src_dir = self.root / "source"
         (self.root / "dev.sh").write_text(
+            f"_root_dir={str(ROOT)!r}\n"
+            f"HELIUM_DEV_BUILD_ROOT={str(self.root / 'build')!r}\n"
             f"_src_dir={str(src_dir)!r}\n"
             f"_out_dir={str(src_dir / 'out/Default')!r}\n"
             "mkdir -p \"$_src_dir\"\n"
             "he() {\n"
             "  printf '%s\\n' \"$*\" >> \"$HE_CALLS\"\n"
             "  case \"$1\" in\n"
-            "    setup) [ \"$2\" = --force ] && echo 'source prepared' ;;\n"
+            "    setup) [ \"$2\" = --force ] || return 2\n"
+            "      printf '%s\\n' \"${SETUP_OUTPUT:-source prepared}\"\n"
+            "      return \"${SETUP_STATUS:-0}\" ;;\n"
             "    reset) return 2 ;;\n"
             "    *) return 2 ;;\n"
             "  esac\n"
@@ -76,18 +126,36 @@ class ReleaseEntrypointsTest(unittest.TestCase):
         self.write_executable(self.bin_dir / "pip3.14", "#!/bin/bash\nexit 0\n")
         self.write_executable(
             self.bin_dir / "timeout",
-            '#!/bin/bash\nexit "$SMOKE_STATUS"\n',
+            '#!/bin/bash\necho smoke >> "$HE_CALLS"\n'
+            f'{sys.executable!r} - <<\'PY\'\n'
+            'from datetime import datetime, timezone\n'
+            'import json, os\n'
+            'from pathlib import Path\n'
+            'path = Path("build/.arcium/build-evidence/smoke/manifest.json")\n'
+            'path.parent.mkdir(parents=True, exist_ok=True)\n'
+            'now = datetime.now(timezone.utc).isoformat()\n'
+            'status = int(os.environ["SMOKE_STATUS"])\n'
+            'path.write_text(json.dumps({"started_at": now, "finished_at": now,\n'
+            '    "returncode": 143 if status == 124 else status,\n'
+            '    "phases": [{"name": "build", "attributes": {"child_started_offset_nanos": 0}}]}))\n'
+            'PY\nexit "$SMOKE_STATUS"\n',
         )
 
         environment = self.entrypoint_environment()
         environment["HE_CALLS"] = str(calls)
-        for status, expected in ((0, 0), (124, 0), (1, 1), (125, 1), (127, 1), (137, 1)):
-            with self.subTest(status=status):
+        cases = [(status, 0, "source prepared", expected)
+                 for status, expected in ((0, 0), (124, 0), (1, 1), (125, 1), (127, 1), (137, 1))]
+        offset = "Hunk #1 succeeded at 20 (offset 5 lines)."
+        cases.extend(((0, 0, offset, 0), (0, 1, "patch failed", 1),
+                      (0, 2, offset, 2)))
+        for status, setup_status, output, expected in cases:
+            with self.subTest(status=status, setup_status=setup_status, output=output):
                 calls.unlink(missing_ok=True)
                 result = subprocess.run(
                     [str(SANITY_SCRIPT)],
                     cwd=self.root,
-                    env={**environment, "SMOKE_STATUS": str(status)},
+                    env={**environment, "SMOKE_STATUS": str(status),
+                         "SETUP_STATUS": str(setup_status), "SETUP_OUTPUT": output},
                     text=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -95,8 +163,9 @@ class ReleaseEntrypointsTest(unittest.TestCase):
                 )
 
                 self.assertEqual(expected, result.returncode, result.stdout)
-                self.assertEqual("setup --force\n", calls.read_text(encoding="utf-8"))
-                if expected:
+                expected_calls = "setup --force\n" + ("" if setup_status else "smoke\n")
+                self.assertEqual(expected_calls, calls.read_text(encoding="utf-8"))
+                if expected and not setup_status:
                     self.assertIn(f"failed with status code {status}", result.stdout)
 
     def test_local_build_passes_no_fuzz_to_patch_utility(self) -> None:

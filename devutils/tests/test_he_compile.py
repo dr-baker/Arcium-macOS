@@ -301,9 +301,10 @@ class PolicyAndPlanTest(unittest.TestCase):
             write_json(remote.ready_file(paths), remote.fingerprint(paths))
             values = [dict(name=k, current={'value': v}) for k, v in
                       [('use_siso', 'true'), ('use_remoteexec', 'true'), ('use_reclient', 'true')]]
-            with patch('he.remote.subprocess.run', return_value=SimpleNamespace(stdout=json.dumps(values))):
+            with patch('he.remote.subprocess.run', return_value=SimpleNamespace(stdout=json.dumps(values))) as run:
                 with self.assertRaisesRegex(HeError, 'effective'):
                     remote.require_ready(paths)
+            self.assertEqual(run.call_args.args[0][0], str(paths.src / 'buildtools/mac/gn'))
 
     def test_plan_formats_and_truncation(self):
         for text, expected in [('ninja: no work to do.\n', 0), ('[1/14] CXX\n[14/14] LINK\n', 14),

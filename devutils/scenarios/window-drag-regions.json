@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "id": "window-drag-regions",
+  "description": "Drag the browser using empty infobar space or the exposed top frame while preserving controls and page input.",
+  "profile": { "policy": "isolated", "name": "new-tab-window-drag" },
+  "feature_flags": [],
+  "tests": [
+    {
+      "target": "//chrome/test:arcium_feature_settings_unit_tests",
+      "filters": [
+        "ArciumBrowserChromeTest.HiddenToolbarTopFrameDragsWithoutClaimingPage",
+        "ArciumBrowserChromeTest.StackedSplitTopPageNeverBecomesWindowCaption",
+        "ArciumBrowserChromeTest.InfobarPaddingDragsAndControlsRemainClient"
+      ]
+    }
+  ],
+  "preconditions": [
+    "Use the exact recorded isolated Dev bundle with an acceptance-owned profile and --enable-automation",
+    "Hide the toolbar, keep the sidebar visible, and use a normal non-fullscreen window"
+  ],
+  "steps": [
+    "Drag empty space in the automation infobar and record the window position before and after",
+    "Verify the banner action and dismiss controls remain clickable; dismiss the banner",
+    "Drag the narrow exposed frame immediately above the webpage and record window movement",
+    "Click and select text inside the webpage; verify it does not drag the window",
+    "Repeat the top-frame check with both split orientations and each active pane",
+    "Enter fullscreen, verify page and banner controls remain usable, then exit fullscreen",
+    "Resize the window using its edge, then close and quit normally"
+  ],
+  "observables": [
+    "Empty banner padding and the exposed top frame move the normal window",
+    "Infobar text, action buttons, links, and dismiss controls remain client input",
+    "Neither webpage becomes a drag region when the lower stacked pane is active",
+    "Fullscreen and native window-edge resizing retain their existing behavior",
+    "Normal close and quit produce no new crash"
+  ],
+  "verify_persistence": false,
+  "verify_teardown": true
+}

@@ -59,7 +59,7 @@ class GitHubBuildConfigurationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         (self.root / "build/src/out/Default").mkdir(parents=True)
-        (self.root / "build/src/tools/gn/bootstrap").mkdir(parents=True)
+        (self.root / "build/src/buildtools/mac").mkdir(parents=True)
         (self.root / "helium-chromium").mkdir()
         (self.root / "devutils").mkdir()
         (self.root / "helium-chromium/flags.gn").write_text("is_debug = false\n")
@@ -78,11 +78,7 @@ class GitHubBuildConfigurationTests(unittest.TestCase):
         )
         readlink_stub.chmod(0o755)
 
-        bootstrap = self.root / "build/src/tools/gn/bootstrap/bootstrap.py"
-        bootstrap.write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n")
-        bootstrap.chmod(0o755)
-
-        gn = self.root / "build/src/out/Default/gn"
+        gn = self.root / "build/src/buildtools/mac/gn"
         gn.write_text(
             "#!/bin/sh\n"
             "printf '%s\\n' \"$*\" >> \"$GN_STUB_LOG\"\n"

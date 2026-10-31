@@ -91,6 +91,8 @@ Some things to know early:
 * Xcode 26 with Swift 6.2 or newer
 * Homebrew
 * Perl (for creating a `.dmg` package)
+* Node.js and `appdmg@0.6.6` for the drag-to-Applications DMG:
+  `npm install -g appdmg@0.6.6`.
 
 ### Build dependencies
 
@@ -98,7 +100,7 @@ Some things to know early:
    a Python environment inside the build dir from `requirements-dev.txt`, so no
    global `pip3` install is needed.
 1. Install Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
-1. Install Ninja, wget, and Quilt via Homebrew: `brew install ninja wget quilt`
+1. Install Ninja, wget, and Quilt via Homebrew: `brew install ninja wget quilt zstd`
 1. Install GNU coreutils and readline via Homebrew: `brew install coreutils readline`
 1. Unlink binutils to use the one provided with Xcode: `brew unlink binutils`
 1. Restart your terminal.
@@ -136,6 +138,16 @@ compiled `Helium.app` into a temporary `Arcium.app`, rewrites its bundle
 identifiers and profile directory, and signs that copy; internal executable
 names stay the ones Chromium expects.
 
+The DMG shows the browser and an Applications shortcut over the blush
+background. Both release packaging paths use `devutils/release_dmg.py`.
+Regenerate the 1× and 2× artwork with
+`swift devutils/dmg-background.swift resources/dmg-background`.
+The browser reads its bundled initial preferences on first launch, after
+checking the existing user and system preference files. Installation does
+not need to create or edit a user profile.
+
+![Drag Arcium to Applications in the blush DMG](assets/install-dmg.png)
+
 `build.sh` always builds in `<checkout>/build`, ignores `HELIUM_BUILD_DIR` and
 `~/.config/arcium/dev.env`, and refuses a checkout whose build dir holds a
 development Quilt tree. Use a dedicated checkout for release builds. The
@@ -148,6 +160,9 @@ the `PROD_MACOS_SPARKLE_FEED_BASE_URL` variable (an HTTPS base serving
 `mac/appcast-arm64.xml` and `mac/appcast-x86_64.xml`) together. For a manual
 build, `enable_sparkle` also needs `sparkle_ed_key` and `sparkle_feed_url` in
 the GN configuration.
+
+Use `./build.sh -c` to clone Chromium instead of downloading the prepared
+archives. `-d` explicitly selects archives.
 
 After a failed official build, remove `build/download_cache` if downloading
 failed, or `build/src` if a later step failed, and run the build again.
@@ -373,6 +388,9 @@ actions. Diagnostics, daily, and both official release architectures use the
 same compile routing, with their own existing configuration and packaging.
 
 ### Updating for a new Chromium release
+
+Start with [Updating from Helium](upstream-update.md) to select matching core
+and macOS revisions and inspect downstream conflicts.
 
 Use a new build dir for a version update and keep the old one until the new
 build passes. `he merge` and `he push` refuse a checkout whose Chromium version

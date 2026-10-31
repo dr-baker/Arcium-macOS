@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsModels.swift
-@@ -896,16 +896,7 @@ final class ArciumSettingsStore: Observa
+@@ -905,16 +905,7 @@ final class ArciumSettingsStore: Observa
          self.pendingChromeAppearance = nil
  
          do {
@@ -20,7 +20,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
              presetError = nil
          } catch {
              preset = nil
-@@ -1435,3 +1426,14 @@ private func isValidSharedPalette(_ pale
+@@ -1444,3 +1435,14 @@ private func isValidSharedPalette(_ pale
          && contains(palette.textContrast, 4.5...7) && contains(palette.lightCanvas, 0...1)
          && contains(palette.darkCanvas, 0...1)
  }
@@ -299,7 +299,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
      func testTintColorEditingDoesNotRequireOrCreateGlowPoints() throws {
          var empty = makeConfiguration()
          empty.colorEffect = .tint
-@@ -2037,3 +2074,11 @@ final class ArciumSettingsUIContractTest
+@@ -2057,3 +2094,11 @@ final class ArciumSettingsUIContractTest
          }
      }
  }
@@ -545,17 +545,17 @@ Index: src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
 +++ src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
-@@ -44,6 +44,9 @@
+@@ -47,6 +47,9 @@
+ #include "chrome/browser/ui/views/frame/shadow_frame_view.h"
  #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
- #include "chrome/browser/ui/views/helium/arcium_chrome_ui_scale.h"
  #include "chrome/browser/ui/views/helium/arcium_space_editor_view.h"
 +#if BUILDFLAG(IS_MAC)
 +#include "chrome/browser/ui/cocoa/arcium_settings_window_controller.h"
 +#endif
- #include "chrome/browser/ui/views/helium/frame_corner_radius.h"
  #include "chrome/browser/ui/views/tabs/common/pinned_tab_container_view.h"
  #include "chrome/browser/ui/views/tabs/common/root_tab_collection_node.h"
-@@ -498,7 +501,12 @@ void VerticalTabStripRegionView::ShowSpa
+ #include "chrome/browser/ui/views/tabs/common/tab_collection_node.h"
+@@ -581,7 +584,12 @@ void VerticalTabStripRegionView::ShowSpa
        base::BindRepeating(&VerticalTabStripBottomContainer::SetThemePreview,
                            base::Unretained(bottom_button_container_.get())),
        base::BindRepeating(&VerticalTabStripRegionView::CloseSpaceEditor,
@@ -563,7 +563,7 @@ Index: src/chrome/browser/ui/views/frame/vertical_tab_strip_region_view.cc
 +                          base::Unretained(this))
 +#if BUILDFLAG(IS_MAC)
 +      , base::BindRepeating(&arcium_settings::ShowSpaceThemeDraft,
-+                            browser_view_->browser())
++                            browser_view()->browser())
 +#endif
 +      );
    editor->SetProperty(

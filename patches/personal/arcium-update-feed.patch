@@ -1,6 +1,6 @@
 --- a/chrome/updater/sparkle.gni
 +++ b/chrome/updater/sparkle.gni
-@@ -9,9 +9,17 @@
+@@ -9,9 +9,17 @@ declare_args() {
    # SUPublicEDKey: EdDSA key used for signing Sparkle updates.
    sparkle_ed_key = ""
  
@@ -20,7 +20,7 @@
 +}
 --- a/chrome/BUILD.gn
 +++ b/chrome/BUILD.gn
-@@ -515,11 +515,10 @@
+@@ -535,11 +535,10 @@ if (is_win) {
      }
  
      if (enable_sparkle) {
@@ -44,7 +44,7 @@
  import optparse
  import os
  import plistlib
-@@ -28,6 +30,7 @@
+@@ -28,6 +30,7 @@ import re
  import subprocess
  import sys
  import tempfile
@@ -52,8 +52,8 @@
  
  TOP = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
  
-@@ -195,8 +198,36 @@
-   return re.match(r'^[0-9a-zA-Z-.]+$', bundle_identifier) is not None
+@@ -217,8 +220,36 @@ def _IsValidBundleId(bundle_identifier):
+     return re.match(r'^[0-9a-zA-Z-.]+$', bundle_identifier) is not None
  
  
 -def _AddSparkleKeys(plist, ed_key, auto_checks, check_interval):
@@ -90,7 +90,7 @@
    plist['SUEnableAutomaticChecks'] = 'YES' if auto_checks else 'NO'
    plist['SUScheduledCheckInterval'] = check_interval
    plist['SUVerifyUpdateBeforeExtraction'] = 'YES'
-@@ -205,7 +236,7 @@
+@@ -227,7 +258,7 @@ def _AddSparkleKeys(plist, ed_key, auto_
  
  def _RemoveSparkleKeys(plist):
    """Removes any set Sparkle keys."""
@@ -99,40 +99,41 @@
                'SUScheduledCheckInterval', 'SUVerifyUpdateBeforeExtraction',
                'SUShowReleaseNotes')
  
-@@ -350,6 +381,11 @@
-                     action='store',
-                     default=None,
-                     help='Sparkle update signing EdDSA key')
-+  parser.add_option('--sparkle_feed_url',
-+                    dest='sparkle_feed_url',
-+                    action='store',
-+                    default=None,
-+                    help='Configured Arcium Sparkle appcast URL')
-   parser.add_option('--sparkle_automatic_checks',
-                     dest='sparkle_automatic_checks',
-                     action='store',
-@@ -508,13 +544,18 @@
+@@ -389,6 +420,13 @@ def Main(argv):
+         help='Sparkle update signing EdDSA key'
+     )
+     parser.add_option(
++        '--sparkle_feed_url',
++        dest='sparkle_feed_url',
++        action='store',
++        default=None,
++        help='Configured Arcium Sparkle appcast URL',
++    )
++    parser.add_option(
+         '--sparkle_automatic_checks',
+         dest='sparkle_automatic_checks',
+         action='store',
+@@ -583,13 +621,17 @@ def Main(argv):
  
-   # Add Sparkle parameters if configured to do so.
-   if options.use_sparkle:
--    if not options.sparkle_ed_key:
--      print('Sparkle updates require an EdDSA key.', file=sys.stderr)
-+    if not _IsValidSparklePublicKey(options.sparkle_ed_key):
-+      print('Sparkle updates require a base64-encoded 32-byte EdDSA public key.',
-+            file=sys.stderr)
-+      return 1
-+    if not _IsValidSparkleFeedURL(options.sparkle_feed_url):
-+      print('Sparkle updates require a valid HTTPS feed URL.',
-+            file=sys.stderr)
-       return 1
-     if options.sparkle_check_interval < 3600:
-       print('Sparkle update check interval must be at least 1 hour (3600).', file=sys.stderr)
-       return 1
--    _AddSparkleKeys(plist, options.sparkle_ed_key,
-+    _AddSparkleKeys(plist, options.sparkle_ed_key, options.sparkle_feed_url,
-                     options.sparkle_automatic_checks,
-                     options.sparkle_check_interval)
-   else:
+     # Add Sparkle parameters if configured to do so.
+     if options.use_sparkle:
+-      if not options.sparkle_ed_key:
+-        print('Sparkle updates require an EdDSA key.', file=sys.stderr)
++      if not _IsValidSparklePublicKey(options.sparkle_ed_key):
++        print('Sparkle updates require a base64-encoded 32-byte EdDSA public key.',
++              file=sys.stderr)
++        return 1
++      if not _IsValidSparkleFeedURL(options.sparkle_feed_url):
++        print('Sparkle updates require a valid HTTPS feed URL.', file=sys.stderr)
+         return 1
+       if options.sparkle_check_interval < 3600:
+         print('Sparkle update check interval must be at least 1 hour (3600).', file=sys.stderr)
+         return 1
+-      _AddSparkleKeys(plist, options.sparkle_ed_key,
++      _AddSparkleKeys(plist, options.sparkle_ed_key, options.sparkle_feed_url,
+                       options.sparkle_automatic_checks,
+                       options.sparkle_check_interval)
+     else:
 --- a/chrome/browser/mac/sparkle_glue.mm
 +++ b/chrome/browser/mac/sparkle_glue.mm
 @@ -22,6 +22,7 @@
@@ -148,20 +149,19 @@
  // Delegated method. Return the appcast URL for the installed channel.
  - (NSString*)feedURLStringForUpdater:(SPUUpdater*)updater {
 -  helium::TryAcquireProfilePtr();
--
--  if (!profile_) {
 +  if (![self shouldAccessUpdateService]) {
++    return @"";
++  }
+ 
+-  if (!profile_) {
++  NSString* configuredFeedURL = base::apple::ObjCCast<NSString>(
++      [[NSBundle mainBundle] objectForInfoDictionaryKey:@"SUFeedURL"]);
++  if (configuredFeedURL.length == 0) {
      return @"";
    }
  
 -  return base::SysUTF8ToNSString(
 -    helium::GetBrowserUpdateURL(*profile_->GetPrefs()).spec());
-+  NSString* configuredFeedURL = base::apple::ObjCCast<NSString>(
-+      [[NSBundle mainBundle] objectForInfoDictionaryKey:@"SUFeedURL"]);
-+  if (configuredFeedURL.length == 0) {
-+    return @"";
-+  }
-+
 +  const auto* command_line = base::CommandLine::ForCurrentProcess();
 +  if (command_line->HasSwitch(helium::kUpdateServerUrlCommandLine)) {
 +    const std::string override_base =

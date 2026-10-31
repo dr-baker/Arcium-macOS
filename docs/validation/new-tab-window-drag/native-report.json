@@ -1,0 +1,135 @@
+{
+  "verifier": "GPT-6.1-Sol native macOS computer use",
+  "app": "runtime/Helium Dev - new-tab-window-drag.app",
+  "initial_pid": 21565,
+  "final_pid": 28018,
+  "final_window_id": 21016,
+  "profile": "/Users/daniel/Library/Application Support/Helium Development/profiles/isolated/new-tab-window-drag",
+  "core_revision": "a50c6e58d58d81731bf6f73853e084d73f0fb114",
+  "outer_revision": "c5cd3f3ca97ae0d712d33eacedc98368f231a5c7",
+  "native_passes": [
+    "Sidebar New Tab immediately adds one selected blank tab and opens empty command bar.",
+    "Escape retains the newly created blank tab.",
+    "CmdT and two repetitions while command bar is open each add exactly one blank tab.",
+    "Typing https://example.com/ and Return navigates the created tab without adding another.",
+    "Switching sidebar tabs preserves previously created blanks.",
+    "CmdT then Example then Return switches to live existing Example Domains result; created blank remains and tab count stays unchanged after switch.",
+    "Empty automation banner area drags window.",
+    "Physical banner Close works after explicitly activating browser; AXPress also works.",
+    "Exact one-pixel strip above content drags window after banner dismissal.",
+    "Public page Learn more link remains clickable and navigates Example Domain to IANA Example Domains.",
+    "Native right-edge drag resizes width1200 to1107; fullscreen enters and exits.",
+    "Side-by-side split: each real active pane top strip drags window.",
+    "Normal Quit menu exits original process; same copied bundle and flags relaunch successfully.",
+    "Four seeded saved identities and resized window geometry survive normal relaunch."
+  ],
+  "tab_row_counts_including_four_saved": {
+    "baseline": 5,
+    "sidebar_new_tab": 6,
+    "escape": 6,
+    "cmdt": 7,
+    "repeat_cmdt": 8,
+    "repeat_cmdt_again": 9,
+    "navigate": 9,
+    "new_blank_for_existing_switch": 10,
+    "after_existing_switch": 10
+  },
+  "bounds": {
+    "automation_banner": {
+      "before": [
+        264,
+        33,
+        1200,
+        1040
+      ],
+      "after": [
+        344,
+        33,
+        1200,
+        1040
+      ]
+    },
+    "single_pane_exact_content_strip": {
+      "before": [
+        354,
+        33,
+        1107,
+        1040
+      ],
+      "after": [
+        274,
+        33,
+        1107,
+        1040
+      ],
+      "global_y": 38,
+      "web_area_top_y": 39
+    },
+    "right_split_pane": {
+      "before": [
+        334,
+        63,
+        1107,
+        1040
+      ],
+      "after": [
+        254,
+        63,
+        1107,
+        1040
+      ],
+      "global_y": 68
+    },
+    "left_split_pane": {
+      "before": [
+        254,
+        63,
+        1107,
+        1040
+      ],
+      "after": [
+        314,
+        63,
+        1107,
+        1040
+      ],
+      "global_y": 68
+    }
+  },
+  "limitations": [
+    "Native stacked split orientation not exercised: launch flags omit kSplitViewHorizontal, which gates its menu toggle. Parent reports deterministic stacked-pane C++ tests pass.",
+    "Automation banner exposes only Close; generic action buttons and label hit behavior are parent C++ coverage, not native passes here.",
+    "Ordinary startup returns to four seeded saved rows plus one new tab; temporary session restoration is not configured and was not verified.",
+    "Window-only video follows the window; recorded bounds establish window movement relative to desktop."
+  ],
+  "initial_false_alarms_resolved": [
+    "Initial physical Close click on inactive window did not dismiss; freshly measured center after explicit activation dismissed correctly.",
+    "Drag at topmost local3 hits native resize border; webpage y73 hits client area. Exact post-dismiss strip globaly38/local5 moves window.",
+    "First corner resize attempt did not resize; native right-edge drag did.",
+    "Brief CmdQ intercepted by existing Warn Before Quitting; normal Quit menu exited successfully."
+  ],
+  "final_state": "Running normal single-pane Example Domain, command bar closed; GUI input ceased.",
+  "selected_media": [
+    "new-tab-command-bar.png",
+    "top-frame.png",
+    "interactions.mp4"
+  ],
+  "video": {
+    "file": "interactions.mp4",
+    "duration_seconds": 34,
+    "width": 1200,
+    "height": 1128,
+    "bytes": 357104,
+    "decode_check": "ffmpeg full decode passes",
+    "source": "Actual window-only ScreenCaptureKit recordings; trims, scale, padding, and concatenation only.",
+    "source_file": "native-verification-highlights.mp4"
+  },
+  "source_media": [
+    "01-sidebar-new-tab.png",
+    "11-banner-drag.png",
+    "21-sliver-exact.png",
+    "25-existing-search.png",
+    "43-final-handoff.png",
+    "native-verification-highlights.mp4"
+  ]
+}

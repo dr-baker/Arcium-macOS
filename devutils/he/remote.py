@@ -230,7 +230,7 @@ def ready_file(paths):
 
 
 def validate_effective(paths):
-    gn = paths.out / 'gn'
+    gn = paths.src / 'buildtools/mac/gn'
     result = subprocess.run([str(gn), 'args', str(paths.out), '--list', '--json'], cwd=paths.src,
                             env=environment(), capture_output=True, text=True, check=True)
     values = {item['name']: item.get('current', item.get('default', {})).get('value')

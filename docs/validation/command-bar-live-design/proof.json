@@ -1,0 +1,25 @@
+{
+  "fixture": "public synthetic workshop rows",
+  "capture_kind": "actual native production Studio embedded editor, not the Swift approximation",
+  "proof_source_generation": "ef9480a1e1f4dd5bc224bb13f0f227256d992b82dca16ce43e1464eeb81dd592",
+  "public_core_source": "e57ef008",
+  "published_renderer_matches_compiled_sdk": {
+    "arcium_command_panel.cc": "7c8534ef82ddb09c0c635de2b5690a779f84307eb3b4a2c7bb86cdefb6b861b8",
+    "arcium_command_design.h": "80cd894d2512b070048384b85cf00c9c4fb0bf667949b269a33d9d77ecd1fd2b"
+  },
+  "row_height": {
+    "before": 44,
+    "after": 64,
+    "same_process": true,
+    "compile_between_states": false,
+    "relaunch_between_states": false,
+    "readout": "scenario and AX; detailed slider pixels stayed below fold"
+  },
+  "light_dark": "same fixture/query a and selected Project notes",
+  "isolated_proof_app_normally_quit": true,
+  "limits": [
+    "No fresh full-browser compile of publication refs",
+    "Native MP4 recording tool unavailable",
+    "These pre-picker-polish controls do not prove the new SVG cards or rounded child-sheet pixels"
+  ]
+}

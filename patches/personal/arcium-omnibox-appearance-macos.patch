@@ -2,14 +2,14 @@ Index: src/chrome/browser/ui/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/BUILD.gn
 +++ src/chrome/browser/ui/BUILD.gn
-@@ -3635,6 +3635,7 @@ static_library("ui") {
-       "views/helium/frame_corner_radius_mac.mm",
+@@ -3514,6 +3514,7 @@ static_library("ui") {
+       "views/helium/fullscreen_window_controls_mac.mm",
        "views/helium/glass_surface_mac.h",
        "views/helium/glass_surface_mac.mm",
 +      "views/omnibox/arcium_command_bar_material_mac.mm",
        "views/helium/native_frame_materials_mac.h",
        "views/helium/native_frame_materials_mac.mm",
-       "views/tab_contents/chrome_web_contents_view_delegate_views_mac.h",
+     ]
 Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/views/omnibox/arcium_command_bar_material.cc
@@ -972,7 +972,7 @@ Index: src/chrome/test/BUILD.gn
 ===================================================================
 --- src.orig/chrome/test/BUILD.gn
 +++ src/chrome/test/BUILD.gn
-@@ -133,6 +133,7 @@ if (!is_android && toolkit_views) {
+@@ -134,6 +134,7 @@ if (!is_android && toolkit_views) {
        ]
      }
      if (is_mac) {

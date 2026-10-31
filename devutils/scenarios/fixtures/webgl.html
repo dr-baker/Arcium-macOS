@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Arcium WebGL check</title>
+<style>
+  body { font: 18px system-ui; margin: 40px; }
+  canvas { width: 320px; height: 200px; border: 1px solid #777; }
+  pre { white-space: pre-wrap; }
+</style>
+<h1>WebGL rendering check</h1>
+<p>The canvas should be green. This checks context creation and framebuffer
+readback; inspect <code>chrome://gpu</code> separately for hardware acceleration.</p>
+<canvas width="320" height="200"></canvas>
+<pre id="result">Running…</pre>
+<script>
+  const canvas = document.querySelector('canvas');
+  const result = document.querySelector('#result');
+  try {
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+    if (!gl) throw new Error('No WebGL context');
+    gl.clearColor(0, 0.75, 0.25, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const pixel = new Uint8Array(4);
+    gl.readPixels(160, 100, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+    const error = gl.getError();
+    const expected = [0, 191, 64, 255];
+    const passed = error === gl.NO_ERROR &&
+      expected.every((value, index) => Math.abs(pixel[index] - value) <= 3);
+    result.textContent = [
+      passed ? 'PASS: green framebuffer' : 'FAIL: unexpected framebuffer',
+      `Version: ${gl.getParameter(gl.VERSION)}`,
+      `Renderer: ${gl.getParameter(gl.RENDERER)}`,
+      `RGBA: ${Array.from(pixel).join(', ')}`,
+      `GL error: ${error}`,
+    ].join('\n');
+    canvas.addEventListener('webglcontextlost', () => {
+      result.textContent += '\nFAIL: WebGL context lost';
+    });
+  } catch (error) {
+    result.textContent = `FAIL: ${error.message}`;
+  }
+</script>
+</html>

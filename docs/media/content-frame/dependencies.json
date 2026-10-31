@@ -1,0 +1,24 @@
+{
+  "checkedAt": "2026-10-27T04:48:14.807693+00:00",
+  "coreCommit": "e2a11b5228dfb60554334647e615871ad5c49bac",
+  "outerCodeCommit": "c3aff7ad489c8cfa24b8784c82e8c5747417fed0",
+  "machoCount": 554,
+  "componentCount": 540,
+  "loadedCandidateCount": 528,
+  "signature": {
+    "verified": true,
+    "returnCode": 0,
+    "detail": ""
+  },
+  "limits": [
+    "DYLD log covers paths loaded so far; arbitrary runtime dlopen strings are not encoded as Mach-O load commands.",
+    "Concurrent helper DYLD logging interleaves some records; dynamic verification retains only complete existing own-DYLD paths. The main-PID vmmap attempt was unavailable (return code 255).",
+    "Optional app_mode_loader is an app-shortcut template binary; its bare bundled execution has unresolved rpaths. Browser and ordinary helper executable closures are complete.",
+    "Main-PID vmmap was unavailable (return code255); dynamic verification relies on complete own-DYLD log records only."
+  ],
+  "amendment": "Corrected the contradictory vmmap coverage sentence; no audit results changed.",
+  "vmmapAvailable": false,
+  "browserHelperClosureIssues": [],
+  "optionalAppModeLoaderUnresolvedPaths": 15,
+  "sharedOutputLoadsObserved": 0
+}

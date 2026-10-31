@@ -2,7 +2,7 @@
 
 # Script to retrieve and unpack resources to build Chromium macOS
 
-set -eux
+set -euo pipefail
 
 _root_dir="$(dirname "$(greadlink -f "$0")")"
 _build_dir="${HELIUM_DEV_BUILD_ROOT:-$_root_dir/build}"
@@ -44,6 +44,7 @@ shift "$(($OPTIND -1))"
 _target_cpu=${1:-arm64}
 
 if $retrieve_generic; then
+    downloads=("$_root_dir/downloads.ini" "$_main_repo/deps.ini")
     if $clone; then
         if [[ $_target_cpu == "arm64" ]]; then
             # For arm64 (Apple Silicon)
@@ -53,27 +54,20 @@ if $retrieve_generic; then
             ___helium_python "$_main_repo/utils/clone.py" -p mac -o "$_src_dir"
         fi
     else
-        ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "$_main_repo/downloads.ini" -c "$_download_cache"
-        ___helium_python "$_main_repo/utils/downloads.py" unpack -i "$_main_repo/downloads.ini" -c "$_download_cache" "$_src_dir"
+        case "$(uname -m)" in
+            arm64) host_arch=arm64 ;;
+            x86_64) host_arch=x64 ;;
+            *) echo "Unsupported macOS host architecture" >&2; exit 1 ;;
+        esac
+        downloads=("$_main_repo/downloads.ini" "$_root_dir/downloads.$host_arch.ini" "${downloads[@]}")
     fi
 
-    # Retrieve and unpack general resources
-    ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "$_root_dir/downloads.ini" -c "$_download_cache"
-    ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "$_main_repo/deps.ini" -c "$_download_cache"
-    ___helium_python "$_main_repo/utils/downloads.py" unpack -i "$_root_dir/downloads.ini" -c "$_download_cache" "$_src_dir"
-    ___helium_python "$_main_repo/utils/downloads.py" unpack -i "$_main_repo/deps.ini" -c "$_download_cache" "$_src_dir"
+    ___helium_python "$_main_repo/utils/downloads.py" retrieve -i "${downloads[@]}" -c "$_download_cache"
+    ___helium_python "$_main_repo/utils/downloads.py" unpack -i "${downloads[@]}" -c "$_download_cache" "$_src_dir"
 fi
 
 if $retrieve_toolchain; then
-  pushd "$_src_dir"
-    "$_src_dir/tools/rust/update_rust.py"
-    for pkg in clang objdump clang-tidy libclang; do
-      "$_src_dir/tools/clang/scripts/update.py" --package $pkg;
-    done
-    "$_src_dir/third_party/node/update_node_binaries"
-
-    NODE="$_src_dir/third_party/node"
-    mkdir -p "$NODE/mac_arm64"
-    mv "$NODE/mac/node-darwin-arm64" "$NODE/mac_arm64/"
-  popd
+    # Prepared host overlays and gclient hooks supply the pinned toolchain.
+    test -x "$_src_dir/buildtools/mac/gn"
+    test -x "$_src_dir/third_party/llvm-build/Release+Asserts/bin/clang"
 fi

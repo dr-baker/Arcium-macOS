@@ -1,0 +1,21 @@
+{
+  "commit": "1edeff984bf72cab6c961c92680079f8001ca636",
+  "customizeLabelVerified": true,
+  "nestedTitle": "Customize scopes",
+  "nestedControlsPresent": [
+    "Scope height",
+    "Scope width",
+    "Attach Scopes"
+  ],
+  "doneReturnsToPrimary": true,
+  "escapeReturnsToPrimary": true,
+  "previewAXRemainsPresent": true,
+  "stackedSelectionPreserved": true,
+  "primaryPickerLeftOpen": true,
+  "roundedOuterPixelsVerified": false,
+  "screenshotLimit": "One AXRaise of sheet still returned parent Settings screenshot; attached sheet remains outside tool screenshot. No denied local screenshot repeated.",
+  "tested_source": "1edeff984bf72cab6c961c92680079f8001ca636",
+  "profile_mode": "isolated command-style-previews",
+  "publication_swift_tests": 101,
+  "window_capture": "unavailable for native child sheets; artwork PNGs are separate native SVG renders"
+}

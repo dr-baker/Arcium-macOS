@@ -225,7 +225,7 @@ def run(paths: Paths, name: str | None, *, new: bool = False, labeled: bool = Fa
     log = logs / f"dev-{name or 'default'}.log"
     with log.open("ab") as handle:
         process = subprocess.Popen(
-            [str(executable), f"--user-data-dir={profile}", "--profile-directory=Default", *DEV_FLAGS,
+            [str(executable), f"--user-data-dir={profile}", *DEV_FLAGS,
              f"--enable-features={','.join(enabled)}", f"--disable-features={','.join(disabled)}", *rest,
              *first_tabs],
             stdin=subprocess.DEVNULL, stdout=handle, stderr=handle, start_new_session=True,
