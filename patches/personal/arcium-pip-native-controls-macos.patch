@@ -216,7 +216,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +#include <optional>
 +#include <string>
 +
-+#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
++#include "chrome/browser/ui/views/overlay/arcium_pip_contrast.h"
 +#include "ui/gfx/native_ui_types.h"
 +
 +#ifdef __OBJC__
@@ -312,8 +312,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +// Actions are delivered asynchronously on the main queue and canceled on
 +// teardown. kSeek carries a normalized fraction and preserves playback state.
 +using ActionCallback = std::function<void(Action, double)>;
-+// Asynchronous, downscaled video-only luminance; a negative value means unavailable.
-+using BrightnessSampler = std::function<void(std::function<void(double)>)>;
++// One asynchronous video-only sample for all button regions. Negative results are unavailable.
++using BrightnessSampler = std::function<void(ContrastRequest, std::function<void(ContrastSamples)>)>;
 +
 +// Construct/update/destroy on the main thread, after native widget
 +// initialization. The caller attaches the returned view with NativeViewHost
@@ -350,7 +350,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2825 @@
+@@ -0,0 +1,2866 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -378,6 +378,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +using arcium::pip::Placement;
 +using arcium::pip::State;
 +using arcium::pip::Effect;
++using arcium::pip::ContrastRequest;
++using arcium::pip::ContrastSamples;
 +namespace geo = arcium::pip::geometry;
 +using pip_motion::Motion;
 +using pip_motion::Outcome;
@@ -477,8 +479,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}  // namespace
 +
 +// PiP prioritizes the video: clear material and a stable white foreground.
-+@interface ArciumPiPCapsule : NSView
++@interface ArciumPiPCapsule : NSView {
++  BOOL _opaqueFallback;
++  double _contrastAlpha;
++}
 +- (instancetype)initWithContent:(NSView*)content radius:(CGFloat)radius;
++- (void)applyBrightness:(double)brightness animate:(BOOL)animate;
 +@end
 +@implementation ArciumPiPCapsule
 +- (instancetype)initWithContent:(NSView*)content radius:(CGFloat)radius {
@@ -487,6 +493,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  self.wantsLayer = YES;
 +  self.layer.cornerRadius = radius;
 +  self.layer.cornerCurve = kCACornerCurveContinuous;
++  _contrastAlpha = .15;
++  self.layer.backgroundColor = gray(0, _contrastAlpha);
 +  content.frame = self.bounds;
 +  content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 +  if ([content isKindOfClass:NSButton.class])
@@ -506,9 +514,28 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  // Opaque accessibility fallback; older systems retain a quiet dark backing.
 +  const BOOL opaque = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency ||
 +      NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast;
-+  self.layer.backgroundColor = gray(.12, opaque ? 1 : .35);
++  _opaqueFallback = opaque;
++  self.layer.backgroundColor = opaque ? gray(.12, 1) : gray(0, _contrastAlpha);
 +  [self addSubview:content];
 +  return self;
++}
++- (void)applyBrightness:(double)brightness animate:(BOOL)animate {
++  if (_opaqueFallback) return;
++  const double alpha = !std::isfinite(brightness) || brightness < 0 ? .15 :
++      .35 * smoothstep((brightness - .60) / .25);
++  if (std::abs(alpha - _contrastAlpha) < .001) return;
++  _contrastAlpha = alpha;
++  CGColorRef previous = ((CALayer*)self.layer.presentationLayer).backgroundColor ?: self.layer.backgroundColor;
++  CABasicAnimation* transition = [CABasicAnimation animationWithKeyPath:@"backgroundColor"];
++  transition.fromValue = (__bridge id)previous;
++  transition.toValue = (__bridge id)gray(0, alpha);
++  transition.duration = .25;
++  [CATransaction begin];
++  [CATransaction setDisableActions:YES];
++  self.layer.backgroundColor = gray(0, alpha);
++  [CATransaction commit];
++  [self.layer removeAnimationForKey:@"pipContrast"];
++  if (animate && !ReduceMotion()) [self.layer addAnimation:transition forKey:@"pipContrast"];
 +}
 +- (void)setFrameSize:(NSSize)size {
 +  [super setFrameSize:size];
@@ -1119,11 +1146,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  State _state;
 +  arcium::pip::BrightnessSampler _brightnessSampler;
 +  NSTimer* _brightnessTimer;
-+  NSView* _contrastBacking;
 +  BOOL _brightnessPending;
 +  BOOL _liveResizing;
 +  NSUInteger _brightnessGeneration;
-+  double _videoBrightness;
++  ContrastSamples _buttonBrightness;
 +  double _lastBrightnessRequest;
 +  std::optional<NSRect> _pendingResizeFrame;
 +  std::function<void()> _beforeFocusRelease;
@@ -1229,6 +1255,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)applyState:(const State&)state;
 +- (BOOL)chromeSuppressed;
 +- (void)sampleBrightness;
++- (NSArray<ArciumPiPCapsule*>*)contrastCapsules;
++- (ContrastRequest)contrastRequest;
 +- (BOOL)hasControlsFocus;
 +- (BOOL)keepsKeyboardControlsVisible;
 +- (void)pointerInteraction;
@@ -1258,7 +1286,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  _pipWindow = window;
 +  _brightnessSampler = std::move(sampler);
-+  _videoBrightness = -1;
++  _buttonBrightness = ContrastSamples{};
 +  _lastBrightnessRequest = -1;
 +  _originalShadow = window.hasShadow;
 +  [self configureEffects];
@@ -1392,7 +1420,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _slider.endDrag = nil;
 +  _resizeView.resizeEvent = nil;
 +  _resizing = NO;
-+  [_contrastBacking removeFromSuperview];
 +  [_glassContainer removeFromSuperview];
 +  [_slider removeFromSuperview];
 +  [_title removeFromSuperview];
@@ -1406,12 +1433,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _glassContainer = [[NSView alloc] initWithFrame:self.bounds];
 +  [_glassContainer addSubview:_glassContent];
 +  _glassContainer.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-+  _contrastBacking = [[NSView alloc] initWithFrame:self.bounds];
-+  _contrastBacking.wantsLayer = YES;
-+  _contrastBacking.layer.backgroundColor = NSColor.blackColor.CGColor;
-+  _contrastBacking.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-+  _contrastBacking.alphaValue = 0;
-+  [self addSubview:_contrastBacking];
 +  [self addSubview:_glassContainer];
 +  _returnButton = [self button:@"pip.exit"
 +                         label:@"Return to tab"
@@ -1480,6 +1501,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _timestamp.textColor = [NSColor colorWithWhite:1 alpha:0.85];
 +  _timestamp.alignment = NSTextAlignmentCenter;
 +  _timestamp.accessibilityElement = NO;
++  _timestamp.wantsLayer = YES;
++  _timestamp.layer.shadowColor = NSColor.blackColor.CGColor;
++  _timestamp.layer.shadowOpacity = .7;
++  _timestamp.layer.shadowRadius = 2;
++  _timestamp.layer.shadowOffset = CGSizeZero;
 +  [self addSubview:_timestamp];
 +  _title = [NSTextField labelWithString:@""];
 +  _title.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
@@ -1606,22 +1632,42 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      _pipWindow.inLiveResize || _returning ||
 +      (motion && motion->phase == Phase::Settling);
 +}
++- (NSArray<ArciumPiPCapsule*>*)contrastCapsules {
++  // Stable ContrastControl slots, including currently hidden seek buttons.
++  return @[(ArciumPiPCapsule*)_returnGlass, (ArciumPiPCapsule*)_tuckGlass,
++           (ArciumPiPCapsule*)_closeGlass, (ArciumPiPCapsule*)_playGlass,
++           (ArciumPiPCapsule*)_backGlass, (ArciumPiPCapsule*)_forwardGlass,
++           (ArciumPiPCapsule*)_muteGlass];
++}
++- (ContrastRequest)contrastRequest {
++  ContrastRequest request;
++  NSArray<ArciumPiPCapsule*>* capsules = [self contrastCapsules];
++  for (NSUInteger i = 0; i < capsules.count; ++i) {
++    const NSRect frame = [capsules[i] convertRect:capsules[i].bounds toView:self];
++    request.regions[i] = arcium::pip::NormalizeContrastRegion(ToRect(frame), ToRect(self.bounds));
++  }
++  return request;
++}
 +- (void)sampleBrightness {
 +  if (_invalidated || _brightnessPending || !_brightnessSampler ||
 +      [self chromeSuppressed] || !_nativeVisible || _state.blocked ||
 +      _tucked != geo::Side::kNone || !_pipWindow.visible) return;
 +  const double now = NSProcessInfo.processInfo.systemUptime;
 +  if (_lastBrightnessRequest >= 0 && now - _lastBrightnessRequest < 1) return;
++  [self layoutSubtreeIfNeeded];
++  const ContrastRequest request = [self contrastRequest];
 +  _lastBrightnessRequest = now;
 +  _brightnessPending = YES;
 +  const NSUInteger generation = _brightnessGeneration;
 +  __weak ArciumPiPNativeOverlay* weakSelf = self;
-+  _brightnessSampler([weakSelf, generation](double brightness) {
++  _brightnessSampler(request, [weakSelf, generation, request](ContrastSamples brightness) {
 +    ArciumPiPNativeOverlay* view = weakSelf;
 +    if (!view || view->_invalidated) return;
 +    view->_brightnessPending = NO;
 +    if (generation != view->_brightnessGeneration || [view chromeSuppressed]) return;
-+    view->_videoBrightness = std::isfinite(brightness) ? brightness : -1;
++    [view layoutSubtreeIfNeeded];
++    if (!(request == [view contrastRequest])) return;
++    view->_buttonBrightness = brightness;
 +    [view refreshChrome];
 +  });
 +}
@@ -1632,6 +1678,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  const BOOL suppressed = [self chromeSuppressed];
 +  const BOOL visible = _nativeVisible && !_state.blocked && !suppressed &&
 +      _tucked == geo::Side::kNone;
++  [self setNeedsLayout:YES];
 +  // GPU-downscaled video samples only while stationary chrome is visible.
 +  if (!visible) {
 +    if (_brightnessTimer) ++_brightnessGeneration;
@@ -1645,15 +1692,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [NSRunLoop.mainRunLoop addTimer:_brightnessTimer forMode:NSRunLoopCommonModes];
 +    [self sampleBrightness];
 +  }
-+  // No dimming over dark footage; gently reach 35% over very bright footage.
-+  const double shade = _videoBrightness < 0 ? .15 :
-+      .35 * smoothstep((_videoBrightness - .60) / .25);
-+  _contrastBacking.hidden = !visible;
-+  if (suppressed || ReduceMotion()) _contrastBacking.alphaValue = visible ? shade : 0;
-+  else [NSAnimationContext runAnimationGroup:^(NSAnimationContext* context) {
-+    context.duration = .25;
-+    _contrastBacking.animator.alphaValue = visible ? shade : 0;
-+  } completionHandler:nil];
++  NSArray<ArciumPiPCapsule*>* capsules = [self contrastCapsules];
++  for (NSUInteger i = 0; i < capsules.count; ++i)
++    [capsules[i] applyBrightness:_buttonBrightness.values[i] animate:visible];
 +  _glassContainer.hidden = _state.blocked || suppressed;
 +  const BOOL animate = !suppressed && !_state.blocked && _tucked == geo::Side::kNone;
 +  for (NSView* view in @[ _returnGlass, _tuckGlass, _closeGlass ]) {
@@ -3061,7 +3102,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _placementReady = NO;
 +  _mouseInside = NO;
 +  _dragging = _resizing = _scrolling = _seeking = _magnifying = _liveResizing = NO;
-+  _videoBrightness = -1;
++  _buttonBrightness = ContrastSamples{};
 +  _consumeMomentum = NO;
 +  _pendingPan = NO;
 +  [_brightnessTimer invalidate]; _brightnessTimer = nil;
@@ -3314,7 +3355,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +51,324 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +51,325 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -3345,12 +3386,13 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +        if (weak) {
 +          weak->OnNativeAction(action, value);
 +        }
-+      }, [video = video_](std::function<void(double)> callback) {
-+        if (video) video->SampleNativeControlsBrightness(base::BindOnce(
-+            [](std::function<void(double)> completion, double brightness) {
-+              completion(brightness);
-+            }, std::move(callback)));
-+        else callback(-1);
++      }, [video = video_](arcium::pip::ContrastRequest request,
++                         std::function<void(arcium::pip::ContrastSamples)> callback) {
++        if (video) video->SampleNativeControlsBrightness(request, base::BindOnce(
++            [](std::function<void(arcium::pip::ContrastSamples)> completion,
++               arcium::pip::ContrastSamples brightness) { completion(brightness); },
++            std::move(callback)));
++        else callback({});
 +      });
 +  controls_->SetBeforeFocusRelease([weak = weak_factory_.GetWeakPtr()] {
 +    if (weak)
@@ -3659,7 +3701,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "base/memory/ptr_util.h"
  #include "base/memory/raw_ptr.h"
  #include "base/notreached.h"
-@@ -65,12 +67,18 @@
+@@ -65,12 +67,21 @@
  #include "services/media_session/public/cpp/media_image_manager.h"
  #include "third_party/blink/public/mojom/picture_in_picture/picture_in_picture.mojom.h"
  #include "ui/base/hit_test.h"
@@ -3672,13 +3714,16 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "ui/base/mojom/ui_base_types.mojom-shared.h"
  #include "ui/base/ui_base_features.h"
  #include "ui/compositor/compositor.h"
++#if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/views/overlay/arcium_pip_contrast.h"
++#endif
 +#include "base/task/single_thread_task_runner.h"
 +#include "components/viz/common/frame_sinks/copy_output_request.h"
 +#include "components/viz/common/frame_sinks/copy_output_result.h"
  #include "ui/compositor/layer_surface.h"
  #include "ui/display/display.h"
  #include "ui/display/screen.h"
-@@ -215,6 +223,28 @@ class GradientBackground : public views:
+@@ -215,6 +226,28 @@ class GradientBackground : public views:
  }  // namespace
  
  // OverlayWindow implementation of FrameView.
@@ -3707,7 +3752,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  class OverlayWindowFrameView : public views::FrameView {
    METADATA_HEADER(OverlayWindowFrameView, views::FrameView)
  
-@@ -238,6 +268,10 @@ class OverlayWindowFrameView : public vi
+@@ -238,6 +271,10 @@ class OverlayWindowFrameView : public vi
        return HTNOWHERE;
      }
  
@@ -3718,7 +3763,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
      constexpr int kResizeAreaCornerSize = 16;
      int window_component = GetHTComponentForFrame(
          point, gfx::Insets(kOverlayBorderThickness), kResizeAreaCornerSize,
-@@ -392,8 +426,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+@@ -392,8 +429,9 @@ std::unique_ptr<VideoOverlayWindowViews>
    // On Mac, we override the default native widget with our own subclass, which
    // allows us to get the default window styling (e.g. corner radius) even
    // though we're using `views::Widget::InitParams::remove_standard_frame`.
@@ -3729,7 +3774,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #endif  // BUILDFLAG(IS_MAC)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -484,6 +519,9 @@ VideoOverlayWindowViews::VideoOverlayWin
+@@ -484,6 +522,9 @@ VideoOverlayWindowViews::VideoOverlayWin
  }
  
  VideoOverlayWindowViews::~VideoOverlayWindowViews() {
@@ -3739,7 +3784,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (overlay_view_) {
      overlay_view_->RemoveObserver(this);
    }
-@@ -574,6 +612,9 @@ void VideoOverlayWindowViews::OnNativeFo
+@@ -574,6 +615,9 @@ void VideoOverlayWindowViews::OnNativeFo
  }
  
  void VideoOverlayWindowViews::OnNativeBlur() {
@@ -3749,7 +3794,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Controls should be hidden when there is no more focus on the window. This
    // is used for tabbing and touch interactions. For mouse interactions, the
    // window cannot be blurred before the ui::EventType::kMouseExited event is
-@@ -628,6 +669,10 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -628,6 +672,10 @@ void VideoOverlayWindowViews::OnNativeWi
  
  void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
      const gfx::Size& new_size) {
@@ -3760,7 +3805,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Hide the controls when the window is being resized. The controls will
    // reappear when the user interacts with the window again.
    UpdateControlsVisibility(false);
-@@ -639,6 +684,15 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -639,6 +687,15 @@ void VideoOverlayWindowViews::OnNativeWi
  }
  
  void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
@@ -3776,7 +3821,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Every time a user uses a keyboard to interact on the window, restart the
    // timer to automatically hide the controls.
    hide_controls_timer_.Reset();
-@@ -670,11 +724,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+@@ -670,11 +727,11 @@ void VideoOverlayWindowViews::OnKeyEvent
        TogglePlayPause();
        event->SetHandled();
      } else if (event->key_code() == ui::VKEY_LEFT &&
@@ -3790,7 +3835,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
        Forward15Seconds();
        event->SetHandled();
      }
-@@ -802,6 +856,11 @@ void VideoOverlayWindowViews::FireEnable
+@@ -802,6 +859,11 @@ void VideoOverlayWindowViews::FireEnable
  }
  
  bool VideoOverlayWindowViews::AreControlsVisible() const {
@@ -3802,7 +3847,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If we're animating to a visibility state, then we'll act as if we're in
    // that state.
    if (fade_animation_) {
-@@ -863,6 +922,14 @@ void VideoOverlayWindowViews::UpdateCont
+@@ -863,6 +925,14 @@ void VideoOverlayWindowViews::UpdateCont
            : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
                  !can_hide_title_and_scrim;
  
@@ -3817,7 +3862,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (should_animate) {
      // Animate the title and top scrim.
      if (title_is_visible != AreTitleAndScrimVisible()) {
-@@ -960,6 +1027,9 @@ void VideoOverlayWindowViews::OnViewVisi
+@@ -960,6 +1030,9 @@ void VideoOverlayWindowViews::OnViewVisi
  
    // The visibility of `overlay_view_` affects our minimum size.
    OnSizeConstraintsChanged();
@@ -3827,7 +3872,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
-@@ -975,6 +1045,101 @@ void VideoOverlayWindowViews::SetForcedT
+@@ -975,6 +1048,120 @@ void VideoOverlayWindowViews::SetForcedT
  }
  
  #if BUILDFLAG(IS_MAC)
@@ -3836,40 +3881,59 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 +}
 +
 +void VideoOverlayWindowViews::SampleNativeControlsBrightness(
-+    base::OnceCallback<void(double)> callback) {
++    const arcium::pip::ContrastRequest& regions,
++    base::OnceCallback<void(arcium::pip::ContrastSamples)> callback) {
++  using namespace arcium::pip;
 +  auto* layer = video_view_ ? video_view_->layer() : nullptr;
-+  if (!layer || !GetCompositor() || !IsVisible() || layer->bounds().IsEmpty()) {
-+    std::move(callback).Run(-1);
++  if (!layer || !GetCompositor() || !IsVisible() || layer->bounds().IsEmpty() ||
++      !native_controls_host_ || native_controls_host_->size().IsEmpty()) {
++    std::move(callback).Run({});
 +    return;
 +  }
-+  // Copy the video layer alone, downscaled on the GPU before CPU access.
-+  // Controls and private browser tabs are never part of this sample.
++  const gfx::Rect video_bounds = video_view_->bounds();
++  const gfx::Size host_size = native_controls_host_->size();
++  // One video-only copy serves every button. Downsample before CPU access;
++  // native controls and other browser contents never enter the sample.
 +  auto request = std::make_unique<viz::CopyOutputRequest>(
 +      viz::CopyOutputRequest::ResultFormat::RGBA,
 +      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
-+      base::BindOnce([](base::OnceCallback<void(double)> callback,
++      base::BindOnce([](base::WeakPtr<VideoOverlayWindowViews> window,
++                        ContrastRequest regions, gfx::Rect video_bounds,
++                        gfx::Size host_size,
++                        base::OnceCallback<void(ContrastSamples)> callback,
 +                        std::unique_ptr<viz::CopyOutputResult> result) {
-+        if (result->IsEmpty()) { std::move(callback).Run(-1); return; }
++        if (!window || !window->native_controls_host_ ||
++            window->video_view_->bounds() != video_bounds ||
++            window->native_controls_host_->size() != host_size || result->IsEmpty()) {
++          std::move(callback).Run({}); return;
++        }
 +        auto pixels = result->ScopedAccessSkBitmap();
 +        const auto& bitmap = pixels.bitmap();
-+        if (bitmap.width() != 16 || bitmap.height() != 9) {
-+          std::move(callback).Run(-1); return;
++        if (bitmap.width() != kContrastWidth || bitmap.height() != kContrastHeight) {
++          std::move(callback).Run({}); return;
 +        }
-+        double luminance = 0;
++        std::array<float, kContrastWidth * kContrastHeight> luminance;
 +        for (int y = 0; y < bitmap.height(); ++y)
 +          for (int x = 0; x < bitmap.width(); ++x) {
 +            const SkColor color = bitmap.getColor(x, y);
-+            luminance += .2126 * SkColorGetR(color) +
-+                         .7152 * SkColorGetG(color) + .0722 * SkColorGetB(color);
++            luminance[y * kContrastWidth + x] =
++                (.2126 * SkColorGetR(color) + .7152 * SkColorGetG(color) +
++                 .0722 * SkColorGetB(color)) / 255.0;
 +          }
-+        std::move(callback).Run(luminance / (255 * bitmap.width() * bitmap.height()));
-+      }, std::move(callback)));
++        const ContrastRegion video{
++            double(video_bounds.x()) / host_size.width(),
++            double(video_bounds.y()) / host_size.height(),
++            double(video_bounds.width()) / host_size.width(),
++            double(video_bounds.height()) / host_size.height()};
++        std::move(callback).Run(MeasureButtonContrast(regions, video, luminance));
++      }, weak_factory_.GetWeakPtr(), regions, video_bounds, host_size, std::move(callback)));
 +  request->set_result_task_runner(base::SingleThreadTaskRunner::GetCurrentDefault());
 +  // ui::Layer transforms area and scale together into device coordinates.
 +  const gfx::Size source = layer->bounds().size();
 +  request->set_area(gfx::Rect(source));
-+  request->SetScaleRatio(gfx::Vector2d(source.width(), source.height()), {16, 9});
-+  request->set_result_selection(gfx::Rect(16, 9));
++  request->SetScaleRatio(gfx::Vector2d(source.width(), source.height()),
++                        {kContrastWidth, kContrastHeight});
++  request->set_result_selection(gfx::Rect(kContrastWidth, kContrastHeight));
 +  layer->RequestCopyOfOutput(std::move(request));
 +}
 +
@@ -3929,7 +3993,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
    MoveToActiveFullscreenSpace();
  }
-@@ -1460,6 +1625,19 @@ void VideoOverlayWindowViews::OnRootView
+@@ -1460,6 +1647,19 @@ void VideoOverlayWindowViews::OnRootView
    }
    view_holder_.clear();
  
@@ -3949,7 +4013,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Don't show the controls until the mouse hovers over the window.
    UpdateControlsVisibility(false, /*should_animate=*/false);
  }
-@@ -1521,6 +1699,12 @@ void VideoOverlayWindowViews::UpdateLaye
+@@ -1521,6 +1721,12 @@ void VideoOverlayWindowViews::UpdateLaye
  }
  
  void VideoOverlayWindowViews::OnUpdateControlsBounds() {
@@ -3962,7 +4026,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    controls_container_view_->SetSize(GetBounds().size());
  
    // Adding an extra pixel to width/height makes sure the scrim covers the
-@@ -1770,6 +1954,11 @@ bool VideoOverlayWindowViews::IsActive()
+@@ -1770,6 +1976,11 @@ bool VideoOverlayWindowViews::IsActive()
  }
  
  void VideoOverlayWindowViews::Close() {
@@ -3974,7 +4038,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1818,6 +2007,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1818,6 +2029,11 @@ void VideoOverlayWindowViews::ShowInacti
      overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
      overlay_view_->ShowBubble(GetNativeView());
      SetBounds(CalculateAndUpdateWindowBounds());
@@ -3986,7 +4050,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    }
  
    // When the window is first shown, make the title and top controls
-@@ -1851,6 +2045,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1851,6 +2067,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -3998,7 +4062,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1884,6 +2083,15 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1884,6 +2105,15 @@ void VideoOverlayWindowViews::UpdateNatu
    // Update the views::Widget bounds to adhere to sizing spec. This will also
    // update the layout of the controls.
    SetBounds(CalculateAndUpdateWindowBounds());
@@ -4014,7 +4078,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (is_tucking_forced_) {
      tucker_->Tuck();
    }
-@@ -1892,6 +2100,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1892,6 +2122,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -4024,7 +4088,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1962,6 +2173,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1962,6 +2195,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -4034,7 +4098,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1997,11 +2211,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1997,11 +2233,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -4052,7 +4116,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2235,7 +2455,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2235,7 +2477,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -4061,7 +4125,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2413,6 +2633,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2413,6 +2655,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -4071,7 +4135,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2518,6 +2741,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2518,6 +2763,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
@@ -4087,16 +4151,17 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
-@@ -36,6 +36,8 @@ namespace viz {
+@@ -36,6 +36,9 @@ namespace viz {
  class FrameSinkId;
  }  // namespace viz
  
 +namespace views { class NativeViewHost; }
++namespace arcium::pip { struct ContrastRequest; struct ContrastSamples; }
 +class VideoOverlayWindowNativeWidgetMac;
  class BackToTabLabelButton;
  class CloseImageButton;
  class HangUpButton;
-@@ -273,6 +275,12 @@ class VideoOverlayWindowViews : public c
+@@ -273,6 +276,12 @@ class VideoOverlayWindowViews : public c
      meets_user_interaction_ = meets_user_interaction;
    }
  
@@ -4109,14 +4174,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.h
    void FinishTuckAnimationForTesting();
  
    bool AreTitleAndScrimVisibleForTesting() const;
-@@ -590,6 +598,19 @@ class VideoOverlayWindowViews : public c
+@@ -590,6 +599,20 @@ class VideoOverlayWindowViews : public c
    // True if the playback controls should be visible.
    bool show_playback_controls_ = true;
  
 +#if BUILDFLAG(IS_MAC)
 +  friend class VideoOverlayWindowNativeWidgetMac;
 +  void RefreshNativeControls();
-+  void SampleNativeControlsBrightness(base::OnceCallback<void(double)> callback);
++  void SampleNativeControlsBrightness(const arcium::pip::ContrastRequest& request,
++      base::OnceCallback<void(arcium::pip::ContrastSamples)> callback);
 +  void DetachNativeControlsHost();
 +  void FocusNativeControls(bool reverse);
 +  raw_ptr<views::NativeViewHost> native_controls_host_ = nullptr;
@@ -4360,7 +4426,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1583 @@
+@@ -0,0 +1,1684 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -4680,6 +4746,78 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_TRUE(overlay.needsLayout);
 +}
 +
++TEST(ArciumPiPContrastTest, LightAwayFromButtonDoesNotAffectItsShade) {
++  std::array<float, kContrastWidth * kContrastHeight> image{};
++  for (int y = 0; y < kContrastHeight / 4; ++y)
++    for (int x = kContrastWidth * 3 / 4; x < kContrastWidth; ++x)
++      image[y * kContrastWidth + x] = 1;
++  ContrastRequest request;
++  request.regions[0] = {.83, .02, .12, .15};
++  request.regions[1] = {.02, .02, .12, .15};
++  request.regions[2] = {.44, .42, .12, .16};
++  const auto samples = MeasureButtonContrast(request, {0, 0, 1, 1}, image);
++  EXPECT_NEAR(samples.values[0], 1, .001);
++  EXPECT_NEAR(samples.values[1], 0, .001);
++  EXPECT_NEAR(samples.values[2], 0, .001);
++}
++
++TEST(ArciumPiPContrastTest, NativeTopAndBottomMapToTheMatchingVideoRows) {
++  std::array<float, kContrastWidth * kContrastHeight> image{};
++  std::fill_n(image.begin(), image.size() / 2, 1);
++  ContrastRequest request;
++  request.regions[0] = NormalizeContrastRegion({10, 80, 20, 20}, {0, 0, 100, 100});
++  request.regions[1] = NormalizeContrastRegion({10, 0, 20, 20}, {0, 0, 100, 100});
++  const auto samples = MeasureButtonContrast(request, {0, 0, 1, 1}, image);
++  EXPECT_NEAR(samples.values[0], 1, .001);
++  EXPECT_NEAR(samples.values[1], 0, .001);
++}
++
++TEST(ArciumPiPContrastTest, LetterboxAndPillarboxContributeBlack) {
++  std::array<float, kContrastWidth * kContrastHeight> image;
++  image.fill(1);
++  ContrastRequest request;
++  request.regions[0] = {.45, .02, .10, .10};
++  request.regions[1] = {.45, .45, .10, .10};
++  request.regions[2] = {.45, .20, .10, .10};
++  auto samples = MeasureButtonContrast(request, {0, .25, 1, .5}, image);
++  EXPECT_NEAR(samples.values[0], 0, .001);
++  EXPECT_NEAR(samples.values[1], 1, .001);
++  EXPECT_NEAR(samples.values[2], .5, .001);
++  request.regions[0] = {.02, .45, .10, .10};
++  request.regions[2] = {.20, .45, .10, .10};
++  samples = MeasureButtonContrast(request, {.25, 0, .5, 1}, image);
++  EXPECT_NEAR(samples.values[0], 0, .001);
++  EXPECT_NEAR(samples.values[1], 1, .001);
++  EXPECT_NEAR(samples.values[2], .5, .001);
++}
++
++TEST(ArciumPiPContrastTest, ScalingAndNonzeroBoundsPreserveTheButtonRegion) {
++  const auto normal = NormalizeContrastRegion({15, 89, 20, 20}, {5, 9, 100, 100});
++  const auto doubled = NormalizeContrastRegion({30, 178, 40, 40}, {10, 18, 200, 200});
++  EXPECT_TRUE(normal == doubled);
++  EXPECT_DOUBLE_EQ(normal.x, .1);
++  EXPECT_DOUBLE_EQ(normal.y, 0);
++}
++
++TEST(ArciumPiPContrastTest, BrightSquareCornersOutsideTheButtonAreExcluded) {
++  std::array<float, kContrastWidth * kContrastHeight> image{};
++  for (int y = 0; y < kContrastHeight / 7; ++y)
++    for (int x = 0; x < kContrastWidth / 7; ++x)
++      image[y * kContrastWidth + x] = 1;
++  ContrastRequest request;
++  request.regions[0] = {0, 0, 1, 1};
++  EXPECT_NEAR(MeasureButtonContrast(request, {0, 0, 1, 1}, image).values[0], 0, .001);
++}
++
++TEST(ArciumPiPContrastTest, UnavailablePixelsAndInvalidRegionsRemainUnknown) {
++  ContrastRequest request;
++  request.regions[0] = {0, 0, 1, 1};
++  EXPECT_LT(MeasureButtonContrast(request, {0, 0, 1, 1}, {}).values[0], 0);
++  std::array<float, kContrastWidth * kContrastHeight> image{};
++  EXPECT_LT(MeasureButtonContrast(request, {0, 0, 0, 1}, image).values[0], 0);
++  EXPECT_LT(MeasureButtonContrast(request, {0, 0, 1, 1}, image).values[1], 0);
++}
++
 +TEST_F(ArciumPiPNativeControlsTest, ClearGlassKeepsWhiteSymbolsInForeground) {
 +  for (NSString* label in @[@"Play", @"Return to tab", @"Tuck to screen edge",
 +       @"Close Picture in Picture", @"Back 15 seconds", @"Forward 15 seconds", @"Mute"]) {
@@ -4702,32 +4840,61 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_EQ(Count(Action::kPlayPause), 1u);
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, BrightVideoDimsOnlyVisibleChrome) {
-+  NSView* backing = [Overlay() valueForKey:@"contrastBacking"];
-+  ASSERT_TRUE(backing);
-+  [Overlay() setValue:@0.2 forKey:@"videoBrightness"];
++double ButtonShade(NSButton* button) {
++  for (NSView* view = button; view; view = view.superview) {
++    if ([view isKindOfClass:NSClassFromString(@"ArciumPiPCapsule")])
++      return [NSColor colorWithCGColor:view.layer.backgroundColor].alphaComponent;
++  }
++  return -1;
++}
++ContrastSamples Brightness(double value) {
++  ContrastSamples samples;
++  samples.values.fill(value);
++  return samples;
++}
++TEST_F(ArciumPiPNativeControlsTest, BrightButtonsDimIndependentlyFromDarkButtons) {
++  DestroyControls();
++  std::function<void(ContrastSamples)> complete;
++  ContrastRequest requested;
++  controls_ = std::make_unique<NativeControls>(window_, [](Action, double) {},
++      [&](ContrastRequest request, std::function<void(ContrastSamples)> callback) {
++        requested = request;
++        complete = std::move(callback);
++      });
++  MountControls();
++  ((ArciumPiPTestWindow*)window_).testVisible = YES;
++  [Overlay() mouseMoved:nil];
 +  Update();
-+  // Let the contrast transition complete without displaying a window.
-+  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.3]];
-+  EXPECT_NEAR(backing.alphaValue, 0, .01);
-+  [Overlay() setValue:@0.95 forKey:@"videoBrightness"];
-+  Update();
-+  [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.3]];
-+  EXPECT_NEAR(backing.alphaValue, .35, .01);
++  ASSERT_TRUE(complete);
++  for (const auto& region : requested.regions) {
++    EXPECT_GT(region.width, 0);
++    EXPECT_GT(region.height, 0);
++    EXPECT_GE(region.x, 0);
++    EXPECT_GE(region.y, 0);
++    EXPECT_LE(region.x + region.width, 1);
++    EXPECT_LE(region.y + region.height, 1);
++  }
++  auto samples = Brightness(.1);
++  samples.values[static_cast<size_t>(ContrastControl::kPlay)] = .95;
++  samples.values[static_cast<size_t>(ContrastControl::kMute)] = .95;
++  complete(samples);
++  EXPECT_NEAR(ButtonShade(Button(@"Play")), .35, .001);
++  EXPECT_NEAR(ButtonShade(Button(@"Mute")), .35, .001);
++  EXPECT_NEAR(ButtonShade(Button(@"Return to tab")), 0, .001);
++  EXPECT_NEAR(ButtonShade(Button(@"Forward 15 seconds")), 0, .001);
 +  EXPECT_TRUE([Button(@"Play").contentTintColor isEqual:NSColor.whiteColor]);
 +  [Overlay() applyPinch:.1 ended:NO cancelled:NO];
 +  Pump();
-+  EXPECT_TRUE(backing.hidden);
 +  EXPECT_FALSE(IsPresented(Button(@"Play")));
 +  EXPECT_FALSE(IsPresented(Slider()));
 +  EXPECT_FALSE(IsPresented([Overlay() valueForKey:@"title"]));
 +  [Overlay() mouseMoved:nil];
 +  Update();
-+  EXPECT_FALSE(IsPresented(Button(@"Play")));
 +  EXPECT_FALSE(IsPresented(Button(@"Back 15 seconds")));
 +  [Overlay() applyPinch:0 ended:YES cancelled:NO];
 +  Pump();
 +  EXPECT_TRUE(IsPresented(Button(@"Play")));
++  ((ArciumPiPTestWindow*)window_).testVisible = NO;
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, HoverCannotRevealChromeDuringPanOrNativeResize) {
@@ -4826,9 +4993,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +
 +TEST_F(ArciumPiPNativeControlsTest, ContrastSamplingSurvivesFocusAndRejectsStaleResults) {
 +  DestroyControls();
-+  std::vector<std::function<void(double)>> completions;
++  std::vector<std::function<void(ContrastSamples)>> completions;
 +  controls_ = std::make_unique<NativeControls>(window_, [](Action, double) {},
-+      [&completions](std::function<void(double)> callback) {
++      [&completions](ContrastRequest, std::function<void(ContrastSamples)> callback) {
 +        completions.push_back(std::move(callback));
 +      });
 +  MountControls();
@@ -4838,8 +5005,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  ASSERT_EQ(completions.size(), 1u);
 +  controls_->FocusControls(false);
 +  EXPECT_TRUE([Overlay() valueForKey:@"brightnessTimer"]);
-+  completions[0](.1);
-+  EXPECT_NEAR([[Overlay() valueForKey:@"videoBrightness"] doubleValue], .1, .001);
++  completions[0](Brightness(.1));
++  EXPECT_NEAR(ButtonShade(Button(@"Play")), 0, .001);
 +  [Overlay() pointerInteraction];
 +  [Overlay() mouseExited:nil];
 +  [Overlay() mouseMoved:nil];
@@ -4851,14 +5018,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  ASSERT_EQ(completions.size(), 2u);
 +  [Overlay() applyPinch:.1 ended:NO cancelled:NO];
 +  EXPECT_FALSE([Overlay() valueForKey:@"brightnessTimer"]);
-+  completions[1](.95);
-+  EXPECT_NEAR([[Overlay() valueForKey:@"videoBrightness"] doubleValue], .1, .001);
++  completions[1](Brightness(.95));
++  EXPECT_NEAR(ButtonShade(Button(@"Play")), 0, .001);
 +  [Overlay() applyPinch:0 ended:YES cancelled:NO];
 +  [Overlay() setValue:@(NSProcessInfo.processInfo.systemUptime - 1.01) forKey:@"lastBrightnessRequest"];
 +  [Overlay() sampleBrightness];
 +  ASSERT_EQ(completions.size(), 3u);
 +  DestroyControls();
-+  completions[2](.95);  // Weak completion after teardown is harmless.
++  completions[2](Brightness(.95));  // Weak completion after teardown is harmless.
 +  ((ArciumPiPTestWindow*)window_).testVisible = NO;
 +}
 +
@@ -6794,13 +6961,14 @@ Index: src/chrome/browser/ui/views/overlay/BUILD.gn
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/BUILD.gn
 +++ src/chrome/browser/ui/views/overlay/BUILD.gn
-@@ -42,7 +42,12 @@ source_set("overlay") {
+@@ -42,7 +42,13 @@ source_set("overlay") {
    ]
  
    if (is_mac) {
 -    public += [ "video_overlay_window_native_widget_mac.h" ]
 +    public += [
 +      "arcium_pip_geometry.h",
++      "arcium_pip_contrast.h",
 +      "arcium_pip_motion.h",
 +      "arcium_pip_native_controls.h",
 +      "video_overlay_window_native_widget_mac.h",
@@ -6808,7 +6976,7 @@ Index: src/chrome/browser/ui/views/overlay/BUILD.gn
    }
  
    if (is_chromeos) {
-@@ -91,9 +96,15 @@ source_set("impl") {
+@@ -91,9 +97,15 @@ source_set("impl") {
    public_deps = [ "//chrome/browser:browser_public_dependencies" ]
  
    if (is_mac) {
@@ -7200,3 +7368,89 @@ Index: src/chrome/browser/ui/helium/arcium_system_appearance_model_unittest.cc
  TEST_F(ArciumSystemAppearanceModelTest,
         NativeChangesRefreshFixedChromeAndStopAtShutdown) {
    ui::MockOsSettingsProvider os;
+Index: src/chrome/browser/ui/views/overlay/arcium_pip_contrast.h
+===================================================================
+--- /dev/null
++++ src/chrome/browser/ui/views/overlay/arcium_pip_contrast.h
+@@ -0,0 +1,81 @@
++// Copyright 2026 The Arcium Authors
++// Use of this source code is governed by a BSD-style license.
++#ifndef CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_CONTRAST_H_
++#define CHROME_BROWSER_UI_VIEWS_OVERLAY_ARCIUM_PIP_CONTRAST_H_
++
++#include <algorithm>
++#include <array>
++#include <cmath>
++#include <span>
++
++#include "arcium_pip_geometry.h"
++
++namespace arcium::pip {
++enum class ContrastControl { kReturn, kTuck, kClose, kPlay, kBack, kForward, kMute, kCount };
++inline constexpr size_t kContrastRegionCount = static_cast<size_t>(ContrastControl::kCount);
++inline constexpr int kContrastWidth = 96;
++inline constexpr int kContrastHeight = 54;
++// Top-left normalized coordinates in the complete PiP content, including bars.
++struct ContrastRegion {
++  double x = 0, y = 0, width = 0, height = 0;
++  bool operator==(const ContrastRegion&) const = default;
++};
++struct ContrastRequest {
++  std::array<ContrastRegion, kContrastRegionCount> regions{};
++  bool operator==(const ContrastRequest&) const = default;
++};
++struct ContrastSamples {
++  std::array<double, kContrastRegionCount> values;
++  ContrastSamples() { values.fill(-1); }
++};
++inline ContrastRegion NormalizeContrastRegion(geometry::Rect frame, geometry::Rect bounds) {
++  if (bounds.width <= 0 || bounds.height <= 0) return {};
++  return {(frame.x - bounds.x) / bounds.width,
++          (bounds.y + bounds.height - frame.y - frame.height) / bounds.height,
++          frame.width / bounds.width, frame.height / bounds.height};
++}
++// The bitmap contains video alone. Samples outside its actual letterboxed
++// rectangle contribute black, matching the PiP window's background.
++inline ContrastSamples MeasureButtonContrast(const ContrastRequest& request,
++    ContrastRegion video, std::span<const float> pixels) {
++  ContrastSamples result;
++  if (pixels.size() != kContrastWidth * kContrastHeight ||
++      !std::isfinite(video.x) || !std::isfinite(video.y) ||
++      !std::isfinite(video.width) || !std::isfinite(video.height) ||
++      video.width <= 0 || video.height <= 0) return result;
++  auto at = [&](double x, double y) {
++    const double sx = std::clamp((x - video.x) / video.width * kContrastWidth - .5,
++                                 0.0, double(kContrastWidth - 1));
++    const double sy = std::clamp((y - video.y) / video.height * kContrastHeight - .5,
++                                 0.0, double(kContrastHeight - 1));
++    const int x0 = static_cast<int>(sx), y0 = static_cast<int>(sy);
++    const int x1 = std::min(x0 + 1, kContrastWidth - 1);
++    const int y1 = std::min(y0 + 1, kContrastHeight - 1);
++    const double a = std::lerp(pixels[y0 * kContrastWidth + x0], pixels[y0 * kContrastWidth + x1], sx - x0);
++    const double b = std::lerp(pixels[y1 * kContrastWidth + x0], pixels[y1 * kContrastWidth + x1], sx - x0);
++    return std::lerp(a, b, sy - y0);
++  };
++  for (size_t i = 0; i < request.regions.size(); ++i) {
++    const auto& region = request.regions[i];
++    if (!std::isfinite(region.x) || !std::isfinite(region.y) ||
++        !std::isfinite(region.width) || !std::isfinite(region.height) ||
++        region.width <= 0 || region.height <= 0) continue;
++    double sum = 0;
++    int count = 0;
++    // Average inside the round button footprint, not its square corners.
++    for (int y = 0; y < 8; ++y) for (int x = 0; x < 8; ++x) {
++      const double u = (x + .5) / 8, v = (y + .5) / 8;
++      if (std::pow(2 * u - 1, 2) + std::pow(2 * v - 1, 2) > 1) continue;
++      const double px = region.x + u * region.width;
++      const double py = region.y + v * region.height;
++      ++count;
++      if (px >= video.x && px < video.x + video.width &&
++          py >= video.y && py < video.y + video.height)
++        sum += at(px, py);
++    }
++    result.values[i] = count ? std::clamp(sum / count, 0.0, 1.0) : -1;
++  }
++  return result;
++}
++}  // namespace arcium::pip
++#endif
