@@ -48,6 +48,7 @@
   "preconditions": [
     "Launch the exact recorded bundle and profile after replay, compilation, and packaging pass",
     "For installed acceptance, use the session-authorized Personal profile at the Arcium user-data root and record this profile substitution separately",
+    "Run Sites customization only in a fresh disposable isolated profile. Skip those mutations for installed/Personal-profile acceptance; restoring defaults is not restoration of prior user settings.",
     "Record existing settings and create only acceptance-owned tabs and Spaces; preserve user items",
     "Serve the synthetic tab-lifecycle fixture on an available owned loopback port; use real HTTP responses for navigation completion checks, not New Tab or internal pages"
   ],
@@ -65,7 +66,8 @@
     "Repeat with a different fixture query string after reopening and dismissing the command bar. The completed response must remain interactive and shortcut recording must not dereference a destroyed autocomplete provider",
     "Press Command-T, type a second test URL, press Return, and inspect both tabs",
     "Open the bar, type a query and select a command row, then press Command-T; verify the old query and selection clear before Escape",
-    "With no matching tabs or saved items, open YouTube, X and ChatGPT with nothing typed: each lists its shortcuts and Return opens the first. Open a matching tab and verify it comes first and its shortcut is not repeated. In Settings > Command bar > Sites, hide X, reorder, rename YouTube, edit its shortcuts, add a custom site with a domain and %s search URL, then delete it and restore defaults; the open bar's scopes and rows update without reopening",
+    "With no matching tabs or saved items, open YouTube, X and ChatGPT with nothing typed: each lists its shortcuts and Return opens the first. Open a matching tab and verify it comes first and its shortcut is not repeated.",
+    "Only in the fresh disposable isolated profile: in Settings > Command bar > Sites, hide X, reorder, rename YouTube, edit its shortcuts, add a custom site with a domain and %s search URL, then delete it and restore defaults; the open bar's scopes and rows update without reopening",
     "Use matching acceptance-owned Pins in two Spaces and a Favorite to verify tiers, rich metadata, Return activation, and duplicate-URL identities",
     "Explicitly select Pin current tab, Add current tab to Favorites, Move Pin to Space, Close live instance, and Return Pin home on acceptance-owned items",
     "Inspect action icons, target context, and activation cues; use arrow keys to move between navigation and action rows without moving focus from the input",
