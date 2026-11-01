@@ -1,6 +1,7 @@
 # Complete gray favicon framing
 
-Core PR21 now targets published main `4e8f8e2b` with reconciled head
+Core PR21 merged as `9bfca487e53d0103a9e9264ec709158afeb69078`.
+Its tree exactly matches reviewed head
 `69187427f58b40ce7c176619f2e09f3343d8a06d`. Its two changed patch files are
 byte-identical to verified `7f2e3677`. The temporary compatibility variant and
 its browser-runner migration were dropped in favor of main's repairs. The CI
@@ -10,9 +11,10 @@ fixture-list repair is already present in main.
 The 18 hunks composing the persistent-tab test file matched exact context in
 memory. This is a focused source check, not a full catalog replay or build.
 The macOS PR now starts at published outer main `bfc058e2` and pins that
-reconciled core. The obsolete appearance GN context refresh was dropped; all
+published core merge. The obsolete appearance GN context refresh was dropped; all
 macOS product patches match published main. Shared156 remains owned by
-Runtime SDK. Both PRs remain drafts pending current-head validation.
+Runtime SDK. Daniel approved the visible fix and merge; the macOS pin update
+awaits final CI. No fresh build or native run is implied by this approval.
 [Astra also approved the outer reconciliation](astra-outer-reconciliation-review.md).
 
 The build, test and native evidence below is historical proof for outer
@@ -88,8 +90,8 @@ enlarge slightly. That affects sharpness separately from this crop correction.
 [Astra reviewed the verified change](astra-review.md) and found no blocking
 production defect. The original review kept the PRs as drafts pending compatibility-parent
 reconciliation. That core parent is now superseded by merged main; current
-draft status reflects current-head validation still pending. Both private
-main reconciliations are now complete.
+both private main reconciliations are complete. Daniel subsequently approved
+merging; the core merge tree is identical to the reviewed head.
 
 The later CI-only core commit `7d8def783403a7be11a1b12714276e180f6312fc` adds five Settings input paths
 to the existing lite-source fixture restorer. Its seven restoration tests

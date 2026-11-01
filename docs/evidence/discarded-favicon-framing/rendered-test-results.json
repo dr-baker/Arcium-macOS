@@ -66,5 +66,12 @@
     "fresh_build": "NOT RUN",
     "fresh_native_validation": "NOT RUN",
     "astra_review": "APPROVED, no blockers; source-only reconciliation"
+  },
+  "merge_delivery": {
+    "core_merge": "9bfca487e53d0103a9e9264ec709158afeb69078",
+    "reviewed_core_head": "69187427f58b40ce7c176619f2e09f3343d8a06d",
+    "trees_identical": true,
+    "user_visual_and_merge_approval": "2026-11-01",
+    "fresh_build_or_native_run": false
   }
 }
