@@ -14,7 +14,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumCommandSites.swift
-@@ -0,0 +1,579 @@
+@@ -0,0 +1,590 @@
 +import Combine
 +import Foundation
 +import SettingsUI
@@ -23,7 +23,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +
 +// Mirrors the sparse "arcium.command_bar.sites" preference. The browser owns
 +// validation; this editor never writes resolved built-in defaults back.
-+nonisolated struct ArciumCommandSiteShortcut: Equatable, Hashable, Sendable {
++nonisolated struct ArciumCommandSiteShortcut: Equatable, Hashable, Identifiable, Sendable {
++    let id = UUID()
 +    var title: String
 +    var url: String
 +
@@ -37,6 +38,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +              let title = dictionary["title"] as? String,
 +              let url = dictionary["url"] as? String else { return nil }
 +        self.init(title: title, url: url)
++    }
++
++    static func == (lhs: Self, rhs: Self) -> Bool {
++        lhs.title == rhs.title && lhs.url == rhs.url
++    }
++
++    func hash(into hasher: inout Hasher) {
++        hasher.combine(title)
++        hasher.combine(url)
 +    }
 +
 +    var dictionary: [String: Any] { ["title": title, "url": url] }
@@ -525,21 +535,22 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsU
 +                    Text("Shortcuts").settingsFont(\.body).foregroundStyle(theme.textPrimary)
 +                    Text("Shown when the scope opens with nothing typed.")
 +                        .settingsFont(\.caption).foregroundStyle(theme.textSecondary)
-+                    ForEach(site.shortcuts.indices, id: \.self) { index in
++                    ForEach($site.shortcuts) { $shortcut in
++                        let shortcutID = shortcut.id
 +                        HStack {
-+                            TextField("Title", text: $site.shortcuts[index].title)
++                            TextField("Title", text: $shortcut.title)
 +                                .frame(width: 150)
-+                                .accessibilityLabel("Shortcut \(index + 1) title")
-+                            TextField("URL", text: $site.shortcuts[index].url,
++                                .accessibilityLabel("Shortcut title")
++                            TextField("URL", text: $shortcut.url,
 +                                      prompt: Text("https://"))
-+                                .accessibilityLabel("Shortcut \(index + 1) URL")
++                                .accessibilityLabel("Shortcut URL")
 +                            Button {
-+                                site.shortcuts.remove(at: index)
++                                site.shortcuts.removeAll { $0.id == shortcutID }
 +                            } label: {
 +                                Image(systemName: "minus.circle")
 +                            }
 +                            .buttonStyle(.borderless)
-+                            .accessibilityLabel("Remove shortcut \(index + 1)")
++                            .accessibilityLabel("Remove shortcut")
 +                        }
 +                    }
 +                    HStack {
@@ -645,7 +656,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUITests/ArciumCommandSitesTests.swift
-@@ -0,0 +1,172 @@
+@@ -0,0 +1,187 @@
 +import XCTest
 +@testable import ArciumSettingsUI
 +
@@ -672,6 +683,21 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_swift/Tests/ArciumSettingsUIT
 +
 +    private func sites(_ saved: [String: Any] = [:]) -> ArciumCommandSites {
 +        ArciumCommandSites(["builtins": Self.builtins, "sites": saved])
++    }
++
++    func testShortcutIdentityIsStableWhileEqualityRemainsValueBased() {
++        let first = ArciumCommandSiteShortcut(title: "Home", url: "https://example.com/")
++        let sameValue = ArciumCommandSiteShortcut(title: "Home", url: "https://example.com/")
++        XCTAssertNotEqual(first.id, sameValue.id)
++        XCTAssertEqual(first, sameValue)
++        XCTAssertEqual(Set([first, sameValue]).count, 1)
++        XCTAssertEqual(first.dictionary as NSDictionary, sameValue.dictionary as NSDictionary)
++        XCTAssertNil(first.dictionary["id"])
++
++        var edited = first
++        edited.title = "Changed"
++        XCTAssertEqual(edited.id, first.id)
++        XCTAssertNotEqual(edited, first)
 +    }
 +
 +    func testDefaultsListBuiltinsInOrderAndWriteNothing() {
