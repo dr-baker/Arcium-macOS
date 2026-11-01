@@ -68,3 +68,12 @@ enlarge slightly. That affects sharpness separately from this crop correction.
 [Astra reviewed the verified change](astra-review.md) and found no blocking
 production defect. The review PRs remain drafts until the compatibility parent
 is reconciled with the overlapping command-sites prerequisites.
+
+The later CI-only core commit `7d8def783403a7be11a1b12714276e180f6312fc` adds five Settings input paths
+to the existing lite-source fixture restorer. Its seven restoration tests
+passed. It changes no product patches; the compiled revisions above remain
+the actual native and rendered-test provenance.
+
+[Astra approved the CI-only follow-up](astra-ci-review.md) after those tests.
+The download ref is the selected release tag; there is no expected per-file
+hash verification or immutable-commit binding.

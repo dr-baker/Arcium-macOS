@@ -34,5 +34,14 @@
       "peek_controller_browsertest.cc: removed session_storage_namespace.h",
       "arcium_command_workshop_browsertest.mm: removed BrowserWindowInterface profile() API"
     ]
+  },
+  "post_build_ci_repair": {
+    "core": "7d8def783403a7be11a1b12714276e180f6312fc",
+    "changed_files": [
+      "devutils/restore_lite_test_fixtures.py"
+    ],
+    "product_patch_changes": [],
+    "restoration_tests": "7/7 PASS",
+    "scope": "five additional Settings input paths for existing lite-source restorer"
   }
 }
