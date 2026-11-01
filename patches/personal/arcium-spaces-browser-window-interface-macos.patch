@@ -440,7 +440,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 ===================================================================
 --- src.orig/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +++ src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
-@@ -483,7 +483,7 @@ std::optional<SettingsChromeVisualState>
+@@ -484,7 +484,7 @@ std::optional<SettingsChromeVisualState>
            }
            auto* spaces = helium::HeliumSpaceServiceFactory::GetForProfileIfExists(profile);
            if (target && (!spaces || spaces->GetExplicitSpaceIdForBrowser(
@@ -449,16 +449,16 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
              return true;
            }
  
-@@ -649,7 +649,7 @@ class CommandSettingsEditor : public vie
+@@ -650,7 +650,7 @@ class CommandSettingsEditor : public vie
        : controls_(controls), closed_(closed),
          browser_widget_(browser_view->browser_widget()) {
      auto* browser = browser_view->browser();
 -    auto* profile = browser->profile()->GetOriginalProfile();
 +    auto* profile = browser->GetProfile()->GetOriginalProfile();
-     auto panel = std::make_unique<arcium::CommandPanelView>(
-         std::make_unique<arcium::CommandExampleSession>(
-             arcium::CreateCommandSession(browser)->GetScopes()),
-@@ -1516,7 +1516,7 @@ void SettingsModelProfileWillBeDestroyed
+     browser_ = browser;
+     auto example = std::make_unique<arcium::CommandExampleSession>(
+         arcium::CreateCommandSession(browser)->GetScopes());
+@@ -1530,7 +1530,7 @@ void SettingsModelProfileWillBeDestroyed
      @"layout" : @(model && layout_available
                        ? model->GetInteger(prefs::kHeliumLayout)
                        : static_cast<int>(HeliumLayoutType::kClassic)),
@@ -467,7 +467,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      @"layoutOptions" : @[
        @{
          @"value" : @(static_cast<int>(HeliumLayoutType::kClassic)),
-@@ -3384,7 +3384,7 @@ base::ScopedClosureRunner ShowSpaceTheme
+@@ -3425,7 +3425,7 @@ base::ScopedClosureRunner ShowSpaceTheme
      const helium::SpaceTheme& theme,
      base::RepeatingCallback<void(const helium::SpaceTheme&)> changed) {
    auto* view = browser ? BrowserView::GetBrowserViewForBrowser(
@@ -476,7 +476,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    auto* widget = view ? view->GetWidget() : nullptr;
    NSWindow* parent = widget ? widget->GetNativeWindow().GetNativeNSWindow() : nil;
    if (!parent || parent.attachedSheet) return {};
-@@ -3441,7 +3441,7 @@ bool ShowForBrowser(BrowserWindowInterfa
+@@ -3482,7 +3482,7 @@ bool ShowForBrowser(BrowserWindowInterfa
    Profile* profile = browser->GetProfile()->GetOriginalProfile();
    auto* spaces = helium::HeliumSpaceServiceFactory::GetForProfile(profile);
    const auto id = spaces ? spaces->GetSpaceIdForBrowser(
@@ -485,7 +485,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    return ShowForSpace(profile, id);
  }
  
-@@ -3455,7 +3455,7 @@ bool ShowAppearanceForBrowser(BrowserWin
+@@ -3496,7 +3496,7 @@ bool ShowAppearanceForBrowser(BrowserWin
      return false;
    }
    const auto id =

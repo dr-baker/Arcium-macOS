@@ -830,7 +830,53 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
  NSString* const kKeySidebarWidth = @"sidebar_width";
  NSString* const kKeyCollapsedSidebarStyle = @"collapsed_sidebar_style";
  NSString* const kKeySidebarFooterAction = @"sidebar_footer_action";
-@@ -1805,6 +1806,12 @@ void SettingsModelProfileWillBeDestroyed
+@@ -650,9 +651,12 @@ class CommandSettingsEditor : public vie
+         browser_widget_(browser_view->browser_widget()) {
+     auto* browser = browser_view->browser();
+     auto* profile = browser->profile()->GetOriginalProfile();
++    browser_ = browser;
++    auto example = std::make_unique<arcium::CommandExampleSession>(
++        arcium::CreateCommandSession(browser)->GetScopes());
++    example_session_ = example.get();
+     auto panel = std::make_unique<arcium::CommandPanelView>(
+-        std::make_unique<arcium::CommandExampleSession>(
+-            arcium::CreateCommandSession(browser)->GetScopes()),
++        std::move(example),
+         base::BindRepeating(&CommandSettingsEditor::RequestClose,
+                             base::Unretained(this)),
+         base::DoNothing());
+@@ -721,6 +725,12 @@ class CommandSettingsEditor : public vie
+     if (browser_widget_) browser_widget_->RemoveObserver(this);
+     CloseWindow();
+   }
++  void RefreshScopes() {
++    if (!closing_ && browser_ && example_session_) {
++      example_session_->SetScopes(
++          arcium::CreateCommandSession(browser_)->GetScopes());
++    }
++  }
+   void UpdateSpace(const helium::HeliumSpace* space) {
+     if (widget_) widget_->UpdateSpace(space);
+   }
+@@ -748,6 +758,8 @@ class CommandSettingsEditor : public vie
+     NSWindow* window = widget_->GetNativeWindow().GetNativeNSWindow();
+     if (window.sheetParent) [window.sheetParent endSheet:window];
+     root_->controls()->Detach();
++    example_session_ = nullptr;
++    browser_ = nullptr;
+     widget_->CloseNow();
+     widget_.reset();
+     delegate_.reset();
+@@ -756,6 +768,8 @@ class CommandSettingsEditor : public vie
+   NSViewController* controls_;
+   void (^closed_)(void);
+   raw_ptr<BrowserWidget> browser_widget_;
++  raw_ptr<BrowserWindowInterface> browser_ = nullptr;
++  raw_ptr<arcium::CommandExampleSession> example_session_ = nullptr;
+   raw_ptr<CommandSettingsPreviewView> root_ = nullptr;
+   std::unique_ptr<views::WidgetDelegate> delegate_;
+   std::unique_ptr<CommandSettingsPreviewWidget> widget_;
+@@ -1805,6 +1819,12 @@ void SettingsModelProfileWillBeDestroyed
          @(model && model->HasPreference(arcium::kCommandPanelLayoutPref)),
      @"commandPanelLayoutManaged" :
          @(model && model->IsManaged(arcium::kCommandPanelLayoutPref)),
@@ -843,7 +889,7 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
      @"commandBarAppearance" : @(command_bar_appearance),
      @"commandBarAppearanceAvailable" : @(command_bar_appearance_available),
      @"commandBarAppearanceManaged" : @(command_bar_appearance_managed),
-@@ -2678,6 +2685,18 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2678,6 +2698,18 @@ void SettingsModelProfileWillBeDestroyed
      }
      return;
    }
@@ -853,8 +899,8 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
 +    const auto sites = [value isKindOfClass:[NSDictionary class]]
 +                           ? BaseDictFromNSObject((NSDictionary*)value)
 +                           : std::nullopt;
-+    if (sites) {
-+      model_->SetCommandSites(*sites);
++    if (sites && model_->SetCommandSites(*sites) && command_editor_) {
++      command_editor_->RefreshScopes();
 +    }
 +    [self modelDidChange];
 +    return;
@@ -862,13 +908,15 @@ Index: src/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
    if ([key isEqualToString:kKeyCommandPanelLayout]) {
      if ([value isKindOfClass:[NSDictionary class]]) {
        const auto layout = arcium_settings::CommandPanelLayoutFromNSObject(value);
-@@ -2811,6 +2830,13 @@ void SettingsModelProfileWillBeDestroyed
+@@ -2811,6 +2843,15 @@ void SettingsModelProfileWillBeDestroyed
      [self closeCommandBarEditor];
      return;
    }
 +  if ([name isEqualToString:@"add_command_site"]) {
 +    if (const auto site = BaseDictFromNSObject(payload)) {
-+      model_->AddCommandSite(*site);
++      if (!model_->AddCommandSite(*site).empty() && command_editor_) {
++        command_editor_->RefreshScopes();
++      }
 +    }
 +    [self modelDidChange];
 +    return;
