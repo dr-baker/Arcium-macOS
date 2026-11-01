@@ -1,0 +1,70 @@
+{
+  "before": {
+    "phase": "before production correction",
+    "test": "PersistentTabViewTest.DiscardedFaviconKeepsFullImageAtScaledSizes",
+    "test_status": "FAILURE",
+    "combinations": 36,
+    "binary_sha256": "351dab9b396e21fd185f3f1663d2dfd3ecb838b75d980417a55d8e83902980b5",
+    "test_retries": 0,
+    "production_source_sha256": "44d9c0c4ee95d882dff99a31d80a4953e350d6090f673be449926a09d808b7d1",
+    "compiled_evidence": "44cc808c457b4d3a86067bbcc291614e"
+  },
+  "after": {
+    "phase": "after production correction",
+    "passed": 29,
+    "failed": [],
+    "regression": [
+      {
+        "elapsed_time_ms": 207,
+        "status": "SUCCESS"
+      }
+    ],
+    "test_retries": 0,
+    "combinations": 36,
+    "outer": "c28bf9a280e5853a01c033f57adefcfe031e82ec",
+    "core": "7f2e3677b5f66c5390c99dbe72caefd6c1e42297",
+    "fingerprint": "c89767e8af46dd92842b9a2739a236696827d9441acccfbb19b137e004adcbd5"
+  },
+  "additional_browser_floor_check": {
+    "migrated_18_case_object": "COMPILED",
+    "executable": "NOT LINKED",
+    "tests": "NOT RUN",
+    "scope": "unchanged browser tests outside favicon diff",
+    "unrelated_compile_errors": [
+      "peek_controller_browsertest.cc: removed session_storage_namespace.h",
+      "arcium_command_workshop_browsertest.mm: removed BrowserWindowInterface profile() API"
+    ]
+  },
+  "post_build_ci_repair": {
+    "core": "7d8def783403a7be11a1b12714276e180f6312fc",
+    "changed_files": [
+      "devutils/restore_lite_test_fixtures.py"
+    ],
+    "product_patch_changes": [],
+    "restoration_tests": "7/7 PASS",
+    "scope": "five additional Settings input paths for existing lite-source restorer"
+  },
+  "main_reconciliation": {
+    "base": "4e8f8e2bd3cdcab014ae9663907db93e915cb850",
+    "head": "69187427f58b40ce7c176619f2e09f3343d8a06d",
+    "carried_patch_bytes_identical_to_verified_head": true,
+    "temporary_compatibility_variant": "dropped; main uses its own repairs",
+    "focused_in_memory_hunks": 18,
+    "focused_context_match": "all exact, no fuzz",
+    "test_cases_composed": 29,
+    "fresh_full_replay": "NOT RUN",
+    "fresh_build": "NOT RUN",
+    "fresh_native_validation": "NOT RUN",
+    "original_proof": "before/after records retain their actual historical revisions"
+  },
+  "outer_main_reconciliation": {
+    "base": "bfc058e2e610020c214ea194c91e03144ab88ed4",
+    "core_pin": "69187427f58b40ce7c176619f2e09f3343d8a06d",
+    "obsolete_appearance_context_refresh": "dropped; file byte-identical to published outer main",
+    "macos_patch_drift": [],
+    "fresh_full_replay": "NOT RUN",
+    "fresh_build": "NOT RUN",
+    "fresh_native_validation": "NOT RUN",
+    "astra_review": "APPROVED, no blockers; source-only reconciliation"
+  }
+}
