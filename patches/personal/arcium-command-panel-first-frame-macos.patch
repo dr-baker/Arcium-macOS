@@ -1,0 +1,41 @@
+Index: src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
+===================================================================
+--- src.orig/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
++++ src/chrome/browser/ui/views/omnibox/arcium_command_bar_material_mac.mm
+@@ -21,6 +21,7 @@
+ #import "chrome/browser/ui/views/helium/glass_surface_mac.h"
+ #include "chrome/browser/ui/views/helium/surface_style.h"
+ #import "components/remote_cocoa/app_shim/native_window_background_view.h"
++#import "components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/views/widget/widget.h"
+ 
+@@ -532,6 +533,12 @@ class CommandBarNativeBackgroundMac : pu
+   CommandBarNativeBackgroundMac(views::Widget* widget,
+                                 base::RepeatingClosure appearance_changed)
+       : widget_(widget) {
++    // The native glass would otherwise appear before the first Views frame.
++    // Reuse the normal CA transaction wait for this window's initial content.
++    if (auto* bridge = remote_cocoa::NativeWidgetNSWindowBridge::GetFromNSWindow(
++            widget_->GetNativeWindow().GetNativeNSWindow())) {
++      bridge->EnableInitialFrameSynchronization();
++    }
+     accessibility_observer_ = [NSWorkspace.sharedWorkspace.notificationCenter
+         addObserverForName:
+             NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
+Index: src/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h
+===================================================================
+--- src.orig/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h
++++ src/components/remote_cocoa/app_shim/native_widget_ns_window_bridge.h
+@@ -199,6 +199,11 @@ class REMOTE_COCOA_APP_SHIM_EXPORT Nativ
+   ui::mojom::ModalType modal_type() const { return modal_type_; }
+   bool is_translucent_window() const { return is_translucent_window_; }
+ 
++  // Native-backed translucent windows can wait for content before first reveal.
++  void EnableInitialFrameSynchronization() {
++    ca_transaction_sync_suppressed_ = false;
++  }
++
+   // The parent widget specified in Widget::InitParams::parent. If non-null, the
+   // parent will close children before the parent closes, and children will be
+   // raised above their parent when window z-order changes.

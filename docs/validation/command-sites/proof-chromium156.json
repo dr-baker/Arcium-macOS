@@ -1,0 +1,55 @@
+{
+  "core": "55022064c5599e5ac201b6da321b2b0a7c2bce67",
+  "macOSCodeCommit": "9b96af27284000a7cfd28b36f148c71b6743e506",
+  "mode": "daily isolated Dev app; mock Keychain; omnibox-command-bar profile; FavoritesAndPins enabled; DialMediaRouteProvider disabled",
+  "capturePid": 63152,
+  "relaunchPid": 79840,
+  "strictPatchReplay": 591,
+  "unitTests": {
+    "omnibox": 458,
+    "focusedSettings": 145,
+    "retries": 0
+  },
+  "swiftPackageTests": 112,
+  "embeddedComponentLibraries": 530,
+  "signedBundle": true,
+  "browserHelperClosurePassed": true,
+  "globalSharedOutputLoadsBeforeRelease": 0,
+  "postRestartObservedProcesses": 9,
+  "postRestartOwnBundlePaths": 529,
+  "postRestartSharedOutputLoads": 0,
+  "normalMenuQuitAndRelaunchPassed": true,
+  "nativeAcceptance": [
+    "Custom Site domains/searchURL/shortcut editing",
+    "Built-in Site label/shortcut editing",
+    "Site visibility and order",
+    "Immediate example preview updates after add/rename/hide/reorder",
+    "Hiding selected preview scope falls back to Omni while retaining query",
+    "One Return activates edited builtin default shortcut",
+    "Matching live tab retains scope-browsing Return behavior",
+    "Edited catalog survives normal menu Quit/relaunch",
+    "Restore default shortcuts and delete disposable custom Sites",
+    "Cold CmdT and CmdL reopening with upward scope-rail scroll"
+  ],
+  "firstCapturedPopulatedFrames": [
+    {
+      "action": "CmdT",
+      "frame": 86,
+      "time": 5.103333,
+      "precedingClosedTime": 5.063333
+    },
+    {
+      "action": "CmdL",
+      "frame": 433,
+      "time": 16.251667,
+      "precedingClosedTime": 16.231667
+    }
+  ],
+  "limits": [
+    "Variable-rate video cannot exclude transients between captured frames (40ms and20ms at openings).",
+    "One contentless frame remains during Escape dismissal, separate from the populated reopening.",
+    "Optional app_mode_loader closure is reported separately and was not exercised; normal browser/helper closure passed.",
+    "Saved-row Return was not driven separately on156; unit tests and retained151native proof cover it.",
+    "The custom one-Return/search-URL navigation was driven on the preliminary156candidate; final candidate repeated builtin one-Return and catalog/persistence checks."
+  ]
+}
