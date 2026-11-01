@@ -43,5 +43,18 @@
     "product_patch_changes": [],
     "restoration_tests": "7/7 PASS",
     "scope": "five additional Settings input paths for existing lite-source restorer"
+  },
+  "main_reconciliation": {
+    "base": "4e8f8e2bd3cdcab014ae9663907db93e915cb850",
+    "head": "69187427f58b40ce7c176619f2e09f3343d8a06d",
+    "carried_patch_bytes_identical_to_verified_head": true,
+    "temporary_compatibility_variant": "dropped; main uses its own repairs",
+    "focused_in_memory_hunks": 18,
+    "focused_context_match": "all exact, no fuzz",
+    "test_cases_composed": 29,
+    "fresh_full_replay": "NOT RUN",
+    "fresh_build": "NOT RUN",
+    "fresh_native_validation": "NOT RUN",
+    "original_proof": "before/after records retain their actual historical revisions"
   }
 }

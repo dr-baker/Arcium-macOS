@@ -1,5 +1,21 @@
 # Complete gray favicon framing
 
+Core PR21 now targets published main `4e8f8e2b` with reconciled head
+`69187427f58b40ce7c176619f2e09f3343d8a06d`. Its two changed patch files are
+byte-identical to verified `7f2e3677`. The temporary compatibility variant and
+its browser-runner migration were dropped in favor of main's repairs. The CI
+fixture-list repair is already present in main.
+
+[Astra approved this reconciliation](astra-main-reconciliation-review.md).
+The 18 hunks composing the persistent-tab test file matched exact context in
+memory. This is a focused source check, not a full catalog replay or build.
+The macOS PR remains draft pending outer PR22's merge and its own main/pin
+reconciliation. Shared156 remains owned by Runtime SDK.
+
+The build, test and native evidence below is historical proof for outer
+`c28bf9a` / core `7f2e3677`, not a build or native run of `69187427`.
+
+
 Hibernated tabs used the enlarged destination dimensions as the source crop.
 At 110% interface scale, a 16-DIP image was sampled as an 18-DIP source.
 The correction samples the full image using `icon.width()` and `icon.height()`.
@@ -23,7 +39,7 @@ fixture tabs and cached icons, the active blank page, 704x504 window and 110%
 scale restored. See the [restored scene](persistence-restored.jpg). No new
 matching crash reports or fatal log markers were observed.
 
-## Automated proof
+## Historical automated proof
 
 - The rendered regression ran and failed before the production change.
 - The identical regression source passed after the one-line correction.
@@ -44,13 +60,15 @@ The additional `arcium_feature_settings_browser_tests` build compiled the
 and command-workshop tests refer to removed Chromium APIs. Those browser
 tests were not run.
 
-## Provenance
+## Historical build provenance
 
 The corrected optimized app was built from outer commit
 `c28bf9a280e5853a01c033f57adefcfe031e82ec` and core commit
 `7f2e3677b5f66c5390c99dbe72caefd6c1e42297`, with fingerprint
 `c89767e8af46dd92842b9a2739a236696827d9441acccfbb19b137e004adcbd5`.
-Later evidence-only commits do not change the product sources.
+The subsequent evidence-only commits at that historical stage did not change
+product sources. The later main reconciliation introduces a different base
+and has not received fresh build or native validation here.
 
 The preserved baseline binary was built from outer `c9386c0a` and core
 `fd7c9080`. Its six relevant favicon paint, gray styling, sidebar sizing and UI-scale
@@ -66,8 +84,9 @@ live-navigation icons can still use 16/32-pixel representations, which may
 enlarge slightly. That affects sharpness separately from this crop correction.
 
 [Astra reviewed the verified change](astra-review.md) and found no blocking
-production defect. The review PRs remain drafts until the compatibility parent
-is reconciled with the overlapping command-sites prerequisites.
+production defect. The original review kept the PRs as drafts pending compatibility-parent
+reconciliation. That core parent is now superseded by merged main; current
+draft status reflects fresh CI and outer-main reconciliation still pending.
 
 The later CI-only core commit `7d8def783403a7be11a1b12714276e180f6312fc` adds five Settings input paths
 to the existing lite-source fixture restorer. Its seven restoration tests
