@@ -2,7 +2,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
-@@ -0,0 +1,194 @@
+@@ -0,0 +1,227 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -16,6 +16,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +#include <span>
 +
 +namespace arcium::pip::geometry {
++inline constexpr double kCornerRadius = 26;
++
 +struct Rect {
 +  double x, y, width, height;
 +};
@@ -195,13 +197,44 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_geometry.h
 +  r.y = top - height;
 +  return ClampPosition(r, area);
 +}
++// Whole-point limits inside the motion model's margin prevent a second
++// position/size correction when the gesture releases ownership.
++inline Rect IntegralResizeArea(Rect area, double margin) {
++  const double left = std::ceil(area.x + margin);
++  const double bottom = std::ceil(area.y + margin);
++  const double right = std::floor(area.x + area.width - margin);
++  const double top = std::floor(area.y + area.height - margin);
++  return {left, bottom, std::max(0.0, right-left), std::max(0.0, top-bottom)};
++}
++// Keep the initial edge parity while resizing around a fixed center. The
++// Chromium native-window bridge uses whole points; independently rounding
++// opposite edges makes an otherwise stationary center alternate by half a point.
++inline Rect CenteredIntegralResize(Rect anchor, Rect requested, Rect area,
++                                  SizeLimits limits = {}) {
++  auto dimension = [](double value, double initial, double minimum, double maximum) {
++    const double origin = std::round(initial);
++    const double lower = std::ceil((minimum-origin)/2);
++    const double upper = std::floor((maximum-origin)/2);
++    if (lower > upper) return std::clamp(std::round(value), minimum, maximum);
++    return origin + 2*std::clamp(std::round((value-origin)/2), lower, upper);
++  };
++  const bool small = area.width < limits.minimum_width || area.height < limits.minimum_height;
++  const double width = dimension(requested.width, anchor.width,
++      small ? 0 : limits.minimum_width,
++      std::min(area.width, std::max(limits.minimum_width, limits.maximum_width)));
++  const double height = dimension(requested.height, anchor.height,
++      small ? 0 : limits.minimum_height,
++      std::min(area.height, std::max(limits.minimum_height, limits.maximum_height)));
++  return ClampPosition({anchor.x+(anchor.width-width)/2,
++                        anchor.y+(anchor.height-height)/2, width, height}, area);
++}
 +}  // namespace arcium::pip::geometry
 +#endif
 Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
-@@ -0,0 +1,145 @@
+@@ -0,0 +1,144 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -306,7 +339,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.h
 +  double duration = 0;
 +  double playback_rate = 1;
 +  uint32_t accent = 0xFFACB9CF;
-+  std::optional<uint32_t> site_color;
 +  std::u16string title;
 +};
 +
@@ -351,7 +383,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,2953 @@
+@@ -0,0 +1,3034 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -371,7 +403,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +#include "arcium_pip_motion.h"
 +#include "arcium_pip_gestures.h"
 +
-+#include "base/functional/bind.h"
 +
 +namespace {
 +using arcium::pip::Action;
@@ -441,52 +472,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                  weight:NSFontWeightMedium]];
 +}
 +NSView* Capsule(NSView* content, CGFloat radius);
-+NSView* TitlePill(NSView* content) {
-+  const BOOL opaque = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency ||
-+      NSWorkspace.sharedWorkspace.accessibilityDisplayShouldIncreaseContrast;
-+  if (@available(macOS 26.0, *)) {
-+    if (!opaque) {
-+      NSGlassEffectView* glass = [[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
-+      glass.style = NSGlassEffectViewStyleRegular;
-+      glass.contentView = content;
-+      return glass;
-+    }
-+  }
-+  NSView* surface;
-+  if (opaque) {
-+    surface = [[NSView alloc] initWithFrame:NSZeroRect];
-+  } else {
-+    auto* material = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
-+    material.material = NSVisualEffectMaterialPopover;
-+    material.blendingMode = NSVisualEffectBlendingModeWithinWindow;
-+    material.state = NSVisualEffectStateActive;
-+    surface = material;
-+  }
-+  surface.wantsLayer = YES;
-+  surface.layer.masksToBounds = YES;
-+  [surface addSubview:content];
-+  return surface;
-+}
-+void TintTitlePill(NSView* surface, std::optional<uint32_t> site_color) {
-+  NSColor* tint = site_color && (*site_color >> 24) != 0 ? Accent(*site_color) : nil;
-+  if (@available(macOS 26.0, *)) {
-+    if ([surface isKindOfClass:NSGlassEffectView.class]) {
-+      auto* glass = (NSGlassEffectView*)surface;
-+      NSColor* desired = [tint colorWithAlphaComponent:.24];
-+      if (glass.tintColor != desired && ![glass.tintColor isEqual:desired])
-+        glass.tintColor = desired;
-+      return;
-+    }
-+  }
-+  if ([surface isKindOfClass:NSVisualEffectView.class]) {
-+    surface.layer.backgroundColor = [tint colorWithAlphaComponent:.12].CGColor;
-+  } else {
-+    [surface.effectiveAppearance performAsCurrentDrawingAppearance:^{
-+      NSColor* base = NSColor.windowBackgroundColor;
-+      surface.layer.backgroundColor = (tint ? [base blendedColorWithFraction:.18 ofColor:tint] : base).CGColor;
-+    }];
-+  }
-+}
 +void Present(NSView* view, BOOL visible, BOOL animate) {
 +  const CGFloat target = visible ? 1 : 0;
 +  if ((!view.hidden && view.alphaValue == target) ||
@@ -504,7 +489,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  [NSAnimationContext
 +      runAnimationGroup:^(NSAnimationContext* context) {
-+        context.duration = 0.16;
++        context.duration = visible ? .14 : .18;
++        context.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
 +        view.animator.alphaValue = target;
 +      }
 +      completionHandler:^{
@@ -636,21 +622,30 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +
 +@interface ArciumPiPSliderCell : NSSliderCell
 +@property(nonatomic, strong) NSColor* accent;
++@property(nonatomic) CGFloat controlScale;
++@property(nonatomic) BOOL trackingThumb;
 +@end
 +@implementation ArciumPiPSliderCell
 +@synthesize accent = _accent;
 +- (void)drawBarInside:(NSRect)rect flipped:(BOOL)flipped {
-+  NSRect track = NSMakeRect(NSMinX(rect), NSMidY(rect) - 1.5, NSWidth(rect), 3);
++  const CGFloat thickness = (self.trackingThumb ? 6 : 4) * std::max(.8, self.controlScale);
++  NSRect track = NSMakeRect(NSMinX(rect), NSMidY(rect) - thickness/2, NSWidth(rect), thickness);
 +  [[NSColor colorWithWhite:1 alpha:0.25] setFill];
-+  [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
++  [[NSBezierPath bezierPathWithRoundedRect:track xRadius:NSHeight(track)/2 yRadius:NSHeight(track)/2] fill];
 +  double fraction = (self.doubleValue - self.minValue) /
 +                    std::max(0.001, self.maxValue - self.minValue);
 +  track.size.width *= std::clamp(fraction, 0.0, 1.0);
 +  [[NSColor colorWithWhite:1 alpha:0.92] setFill];
-+  [[NSBezierPath bezierPathWithRoundedRect:track xRadius:1.5 yRadius:1.5] fill];
++  [[NSBezierPath bezierPathWithRoundedRect:track xRadius:NSHeight(track)/2 yRadius:NSHeight(track)/2] fill];
++}
++- (NSRect)knobRectFlipped:(BOOL)flipped {
++  NSRect native = [super knobRectFlipped:flipped];
++  const CGFloat diameter = 12 * std::max(.8, self.controlScale);
++  return NSMakeRect(NSMidX(native)-diameter/2, NSMidY(native)-diameter/2, diameter, diameter);
 +}
 +- (void)drawKnob:(NSRect)rect {
-+  NSRect knob = NSMakeRect(NSMidX(rect) - 5, NSMidY(rect) - 5, 10, 10);
++  if (self.trackingThumb) return;
++  NSRect knob = rect;
 +  [[NSColor colorWithWhite:0 alpha:0.28] setFill];
 +  [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(knob, -0.5, -0.5)] fill];
 +  [NSColor.whiteColor setFill];
@@ -660,11 +655,97 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +@end
 +
-+@interface ArciumPiPSlider : NSSlider
++@interface ArciumPiPThumbHost : NSView
++@end
++@implementation ArciumPiPThumbHost
++- (NSView*)hitTest:(NSPoint)point { return nil; }
++@end
++@interface ArciumPiPSlider : NSSlider {
++  ArciumPiPThumbHost* _thumbHost;
++  NSView* _thumbGlass;
++  NSView* _thumbAccent;
++  NSUInteger _thumbGeneration;
++}
++@property(nonatomic) CGFloat controlScale;
++- (void)setTrackingThumb:(BOOL)tracking;
++- (void)updateThumb;
 +@property(nonatomic, copy) void (^beginDrag)(void);
 +@property(nonatomic, copy) void (^endDrag)(void);
 +@end
 +@implementation ArciumPiPSlider
++- (instancetype)initWithFrame:(NSRect)frame {
++  self = [super initWithFrame:frame];
++  if (!self) return nil;
++  _thumbHost = [[ArciumPiPThumbHost alloc] initWithFrame:NSZeroRect];
++  _thumbHost.wantsLayer = YES;
++  _thumbHost.hidden = YES;
++  _thumbHost.accessibilityElement = NO;
++  _thumbAccent = [[NSView alloc] initWithFrame:NSZeroRect];
++  _thumbAccent.wantsLayer = YES;
++  _thumbGlass = Capsule(_thumbAccent, 14);
++  [_thumbHost addSubview:_thumbGlass];
++  [self addSubview:_thumbHost];
++  return self;
++}
++- (void)setControlScale:(CGFloat)scale {
++  _controlScale = scale;
++  ((ArciumPiPSliderCell*)self.cell).controlScale = scale;
++  self.needsLayout = YES;
++  self.needsDisplay = YES;
++}
++- (void)layout { [super layout]; [self updateThumb]; }
++- (void)updateThumb {
++  if (!_thumbHost) return;
++  auto* cell = (ArciumPiPSliderCell*)self.cell;
++  NSRect knob = [cell knobRectFlipped:self.flipped];
++  const CGFloat diameter = 28 * std::max(.8, _controlScale);
++  [CATransaction begin]; [CATransaction setDisableActions:YES];
++  _thumbHost.frame = NSMakeRect(NSMidX(knob)-diameter/2, NSMidY(knob)-diameter/2, diameter, diameter);
++  Place(_thumbGlass, _thumbAccent, _thumbHost.bounds);
++  _thumbAccent.layer.backgroundColor = [cell.accent colorWithAlphaComponent:.16].CGColor;
++  [CATransaction commit];
++}
++- (void)setTrackingThumb:(BOOL)tracking {
++  const NSUInteger generation = ++_thumbGeneration;
++  auto* cell = (ArciumPiPSliderCell*)self.cell;
++  const BOOL wasHidden = _thumbHost.hidden;
++  CALayer* presentation = _thumbHost.layer.presentationLayer ?: _thumbHost.layer;
++  NSNumber* previousScale = [presentation valueForKeyPath:@"transform.scale"];
++  [_thumbHost.layer removeAnimationForKey:@"pickup"];
++  if (tracking) {
++    cell.trackingThumb = YES;
++    [self updateThumb];
++    self.needsDisplay = YES;
++    [CATransaction begin]; [CATransaction setDisableActions:YES];
++    _thumbHost.layer.transform = CATransform3DIdentity;
++    [CATransaction commit];
++    Present(_thumbHost, YES, YES);
++    if (!ReduceMotion()) {
++      CABasicAnimation* grow = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
++      grow.fromValue = wasHidden ? @(.43) : previousScale;
++      grow.toValue = @(1); grow.duration = .14;
++      grow.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
++      [_thumbHost.layer addAnimation:grow forKey:@"pickup"];
++    }
++  } else if (ReduceMotion()) {
++    cell.trackingThumb = NO; _thumbHost.hidden = YES; self.needsDisplay = YES;
++  } else {
++    // Keep just one thumb visible while it settles back into the track.
++    CABasicAnimation* shrink = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
++    shrink.fromValue = previousScale; shrink.toValue = @(.43); shrink.duration = .12;
++    [_thumbHost.layer addAnimation:shrink forKey:@"pickup"];
++    [NSAnimationContext runAnimationGroup:^(NSAnimationContext* context) {
++      context.duration = .12; self->_thumbHost.animator.alphaValue = 0;
++    } completionHandler:^{
++      if (generation != self->_thumbGeneration) return;
++      cell.trackingThumb = NO; self->_thumbHost.hidden = YES; self.needsDisplay = YES;
++    }];
++  }
++}
++- (BOOL)sendAction:(SEL)action to:(id)target {
++  [self updateThumb];
++  return [super sendAction:action to:target];
++}
 +- (BOOL)acceptsFirstResponder {
 +  return YES;
 +}
@@ -690,7 +771,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (self.beginDrag) {
 +    self.beginDrag();
 +  }
++  [self setTrackingThumb:YES];
 +  [super mouseDown:event];
++  [self setTrackingThumb:NO];
 +  if (self.endDrag) {
 +    self.endDrag();
 +  }
@@ -1174,7 +1257,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    CGPathAddRect(mask, nullptr, fxRoot.bounds);
 +    const CGRect cutout = CGRectMake(frame.origin.x-fxOrigin.x, frame.origin.y-fxOrigin.y,
 +        frame.size.width, frame.size.height);
-+    CGPathAddRoundedRect(mask, nullptr, CGRectInset(cutout,-1,-1),20,20);
++    CGPathAddRoundedRect(mask, nullptr, CGRectInset(cutout,-1,-1),geo::kCornerRadius,geo::kCornerRadius);
 +    stringOcclusion.path = mask; CGPathRelease(mask);
 +  }
 +
@@ -1223,8 +1306,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  ArciumPiPSlider* _slider;
 +  NSTextField* _timestamp;
 +  NSTextField* _title;
-+  NSView* _titlePill;
-+  NSView* _titleHost;
++  NSView* _hoverShade;
++  NSView* _vignetteView;
 +  ArciumPiPResizeView* _resizeView;
 +  NSTrackingArea* _tracking;
 +  NSTimer* _progressTimer;
@@ -1473,9 +1556,26 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _resizing = NO;
 +  [_glassContainer removeFromSuperview];
 +  [_slider removeFromSuperview];
-+  [_titlePill removeFromSuperview];
++  [_title removeFromSuperview];
++  [_hoverShade removeFromSuperview];
++  [_vignetteView removeFromSuperview];
 +  [_timestamp removeFromSuperview];
 +  [_resizeView removeFromSuperview];
++  _hoverShade = [[NSView alloc] initWithFrame:self.bounds];
++  _hoverShade.wantsLayer = YES;
++  _hoverShade.hidden = YES; _hoverShade.alphaValue = 0;
++  _hoverShade.layer.backgroundColor = gray(0, .24);
++  _hoverShade.accessibilityElement = NO;
++  [self addSubview:_hoverShade];
++  _vignetteView = [[NSView alloc] initWithFrame:self.bounds];
++  _vignetteView.wantsLayer = YES;
++  _vignetteView.hidden = YES; _vignetteView.alphaValue = 0;
++  CAGradientLayer* vignette = [CAGradientLayer layer];
++  vignette.colors = @[(__bridge id)gray(0, 0), (__bridge id)gray(0, .62)];
++  vignette.startPoint = CGPointMake(.5, 0); vignette.endPoint = CGPointMake(.5, 1);
++  _vignetteView.layer = vignette;
++  _vignetteView.accessibilityElement = NO;
++  [self addSubview:_vignetteView];
 +  _glassContent = [[NSView alloc] initWithFrame:self.bounds];
 +  _glassContent.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 +  // Glass containers elevate descendant effects above sibling content.
@@ -1560,15 +1660,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self addSubview:_timestamp];
 +  _title = [NSTextField labelWithString:@""];
 +  _title.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
-+  _title.textColor = NSColor.labelColor;
++  _title.textColor = NSColor.whiteColor;
++  _title.wantsLayer = YES;
++  _title.layer.shadowColor = NSColor.blackColor.CGColor;
++  _title.layer.shadowOpacity = .35;
++  _title.layer.shadowRadius = 2;
++  _title.layer.shadowOffset = CGSizeZero;
 +  _title.alignment = NSTextAlignmentCenter;
 +  _title.lineBreakMode = NSLineBreakByTruncatingTail;
 +  _title.maximumNumberOfLines = 1;
 +  _title.accessibilityElement = YES;
-+  _titleHost = [[NSView alloc] initWithFrame:NSZeroRect];
-+  [_titleHost addSubview:_title];
-+  _titlePill = TitlePill(_titleHost);
-+  [self addSubview:_titlePill];
++  [self addSubview:_title];
 +  _resizeView = [[ArciumPiPResizeView alloc] initWithFrame:NSZeroRect];
 +  _resizeView.accessibilityLabel = @"Resize Picture in Picture";
 +  _resizeView.resizeEvent = ^(NSEvent* event, NSInteger phase) {
@@ -1749,7 +1851,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _restoreHost.hidden = suppressed || _state.blocked || _tucked == geo::Side::kNone;
 +  Present(_slider, visible && _state.can_seek, animate);
 +  Present(_timestamp, visible && _state.can_seek, animate);
-+  Present(_titlePill,
++  Present(_hoverShade, visible, animate);
++  const BOOL titleVisible = !suppressed && !_state.blocked && _tucked == geo::Side::kNone &&
++      (visible || _state.show_title) && !_state.title.empty();
++  Present(_vignetteView, visible || titleVisible, animate);
++  Present(_title,
 +          !suppressed && !_state.blocked && _tucked == geo::Side::kNone &&
 +              (visible || _state.show_title) && !_state.title.empty(),
 +          animate);
@@ -1769,7 +1875,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      initWithCharacters:reinterpret_cast<const unichar*>(_state.title.data())
 +                  length:_state.title.size()];
 +  _title.toolTip = _title.stringValue;
-+  TintTitlePill(_titlePill, _state.site_color);
 +  _slider.enabled = _state.can_seek;
 +  NSColor* accent = Accent(_state.accent);
 +  ((ArciumPiPSliderCell*)_slider.cell).accent = accent;
@@ -1806,6 +1911,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [super layout];
 +  if ([self chromeSuppressed]) return;
 +  const CGFloat w = NSWidth(self.bounds), h = NSHeight(self.bounds);
++  _hoverShade.frame = self.bounds;
++  const CGFloat vignetteHeight = std::min(h, std::max(96.0, h*.36));
++  _vignetteView.frame = NSMakeRect(0, h-vignetteHeight, w, vignetteHeight);
 +  _glassContainer.frame = self.bounds;
 +  _glassContent.frame = self.bounds;
 +  const CGFloat scale = std::clamp(std::min(w/480.0,h/270.0),.8,1.45);
@@ -1834,18 +1942,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  Present(_backGlass,seekButtons,![self chromeSuppressed] && !_state.blocked && _tucked == geo::Side::kNone);
 +  Present(_forwardGlass,seekButtons,![self chromeSuppressed] && !_state.blocked && _tucked == geo::Side::kNone);
 +  Place(_muteGlass,_muteButton,NSMakeRect(pad,pad,28*scale,28*scale));
-+  _slider.frame = NSMakeRect(16*scale,40*scale,std::max(0.0,w-32*scale),24*scale);
++  _slider.controlScale = scale;
++  _slider.frame = NSMakeRect(16*scale,34*scale,std::max(0.0,w-32*scale),36*scale);
 +  _timestamp.frame = NSMakeRect(48*scale,13*scale,std::max(0.0,w-96*scale),14*scale);
 +  // Reserve the larger two-button group on both sides to keep the title
 +  // centered in the window rather than in the asymmetric remaining space.
-+  const CGFloat titleHeight = 28*scale;
-+  const CGFloat titleLimit = std::max(0.0, w-2*(pad+2*utility+14*scale));
-+  const CGFloat textWidth = [_title.stringValue sizeWithAttributes:@{NSFontAttributeName:_title.font}].width;
-+  const CGFloat titleWidth = std::min(titleLimit, std::max(titleHeight, std::ceil(textWidth)+24*scale));
-+  Place(_titlePill, _titleHost, NSMakeRect((w-titleWidth)/2,
-+      h-pad-(utility+titleHeight)/2, titleWidth, titleHeight));
-+  _title.frame = NSMakeRect(12*scale, (titleHeight-16*scale)/2,
-+      std::max(0.0,titleWidth-24*scale), 16*scale);
++  const CGFloat titleHeight = 24*scale;
++  const CGFloat titleWidth = std::max(0.0, w-2*(pad+2*utility+14*scale));
++  _title.frame = NSMakeRect((w-titleWidth)/2, h-pad-(utility+titleHeight)/2,
++                            titleWidth, titleHeight);
 +  _resizeView.frame = NSMakeRect(w-24*scale,0,24*scale,24*scale);
 +  const CGFloat handleX = _tucked == geo::Side::kLeft ? w-geo::kHandleWidth : 0;
 +  Place(_restoreHost,_restoreButton,NSMakeRect(handleX,h*.5-32,geo::kHandleWidth,64));
@@ -2466,7 +2571,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [_shadowWindow orderWindow:NSWindowBelow relativeTo:_pipWindow.windowNumber];
 +  }
 +  CGPathRef path = CGPathCreateWithRoundedRect(CGRectMake(kShadowPad, kShadowPad,
-+      frame.size.width, frame.size.height), 16, 16, nullptr);
++      frame.size.width, frame.size.height), geo::kCornerRadius, geo::kCornerRadius, nullptr);
 +  ambientShadow.shadowPath = contactShadow.shadowPath = path;
 +  CGPathRelease(path);
 +  // Pickup shadow: +1 spreads and softens as it lifts, -1 tightens and darkens.
@@ -2904,9 +3009,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    gestures->endPinch(cancelled); _magnifying = NO;
 +    _preferredWidth = cancelled ? _magnifyPreferredWidth : motion->size.width;
 +  }
-+  const NSRect frame = NSMakeRect(motion->position.x, motion->position.y,
-+                                  motion->size.width, motion->size.height);
++  const auto area = motion->area();
++  const auto integralArea = geo::IntegralResizeArea(
++      {area.x, area.y, area.width, area.height}, motion->settings.margin);
++  const auto integral = geo::CenteredIntegralResize(ToRect(_magnifyStartFrame),
++      {motion->position.x, motion->position.y, motion->size.width, motion->size.height},
++      integralArea, _sizeLimits);
++  const NSRect frame = cancelled ? _magnifyStartFrame : ToNSRect(integral);
 +  if (ended || cancelled) {
++    motion->resize({frame.size.width, frame.size.height});
++    motion->placeAt({frame.origin.x, frame.origin.y});
++    if (!cancelled) _preferredWidth = frame.size.width;
 +    _pendingResizeFrame.reset();
 +    [self pauseMotionFrames];
 +    [self setWindowFrame:frame animate:NO];
@@ -3309,7 +3422,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
 +++ src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h
-@@ -1,31 +1,69 @@
+@@ -1,31 +1,68 @@
 -// Copyright 2025 The Chromium Authors
 -// Use of this source code is governed by a BSD-style license that can be
 -// found in the LICENSE file.
@@ -3377,7 +3490,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 + private:
 +  void OnProfileWillBeDestroyed(Profile* profile) override;
 +  void TitleWasSet(content::NavigationEntry* entry) override;
-+  void DidChangeThemeColor() override;
 +  void SaveUserPlacement();
 +  void ApplyWindowPolicy();
 +  void ClearNativeControlsFocus();
@@ -3447,7 +3559,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +51,340 @@ void VideoOverlayWindowNativeWidgetMac::
+@@ -22,3 +51,337 @@ void VideoOverlayWindowNativeWidgetMac::
    params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
    params->style_mask = NSWindowStyleMaskFullSizeContentView;
  }
@@ -3503,9 +3615,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  RefreshNativeControls();
 +}
 +
-+void VideoOverlayWindowNativeWidgetMac::DidChangeThemeColor() {
-+  RefreshNativeControls();
-+}
++
 +
 +void VideoOverlayWindowNativeWidgetMac::ApplyWindowPolicy() {
 +  auto* window = static_cast<NativeWidgetMacNSWindow*>(
@@ -3701,7 +3811,6 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  if (auto* contents = web_contents()) {
 +    if (!contents->GetTitle().empty())
 +      state.title = contents->GetTitle();
-+    state.site_color = contents->GetThemeColor();
 +  }
 +  state.accent = video->GetColorProvider()->GetColor(ui::kColorSysPrimary);
 +  controls_->Update(state);
@@ -3830,7 +3939,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #include "ui/compositor/layer_surface.h"
  #include "ui/display/display.h"
  #include "ui/display/screen.h"
-@@ -215,6 +226,28 @@ class GradientBackground : public views:
+@@ -106,6 +117,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_MAC)
++#include "chrome/browser/ui/views/overlay/arcium_pip_geometry.h"
+ #include "chrome/browser/ui/views/overlay/video_overlay_window_native_widget_mac.h"
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+@@ -215,6 +227,28 @@ class GradientBackground : public views:
  }  // namespace
  
  // OverlayWindow implementation of FrameView.
@@ -3859,7 +3976,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  class OverlayWindowFrameView : public views::FrameView {
    METADATA_HEADER(OverlayWindowFrameView, views::FrameView)
  
-@@ -238,6 +271,10 @@ class OverlayWindowFrameView : public vi
+@@ -238,6 +272,10 @@ class OverlayWindowFrameView : public vi
        return HTNOWHERE;
      }
  
@@ -3870,7 +3987,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
      constexpr int kResizeAreaCornerSize = 16;
      int window_component = GetHTComponentForFrame(
          point, gfx::Insets(kOverlayBorderThickness), kResizeAreaCornerSize,
-@@ -392,8 +429,9 @@ std::unique_ptr<VideoOverlayWindowViews>
+@@ -392,8 +430,9 @@ std::unique_ptr<VideoOverlayWindowViews>
    // On Mac, we override the default native widget with our own subclass, which
    // allows us to get the default window styling (e.g. corner radius) even
    // though we're using `views::Widget::InitParams::remove_standard_frame`.
@@ -3881,7 +3998,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  #endif  // BUILDFLAG(IS_MAC)
  
  #if BUILDFLAG(IS_CHROMEOS)
-@@ -484,6 +522,9 @@ VideoOverlayWindowViews::VideoOverlayWin
+@@ -484,6 +523,9 @@ VideoOverlayWindowViews::VideoOverlayWin
  }
  
  VideoOverlayWindowViews::~VideoOverlayWindowViews() {
@@ -3891,7 +4008,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (overlay_view_) {
      overlay_view_->RemoveObserver(this);
    }
-@@ -574,6 +615,9 @@ void VideoOverlayWindowViews::OnNativeFo
+@@ -574,6 +616,9 @@ void VideoOverlayWindowViews::OnNativeFo
  }
  
  void VideoOverlayWindowViews::OnNativeBlur() {
@@ -3901,7 +4018,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Controls should be hidden when there is no more focus on the window. This
    // is used for tabbing and touch interactions. For mouse interactions, the
    // window cannot be blurred before the ui::EventType::kMouseExited event is
-@@ -628,6 +672,10 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -628,6 +673,10 @@ void VideoOverlayWindowViews::OnNativeWi
  
  void VideoOverlayWindowViews::OnNativeWidgetSizeChanged(
      const gfx::Size& new_size) {
@@ -3912,7 +4029,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Hide the controls when the window is being resized. The controls will
    // reappear when the user interacts with the window again.
    UpdateControlsVisibility(false);
-@@ -639,6 +687,15 @@ void VideoOverlayWindowViews::OnNativeWi
+@@ -639,6 +688,15 @@ void VideoOverlayWindowViews::OnNativeWi
  }
  
  void VideoOverlayWindowViews::OnKeyEvent(ui::KeyEvent* event) {
@@ -3928,7 +4045,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Every time a user uses a keyboard to interact on the window, restart the
    // timer to automatically hide the controls.
    hide_controls_timer_.Reset();
-@@ -670,11 +727,11 @@ void VideoOverlayWindowViews::OnKeyEvent
+@@ -670,11 +728,11 @@ void VideoOverlayWindowViews::OnKeyEvent
        TogglePlayPause();
        event->SetHandled();
      } else if (event->key_code() == ui::VKEY_LEFT &&
@@ -3942,7 +4059,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
        Forward15Seconds();
        event->SetHandled();
      }
-@@ -802,6 +859,11 @@ void VideoOverlayWindowViews::FireEnable
+@@ -802,6 +860,11 @@ void VideoOverlayWindowViews::FireEnable
  }
  
  bool VideoOverlayWindowViews::AreControlsVisible() const {
@@ -3954,7 +4071,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If we're animating to a visibility state, then we'll act as if we're in
    // that state.
    if (fade_animation_) {
-@@ -863,6 +925,14 @@ void VideoOverlayWindowViews::UpdateCont
+@@ -863,6 +926,14 @@ void VideoOverlayWindowViews::UpdateCont
            : wanted_visibility || initial_title_hide_timer_.IsRunning() ||
                  !can_hide_title_and_scrim;
  
@@ -3969,7 +4086,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (should_animate) {
      // Animate the title and top scrim.
      if (title_is_visible != AreTitleAndScrimVisible()) {
-@@ -960,6 +1030,9 @@ void VideoOverlayWindowViews::OnViewVisi
+@@ -960,6 +1031,9 @@ void VideoOverlayWindowViews::OnViewVisi
  
    // The visibility of `overlay_view_` affects our minimum size.
    OnSizeConstraintsChanged();
@@ -3979,7 +4096,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetForcedTucking(bool tuck) {
-@@ -975,6 +1048,120 @@ void VideoOverlayWindowViews::SetForcedT
+@@ -975,6 +1049,120 @@ void VideoOverlayWindowViews::SetForcedT
  }
  
  #if BUILDFLAG(IS_MAC)
@@ -4100,7 +4217,20 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  void VideoOverlayWindowViews::OnAnyBrowserEnteredFullscreen() {
    MoveToActiveFullscreenSpace();
  }
-@@ -1460,6 +1647,19 @@ void VideoOverlayWindowViews::OnRootView
+@@ -1450,7 +1638,12 @@ void VideoOverlayWindowViews::OnRootView
+   GetRootView()->layer()->SetName("VideoOverlayWindowViews:RootView");
+   GetRootView()->layer()->SetMasksToBounds(true);
+ #if !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_MAC)
++  GetRootView()->layer()->SetRoundedCornerRadius(gfx::RoundedCornersF(
++      static_cast<float>(arcium::pip::geometry::kCornerRadius)));
++#else
+   GetRootView()->layer()->SetRoundedCornerRadius(gfx::RoundedCornersF(6));
++#endif
+   GetRootView()->layer()->SetIsFastRoundedCorner(true);
+ #endif
+ 
+@@ -1460,6 +1653,19 @@ void VideoOverlayWindowViews::OnRootView
    }
    view_holder_.clear();
  
@@ -4120,7 +4250,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // Don't show the controls until the mouse hovers over the window.
    UpdateControlsVisibility(false, /*should_animate=*/false);
  }
-@@ -1521,6 +1721,12 @@ void VideoOverlayWindowViews::UpdateLaye
+@@ -1521,6 +1727,12 @@ void VideoOverlayWindowViews::UpdateLaye
  }
  
  void VideoOverlayWindowViews::OnUpdateControlsBounds() {
@@ -4133,7 +4263,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    controls_container_view_->SetSize(GetBounds().size());
  
    // Adding an extra pixel to width/height makes sure the scrim covers the
-@@ -1770,6 +1976,11 @@ bool VideoOverlayWindowViews::IsActive()
+@@ -1770,6 +1982,11 @@ bool VideoOverlayWindowViews::IsActive()
  }
  
  void VideoOverlayWindowViews::Close() {
@@ -4145,7 +4275,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    views::Widget::Close();
    MaybeUnregisterFrameSinkHierarchy();
    if (fade_animator_) {
-@@ -1818,6 +2029,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1818,6 +2035,11 @@ void VideoOverlayWindowViews::ShowInacti
      overlay_view_->SetBoundsRect(gfx::Rect(GetBounds().size()));
      overlay_view_->ShowBubble(GetNativeView());
      SetBounds(CalculateAndUpdateWindowBounds());
@@ -4157,7 +4287,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    }
  
    // When the window is first shown, make the title and top controls
-@@ -1851,6 +2067,11 @@ void VideoOverlayWindowViews::ShowInacti
+@@ -1851,6 +2073,11 @@ void VideoOverlayWindowViews::ShowInacti
  }
  
  void VideoOverlayWindowViews::Hide() {
@@ -4169,7 +4299,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    // If there is an existing overlay view, remove it now.
    RemoveOverlayViewIfExists();
    views::Widget::Hide();
-@@ -1884,6 +2105,15 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1884,6 +2111,15 @@ void VideoOverlayWindowViews::UpdateNatu
    // Update the views::Widget bounds to adhere to sizing spec. This will also
    // update the layout of the controls.
    SetBounds(CalculateAndUpdateWindowBounds());
@@ -4185,7 +4315,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
    if (is_tucking_forced_) {
      tucker_->Tuck();
    }
-@@ -1892,6 +2122,9 @@ void VideoOverlayWindowViews::UpdateNatu
+@@ -1892,6 +2128,9 @@ void VideoOverlayWindowViews::UpdateNatu
  void VideoOverlayWindowViews::SetPlaybackState(PlaybackState playback_state) {
    playback_state_for_testing_ = playback_state;
    play_pause_controls_view_->SetPlaybackState(playback_state);
@@ -4195,7 +4325,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetPlayPauseButtonVisibility(bool is_visible) {
-@@ -1962,6 +2195,9 @@ void VideoOverlayWindowViews::SetMediaMu
+@@ -1962,6 +2201,9 @@ void VideoOverlayWindowViews::SetMediaMu
    if (toggle_mute_button_) {
      toggle_mute_button_->SetMutedState(muted);
    }
@@ -4205,7 +4335,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetToggleMicrophoneButtonVisibility(
-@@ -1997,11 +2233,17 @@ void VideoOverlayWindowViews::SetMediaPo
+@@ -1997,11 +2239,17 @@ void VideoOverlayWindowViews::SetMediaPo
    position_ = position;
    progress_view_->UpdateProgress(position);
    UpdateTimestampLabel(position_.GetPosition(), position_.duration());
@@ -4223,7 +4353,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::SetFaviconImages(
-@@ -2235,7 +2477,7 @@ void VideoOverlayWindowViews::TogglePlay
+@@ -2235,7 +2483,7 @@ void VideoOverlayWindowViews::TogglePlay
    // TogglePlayPause() since the IPC message may not have been propagated
    // the media player yet.
    bool is_active = controller_->TogglePlayPause();
@@ -4232,7 +4362,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::Replay15Seconds() {
-@@ -2413,6 +2655,9 @@ void VideoOverlayWindowViews::RemoveOver
+@@ -2413,6 +2661,9 @@ void VideoOverlayWindowViews::RemoveOver
      GetContentsView()->RemoveChildViewT(overlay_view_.ExtractAsDangling());
      OnSizeConstraintsChanged();
    }
@@ -4242,7 +4372,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
  }
  
  void VideoOverlayWindowViews::OnProgressDragStateChanged(
-@@ -2518,6 +2763,11 @@ void VideoOverlayWindowViews::OnInitialT
+@@ -2518,6 +2769,11 @@ void VideoOverlayWindowViews::OnInitialT
  }
  
  bool VideoOverlayWindowViews::AreTitleAndScrimVisible() const {
@@ -4533,13 +4663,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1907 @@
+@@ -0,0 +1,1941 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
 +#include "chrome/browser/ui/views/overlay/arcium_pip_native_controls.h"
 +
 +#import <AppKit/AppKit.h>
++#import <QuartzCore/QuartzCore.h>
 +
 +#include <algorithm>
 +#include <cmath>
@@ -4624,6 +4755,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +- (NSWindow*)window { return self.testWindow; }
 +- (NSPoint)locationInWindow { return [self.testWindow convertPointFromScreen:self.globalPoint]; }
 +- (NSTimeInterval)timestamp { return self.testTime; }
++@end
++
++@interface NSSlider (ArciumPiPThumbTesting)
++- (void)setTrackingThumb:(BOOL)tracking;
 +@end
 +
 +namespace arcium::pip {
@@ -4928,14 +5063,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  EXPECT_LT(MeasureButtonContrast(request, {0, 0, 1, 1}, image).values[1], 0);
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, TabTitlePillStaysCenteredAndClearOfButtons) {
++TEST_F(ArciumPiPNativeControlsTest, TabTitleStaysCenteredAndClearOfButtons) {
 +  state_.title = u"A long video title that should truncate without moving off center or covering either group of controls";
 +  Update();
 +  for (NSSize size : {NSMakeSize(284, 160), NSMakeSize(400, 225),
 +                      NSMakeSize(640, 360), NSMakeSize(1200, 675),
 +                      NSMakeSize(284, 600)}) {
 +    Resize(size);
-+    NSView* pill = [Overlay() valueForKey:@"titlePill"];
++    NSView* pill = [Overlay() valueForKey:@"title"];
 +    NSTextField* title = [Overlay() valueForKey:@"title"];
 +    NSView* back = [Overlay() valueForKey:@"returnGlass"];
 +    NSView* tuck = [Overlay() valueForKey:@"tuckGlass"];
@@ -4952,41 +5087,70 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  }
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, ShortTabTitleUsesACompactPill) {
++TEST_F(ArciumPiPNativeControlsTest, HoverUsesUniformTintAndTopOnlyVignette) {
 +  state_.title = u"Video";
 +  Update();
-+  NSView* pill = [Overlay() valueForKey:@"titlePill"];
-+  EXPECT_LT(NSWidth(pill.frame), NSWidth(Overlay().bounds) / 2);
-+  EXPECT_NEAR(NSMidX(pill.frame), NSMidX(Overlay().bounds), .01);
++  NSView* shade = [Overlay() valueForKey:@"hoverShade"];
++  NSView* vignette = [Overlay() valueForKey:@"vignetteView"];
++  EXPECT_TRUE(NSEqualSizes(shade.frame.size, Overlay().bounds.size));
++  EXPECT_NEAR(CGColorGetAlpha(shade.layer.backgroundColor), .24, .001);
++  EXPECT_NEAR(NSMaxY(vignette.frame), NSHeight(Overlay().bounds), .01);
++  EXPECT_LT(NSHeight(vignette.frame), NSHeight(Overlay().bounds));
++  EXPECT_TRUE([vignette.layer isKindOfClass:CAGradientLayer.class]);
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, TitleUsesRegularGlassAndOptionalSiteTint) {
-+  state_.accent = 0xFF0000FF;  // Browser accent is not a site color.
++TEST_F(ArciumPiPNativeControlsTest, WhiteTitleHasNoGlassBacking) {
++  state_.title = u"Video";
 +  Update();
-+  NSView* pill = [Overlay() valueForKey:@"titlePill"];
-+  if (@available(macOS 26.0, *)) {
-+    if ([pill isKindOfClass:NSGlassEffectView.class]) {
-+      auto* glass = (NSGlassEffectView*)pill;
-+      EXPECT_EQ(glass.style, NSGlassEffectViewStyleRegular);
-+      EXPECT_FALSE(glass.tintColor);
-+      state_.site_color = 0xFFFF0000;
-+      Update();
-+      NSColor* tint = [glass.tintColor colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-+      EXPECT_NEAR(tint.redComponent, 1, .001);
-+      EXPECT_NEAR(tint.greenComponent, 0, .001);
-+      EXPECT_NEAR(tint.alphaComponent, .24, .001);
-+      state_.site_color.reset();
-+      Update();
-+      EXPECT_FALSE(glass.tintColor);
-+      state_.site_color = 0x00000000;
-+      Update();
-+      EXPECT_FALSE(glass.tintColor);
-+    }
++  NSTextField* title = [Overlay() valueForKey:@"title"];
++  EXPECT_EQ(title.superview, Overlay());
++  EXPECT_TRUE([title.textColor isEqual:NSColor.whiteColor]);
++  EXPECT_FALSE(title.drawsBackground);
++}
++
++TEST_F(ArciumPiPNativeControlsTest, ScrubberScalesAndExpandsIntoGlass) {
++  double previous = 0;
++  for (NSSize size : {NSMakeSize(284,160), NSMakeSize(480,270), NSMakeSize(1200,675)}) {
++    Resize(size);
++    NSSlider* slider = (NSSlider*)[Overlay() valueForKey:@"slider"];
++    NSRect knob = [(NSSliderCell*)slider.cell knobRectFlipped:slider.isFlipped];
++    EXPECT_GT(NSWidth(knob), previous); previous = NSWidth(knob);
++    [(id)slider setTrackingThumb:YES];
++    NSView* thumb = [slider valueForKey:@"thumbHost"];
++    EXPECT_FALSE(thumb.hidden);
++    EXPECT_GT(NSWidth(thumb.frame), NSWidth(knob));
++    EXPECT_EQ([thumb hitTest:NSMakePoint(1,1)], nil);
++    [(id)slider setTrackingThumb:NO];
++
 +  }
 +}
 +
++TEST(ArciumPiPGeometryTest, CenteredPinchDoesNotAlternateItsNativeCenter) {
++  geometry::Rect anchor{400,300,480,270}, area{0,0,2200,1400};
++  for (int i = 0; i < 1000; ++i) {
++    const double width = 400 + i*.25, height = width/(16.0/9.0);
++    const auto frame = geometry::CenteredIntegralResize(anchor,
++        {640-width/2,435-height/2,width,height},area);
++    EXPECT_EQ(frame.x+frame.width/2,640);
++    EXPECT_EQ(frame.y+frame.height/2,435);
++    EXPECT_EQ(frame.x,std::round(frame.x));
++    EXPECT_EQ(frame.y,std::round(frame.y));
++  }
++}
++
++TEST_F(ArciumPiPNativeControlsTest, EdgePinchReleaseKeepsItsLastDisplayedFrame) {
++  const NSRect visible = NSScreen.mainScreen.visibleFrame;
++  [window_ setFrame:NSMakeRect(NSMinX(visible)+22,NSMinY(visible)+22,640,360) display:NO];
++  [Overlay() applyPinch:.25 ended:NO cancelled:NO];
++  [Overlay() renderMotionAt:NSProcessInfo.processInfo.systemUptime];
++  const NSRect displayed = window_.frame;
++  [Overlay() applyPinch:0 ended:YES cancelled:NO];
++  Pump();
++  EXPECT_TRUE(NSEqualRects(window_.frame,displayed));
++}
++
 +TEST_F(ArciumPiPNativeControlsTest, TabTitleUpdatesWithoutReplacingChrome) {
-+  NSView* pill = [Overlay() valueForKey:@"titlePill"];
++  NSView* pill = [Overlay() valueForKey:@"title"];
 +  NSButton* play = Button(@"Play");
 +  state_.title = u"First video";
 +  Update();
@@ -4994,15 +5158,15 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  Update();
 +  NSTextField* title = [Overlay() valueForKey:@"title"];
 +  EXPECT_TRUE([title.stringValue isEqual:@"A different video title"]);
-+  EXPECT_EQ(pill, [Overlay() valueForKey:@"titlePill"]);
++  EXPECT_EQ(pill, [Overlay() valueForKey:@"title"]);
 +  EXPECT_EQ(play, Button(@"Play"));
 +  state_.title.clear();
 +  Update();
 +  EXPECT_FALSE(IsPresented(pill));
 +}
 +
-+TEST_F(ArciumPiPNativeControlsTest, TabTitlePillRemainsADragSurface) {
-+  NSView* pill = [Overlay() valueForKey:@"titlePill"];
++TEST_F(ArciumPiPNativeControlsTest, TabTitleRemainsADragSurface) {
++  NSView* pill = [Overlay() valueForKey:@"title"];
 +  const NSPoint center = [pill convertPoint:NSMakePoint(NSMidX(pill.bounds), NSMidY(pill.bounds)) toView:nil];
 +  EXPECT_EQ([window_.contentView hitTest:center], Overlay());
 +  ASSERT_TRUE(Scroll(NSEventPhaseBegan, 4, 3));
