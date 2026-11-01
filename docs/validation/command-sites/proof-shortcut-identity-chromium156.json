@@ -1,0 +1,68 @@
+{
+  "coreCommit": "eaba2a22d7b8bd374abfc58e614c34499acb024e",
+  "macOSCodeCommit": "f814925a195d77ff8f32066f5bf099a93d3dfe95",
+  "componentBuild": "Existing production SwiftPM build helper, release arm64 macOS; only SettingsUI dylib and its resources replaced in the previously validated independent daily Chromium app. No shared Chromium source/output access.",
+  "retainedBrowserCode": {
+    "core": "55022064c5599e5ac201b6da321b2b0a7c2bce67",
+    "macOS": "9b96af27284000a7cfd28b36f148c71b6743e506",
+    "omniboxTests": 458,
+    "focusedSettingsTests": 145
+  },
+  "swiftPackageTests": 113,
+  "nativeDeletionCases": [
+    {
+      "case": "delete last",
+      "actions": "Delete History; edit Watch later title; Save; reopen",
+      "observed": [
+        {
+          "title": "Subscriptions",
+          "url": "https://www.youtube.com/feed/subscriptions"
+        },
+        {
+          "title": "Watch later after last",
+          "url": "https://www.youtube.com/playlist?list=WL"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "case": "delete middle",
+      "actions": "Restore defaults; delete Watch later; edit History title; Save; reopen",
+      "observed": [
+        {
+          "title": "Subscriptions",
+          "url": "https://www.youtube.com/feed/subscriptions"
+        },
+        {
+          "title": "History after middle",
+          "url": "https://www.youtube.com/feed/history"
+        }
+      ],
+      "passed": true
+    },
+    {
+      "case": "delete only",
+      "actions": "Restore defaults; remove third, second, then only remaining row; Add Shortcut; enter replacement; Save; reopen",
+      "observed": [
+        {
+          "title": "Replacement after only",
+          "url": "https://www.youtube.com/feed/subscriptions"
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "fixturesRestored": true,
+  "independentReview": "Astra GO; no blocking findings; native behavior integrator-driven",
+  "bundleMachOs": 549,
+  "embeddedComponents": 530,
+  "signatureVerified": true,
+  "loadedSettingsUINormalizedHash": "bbd1c2fe95b04b20745505d835c7c559eee39c65c9f5b81aedf50c8b91f89b42",
+  "mainExecutableAlias": "macOS reports a code-sign clone path. Same device/inode/size/SHA256/CDHash as candidate; CGWindow owner PID agrees with isolated app. Exact-path launch guard timed out; not claimed as passed.",
+  "limits": [
+    "No native pre-fix crash was reproduced; the fix addresses the source-level stale index binding risk.",
+    "Save/reopen exercised in one browser session; prior normal restart proof applies to retained browser code.",
+    "Optional app_mode_loader closure remains unexercised and separately reported."
+  ],
+  "sharedBuildOutputMappings": 0
+}

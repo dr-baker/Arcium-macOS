@@ -5,7 +5,7 @@ These captures use the isolated `omnibox-command-bar` profile and public fixture
 ## Chromium 156 final candidate
 
 - Core: `55022064c5599e5ac201b6da321b2b0a7c2bce67`.
-- macOS code: `9b96af27284000a7cfd28b36f148c71b6743e506`. Later evidence commits and the core merge pin do not change the tested product code.
+- macOS code: `9b96af27284000a7cfd28b36f148c71b6743e506`. The later shortcut identity repair is validated separately below; evidence and CI-fixture commits do not change this browser code.
 - Strict replay/check: 591/591 patches; no problems or pending timestamp snapshot.
 - Daily `chrome`, `arcium_omnibox_unit_tests` and `arcium_feature_settings_unit_tests` compiled. All 458 omnibox tests and 145 focused settings tests passed once, with retries disabled. Settings Swift tests: 112 passed.
 - Signed independent app: 530 embedded component libraries. Normal browser/helper dependency closure and code hashes passed; zero shared-output loads before source/output release. After normal Quit/relaunch, nine observed browser/helper processes loaded zero shared-output paths.
@@ -15,6 +15,15 @@ These captures use the isolated `omnibox-command-bar` profile and public fixture
 - Normal native menu Quit and relaunch passed. No attributable browser/helper crash was found in the inspected runtime log or diagnostic reports.
 
 The variable-rate recording cannot exclude transients between captured frames: the two opening gaps are 40 ms and 20 ms. One contentless frame remains during Escape closing. Optional `app_mode_loader` closure is separately reported and unexercised; browser/helper closure passed. See [exact proof and remaining limits](proof-chromium156.json). Astra reviewed the final code, including the preview refresh; final evidence review is recorded in the PR.
+
+## Shortcut row identity repair
+
+- macOS code: `f814925a195d77ff8f32066f5bf099a93d3dfe95`; core `eaba2a22` adds CI fixture restoration only.
+- Shortcut rows now keep stable IDs during editing and deletion. IDs are excluded from value equality, hashing and persisted dictionaries.
+- Settings Swift tests: 113 passed. The production release SettingsUI component was built privately and placed into a separate signed copy of the validated Chromium 156 app; retained browser code was not rebuilt.
+- Native computer use in a fresh disposable profile verified deleting the last and middle rows, editing each survivor, saving and reopening. Deleting the only row and adding a replacement also passed. Defaults were restored.
+- All 549 bundle Mach-O files passed the code comparison audit. The loaded SettingsUI component matches the private production build; no shared build output was mapped. The OS executable alias was verified by filesystem identity, hashes and signature after the exact-path launch guard timed out.
+- Astra reviewed the repair with no blocking findings. [Exact proof and limits](proof-shortcut-identity-chromium156.json).
 
 ## Chromium 151 baseline
 
