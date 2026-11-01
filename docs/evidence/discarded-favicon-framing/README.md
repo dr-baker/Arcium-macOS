@@ -1,0 +1,70 @@
+# Complete gray favicon framing
+
+Hibernated tabs used the enlarged destination dimensions as the source crop.
+At 110% interface scale, a 16-DIP image was sampled as an 18-DIP source.
+The correction samples the full image using `icon.width()` and `icon.height()`.
+Destination size, filtering, grayscale and opacity stay the same.
+
+These are unedited native app screenshots from the same isolated profile.
+Each pair contains a hibernated gray icon followed by its colored reference.
+The fixture artwork has a white border and blue/red center, supplied as
+16-, 32- and 64-pixel PNGs by a local HTTP fixture.
+
+| 110% before | 110% after |
+| --- | --- |
+| ![Clipped gray favicon borders](before-110.jpg) | ![Complete gray favicon borders](after-110.jpg) |
+
+The [125% before](before-125.jpg) and [125% after](after-125.jpg) screenshots
+show the larger scaling case. The [100% smoke check](after-100.jpg) also
+retains the complete border and center framing.
+
+The app quit normally and relaunched on the same isolated profile. All six
+fixture tabs and cached icons, the active blank page, 704x504 window and 110%
+scale restored. See the [restored scene](persistence-restored.jpg). No new
+matching crash reports or fatal log markers were observed.
+
+## Automated proof
+
+- The rendered regression ran and failed before the production change.
+- The identical regression source passed after the one-line correction.
+- All 29 `PersistentTabViewTest.*` cases passed, with retries disabled.
+- The new case checks 36 combinations of logical source size, destination
+  size and 1x/2x display scale. It checks four corners, gray opacity and
+  one exterior transparent pixel. Already-gray inputs exercise framing and
+  opacity; they do not independently test desaturation.
+- The optimized `chrome` and `arcium_feature_settings_unit_tests` targets built.
+- Settings `build_ts` and `lint` passed. All 588 patches applied strictly,
+  with no pending timestamp snapshot or reported source problems.
+
+[Machine-readable test results](rendered-test-results.json) include source
+and binary hashes and the actual compiled revisions.
+
+The additional `arcium_feature_settings_browser_tests` build compiled the
+18 migrated browser-chrome cases. It did not link because unchanged Peek
+and command-workshop tests refer to removed Chromium APIs. Those browser
+tests were not run.
+
+## Provenance
+
+The corrected optimized app was built from outer commit
+`c28bf9a280e5853a01c033f57adefcfe031e82ec` and core commit
+`7f2e3677b5f66c5390c99dbe72caefd6c1e42297`, with fingerprint
+`c89767e8af46dd92842b9a2739a236696827d9441acccfbb19b137e004adcbd5`.
+Later evidence-only commits do not change the product sources.
+
+The preserved baseline binary was built from outer `c9386c0a` and core
+`fd7c9080`. Its six relevant favicon paint, gray styling, sidebar sizing and UI-scale
+owner patches are byte-identical to the unfixed Chromium156 base. The entire
+baseline tree is not identical; it also contains PiP and test changes. Both app snapshots embed all 530 component
+libraries. Their 549 Mach-O files passed dependency closure and deep signature
+verification. The fixed runtime also passed snapshot hash checks and loaded
+no shared build-output libraries.
+
+Imported favicon artwork can retain up to 64 pixels, enough for the supported
+125% interface scale with 2x resources when the original is available. Normal
+live-navigation icons can still use 16/32-pixel representations, which may
+enlarge slightly. That affects sharpness separately from this crop correction.
+
+[Astra reviewed the verified change](astra-review.md) and found no blocking
+production defect. The review PRs remain drafts until the compatibility parent
+is reconciled with the overlapping command-sites prerequisites.

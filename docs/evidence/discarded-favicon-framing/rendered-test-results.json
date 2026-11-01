@@ -1,0 +1,38 @@
+{
+  "before": {
+    "phase": "before production correction",
+    "test": "PersistentTabViewTest.DiscardedFaviconKeepsFullImageAtScaledSizes",
+    "test_status": "FAILURE",
+    "combinations": 36,
+    "binary_sha256": "351dab9b396e21fd185f3f1663d2dfd3ecb838b75d980417a55d8e83902980b5",
+    "test_retries": 0,
+    "production_source_sha256": "44d9c0c4ee95d882dff99a31d80a4953e350d6090f673be449926a09d808b7d1",
+    "compiled_evidence": "44cc808c457b4d3a86067bbcc291614e"
+  },
+  "after": {
+    "phase": "after production correction",
+    "passed": 29,
+    "failed": [],
+    "regression": [
+      {
+        "elapsed_time_ms": 207,
+        "status": "SUCCESS"
+      }
+    ],
+    "test_retries": 0,
+    "combinations": 36,
+    "outer": "c28bf9a280e5853a01c033f57adefcfe031e82ec",
+    "core": "7f2e3677b5f66c5390c99dbe72caefd6c1e42297",
+    "fingerprint": "c89767e8af46dd92842b9a2739a236696827d9441acccfbb19b137e004adcbd5"
+  },
+  "additional_browser_floor_check": {
+    "migrated_18_case_object": "COMPILED",
+    "executable": "NOT LINKED",
+    "tests": "NOT RUN",
+    "scope": "unchanged browser tests outside favicon diff",
+    "unrelated_compile_errors": [
+      "peek_controller_browsertest.cc: removed session_storage_namespace.h",
+      "arcium_command_workshop_browsertest.mm: removed BrowserWindowInterface profile() API"
+    ]
+  }
+}
