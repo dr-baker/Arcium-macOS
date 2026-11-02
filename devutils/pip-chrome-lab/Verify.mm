@@ -1,6 +1,21 @@
 #import <Cocoa/Cocoa.h>
 #include "arcium_pip_native_controls.mm"
 #include <cstdio>
+@interface HiddenGesturePanel : NSPanel
+@property BOOL admitGestureInput;
+@property BOOL requestedKey;
+@end
+@implementation HiddenGesturePanel
+- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)isVisible { return self.admitGestureInput || super.visible; }
+- (void)makeKeyWindow { self.requestedKey=YES; }
+@end
+@interface TestPinchRecognizer : NSMagnificationGestureRecognizer
+@property NSGestureRecognizerState testState;
+@end
+@implementation TestPinchRecognizer
+- (NSGestureRecognizerState)state { return self.testState; }
+@end
 static int checks=0;
 static void Check(bool pass,const char* reason) { ++checks; if(!pass) { std::fprintf(stderr,"FAIL: %s\n",reason); std::exit(1); } }
 static void Exception(NSException* e) { std::fprintf(stderr,"EXCEPTION: %s\n%s\n",e.description.UTF8String,e.callStackSymbols.description.UTF8String); }
@@ -43,7 +58,7 @@ int main() { @autoreleasepool {
       Check(frame.x+frame.width/2==start.x+start.width/2,"odd and even anchors keep center");
     }
   }
-  NSWindow* window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,640,360) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+  HiddenGesturePanel* window=[[HiddenGesturePanel alloc] initWithContentRect:NSMakeRect(100,100,640,360) styleMask:NSWindowStyleMaskBorderless|NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
   window.releasedWhenClosed=NO;
   std::fprintf(stderr,"checkpoint: constructing production controls\n");
   int returns=0;
@@ -163,6 +178,41 @@ int main() { @autoreleasepool {
     CFRunLoopRunInMode(kCFRunLoopDefaultMode,.01,false);
   Check(delivered,"main queue delivers native actions");
   Check(returns==1,"clicking title returns video to tab");
+
+  [overlay setValue:@YES forKey:@"mouseInside"];
+  [overlay pointerInteraction];
+  controls.FocusControls(false);
+  [overlay pointerInteraction];
+  Check(window.firstResponder==overlay,"pointer control release keeps gesture responder in overlay");
+  [window makeFirstResponder:window.contentView];
+  [overlay performSelector:@selector(mouseEntered:) withObject:nil];
+  Check(window.requestedKey,"hover requests gesture key window");
+  Check(window.firstResponder==overlay,"hover selects overlay as gesture responder");
+  [overlay updateTrackingAreas];
+  NSTrackingArea* tracking=[overlay valueForKey:@"tracking"];
+  for (int i=0;i<4;++i) { [overlay refreshChrome]; [overlay layoutSubtreeIfNeeded]; [overlay updateTrackingAreas]; }
+  Check([overlay valueForKey:@"tracking"]==tracking,"relayout preserves live overlay hover tracking");
+  [title updateTrackingAreas];
+  NSTrackingArea* titleTracking=[title valueForKey:@"titleTracking"];
+  [title updateTrackingAreas];
+  Check([title valueForKey:@"titleTracking"]==titleTracking,"relayout preserves live title hover tracking");
+  window.admitGestureInput=YES;
+  Check([overlay acceptsGestureInput],"attached nonactivating panel admits gesture input");
+  auto* recognizer=[TestPinchRecognizer new];
+  recognizer.testState=NSGestureRecognizerStateBegan; recognizer.magnification=0;
+  [overlay recognizePinch:recognizer];
+  const NSRect beforeRouted=window.frame;
+  recognizer.testState=NSGestureRecognizerStateChanged; recognizer.magnification=.1;
+  [overlay recognizePinch:recognizer]; [overlay flushResizeFrame];
+  Check(NSWidth(window.frame)>NSWidth(beforeRouted),"recognizer action grows nonactivating panel");
+  recognizer.testState=NSGestureRecognizerStateChanged; recognizer.magnification=-.2;
+  [overlay recognizePinch:recognizer]; [overlay flushResizeFrame];
+  Check(NSWidth(window.frame)<NSWidth(beforeRouted),"recognizer action shrinks nonactivating panel");
+  recognizer.testState=NSGestureRecognizerStateEnded; recognizer.magnification=0;
+  [overlay recognizePinch:recognizer];
+  Check(![[overlay valueForKey:@"magnifying"] boolValue],"recognizer end releases pinch ownership");
+  window.admitGestureInput=NO;
+  Check(!window.visible,"gesture fixture never ordered native panel");
 
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);
 } return 0; }

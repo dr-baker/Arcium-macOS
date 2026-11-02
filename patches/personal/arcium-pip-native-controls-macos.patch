@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3212 @@
+@@ -0,0 +1,3214 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -688,7 +688,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (void)viewDidChangeBackingProperties { [super viewDidChangeBackingProperties]; [self refreshText]; }
 +- (void)updateTrackingAreas {
 +  [super updateTrackingAreas];
-+  if (_titleTracking) [self removeTrackingArea:_titleTracking];
++  if (_titleTracking) return;
 +  _titleTracking = [[NSTrackingArea alloc] initWithRect:NSZeroRect
 +      options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
 +              NSTrackingActiveAlways | NSTrackingInVisibleRect | NSTrackingEnabledDuringMouseDrag
@@ -2171,9 +2171,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)updateTrackingAreas {
 +  [super updateTrackingAreas];
-+  if (_tracking) {
-+    [self removeTrackingArea:_tracking];
-+  }
++  // InVisibleRect follows layout itself. Replacing a live area drops the
++  // inside/outside transition when controls relayout during a pointer press.
++  if (_tracking) return;
 +  _tracking = [[NSTrackingArea alloc]
 +      initWithRect:NSZeroRect
 +           options:NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
@@ -2212,6 +2212,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    // This Chromium window already has activation independence. Take only
 +    // its gesture focus; activating the application can switch Spaces.
 +    [_pipWindow makeKeyWindow];
++    if (![self keepsKeyboardControlsVisible]) [_pipWindow makeFirstResponder:self];
 +  }
 +  _mouseInside = YES;
 +  if (_state.blocked || _tucked != geo::Side::kNone) {
@@ -3451,7 +3452,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (beforeRelease)
 +    beforeRelease();
 +  if (!_invalidated && [self hasControlsFocus]) {
-+    [_pipWindow makeFirstResponder:_pipWindow.contentView];
++    [_pipWindow makeFirstResponder:_mouseInside && self.window == _pipWindow
++                                       ? self : _pipWindow.contentView];
 +    [self armHideTimer];
 +  }
 +  _releasingFocus = NO;
