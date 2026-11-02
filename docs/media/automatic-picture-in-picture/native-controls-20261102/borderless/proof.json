@@ -1,0 +1,59 @@
+{
+  "at": "2026-11-02T23:43:21.721825+00:00",
+  "built_outer": "366d397dad4cf1899f765590b4e7e421aadb5846",
+  "core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "tooling_outer": "6ef7d1eec89d4985e73bf6500335b0e9172785ce",
+  "build": "4ee0f0ba7d074bea9bfa7c0273a19495",
+  "native_tests_passed": 96,
+  "native_retries": 0,
+  "installer_unit_tests_passed": 8,
+  "installer_integration_tests_passed": 5,
+  "signature": {
+    "installed": true,
+    "build_verified": true,
+    "matches_build": true,
+    "identity_ok": true,
+    "signature_ok": true,
+    "signed_by": "Developer ID Application: Daniel Richard Baker (45W5CFCVQF)"
+  },
+  "patches": {
+    "applied": 590,
+    "series": 590,
+    "top": "personal/arcium-pip-native-controls-macos.patch"
+  },
+  "problems": [],
+  "timestamp_snapshot_pending": false,
+  "namesub_applied": true,
+  "args_sha256": "bbf771eea8b180b278d619fa3dc654d022d1813f5550b9be747e204925ab298b",
+  "manual_limits": [
+    "Daniel retains visual testing; no original-profile UI or screenshots inspected",
+    "Border disappearance, pinch/drag/grip/focus and Spaces/fullscreen remain manual",
+    "Previous media/renderer and hidden lifecycle checks were not repeated for the frame-class change",
+    "First install attempt published successfully but readiness verification failed; reviewed tooling corrected executable aliases and locally owned socket detection",
+    "The initial lock hostname mismatch cause remains unknown; socket/profile/PID/user evidence independently establishes local ownership"
+  ],
+  "build_mode": "daily",
+  "targets": [
+    "chrome",
+    "arcium_feature_settings_unit_tests"
+  ],
+  "component_libraries": 530,
+  "runtime_snapshot": {
+    "observed_at_utc": "2026-11-02T23:42:17.758747+00:00",
+    "installed_processes": 14,
+    "installed_mappings": 7309,
+    "global_shared_source_output_mappings": 0,
+    "lsof_returncode": 0,
+    "lsof_stderr_present": false,
+    "limits": [
+      "Single snapshot; process mappings can change after observation.",
+      "Current-user txt/mem mappings only; inaccessible mappings are not proven absent.",
+      "No process arguments, profile contents, unrelated paths, or raw hostnames persisted.",
+      "No app actions or signals performed."
+    ]
+  },
+  "teardown": {
+    "candidate_quit_normally_before_relaunch": true,
+    "profile_content_persistence_inspected": false
+  }
+}

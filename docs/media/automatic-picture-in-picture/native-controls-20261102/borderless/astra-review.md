@@ -1,0 +1,13 @@
+# Borderless PiP source review
+
+Verdict: approve the two-line candidate for build and installed visual/interaction validation. No blocking source finding. This is a justified, small structural correction, but it does not yet prove the photographed outline came from AppKit or that the outline is gone.
+
+Reviewed the private title-pill authoring source, candidate diff/provenance, and supplied exact Chromium 156.0.8078.47 native-window implementation. No shared source/output access, build, install, UI operation, or source edit performed.
+
+The frameless subclass overrides frame selection with NativeWidgetMacFramelessNSWindowFrame (a NativeWidgetMacNSWindowTitledFrame subclass) and only overrides titlebar height to zero. The base implementation instead selects NativeWidgetMacNSWindowBorderlessFrame when Titled is absent (with superclass fallback if the private frame class is unavailable). Choosing kDefault plus Borderless expresses the intended unframed window and removes reliance on a titled frame having zero titlebar height. Changing only the style mask would leave the subclass's forced titled-frame selection in place; the paired change is sensible.
+
+Key/main eligibility remains supplied by NativeWidgetMacNSWindow's bridge-based overrides, explicitly written to support borderless windows. Activation independence and the explicit CanJoinAllSpaces/FullScreenAuxiliary/CanJoinAllApplications policy still run after initialization and show. Event dispatch, bridge ownership, and PiP lifecycle code remain inherited/unchanged.
+
+The native grip and pinch use custom view events/recognizers, geometry limits, and setFrame calls; they do not require titled chrome or FullSizeContentView. Removing FullSizeContentView is consistent with a borderless content rectangle. Existing borderless exterior-resize-thickness support remains in the base class if Resizable is present. Native edge resizing and frame/content sizing still need runtime checking because AppKit frame-class behavior changes. A small inherited behavioral difference is that the borderless frame's fallback mouseDown calls the drag helper without the titled frame's movable guard; custom PiP drag handling is unchanged, and this is not a blocker for this movable PiP window.
+
+Required evidence before claiming fixed: a fresh installed PiP screenshot showing no square outer outline, plus smoke checks of bounds/aspect ratio, bottom-right grip, pinch, drag, keyboard/native-control focus, and Spaces/full-screen visibility. Prior lifecycle/tests cover unchanged logic but cannot establish the new AppKit frame's rendering. Rounded compositor masking and separate soft-shadow code are untouched; either may still require investigation if the outline survives.

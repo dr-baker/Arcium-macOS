@@ -1,3 +1,8 @@
+Latest follow-up: [borderless PiP delivery](borderless/README.md) records the
+subsequent frame-class correction, installed verification and its remaining
+manual appearance checks. The build and test results below describe the
+preceding delivery.
+
 # Native PiP delivery on Chromium 156
 
 Product source is macOS `cb2734629418e77453e5f44b753f9e645e274a46`,
