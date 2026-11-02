@@ -1,6 +1,10 @@
 #import <Cocoa/Cocoa.h>
 #include "arcium_pip_native_controls.mm"
 #include <cstdio>
+#import <objc/runtime.h>
+static int activationRequests=0;
+static void RecordActivation(id,SEL,BOOL) { ++activationRequests; }
+static BOOL RecordRestore(id,SEL,NSApplicationActivationOptions) { return YES; }
 @interface HiddenGesturePanel : NSPanel
 @property BOOL admitGestureInput;
 @property BOOL requestedKey;
@@ -15,29 +19,6 @@
 @end
 @implementation TestPinchRecognizer
 - (NSGestureRecognizerState)state { return self.testState; }
-@end
-@interface TestIndirectTouch : NSTouch
-@property NSPoint point;
-@property(nonatomic,strong) id token;
-@end
-@implementation TestIndirectTouch
-- (NSTouchType)type { return NSTouchTypeIndirect; }
-- (NSPoint)normalizedPosition { return self.point; }
-- (NSSize)deviceSize { return NSMakeSize(100,60); }
-- (id)identity { return self.token; }
-- (id)device { return @"test-trackpad"; }
-@end
-@interface TestTouchEvent : NSEvent
-@property(nonatomic,strong) NSSet<NSTouch*>* pair;
-@property BOOL cancelTouches;
-@property NSEventType kind;
-@end
-@implementation TestTouchEvent
-- (NSEventType)type { return self.kind==0 ? NSEventTypeGesture : self.kind; }
-- (NSSet<NSTouch*>*)touchesMatchingPhase:(NSTouchPhase)phase inView:(NSView*)view {
-  if (phase==NSTouchPhaseCancelled) return self.cancelTouches ? self.pair : NSSet.set;
-  return self.cancelTouches ? NSSet.set : self.pair;
-}
 @end
 @interface TrackingTestEvent : NSEvent
 @property(nonatomic,strong) NSTrackingArea* area;
@@ -60,6 +41,18 @@
 - (CGFloat)magnification { return self.delta; }
 - (NSEventPhase)phase { return self.eventPhase; }
 @end
+@interface PanTestEvent : HoverMagnifyEvent
+@property CGFloat dx;
+@property CGFloat dy;
+@end
+@implementation PanTestEvent
+- (NSEventType)type { return NSEventTypeScrollWheel; }
+- (BOOL)hasPreciseScrollingDeltas { return YES; }
+- (NSEventPhase)momentumPhase { return NSEventPhaseNone; }
+- (CGFloat)scrollingDeltaX { return self.dx; }
+- (CGFloat)scrollingDeltaY { return self.dy; }
+- (NSTimeInterval)timestamp { return NSProcessInfo.processInfo.systemUptime; }
+@end
 static int checks=0;
 static void Check(bool pass,const char* reason) { ++checks; if(!pass) { std::fprintf(stderr,"FAIL: %s\n",reason); std::exit(1); } }
 static void Exception(NSException* e) { std::fprintf(stderr,"EXCEPTION: %s\n%s\n",e.description.UTF8String,e.callStackSymbols.description.UTF8String); }
@@ -67,23 +60,9 @@ int main() { @autoreleasepool {
   NSSetUncaughtExceptionHandler(Exception);
   std::fprintf(stderr,"checkpoint: native initialization\n");
   [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
+  method_setImplementation(class_getInstanceMethod(NSApplication.class,@selector(activateIgnoringOtherApps:)),(IMP)RecordActivation);
+  method_setImplementation(class_getInstanceMethod(NSRunningApplication.class,@selector(activateWithOptions:)),(IMP)RecordRestore);
   using namespace arcium::pip;
-  pip_motion::TouchPinch touchModel;
-  touchModel.sample({0,0},{40,0});
-  auto firstTouch=touchModel.sample({-1,0},{41,0});
-  Check(firstTouch.began && std::abs(firstTouch.delta-.05)<1e-9,"separation starts pinch with full threshold delta");
-  auto nextTouch=touchModel.sample({0,0},{40,0});
-  Check(!nextTouch.began && nextTouch.delta<0,"reversing separation shrinks smoothly");
-  touchModel.reset();
-  for (int i=0;i<40;++i) {
-    touchModel.sample({double(i)*2,10},{40+double(i)*2+.1*std::sin(i),10});
-    Check(!touchModel.active(),"parallel two-finger pan and slight finger jitter do not zoom");
-  }
-  Check(touchModel.sample({78,10},{128,10}).began,"pinch can begin after parallel pan");
-  touchModel.reset(); touchModel.sample({0,0},{40,0});
-  Check(touchModel.sample({0,0},{42,0}).began,"one stationary finger still permits pinch");
-  touchModel.reset(); touchModel.sample({0,0},{0,0});
-  Check(!touchModel.active(),"coincident contacts do not produce scale division");
   geometry::Rect anchor{400,300,480,270}, area{0,0,2200,1400};
   double previous=0; bool oldDrift=false;
   for(int i=0;i<1000;++i) {
@@ -318,59 +297,52 @@ int main() { @autoreleasepool {
   magnify.eventPhase=NSEventPhaseChanged; magnify.delta=.2; [hover magnifyWithEvent:magnify]; [hover flushResizeFrame];
   Check(NSEqualRects(hoverWindow.frame,hiddenFrame),"hidden hover fallback rejects input");
 
-  // Match the live hover route using indirect touch samples, without any click
-  // or synthesized Magnify event. Windows remain unordered throughout.
-  NSPoint pointer=NSEvent.mouseLocation;
-  [hoverWindow setFrame:NSMakeRect(pointer.x-200,pointer.y-100,480,270) display:NO];
-  hoverWindow.admitGestureInput=YES; hover.frame=hoverWindow.contentView.bounds;
-  auto* ta=[TestIndirectTouch new]; ta.token=[NSObject new]; ta.point=NSMakePoint(.3,.5);
-  auto* tb=[TestIndirectTouch new]; tb.token=[NSObject new]; tb.point=NSMakePoint(.7,.5);
-  auto* touches=[TestTouchEvent new]; touches.pair=[NSSet setWithObjects:ta,tb,nil];
-  const NSRect beforeTouches=hoverWindow.frame;
-  Check(![hover consumeTouchPinch:touches],"hover touch pair waits for pinch intent and preserves pan");
-  ta.point=NSMakePoint(.2,.5); tb.point=NSMakePoint(.8,.5);
-  Check([hover consumeTouchPinch:touches],"hover separation claims pinch without native magnification");
-  [hover flushResizeFrame];
-  Check(NSWidth(hoverWindow.frame)>NSWidth(beforeTouches),"indirect hover pinch grows window");
-  Check(!hover.gestureRecognizers.firstObject.enabled,"native recognizer is suspended while direct touch owns pinch");
-  const NSRect once=hoverWindow.frame;
-  magnify.delta=.5;
-  Check([hover consumeMagnify:magnify],"duplicate native magnification is consumed");
-  [hover flushResizeFrame];
-  Check(NSEqualRects(once,hoverWindow.frame),"duplicate native magnification does not resize twice");
-  ta.point=NSMakePoint(.35,.5); tb.point=NSMakePoint(.65,.5);
-  Check([hover consumeTouchPinch:touches],"direct touch pinch keeps ownership while shrinking");
-  [hover flushResizeFrame];
-  Check(NSWidth(hoverWindow.frame)<NSWidth(beforeTouches),"indirect hover pinch shrinks window");
-  touches.pair=[NSSet setWithObject:ta];
-  Check([hover consumeTouchPinch:touches],"lifting a finger ends the owned pinch");
-  Check([[hover valueForKey:@"consumeMomentum"] boolValue],"pinch completion consumes inertia from a preceding pan");
-  Check(![[hover valueForKey:@"magnifying"] boolValue] && hover.gestureRecognizers.firstObject.enabled,"finger lift restores native recognizer and releases pinch");
-  touches.pair=[NSSet setWithObjects:ta,tb,nil];
+  // Real lifecycle callbacks must release a native pinch even after new-input
+  // admission is lost. These hidden windows are never ordered or activated.
+  hoverWindow.admitGestureInput=YES;
+  for (int reason=0; reason<5; ++reason) {
+    [hover stopMotion];
+    const NSRect initial=hoverWindow.frame;
+    magnify.eventPhase=NSEventPhaseBegan; magnify.delta=0; [hover consumeMagnify:magnify];
+    magnify.eventPhase=NSEventPhaseChanged; magnify.delta=.1; [hover consumeMagnify:magnify]; [hover flushResizeFrame];
+    Check([[hover valueForKey:@"magnifying"] boolValue],"native pinch starts before interruption");
+    Check(NSWidth(hoverWindow.frame)>NSWidth(initial),"interrupted pinch has applied resize");
+    if (reason==0) [hover touchesCancelledWithEvent:magnify];
+    if (reason==1) [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidResignKeyNotification object:hoverWindow];
+    if (reason==2) [NSNotificationCenter.defaultCenter postNotificationName:NSApplicationDidResignActiveNotification object:NSApp];
+    if (reason==3) {
+      hoverWindow.admitGestureInput=NO;
+      recognizer.testState=NSGestureRecognizerStateCancelled;
+      [hover recognizePinch:recognizer];
+      hoverWindow.admitGestureInput=YES;
+    }
+    if (reason==4) {
+      [hover setValue:@YES forKey:@"seeking"];
+      [hover applyPinch:0 ended:NO cancelled:YES];
+      [hover setValue:@NO forKey:@"seeking"];
+    }
+    Check(![[hover valueForKey:@"magnifying"] boolValue],"lifecycle interruption releases native pinch");
+    Check(NSEqualRects(hoverWindow.frame,initial),"interruption restores pinch snapshot");
+    Check(hover.gestureRecognizers.firstObject.enabled,"native recognizer stays available after interruption");
+    [hover cancelGestureInput];
+    Check(NSEqualRects(hoverWindow.frame,initial),"repeated cancellation is idempotent");
+  }
   [hover stopMotion];
-  pointer=NSEvent.mouseLocation;
-  [hoverWindow setFrameOrigin:NSMakePoint(pointer.x-NSWidth(hoverWindow.frame)/2,pointer.y-NSHeight(hoverWindow.frame)/2)];
+  const NSRect work=NSScreen.mainScreen.visibleFrame;
+  [hoverWindow setFrame:NSMakeRect(NSMinX(work)+200,NSMinY(work)+200,480,270) display:NO];
   hover.frame=hoverWindow.contentView.bounds;
-  Check(PointerInsideView(hover),"next hover gesture starts under actual pointer");
-  Check(![hover consumeTouchPinch:touches],"next pair starts a fresh baseline");
-  const NSRect cancelBase=hoverWindow.frame;
-  ta.point=NSMakePoint(.25,.5); tb.point=NSMakePoint(.75,.5);
-  Check([hover consumeTouchPinch:touches],"next pinch begins independently"); [hover flushResizeFrame];
-  touches.kind=NSEventTypeEndGesture;
-  Check([hover consumeTouchPinch:touches] && [[hover valueForKey:@"magnifying"] boolValue],"native pan end cannot cut off the same fingers pinching");
-  touches.kind=NSEventTypeGesture;
-  touches.cancelTouches=YES;
-  Check([hover consumeTouchPinch:touches],"cancelled direct pinch stays consumed");
-  Check(NSEqualRects(hoverWindow.frame,cancelBase),"touch cancellation restores exact prior frame");
-  touches.cancelTouches=NO; ta.point=NSMakePoint(.3,.5); tb.point=NSMakePoint(.7,.5);
-  [hover stopMotion];
-  pointer=NSEvent.mouseLocation;
-  [hoverWindow setFrameOrigin:NSMakePoint(pointer.x-NSWidth(hoverWindow.frame)/2,pointer.y-NSHeight(hoverWindow.frame)/2)];
-  [hover consumeTouchPinch:touches]; ta.point=NSMakePoint(.2,.5); tb.point=NSMakePoint(.8,.5); [hover consumeTouchPinch:touches];
-  hoverControls.RestorePlacementForHide();
-  Check(![[hover valueForKey:@"magnifying"] boolValue] && hover.gestureRecognizers.firstObject.enabled,"hide rolls back direct pinch and restores event ownership");
-  [hoverWindow setFrameOrigin:NSMakePoint(-10000,-10000)];
-  Check(![hover consumeTouchPinch:touches],"indirect pair outside card cannot claim pinch");
+  auto* pan=[PanTestEvent new]; pan.targetWindow=hoverWindow; pan.targetPoint=NSMakePoint(200,100);
+  const NSRect panStart=hoverWindow.frame;
+  pan.eventPhase=NSEventPhaseBegan; pan.dx=12; pan.dy=-8;
+  Check([hover consumeScroll:pan],"two-axis pan starts without raw touch classifier");
+  [hover renderMotionAt:NSProcessInfo.processInfo.systemUptime];
+  Check(NSMinX(hoverWindow.frame)>NSMinX(panStart) && NSMinY(hoverWindow.frame)>NSMinY(panStart),"diagonal pan moves both axes freely");
+  magnify.eventPhase=NSEventPhaseBegan; magnify.delta=.1;
+  Check([hover consumeMagnify:magnify],"native pinch can take over from two-finger movement");
+  Check(![[hover valueForKey:@"scrolling"] boolValue] && [[hover valueForKey:@"magnifying"] boolValue],"pan-to-pinch has exactly one owner");
+  magnify.eventPhase=NSEventPhaseEnded; magnify.delta=0; [hover consumeMagnify:magnify];
+  Check(![[hover valueForKey:@"magnifying"] boolValue],"pan-to-pinch releases cleanly");
+  Check(activationRequests>0,"hover requests application activation through intercepted AppKit hook");
   hoverWindow.admitGestureInput=NO;
 
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);

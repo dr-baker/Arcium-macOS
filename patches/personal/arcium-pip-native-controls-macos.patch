@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3291 @@
+@@ -0,0 +1,3287 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1505,9 +1505,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  BOOL _pendingPan;
 +  BOOL _suppressMouseUp;
 +  NSMagnificationGestureRecognizer* _pinchRecognizer;
-+  pip_motion::TouchPinch touchPinch;
-+  id _touchA, _touchB;
 +  __weak NSWindow* _previousKeyWindow;
++  NSRunningApplication* _previousApplication;
 +  NSTimer* _returnTimer;
 +  NSRect _returnFrame;
 +  double _returnStart;
@@ -1566,8 +1565,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +- (BOOL)chromeSuppressed;
 +- (void)sampleBrightness;
 +- (BOOL)consumeMouseInput:(NSEvent*)event;
-+- (BOOL)consumeTouchPinch:(NSEvent*)event;
-+- (void)finishTouchPinch:(BOOL)cancelled;
++- (void)cancelGestureInput;
 +- (NSArray<ArciumPiPCapsule*>*)contrastCapsules;
 +- (ContrastRequest)contrastRequest;
 +- (BOOL)hasControlsFocus;
@@ -1644,6 +1642,20 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                        usingBlock:^(NSNotification* note) {
 +                                          [weakSelf invalidate];
 +                                        }]];
++  // A stream can end after the panel loses admission. Release ownership here
++  // without restoring focus: the user has already chosen another window/app.
++  for (NSNotificationName name in @[NSWindowDidResignKeyNotification,
++                                    NSApplicationDidResignActiveNotification]) {
++    [_observers addObject:[center addObserverForName:name
++        object:[name isEqual:NSWindowDidResignKeyNotification] ? window : NSApp
++        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification* note) {
++      ArciumPiPNativeOverlay* overlay = weakSelf;
++      if (!overlay) return;
++      overlay->_previousKeyWindow = nil;
++      overlay->_previousApplication = nil;
++      [overlay cancelGestureInput];
++    }]];
++  }
 +  NSNotificationCenter* workspaceCenter =
 +      NSWorkspace.sharedWorkspace.notificationCenter;
 +  [_observers
@@ -1667,19 +1679,21 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _pinchRecognizer.delaysMagnificationEvents = YES;
 +  [self addGestureRecognizer:_pinchRecognizer];
 +  _eventMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:
-+      NSEventMaskScrollWheel | NSEventMaskMagnify | NSEventMaskGesture | NSEventMaskEndGesture | NSEventMaskLeftMouseDown |
++      NSEventMaskScrollWheel | NSEventMaskMagnify | NSEventMaskLeftMouseDown |
 +      NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown | NSEventMaskKeyDown |
 +      NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp | NSEventMaskMouseMoved handler:^NSEvent*(NSEvent* event) {
 +    ArciumPiPNativeOverlay* overlay = weakSelf;
-+    if (!overlay || ![overlay acceptsGestureInput]) return event;
++    if (!overlay) return event;
++    if (![overlay acceptsGestureInput]) {
++      [overlay cancelGestureInput];
++      return event;
++    }
 +    if (event.type == NSEventTypeMouseMoved) {
 +      const BOOL inside = PointerInsideView(overlay);
 +      if (overlay->_mouseInside && !inside) [overlay mouseExited:event];
 +      else if (!overlay->_mouseInside && inside) [overlay mouseEntered:event];
 +      return event;
 +    }
-+    if (event.type == NSEventTypeGesture || event.type == NSEventTypeEndGesture)
-+      return [overlay consumeTouchPinch:event] ? nil : event;
 +    // Pointer ownership outlives hidden glyphs and re-hit-tests outside the card.
 +    if ([overlay consumeMouseInput:event]) return nil;
 +    if (event.type == NSEventTypeLeftMouseDragged || event.type == NSEventTypeLeftMouseUp)
@@ -1701,7 +1715,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    // The card recognizer owns card magnification; the monitor covers events
 +    // addressed to another window while the pointer remains over the card.
 +    if (event.type == NSEventTypeMagnify) {
-+      if (event.window == overlay->_pipWindow) return event;
++      if (event.window == overlay->_pipWindow && overlay->_pipWindow.keyWindow) return event;
 +      return [overlay consumeMagnify:event] ? nil : event;
 +    }
 +    return [overlay consumeScroll:event] ? nil : event;
@@ -1882,7 +1896,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    return;
 +  }
 +  if (state.blocked) {
-+    [self finishTouchPinch:YES];
 +    [self cancelReturn];
 +    [self stopMotion];
 +    [self releaseControlsFocus];
@@ -2226,11 +2239,17 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  // Descendant tracking events can bubble through the responder chain, and
 +  // queued events can describe an old pointer position after focus changes.
 +  if (event && ((event.type == NSEventTypeMouseEntered && event.trackingArea != _tracking) || !PointerInsideView(self))) return;
-+  if (!_invalidated && !_state.blocked && !_returning) {
++  if (!_invalidated && !_state.blocked && !_returning && _tucked == geo::Side::kNone) {
 +    if (!_pipWindow.keyWindow) _previousKeyWindow = NSApp.keyWindow;
-+    // This Chromium window already has activation independence. Take only
-+    // its gesture focus; activating the application can switch Spaces.
++    // WindowServer sends trackpad magnification only to the frontmost
++    // application; nonactivating key focus receives scrolling but no pinch.
++    // Key the card first so activation has no other window to raise.
++    NSRunningApplication* front = NSWorkspace.sharedWorkspace.frontmostApplication;
 +    [_pipWindow makeKeyWindow];
++    if (front.processIdentifier != NSProcessInfo.processInfo.processIdentifier) {
++      _previousApplication = front;
++      [NSApp activateIgnoringOtherApps:YES];
++    }
 +    if (![self keepsKeyboardControlsVisible]) [_pipWindow makeFirstResponder:self];
 +  }
 +  _mouseInside = YES;
@@ -2254,11 +2273,20 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self armHideTimer];
 +}
 +- (void)restoreGestureFocus {
-+  if (_pipWindow.keyWindow && ![self keepsKeyboardControlsVisible]) {
-+    if (_previousKeyWindow.visible) [_previousKeyWindow makeKeyWindow];
++  if ([self keepsKeyboardControlsVisible]) return;
++  NSRunningApplication* previous = _previousApplication;
++  NSWindow* previousKey = _previousKeyWindow;
++  // Clear before changing focus; resign notifications may reenter cleanup.
++  _previousKeyWindow = nil;
++  _previousApplication = nil;
++  if (_pipWindow.keyWindow) {
++    if (previousKey.visible && !previous) [previousKey makeKeyWindow];
 +    else [_pipWindow resignKeyWindow];
 +  }
-+  _previousKeyWindow = nil;
++  if (previous && !previous.terminated &&
++      NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier ==
++          NSProcessInfo.processInfo.processIdentifier)
++    [previous activateWithOptions:0];
 +}
 +- (void)mouseExited:(NSEvent*)event {
 +  if (event && ((event.type == NSEventTypeMouseExited && event.trackingArea != _tracking) || PointerInsideView(self))) return;
@@ -2593,9 +2621,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self pauseMotionFrames];
 +  // Cancellation, permission blocking, hide and display reconfiguration all
 +  // restore the pinch snapshot before releasing the model that owns it.
-+  if (_magnifying && touchPinch.active()) {
-+    touchPinch.reset(); _touchA = _touchB = nil; _pinchRecognizer.enabled = YES;
-+  }
 +  if (_magnifying && gestures) {
 +    gestures->endPinch(true);
 +    _preferredWidth = _magnifyPreferredWidth;
@@ -3187,7 +3212,28 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  } else [self requestMotionFrame];
 +  return YES;
 +}
++- (void)cancelGestureInput {
++  const BOOL pinching = _magnifying;
++  const NSRect snapshot = _magnifyStartFrame;
++  const BOOL interacting = pinching || _scrolling || _pendingPan;
++  if (interacting) [self stopMotion];
++  if (pinching) [self setWindowFrame:snapshot animate:NO];
++  _consumeMomentum = NO;
++  if (interacting && !_invalidated) {
++    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
++    [self refreshChrome];
++    [self armHideTimer];
++  }
++}
++- (void)touchesCancelledWithEvent:(NSEvent*)event {
++  [self cancelGestureInput];
++}
 +- (void)applyPinch:(CGFloat)delta ended:(BOOL)ended cancelled:(BOOL)cancelled {
++  if ((ended || cancelled) && _magnifying &&
++      (_invalidated || _state.blocked || _returning || _seeking || _tucked != geo::Side::kNone)) {
++    [self cancelGestureInput];
++    return;
++  }
 +  if (_invalidated || _state.blocked || _seeking || _returning || _tucked != geo::Side::kNone) return;
 +  _consumeMomentum = NO; _pendingPan = NO;
 +  if (!_magnifying) {
@@ -3241,56 +3287,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    if (!_mouseInside) [self restoreGestureFocus];
 +  }
 +}
-+- (void)finishTouchPinch:(BOOL)cancelled {
-+  const BOOL owned = touchPinch.active();
-+  if (owned) [self applyPinch:0 ended:!cancelled cancelled:cancelled];
-+  touchPinch.reset(); _touchA = _touchB = nil;
-+  if (owned) _consumeMomentum = YES;
-+  _pinchRecognizer.enabled = YES;
-+}
-+- (BOOL)consumeTouchPinch:(NSEvent*)event {
-+  const BOOL owned = touchPinch.active();
-+  if (event.type == NSEventTypeEndGesture) {
-+    // A native pan can end while the same contacts are beginning to pinch.
-+    // Owned indirect touches end only when contacts lift or cancel.
-+    if (!owned) [self finishTouchPinch:NO];
-+    return owned;
-+  }
-+  if (_invalidated || _state.blocked || _seeking || _returning || _tucked != geo::Side::kNone) {
-+    [self finishTouchPinch:YES]; return owned;
-+  }
-+  // Existing native magnification keeps its stream. The fallback only claims
-+  // separation when native recognition has not started.
-+  if (_magnifying && !owned) { touchPinch.reset(); _touchA = _touchB = nil; return NO; }
-+  if (!owned && !_scrolling && !_pendingPan && !PointerInsideView(self)) {
-+    [self finishTouchPinch:NO]; return NO;
-+  }
-+  const BOOL cancelled = [event touchesMatchingPhase:NSTouchPhaseCancelled inView:nil].count > 0;
-+  NSArray<NSTouch*>* pair = [event touchesMatchingPhase:NSTouchPhaseTouching inView:nil].allObjects;
-+  if (cancelled || pair.count != 2) { [self finishTouchPinch:cancelled]; return owned; }
-+  NSTouch* a = pair[0]; NSTouch* b = pair[1];
-+  const NSPoint pa = a.normalizedPosition, pb = b.normalizedPosition;
-+  const NSSize size = a.deviceSize;
-+  if (a.type != NSTouchTypeIndirect || b.type != NSTouchTypeIndirect ||
-+      !a.identity || !b.identity || [a.identity isEqual:b.identity] ||
-+      (a.device != b.device && ![a.device isEqual:b.device]) || !NSEqualSizes(size,b.deviceSize) || !std::isfinite(size.width) || !std::isfinite(size.height) || size.width <= 0 || size.height <= 0 ||
-+      !std::isfinite(pa.x) || !std::isfinite(pa.y) || !std::isfinite(pb.x) || !std::isfinite(pb.y)) {
-+    [self finishTouchPinch:YES]; return owned;
-+  }
-+  const BOOL same = ([_touchA isEqual:a.identity] && [_touchB isEqual:b.identity]) ||
-+                    ([_touchA isEqual:b.identity] && [_touchB isEqual:a.identity]);
-+  if (!same) { [self finishTouchPinch:NO]; _touchA = a.identity; _touchB = b.identity; }
-+  const auto sample = touchPinch.sample({pa.x*size.width,pa.y*size.height}, {pb.x*size.width,pb.y*size.height});
-+  if (!touchPinch.active()) return NO;
-+  // Cancel native recognition before applying the first fallback delta, so
-+  // delayed magnification cannot apply the same physical pinch twice.
-+  if (sample.began) _pinchRecognizer.enabled = NO;
-+  [self applyPinch:sample.delta ended:NO cancelled:NO];
-+  return YES;
-+}
 +- (void)recognizePinch:(NSMagnificationGestureRecognizer*)recognizer {
-+  if (touchPinch.active()) { recognizer.magnification = 0; return; }
-+  if (![self acceptsGestureInput] || recognizer.state == NSGestureRecognizerStatePossible) return;
++  if (recognizer.state == NSGestureRecognizerStatePossible) return;
++  if (![self acceptsGestureInput]) { [self cancelGestureInput]; recognizer.magnification = 0; return; }
 +  const BOOL cancelled = recognizer.state == NSGestureRecognizerStateCancelled ||
 +                         recognizer.state == NSGestureRecognizerStateFailed;
 +  [self applyPinch:recognizer.magnification
@@ -3298,7 +3297,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  recognizer.magnification = 0;
 +}
 +- (BOOL)consumeMagnify:(NSEvent*)event {
-+  if (touchPinch.active()) return YES;
 +  if (!_magnifying && !_scrolling && !_pendingPan && ![self eventOverCard:event]) return NO;
 +  if (event.phase == NSEventPhaseNone) {
 +    [self applyPinch:event.magnification ended:NO cancelled:NO];
@@ -3535,7 +3533,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)prepareForHide {
-+  [self finishTouchPinch:YES];
 +  _suppressMouseUp = NO;
 +  _pointerControlsFocus = NO;
 +  [self cancelReturn];
@@ -3585,7 +3582,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)invalidate {
-+  [self finishTouchPinch:YES];
 +  [self cancelReturn];
 +  [self restoreGestureFocus];
 +  if (_invalidated) {
@@ -7801,7 +7797,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_gestures.h
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_gestures.h
-@@ -0,0 +1,120 @@
+@@ -0,0 +1,81 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -7810,45 +7806,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_gestures.h
 +#include "arcium_pip_motion.h"
 +
 +namespace pip_motion {
-+
-+// Separation identifies a pinch even when AppKit supplies indirect touches
-+// without a magnification event. Parallel travel remains a pan.
-+class TouchPinch {
-+ public:
-+  struct Update { bool began = false; double delta = 0; };
-+  bool active() const { return active_; }
-+  void reset() { seeded_ = active_ = false; }
-+  Update sample(Point a, Point b) {
-+    const double distance = length(b-a);
-+    const Point center = (a+b)*.5;
-+    if (distance < 1) return {};
-+    if (!seeded_) { seed(center,distance); return {}; }
-+    if (!active_) {
-+      const double separation = std::abs(distance-initialDistance_);
-+      const double translation = length(center-initialCenter_);
-+      const double threshold = std::max(1.5,initialDistance_*.04);
-+      if (translation > threshold && translation > separation*.8) {
-+        seed(center,distance); return {};
-+      }
-+      if (separation < threshold) return {};
-+      active_ = true;
-+      const double delta = distance/initialDistance_-1;
-+      previousDistance_ = distance;
-+      return {true,delta};
-+    }
-+    const double delta = distance/previousDistance_-1;
-+    previousDistance_ = distance;
-+    return {false,delta};
-+  }
-+ private:
-+  void seed(Point center, double distance) {
-+    seeded_ = true; initialCenter_ = center;
-+    initialDistance_ = previousDistance_ = distance;
-+  }
-+  bool seeded_ = false, active_ = false;
-+  Point initialCenter_;
-+  double initialDistance_ = 0, previousDistance_ = 0;
-+};
 +
 +// A trackpad moves a held card in screen points. Cursor position is not reused
 +// after pickup: the window can move beneath a stationary pointer.
