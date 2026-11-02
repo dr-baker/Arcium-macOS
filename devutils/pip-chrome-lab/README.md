@@ -55,3 +55,10 @@ process-specific file under `/private/tmp`; its path is written to
 `/private/tmp/arcium-pip-live-trace-path.txt`. It samples state at 10 Hz and writes
 only changes. Normal launches use the standard application class and no trace
 timer. The tracer does not modify the overlay's input routing.
+
+Indirect two-finger touch separation supplies hover pinch when AppKit does not
+emit magnification. Parallel finger travel remains pan; meaningful separation
+claims resize. Finger lift finishes it and cancellation restores the start
+frame. While this fallback owns a pinch, native recognition is suspended to
+avoid duplicate resizing. It uses the same local hover monitor as movement
+and the existing display-paced resize path.
