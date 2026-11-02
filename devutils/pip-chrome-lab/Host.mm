@@ -58,6 +58,8 @@
   id _videoObserver;
   NSTimer* _traceTimer;
   NSFileHandle* _traceHandle;
+  NSFileHandle* _eventHandle;
+  NSUInteger _inputSequence;
   NSDictionary* _lastTraceState;
   NSUInteger _rawMagnifyEvents, _rawScrollEvents, _rawGestureEvents, _touchCount;
   double _touchDistance;
@@ -103,6 +105,9 @@
     NSString* trace=[NSString stringWithFormat:@"/private/tmp/arcium-pip-live-input-%d.jsonl",getpid()];
     [NSFileManager.defaultManager createFileAtPath:trace contents:nil attributes:nil];
     _traceHandle=[NSFileHandle fileHandleForWritingAtPath:trace];
+    NSString* events=[trace stringByReplacingOccurrencesOfString:@".jsonl" withString:@"-events.jsonl"];
+    [NSFileManager.defaultManager createFileAtPath:events contents:nil attributes:nil];
+    _eventHandle=[NSFileHandle fileHandleForWritingAtPath:events];
     [trace writeToFile:@"/private/tmp/arcium-pip-live-trace-path.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     __weak Lab* weakTrace=self;
     _traceTimer=[NSTimer timerWithTimeInterval:.1 repeats:YES block:^(NSTimer*) { [weakTrace recordInputState:@"tick"]; }];
@@ -112,6 +117,22 @@
 }
 - (void)traceInput:(NSEvent*)event before:(BOOL)before {
   if (!_traceHandle) return;
+  if (before) ++_inputSequence;
+  if (event.type==NSEventTypeMagnify || event.type==NSEventTypeBeginGesture ||
+      event.type==NSEventTypeEndGesture || event.type==NSEventTypeScrollWheel) {
+    NSView* overlay=_controls->GetNativeView().Get();
+    NSDictionary* row=@{@"sequence":@(_inputSequence), @"before":@(before),
+      @"t":@(event.timestamp), @"type":@(event.type), @"phase":@(event.phase),
+      @"momentum":@(event.type==NSEventTypeScrollWheel ? event.momentumPhase : 0),
+      @"delta":@(event.type==NSEventTypeMagnify ? event.magnification : 0),
+      @"addressed_to_card":@(event.window==_card), @"card_key":@(_card.keyWindow),
+      @"frontmost_self":@(NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier==getpid()),
+      @"magnifying":@([[overlay valueForKey:@"magnifying"] boolValue]),
+      @"scrolling":@([[overlay valueForKey:@"scrolling"] boolValue]),
+      @"width":@(NSWidth(_card.frame)), @"height":@(NSHeight(_card.frame))};
+    NSData* data=[NSJSONSerialization dataWithJSONObject:row options:0 error:nil];
+    if (data) { [_eventHandle writeData:data]; [_eventHandle writeData:[@"\n" dataUsingEncoding:NSUTF8StringEncoding]]; }
+  }
   if (before) {
     if (event.type==NSEventTypeMagnify) ++_rawMagnifyEvents;
     if (event.type==NSEventTypeScrollWheel) ++_rawScrollEvents;
@@ -143,6 +164,8 @@
     @"keyboard_focus":flag(@"keyboardControlsFocus"), @"seeking":flag(@"seeking"),
     @"dragging":flag(@"dragging"), @"magnifying":flag(@"magnifying"),
     @"app_active":@([NSApp isActive]), @"card_key":@(_card.keyWindow),
+    @"frontmost_self":@(NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier==getpid()),
+    @"recognizer_enabled":@([((NSGestureRecognizer*)[overlay valueForKey:@"pinchRecognizer"]) isEnabled]),
     @"responder":NSStringFromClass(_card.firstResponder.class) ?: @"none",
     @"recognizer_state":@([((NSGestureRecognizer*)[overlay valueForKey:@"pinchRecognizer"]) state]),
     @"touch_count":@(_touchCount), @"touch_distance":@(_touchDistance),
@@ -248,7 +271,7 @@
   }];
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)app { return YES; }
-- (void)applicationWillTerminate:(NSNotification*)note { [_traceTimer invalidate]; [_traceHandle closeFile]; [_player pause]; if (_videoObserver) [_player removeTimeObserver:_videoObserver]; _controls.reset(); }
+- (void)applicationWillTerminate:(NSNotification*)note { [_traceTimer invalidate]; [_traceHandle closeFile]; [_eventHandle closeFile]; [_player pause]; if (_videoObserver) [_player removeTimeObserver:_videoObserver]; _controls.reset(); }
 @end
 int main() { @autoreleasepool {
   Class appClass=getenv("ARCIUM_PIP_TRACE_INPUT") ? LabApplication.class : NSApplication.class;

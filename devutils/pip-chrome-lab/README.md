@@ -56,9 +56,18 @@ process-specific file under `/private/tmp`; its path is written to
 only changes. Normal launches use the standard application class and no trace
 timer. The tracer does not modify the overlay's input routing.
 
-Indirect two-finger touch separation supplies hover pinch when AppKit does not
-emit magnification. Parallel finger travel remains pan; meaningful separation
-claims resize. Finger lift finishes it and cancellation restores the start
-frame. While this fallback owns a pinch, native recognition is suspended to
-avoid duplicate resizing. It uses the same local hover monitor as movement
-and the existing display-paced resize path.
+Native pinch needs the lab to be frontmost as well as the card to have gesture
+focus. Hover now makes the card key before activating the app, without requesting
+all windows. On exit, it restores the preceding app if the user has not chosen
+another app in the meantime. This can change the menu bar while hovering; Space
+and other-window behavior still need hardware testing. The former indirect-touch
+separation classifier is removed: its intermittent gesture snapshots could leave
+resize stuck. Cancellation, loss of key status, app deactivation and hiding all
+release native pinch ownership, even when new input is disallowed.
+
+The opt-in trace records `frontmost_self` separately from AppKit's `app_active`;
+nonactivating panels can report active without their process being frontmost.
+A companion `-events.jsonl` file logs before/after local magnify and scroll
+dispatch, target-card status, phases and ownership. No global input monitor is
+installed. Hidden checks intercept activation calls and never order windows;
+they establish cleanup behavior, not physical trackpad delivery.
