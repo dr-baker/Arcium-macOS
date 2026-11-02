@@ -1,0 +1,76 @@
+{
+  "built_outer": "cb2734629418e77453e5f44b753f9e645e274a46",
+  "core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "mode": "daily",
+  "output": "Default",
+  "build": {
+    "invocation_id": "571a0bac91db44d9b8f06024a0443da8",
+    "source_revision": "cb2734629418e77453e5f44b753f9e645e274a46",
+    "core_revision": "fd7c9080745e66f846a25665e3f57cf612da7169",
+    "build_status": "success",
+    "outcome": "success",
+    "returncode": 0,
+    "finished_at": "2026-11-02T20:07:13.738809+00:00",
+    "targets": [
+      "chrome",
+      "arcium_feature_settings_unit_tests",
+      "arcium_feature_settings_browser_tests",
+      "arcium_media_session_impl_unittests",
+      "arcium_web_media_player_unittests"
+    ]
+  },
+  "siso_actions": 483,
+  "focused_tests": {
+    "native": {
+      "passed": 96,
+      "retries": 0,
+      "failed": 0
+    },
+    "media": {
+      "passed": 57,
+      "retries": 0,
+      "failed": 0
+    },
+    "renderer": {
+      "passed": 9,
+      "retries": 0,
+      "failed": 0
+    }
+  },
+  "hidden_appkit_assertions": 3452,
+  "unbranded_quilt_native_sha256": "8554cab3eaeac0be1002d1bdbcfbd9b7f6531cff9bd001dcbd482caf020030b8",
+  "patches": {
+    "applied": 590,
+    "series": 590,
+    "top": "personal/arcium-pip-native-controls-macos.patch",
+    "problems": [],
+    "timestamp_snapshot_pending": false
+  },
+  "installed_app": "/Applications/Arcium.app",
+  "installed_checks": {
+    "installed": true,
+    "build_verified": true,
+    "matches_build": true,
+    "identity_ok": true,
+    "signature_ok": true,
+    "signed_by": "Developer ID Application: Daniel Richard Baker (45W5CFCVQF)"
+  },
+  "runtime_dependency_proof": {
+    "process_count": 10,
+    "installed_app_mappings": 5221,
+    "shared_source_output_paths": []
+  },
+  "real_profile_launched": true,
+  "new_profile_or_mock_keychain": false,
+  "prior_failures": {
+    "build": "Two missing test-window subclass casts; final compile passed",
+    "native": "94 passed, two failed before pinch rollback and presentation-boundary fixture corrections; final complete96 passed"
+  },
+  "limits": [
+    "User requested real-profile visual testing remain manual",
+    "Physical input in installed browser and close black-bar optical result unproven",
+    "Policy browser runner compiled; prior unchanged policy baseline reused",
+    "Current optical screenshot/video not collected by user preference",
+    "New-install persistence and normal quit not retested"
+  ]
+}
