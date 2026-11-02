@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3385 @@
+@@ -0,0 +1,3386 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3622,7 +3622,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (_invalidated || _hiding) return;
 +  // Focus and frame mutations can synchronously refresh the native host. Fence
 +  // those callbacks before stopping effects or releasing borrowed focus.
-+  const NSRect hideFrame = _returning ? _returnFrame : _pipWindow.frame;
++  const NSRect hideFrame = _returning ? _returnFrame :
++      (_magnifying ? _magnifyStartFrame : _pipWindow.frame);
 +  _hiding = YES;
 +  // Stop presenting the card before focus/geometry callbacks can render a
 +  // partially dismantled glass hierarchy. Placement restores alpha before show.
@@ -5026,7 +5027,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1980 @@
+@@ -0,0 +1,1987 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -6225,6 +6226,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  Pump();
 +  ExpectSameFrame(window_.frame, original);
 +  EXPECT_FALSE(IsPresented(Button(@"Restore Picture in Picture")));
++  Update();
++  EXPECT_FALSE(IsPresented(Button(@"Play")));
++  Placement placement;
++  placement.width = NSWidth(original);
++  controls_->PreparePlacement(placement, nil,
++      NSWidth(original) / NSHeight(original), {});
++  [Overlay() mouseMoved:nil];
 +  Update();
 +  ExpectPresentedWithinOverlay(Button(@"Play"));
 +}

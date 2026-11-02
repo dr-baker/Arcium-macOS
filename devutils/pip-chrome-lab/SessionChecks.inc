@@ -9,11 +9,15 @@ static void CheckSessionBoundaries() {
     auto* view=(ArciumPiPNativeOverlay*)controls.GetNativeView().Get();
     [panel.contentView addSubview:view];
     State state; state.can_play=true; controls.Update(state);
+    const NSRect prePinchFrame=panel.frame;
     auto* recognizer=[TestPinchRecognizer new];
     recognizer.testState=NSGestureRecognizerStateBegan; recognizer.magnification=.1;
     [view recognizePinch:recognizer]; [view flushResizeFrame];
     Check([[view valueForKey:@"magnifying"] boolValue],"extra: nonkey admitted pinch starts");
-    controls.RestorePlacementForHide(); panel.admitted=NO;
+    controls.RestorePlacementForHide();
+    Check(NSEqualRects(panel.frame,prePinchFrame),"hide preserves the cancelled pinch start frame, not its enlarged presentation");
+    Check(!controls.TakeUserPlacement(),"hiding a cancelled pinch does not persist its intermediate width");
+    panel.admitted=NO;
     Placement placement; placement.width=640;
     controls.PreparePlacement(placement,nil,16./9.,{}); panel.admitted=YES;
     const NSRect reopened=panel.frame;
