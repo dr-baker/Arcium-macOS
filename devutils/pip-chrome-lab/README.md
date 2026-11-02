@@ -42,3 +42,8 @@ uses two appearance-only AppKit hooks on `LabPanel`, matching the Opus lab;
 they do not change actual key status or activate the app. These hooks are not
 part of the browser patch. Hidden tests now cover responder handoff and the
 recognizer action on a nonactivating panel; hardware delivery remains manual.
+
+Pinch and two-finger movement target the card under the pointer without a
+click first. If native pinch recognition fails, raw magnification uses the
+same hover route. The recognizer delays those events until failure, keeping
+a recognized pinch from being resized twice.

@@ -16,6 +16,19 @@
 @implementation TestPinchRecognizer
 - (NSGestureRecognizerState)state { return self.testState; }
 @end
+@interface HoverMagnifyEvent : NSEvent
+@property(nonatomic,weak) NSWindow* targetWindow;
+@property CGFloat delta;
+@property NSEventPhase eventPhase;
+@property NSPoint targetPoint;
+@end
+@implementation HoverMagnifyEvent
+- (NSEventType)type { return NSEventTypeMagnify; }
+- (NSWindow*)window { return self.targetWindow; }
+- (NSPoint)locationInWindow { return self.targetPoint; }
+- (CGFloat)magnification { return self.delta; }
+- (NSEventPhase)phase { return self.eventPhase; }
+@end
 static int checks=0;
 static void Check(bool pass,const char* reason) { ++checks; if(!pass) { std::fprintf(stderr,"FAIL: %s\n",reason); std::exit(1); } }
 static void Exception(NSException* e) { std::fprintf(stderr,"EXCEPTION: %s\n%s\n",e.description.UTF8String,e.callStackSymbols.description.UTF8String); }
@@ -213,6 +226,29 @@ int main() { @autoreleasepool {
   Check(![[overlay valueForKey:@"magnifying"] boolValue],"recognizer end releases pinch ownership");
   window.admitGestureInput=NO;
   Check(!window.visible,"gesture fixture never ordered native panel");
+  HiddenGesturePanel* hoverWindow=[[HiddenGesturePanel alloc] initWithContentRect:NSMakeRect(100,100,480,270)
+      styleMask:NSWindowStyleMaskBorderless|NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
+  hoverWindow.releasedWhenClosed=NO; hoverWindow.admitGestureInput=YES;
+  NativeControls hoverControls(hoverWindow,[](Action,double){});
+  auto* hover=(ArciumPiPNativeOverlay*)hoverControls.GetNativeView().Get();
+  hover.frame=hoverWindow.contentView.bounds; [hoverWindow.contentView addSubview:hover];
+  hoverControls.Update(state);
+  [hover performSelector:@selector(mouseEntered:) withObject:nil];
+  Check(hoverWindow.firstResponder==hover,"fresh hover takes gesture focus without click");
+  auto* magnify=[HoverMagnifyEvent new]; magnify.targetWindow=hoverWindow; magnify.targetPoint=NSMakePoint(200,100);
+  const NSRect beforeHoverPinch=hoverWindow.frame;
+  magnify.eventPhase=NSEventPhaseBegan; magnify.delta=0; [hover magnifyWithEvent:magnify];
+  magnify.eventPhase=NSEventPhaseChanged; magnify.delta=.15; [hover magnifyWithEvent:magnify]; [hover flushResizeFrame];
+  Check(NSWidth(hoverWindow.frame)>NSWidth(beforeHoverPinch),"hover-only raw pinch grows without any click");
+  magnify.delta=-.25; [hover magnifyWithEvent:magnify]; [hover flushResizeFrame];
+  Check(NSWidth(hoverWindow.frame)<NSWidth(beforeHoverPinch),"hover-only raw pinch shrinks without any click");
+  magnify.eventPhase=NSEventPhaseEnded; magnify.delta=0; [hover magnifyWithEvent:magnify];
+  Check(![[hover valueForKey:@"magnifying"] boolValue],"hover-only fallback finishes pinch ownership");
+  Check(hover.gestureRecognizers.firstObject.delaysMagnificationEvents,"recognized gestures delay raw fallback to avoid duplicate resize");
+  hoverWindow.admitGestureInput=NO;
+  const NSRect hiddenFrame=hoverWindow.frame;
+  magnify.eventPhase=NSEventPhaseChanged; magnify.delta=.2; [hover magnifyWithEvent:magnify]; [hover flushResizeFrame];
+  Check(NSEqualRects(hoverWindow.frame,hiddenFrame),"hidden hover fallback rejects input");
 
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);
 } return 0; }

@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3214 @@
+@@ -0,0 +1,3216 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3273,8 +3273,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +- (void)magnifyWithEvent:(NSEvent*)event {
-+  // The recognizer owns events on this window. Other-window magnification is
-+  // handled by the application monitor without double-applying the delta.
++  // The recognizer delays raw magnification until recognition fails. Retain
++  // the same hover-based route for those events instead of dropping them in
++  // the responder chain. Recognized pinches never reach this fallback.
++  if ([self acceptsGestureInput] && [self consumeMagnify:event]) return;
 +  [super magnifyWithEvent:event];
 +}
 +
@@ -4855,7 +4857,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.mm
-@@ -0,0 +1,1966 @@
+@@ -0,0 +1,1980 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -6198,6 +6200,20 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +  controls_->RestorePlacementForHide();
 +  ExpectSameFrame(window_.frame,original);
 +  EXPECT_FALSE(controls_->TakeUserPlacement());
++}
++
++TEST_F(ArciumPiPNativeControlsTest, HoverMagnificationFallbackNeedsNoClick) {
++  window_.testVisible = YES;
++  const NSRect original = window_.frame;
++  auto* event = [ArciumPiPFallbackMagnifyEvent new];
++  event.testWindow = window_; event.testDelta = .15;
++  [Overlay() magnifyWithEvent:event];
++  EXPECT_GT(NSWidth(window_.frame), NSWidth(original));
++  EXPECT_FALSE([[Overlay() valueForKey:@"magnifying"] boolValue]);
++  window_.testVisible = NO;
++  const NSRect hidden = window_.frame;
++  [Overlay() magnifyWithEvent:event];
++  ExpectSameFrame(window_.frame, hidden);
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, PhaseLessFallbackPinchEndsBeforeNextPan) {
