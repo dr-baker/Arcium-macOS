@@ -2,6 +2,22 @@
 #import <AVFoundation/AVFoundation.h>
 #include "arcium_pip_native_controls.mm"
 
+@protocol LabInputTracing
+- (void)traceInput:(NSEvent*)event before:(BOOL)before;
+@end
+@interface LabApplication : NSApplication
+@end
+@implementation LabApplication
+- (void)sendEvent:(NSEvent*)event {
+  id delegate=self.delegate;
+  if ([delegate respondsToSelector:@selector(traceInput:before:)])
+    [(id<LabInputTracing>)delegate traceInput:event before:YES];
+  [super sendEvent:event];
+  if ([delegate respondsToSelector:@selector(traceInput:before:)])
+    [(id<LabInputTracing>)delegate traceInput:event before:NO];
+}
+@end
+
 @interface LabPanel : NSPanel
 @end
 @implementation LabPanel
@@ -31,7 +47,7 @@
   [grid stroke];
 }
 @end
-@interface Lab : NSObject<NSApplicationDelegate,NSWindowDelegate> {
+@interface Lab : NSObject<NSApplicationDelegate,NSWindowDelegate,LabInputTracing> {
   NSWindow* _card;
   NSWindow* _settings;
   LabBackdrop* _backdrop;
@@ -40,6 +56,11 @@
   AVPlayer* _player;
   AVPlayerLayer* _video;
   id _videoObserver;
+  NSTimer* _traceTimer;
+  NSFileHandle* _traceHandle;
+  NSDictionary* _lastTraceState;
+  NSUInteger _rawMagnifyEvents, _rawScrollEvents, _rawGestureEvents, _touchCount;
+  double _touchDistance;
   NSTextField* _status;
   NSMutableDictionary<NSString*,NSSlider*>* _tuning;
 }
@@ -78,6 +99,61 @@
   [self tune:nil];
   [_card orderFront:nil]; [_settings makeKeyAndOrderFront:nil];
   [NSApp activateIgnoringOtherApps:YES];
+  if (getenv("ARCIUM_PIP_TRACE_INPUT")) {
+    NSString* trace=[NSString stringWithFormat:@"/private/tmp/arcium-pip-live-input-%d.jsonl",getpid()];
+    [NSFileManager.defaultManager createFileAtPath:trace contents:nil attributes:nil];
+    _traceHandle=[NSFileHandle fileHandleForWritingAtPath:trace];
+    [trace writeToFile:@"/private/tmp/arcium-pip-live-trace-path.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    __weak Lab* weakTrace=self;
+    _traceTimer=[NSTimer timerWithTimeInterval:.1 repeats:YES block:^(NSTimer*) { [weakTrace recordInputState:@"tick"]; }];
+    [NSRunLoop.mainRunLoop addTimer:_traceTimer forMode:NSRunLoopCommonModes];
+    [self recordInputState:@"launch"];
+  }
+}
+- (void)traceInput:(NSEvent*)event before:(BOOL)before {
+  if (!_traceHandle) return;
+  if (before) {
+    if (event.type==NSEventTypeMagnify) ++_rawMagnifyEvents;
+    if (event.type==NSEventTypeScrollWheel) ++_rawScrollEvents;
+    if (event.type==NSEventTypeBeginGesture || event.type==NSEventTypeEndGesture || event.type==NSEventTypeGesture) ++_rawGestureEvents;
+    if (event.type==NSEventTypeGesture) {
+      NSArray<NSTouch*>* touches=[event touchesMatchingPhase:NSTouchPhaseTouching inView:nil].allObjects;
+      _touchCount=touches.count; _touchDistance=0;
+      if (touches.count==2) {
+        NSPoint a=touches[0].normalizedPosition,b=touches[1].normalizedPosition;
+        NSSize size=touches[0].deviceSize;
+        _touchDistance=std::hypot((a.x-b.x)*size.width,(a.y-b.y)*size.height);
+      }
+    }
+  }
+  if (event.type==NSEventTypeMagnify || event.type==NSEventTypeBeginGesture || event.type==NSEventTypeEndGesture || event.type==NSEventTypeMouseEntered || event.type==NSEventTypeMouseExited)
+    [self recordInputState:before ? @"input-before" : @"input-after"];
+}
+- (void)recordInputState:(NSString*)source {
+  if (!_controls || !_traceHandle) return;
+  NSView* overlay=_controls->GetNativeView().Get();
+  NSView* glass=[overlay valueForKey:@"glassContainer"];
+  auto flag=[&](NSString* key) { return @([[overlay valueForKey:key] boolValue]); };
+  NSDictionary* state=@{
+    @"physical_inside":@(NSPointInRect(NSEvent.mouseLocation,_card.frame)),
+    @"window_id":@(_card.windowNumber),
+    @"card_top_left":@[@(NSMinX(_card.frame)),@(NSMaxY(NSScreen.screens.firstObject.frame)-NSMaxY(_card.frame))],
+    @"tracked_inside":flag(@"mouseInside"), @"native_visible":flag(@"nativeVisible"),
+    @"glass_hidden":@(glass.hidden), @"card_visible":@(_card.visible),
+    @"keyboard_focus":flag(@"keyboardControlsFocus"), @"seeking":flag(@"seeking"),
+    @"dragging":flag(@"dragging"), @"magnifying":flag(@"magnifying"),
+    @"app_active":@([NSApp isActive]), @"card_key":@(_card.keyWindow),
+    @"responder":NSStringFromClass(_card.firstResponder.class) ?: @"none",
+    @"recognizer_state":@([((NSGestureRecognizer*)[overlay valueForKey:@"pinchRecognizer"]) state]),
+    @"touch_count":@(_touchCount), @"touch_distance":@(_touchDistance),
+    @"raw_magnify":@(_rawMagnifyEvents), @"raw_scroll":@(_rawScrollEvents), @"raw_gesture":@(_rawGestureEvents),
+    @"width":@(NSWidth(_card.frame)), @"height":@(NSHeight(_card.frame))
+  };
+  if ([_lastTraceState isEqual:state]) return;
+  _lastTraceState=state;
+  NSMutableDictionary* row=[state mutableCopy]; row[@"time"]=@(NSProcessInfo.processInfo.systemUptime); row[@"source"]=source;
+  NSData* data=[NSJSONSerialization dataWithJSONObject:row options:0 error:nil];
+  if (data) { [_traceHandle writeData:data]; [_traceHandle writeData:[@"\n" dataUsingEncoding:NSUTF8StringEncoding]]; }
 }
 - (void)action:(arcium::pip::Action)action value:(double)value {
   switch(action) {
@@ -172,10 +248,11 @@
   }];
 }
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)app { return YES; }
-- (void)applicationWillTerminate:(NSNotification*)note { [_player pause]; if (_videoObserver) [_player removeTimeObserver:_videoObserver]; _controls.reset(); }
+- (void)applicationWillTerminate:(NSNotification*)note { [_traceTimer invalidate]; [_traceHandle closeFile]; [_player pause]; if (_videoObserver) [_player removeTimeObserver:_videoObserver]; _controls.reset(); }
 @end
 int main() { @autoreleasepool {
-  NSApplication* app=NSApplication.sharedApplication;
+  Class appClass=getenv("ARCIUM_PIP_TRACE_INPUT") ? LabApplication.class : NSApplication.class;
+  NSApplication* app=[appClass sharedApplication];
   [app setActivationPolicy:NSApplicationActivationPolicyRegular];
   Lab* delegate=[Lab new]; app.delegate=delegate;
   [app run];

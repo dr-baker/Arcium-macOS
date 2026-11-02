@@ -47,3 +47,11 @@ Pinch and two-finger movement target the card under the pointer without a
 click first. If native pinch recognition fails, raw magnification uses the
 same hover route. The recognizer delays those events until failure, keeping
 a recognized pinch from being resized twice.
+
+For hardware-delivery diagnosis, launch with `ARCIUM_PIP_TRACE_INPUT=1` in the
+app's environment. The optional tracer records this lab's native gesture counts,
+touch count/separation, pointer-inside state, focus and card bounds to a
+process-specific file under `/private/tmp`; its path is written to
+`/private/tmp/arcium-pip-live-trace-path.txt`. It samples state at 10 Hz and writes
+only changes. Normal launches use the standard application class and no trace
+timer. The tracer does not modify the overlay's input routing.
