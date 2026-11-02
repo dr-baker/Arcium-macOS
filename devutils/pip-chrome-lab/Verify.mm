@@ -56,6 +56,7 @@ static BOOL RecordRestore(id,SEL,NSApplicationActivationOptions) { return YES; }
 static int checks=0;
 static void Check(bool pass,const char* reason) { ++checks; if(!pass) { std::fprintf(stderr,"FAIL: %s\n",reason); std::exit(1); } }
 static void Exception(NSException* e) { std::fprintf(stderr,"EXCEPTION: %s\n%s\n",e.description.UTF8String,e.callStackSymbols.description.UTF8String); }
+#include "LifecycleChecks.inc"
 int main() { @autoreleasepool {
   NSSetUncaughtExceptionHandler(Exception);
   std::fprintf(stderr,"checkpoint: native initialization\n");
@@ -345,5 +346,6 @@ int main() { @autoreleasepool {
   Check(activationRequests>0,"hover requests application activation through intercepted AppKit hook");
   hoverWindow.admitGestureInput=NO;
 
+  CheckLifecycle();
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);
 } return 0; }

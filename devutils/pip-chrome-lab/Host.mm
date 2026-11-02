@@ -241,7 +241,8 @@
 - (void)reset:(id)sender {
   _controls->RestorePlacementForHide();
   [_card setFrame:NSMakeRect(100,180,640,360) display:NO];
-  _controls->Reanchor(16./9.,{}); [_card orderFront:nil];
+  arcium::pip::Placement placement; placement.width=640;
+  _controls->PreparePlacement(placement,nil,16./9.,{}); [_card orderFront:nil];
   _status.stringValue=@"Reset · tuning unchanged";
 }
 - (void)openVideo:(id)sender {

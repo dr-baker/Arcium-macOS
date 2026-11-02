@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3287 @@
+@@ -0,0 +1,3331 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1503,12 +1503,16 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  NSRect _resizeStartFrame;
 +  NSPoint _resizeStartMouse;
 +  BOOL _pendingPan;
++  BOOL _hiding;
++  BOOL _pinchInterrupted;
++  BOOL _cancellingGesture;
 +  BOOL _suppressMouseUp;
 +  NSMagnificationGestureRecognizer* _pinchRecognizer;
 +  __weak NSWindow* _previousKeyWindow;
 +  NSRunningApplication* _previousApplication;
 +  NSTimer* _returnTimer;
 +  NSRect _returnFrame;
++  BOOL _returnCompleted;
 +  double _returnStart;
 +  BOOL _returning;
 +  double _snapshotTime;
@@ -1725,6 +1729,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)deliver:(Action)action value:(double)value {
++  if (_hiding || _invalidated) return;
 +  std::weak_ptr<Delivery> weak = _delivery;
 +  dispatch_async(dispatch_get_main_queue(), ^{
 +    auto delivery = weak.lock();
@@ -1892,11 +1897,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)applyState:(const State&)state {
-+  if (_invalidated) {
++  if (_invalidated) return;
++  if (_hiding) {
++    _state = state;
 +    return;
 +  }
 +  if (state.blocked) {
-+    [self cancelReturn];
++    [self cancelReturn:YES];
 +    [self stopMotion];
 +    [self releaseControlsFocus];
 +  }
@@ -1958,7 +1965,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    }
 +  }
 +  if (_returning && !_state.HasEffect(Effect::kReturn) && !_state.blocked) {
-+    [self cancelReturn]; [self deliver:Action::kReturn value:0];
++    [self cancelReturn:YES]; [self deliver:Action::kReturn value:0];
 +  }
 +}
 +
@@ -1984,7 +1991,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                 TimeLabel(_state.duration)];
 +}
 +- (BOOL)chromeSuppressed {
-+  return _dragging || _scrolling || _magnifying || _resizing || _liveResizing ||
++  return _hiding || _dragging || _scrolling || _magnifying || _resizing || _liveResizing ||
 +      _pipWindow.inLiveResize || _returning ||
 +      (motion && motion->phase == Phase::Settling);
 +}
@@ -2213,7 +2220,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)armHideTimer {
 +  [_hideTimer invalidate];
-+  if (_invalidated || !_nativeVisible || _seeking || [_title isReadingTitle] || [self keepsKeyboardControlsVisible] || _state.blocked ||
++  if (_invalidated || _hiding || !_nativeVisible || _seeking || [_title isReadingTitle] || [self keepsKeyboardControlsVisible] || _state.blocked ||
 +      _tucked != geo::Side::kNone) {
 +    return;
 +  }
@@ -2236,14 +2243,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (BOOL)acceptsFirstResponder { return YES; }
 +- (void)mouseEntered:(NSEvent*)event {
++  if (_hiding || _invalidated) return;
 +  // Descendant tracking events can bubble through the responder chain, and
 +  // queued events can describe an old pointer position after focus changes.
 +  if (event && ((event.type == NSEventTypeMouseEntered && event.trackingArea != _tracking) || !PointerInsideView(self))) return;
-+  if (!_invalidated && !_state.blocked && !_returning && _tucked == geo::Side::kNone) {
++  if (!_invalidated && !_hiding && !_state.blocked && !_returning && _tucked == geo::Side::kNone) {
 +    if (!_pipWindow.keyWindow) _previousKeyWindow = NSApp.keyWindow;
-+    // WindowServer sends trackpad magnification only to the frontmost
-+    // application; nonactivating key focus receives scrolling but no pinch.
-+    // Key the card first so activation has no other window to raise.
++    // In hardware traces, nonactivating key focus received scroll but no
++    // magnification. Key the card before activating; do not request all windows.
 +    NSRunningApplication* front = NSWorkspace.sharedWorkspace.frontmostApplication;
 +    [_pipWindow makeKeyWindow];
 +    if (front.processIdentifier != NSProcessInfo.processInfo.processIdentifier) {
@@ -2261,6 +2268,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self armHideTimer];
 +}
 +- (void)mouseMoved:(NSEvent*)event {
++  if (_hiding || _invalidated) return;
 +  if (event && !PointerInsideView(self)) { [self mouseExited:event]; return; }
 +  _mouseInside = YES;
 +  if (_state.blocked || _tucked != geo::Side::kNone) {
@@ -2290,8 +2298,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)mouseExited:(NSEvent*)event {
 +  if (event && ((event.type == NSEventTypeMouseExited && event.trackingArea != _tracking) || PointerInsideView(self))) return;
-+  if (!_dragging && !_magnifying) [self restoreGestureFocus];
 +  _mouseInside = NO;
++  if (!_dragging && !_magnifying) [self restoreGestureFocus];
 +  if (!_seeking && !_dragging && ![self keepsKeyboardControlsVisible]) {
 +    [self releaseControlsFocus];
 +    _nativeVisible = NO;
@@ -2331,7 +2339,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                      pip_motion::Rect{active.frame.origin.x,active.frame.origin.y,active.frame.size.width,active.frame.size.height});
 +}
 +- (BOOL)ensureMotion {
-+  if (!_pipWindow || _invalidated || _state.blocked || _returning) return NO;
++  if (!_pipWindow || _invalidated || _hiding || _state.blocked || _returning) return NO;
 +  if (!motion) {
 +    NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
 +    if (!screen) return NO;
@@ -2490,6 +2498,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  return static_cast<int>(outcome.decision)*100+static_cast<int>(outcome.side)*20+edges;
 +}
 +- (void)ensureMotionLayers {
++  if (_hiding || _invalidated) return;
 +  if (_state.HasEffect(Effect::kShadows) && !_shadowWindow) {
 +    _shadowWindow = [[NSPanel alloc] initWithContentRect:NSZeroRect
 +        styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
@@ -2530,7 +2539,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +// Coalesce active input into the next display frame. Idle input responds
 +// immediately; a stalled display link must not leave the window frozen.
 +- (void)requestMotionFrame {
-+  if (_invalidated || !motion || _state.blocked || _magnifying || _resizing || _returning || _pipWindow.inLiveResize) return;
++  if (_invalidated || _hiding || !motion || _state.blocked || _magnifying || _resizing || _returning || _pipWindow.inLiveResize) return;
 +  _motionFrameDirty = YES;
 +  const double now = NSProcessInfo.processInfo.systemUptime;
 +  if (_motionFramesRunning && now - _lastRenderAt < .1) return;
@@ -2541,6 +2550,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (void)startMotionTimer { [self requestMotionFrame]; }
 +- (void)queueResizeFrame:(NSRect)frame {
++  if (_hiding || _invalidated) return;
 +  _pendingResizeFrame = frame;
 +  [self startMotionFrames];
 +}
@@ -2551,7 +2561,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self setWindowFrame:frame animate:NO];
 +}
 +- (void)startMotionFrames {
-+  if (_motionFramesRunning) return;
++  if (_hiding || _invalidated || _motionFramesRunning) return;
 +  _motionFramesRunning = YES;
 +  if (@available(macOS 14.0, *)) {
 +    if (!_motionDisplayLink) {
@@ -2663,7 +2673,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _pipWindow.hasShadow = _originalShadow;
 +}
 +- (BOOL)updateMotionVisuals {
-+  if (!motion) return YES;
++  if (_hiding || _invalidated || !motion) return YES;
 +  const double now = _motionRenderTime > 0 ? _motionRenderTime : NSProcessInfo.processInfo.systemUptime;
 +  const double dt = std::clamp(now - lastVisualTime, 0.0, .05);
 +  lastVisualTime = now;
@@ -2918,6 +2928,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (_invalidated || !_pipWindow) {
 +    return;
 +  }
++  // The native host calls placement before showing a reused window. A finished
++  // Return remains transparent until this explicit new presentation boundary.
++  _hiding = NO;
++  _returnCompleted = NO;
++  _pipWindow.alphaValue = 1;
 +  [self stopMotion];
 +  _hasPosition = placement.has_position;
 +  _positionFraction = NSMakePoint(placement.x, placement.y);
@@ -2943,7 +2958,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self setWindowFrame:_restoreFrame animate:NO];
 +}
 +- (void)reanchor:(double)aspect limits:(geo::SizeLimits)limits {
-+  if (_invalidated || !_pipWindow) {
++  if (_invalidated || _hiding || !_pipWindow) {
 +    return;
 +  }
 +  [self stopMotion];
@@ -3140,7 +3155,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (BOOL)acceptsGestureInput {
-+  return !_invalidated && !_state.blocked && !_returning && _pipWindow.visible &&
++  return !_invalidated && !_hiding && !_state.blocked && !_returning && _pipWindow.visible &&
 +      self.window == _pipWindow && self.superview && !self.hiddenOrHasHiddenAncestor;
 +}
 +- (BOOL)eventOverCard:(NSEvent*)event {
@@ -3213,20 +3228,31 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  return YES;
 +}
 +- (void)cancelGestureInput {
++  if (_cancellingGesture) return;
++  _cancellingGesture = YES;
++  _pinchInterrupted = YES;
 +  const BOOL pinching = _magnifying;
 +  const NSRect snapshot = _magnifyStartFrame;
 +  const BOOL interacting = pinching || _scrolling || _pendingPan;
 +  if (interacting) [self stopMotion];
 +  if (pinching) [self setWindowFrame:snapshot animate:NO];
 +  _consumeMomentum = NO;
-+  if (interacting && !_invalidated) {
++  // Reset recognition before accepting another stream. Its cancellation action
++  // can reenter here; continuations still require a fresh native Began.
++  if (_pinchRecognizer.state != NSGestureRecognizerStatePossible) {
++    _pinchRecognizer.enabled = NO;
++    _pinchRecognizer.enabled = YES;
++  }
++  if (interacting && !_invalidated && !_hiding) {
 +    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
 +    [self refreshChrome];
 +    [self armHideTimer];
 +  }
++  _cancellingGesture = NO;
 +}
 +- (void)touchesCancelledWithEvent:(NSEvent*)event {
 +  [self cancelGestureInput];
++  if (!_mouseInside && !_hiding) [self restoreGestureFocus];
 +}
 +- (void)applyPinch:(CGFloat)delta ended:(BOOL)ended cancelled:(BOOL)cancelled {
 +  if ((ended || cancelled) && _magnifying &&
@@ -3259,6 +3285,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  motion->placeAt({center.x - fit.width / 2, center.y - fit.height / 2});
 +  if (ended || cancelled) {
 +    gestures->endPinch(cancelled); _magnifying = NO;
++    if (cancelled) _pinchInterrupted = YES;
 +    _preferredWidth = cancelled ? _magnifyPreferredWidth : motion->size.width;
 +  }
 +  const auto area = motion->area();
@@ -3288,8 +3315,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +- (void)recognizePinch:(NSMagnificationGestureRecognizer*)recognizer {
-+  if (recognizer.state == NSGestureRecognizerStatePossible) return;
++  if (_cancellingGesture || recognizer.state == NSGestureRecognizerStatePossible) return;
 +  if (![self acceptsGestureInput]) { [self cancelGestureInput]; recognizer.magnification = 0; return; }
++  if (_pinchInterrupted && recognizer.state != NSGestureRecognizerStateBegan) {
++    recognizer.magnification = 0;
++    return;
++  }
++  if (recognizer.state == NSGestureRecognizerStateBegan) _pinchInterrupted = NO;
 +  const BOOL cancelled = recognizer.state == NSGestureRecognizerStateCancelled ||
 +                         recognizer.state == NSGestureRecognizerStateFailed;
 +  [self applyPinch:recognizer.magnification
@@ -3297,6 +3329,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  recognizer.magnification = 0;
 +}
 +- (BOOL)consumeMagnify:(NSEvent*)event {
++  if (_pinchInterrupted && !(event.phase & NSEventPhaseBegan)) return NO;
++  if (event.phase & NSEventPhaseBegan) _pinchInterrupted = NO;
 +  if (!_magnifying && !_scrolling && !_pendingPan && ![self eventOverCard:event]) return NO;
 +  if (event.phase == NSEventPhaseNone) {
 +    [self applyPinch:event.magnification ended:NO cancelled:NO];
@@ -3395,9 +3429,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self deliver:Action::kForward15 value:0];
 +  }
 +}
-+- (void)cancelReturn {
++- (void)cancelReturn:(BOOL)restore {
 +  [_returnTimer invalidate]; _returnTimer = nil;
-+  if (_returning && _pipWindow) {
++  if (restore && _returning && !_returnCompleted && _pipWindow) {
 +    _pipWindow.alphaValue = 1;
 +    [self setWindowFrame:_returnFrame animate:NO];
 +  }
@@ -3409,7 +3443,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (!_state.HasEffect(Effect::kReturn) || ReduceMotion() || !_openerWindow.visible) {
 +    [self deliver:Action::kReturn value:0]; return;
 +  }
-+  _returning = YES; _returnFrame = _pipWindow.frame;
++  _returning = YES; _returnCompleted = NO; _returnFrame = _pipWindow.frame;
 +  [self refreshChrome];
 +  _returnStart = NSProcessInfo.processInfo.systemUptime;
 +  const uint64_t generation = _sessionGeneration;
@@ -3431,8 +3465,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    overlay->_pipWindow.alphaValue = 1-ease;
 +    if (u >= 1) {
 +      [overlay->_returnTimer invalidate]; overlay->_returnTimer = nil;
-+      overlay->_pipWindow.alphaValue = 1;
-+      [overlay setWindowFrame:overlay->_returnFrame animate:NO];
++      // The action is asynchronous. Keep the completed flight invisible until
++      // the host has hidden it; placement restores opacity before reuse.
++      overlay->_returnCompleted = YES;
 +      [overlay deliver:Action::kReturn value:0];
 +    }
 +  }];
@@ -3533,19 +3568,27 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)prepareForHide {
-+  _suppressMouseUp = NO;
-+  _pointerControlsFocus = NO;
-+  [self cancelReturn];
-+  [self restoreGestureFocus];
-+  if (_invalidated) {
-+    return;
-+  }
-+  [self stopMotion];
++  if (_invalidated || _hiding) return;
++  // Focus and frame mutations can synchronously refresh the native host. Fence
++  // those callbacks before stopping effects or releasing borrowed focus.
++  const NSRect hideFrame = _returning ? _returnFrame : _pipWindow.frame;
++  _hiding = YES;
++  // Stop presenting the card before focus/geometry callbacks can render a
++  // partially dismantled glass hierarchy. Placement restores alpha before show.
++  _pipWindow.alphaValue = 0;
 +  ++_sessionGeneration;
 +  // A media session can reuse this hidden window. Drop queued input from the
 +  // previous session without changing playback or destroying the native host.
 +  ActionCallback callback = _delivery ? _delivery->callback : ActionCallback{};
 +  _delivery = std::make_shared<Delivery>(Delivery{std::move(callback)});
++  _nativeVisible = NO;
++  _mouseInside = NO;
++  _suppressMouseUp = NO;
++  _pointerControlsFocus = NO;
++  [self releaseControlsFocus];
++  [self cancelReturn:NO];
++  [self restoreGestureFocus];
++  [self stopMotion];
 +  const BOOL wasTucked = _tucked != geo::Side::kNone;
 +  NSScreen* screen = _pipWindow.screen ?: [self anchorScreen];
 +  if (wasTucked) {
@@ -3556,7 +3599,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      }
 +    }
 +  }
-+  NSRect frame = wasTucked ? _restoreFrame : _pipWindow.frame;
++  NSRect frame = wasTucked ? _restoreFrame : hideFrame;
 +  _tucked = geo::Side::kNone;
 +  _nativeVisible = NO;
 +  _hasSnapshot = NO;
@@ -3582,12 +3625,13 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +
 +- (void)invalidate {
-+  [self cancelReturn];
++  _hiding = YES;
++  [self releaseControlsFocus];
++  [self cancelReturn:YES];
 +  [self restoreGestureFocus];
 +  if (_invalidated) {
 +    return;
 +  }
-+  [self releaseControlsFocus];
 +  _axParent = nil;
 +  _beforeFocusRelease = nullptr;
 +  [self stopMotion];

@@ -71,3 +71,12 @@ A companion `-events.jsonl` file logs before/after local magnify and scroll
 dispatch, target-card status, phases and ownership. No global input monitor is
 installed. Hidden checks intercept activation calls and never order windows;
 they establish cleanup behavior, not physical trackpad delivery.
+
+Hide preparation makes the card transparent before changing focus or geometry,
+and fences reentrant host refreshes until the next explicit
+placement, which the browser's native Show wrapper already performs. The lab's
+Reset action uses the same boundary. Completed Return animations stay transparent
+until the host hides the card; an explicit cancellation restores it immediately.
+Hidden lifecycle checks cover focus restoration after a cancelled pinch, late
+gesture callbacks, synchronous refresh during hiding and Return/reopen ordering.
+They do not establish the cause of the reported transient black corner bar.
