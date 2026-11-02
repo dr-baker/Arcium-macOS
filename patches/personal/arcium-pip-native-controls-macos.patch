@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3343 @@
+@@ -0,0 +1,3359 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1528,6 +1528,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  BOOL _hasSnapshot;
 +  BOOL _invalidated;
 +  uint64_t _sessionGeneration;
++  uint64_t _motionGeneration;
 +  std::optional<Placement> _userPlacement;
 +  __weak NSWindow* _openerWindow;
 +  double _preferredWidth;
@@ -2345,6 +2346,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    if (!screen) return NO;
 +    const NSRect area = screen.visibleFrame, frame = _pipWindow.frame;
 +    motion = std::make_unique<Motion>(pip_motion::Rect{area.origin.x, area.origin.y, area.size.width, area.size.height});
++    ++_motionGeneration;
 +    motion->settings = pip_motion::selectedSettings();
 +    motion->size = {frame.size.width, frame.size.height};
 +    motion->seed({frame.origin.x, frame.origin.y},
@@ -2618,7 +2620,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [self haptic:NSHapticFeedbackPatternAlignment];
 +  }
 +  _motionRenderTime = target;
++  const uint64_t generation = _motionGeneration;
 +  const BOOL done = [self updateMotionVisuals];
++  if (_hiding || _invalidated || !motion || _motionGeneration != generation) return;
 +  _motionRenderTime = 0;
 +  if (done && !_motionFrameDirty && motion->phase != Phase::Dragging && motion->phase != Phase::Settling) {
 +    [self pauseMotionFrames];
@@ -2627,6 +2631,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +}
 +- (void)stopMotion {
++  const uint64_t generation = ++_motionGeneration;
++  _motionRenderTime = 0;
 +  _pendingResizeFrame.reset();
 +  [self pauseMotionFrames];
 +  // Cancellation, permission blocking, hide and display reconfiguration all
@@ -2638,6 +2644,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  if (motion && _pipWindow) {
 +    [self setWindowFrame:NSMakeRect(motion->position.x, motion->position.y,
 +        motion->size.width, motion->size.height) animate:NO];
++    if (_motionGeneration != generation) return;
 +  }
 +  [_pressureFeedback close]; _pressureFeedback = nil;
 +  gestures.reset(); motion.reset(); _dragging = NO; awaitingLanding = NO;
@@ -2674,6 +2681,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (BOOL)updateMotionVisuals {
 +  if (_hiding || _invalidated || !motion) return YES;
++  const uint64_t generation = _motionGeneration;
++  const auto current = [&] {
++    return !_hiding && !_invalidated && motion && _motionGeneration == generation;
++  };
 +  const double now = _motionRenderTime > 0 ? _motionRenderTime : NSProcessInfo.processInfo.systemUptime;
 +  const double dt = std::clamp(now - lastVisualTime, 0.0, .05);
 +  lastVisualTime = now;
@@ -2712,10 +2723,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  }
 +  if (!_state.HasVisualEffects() || ReduceMotion()) {
 +    [self clearMotionPresentation];
++    if (!current()) return YES;
 +    [self setWindowFrame:NSMakeRect(position.x,position.y,w,h) animate:NO];
 +    return YES;
 +  }
 +  [self ensureMotionLayers];
++  if (!current()) return YES;
 +  const bool keep = moved && shown.decision == Decision::Keep;
 +  // Hand speed rises quickly but eases down, so a slowing drag reads as a glide rather than a step.
 +  approach(handSpeed, dragging ? cue.speed : 0, .04, .12, dt);
@@ -2806,9 +2819,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  const NSRect frame = NSMakeRect(position.x + leanX - w*(cardScale-1)/2,
 +      position.y + leanY - h*(cardScale-1)/2, w*cardScale, h*cardScale);
 +  [self setWindowFrame:frame animate:NO];
++  if (!current()) { [CATransaction commit]; return YES; }
 +  [_shadowWindow setFrame:NSInsetRect(frame, -kShadowPad, -kShadowPad) display:NO];
++  if (!current()) { [CATransaction commit]; return YES; }
 +  if (_pipWindow.visible && _shadowWindow.parentWindow == _pipWindow) {
 +    [_shadowWindow orderWindow:NSWindowBelow relativeTo:_pipWindow.windowNumber];
++    if (!current()) { [CATransaction commit]; return YES; }
 +  }
 +  CGPathRef path = CGPathCreateWithRoundedRect(CGRectMake(kShadowPad, kShadowPad,
 +      frame.size.width, frame.size.height), geo::CornerRadius(frame.size.width,frame.size.height),
