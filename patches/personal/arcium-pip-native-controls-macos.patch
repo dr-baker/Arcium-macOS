@@ -3917,10 +3917,15 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
  
  VideoOverlayWindowNativeWidgetMac::~VideoOverlayWindowNativeWidgetMac() =
      default;
-@@ -22,3 +51,337 @@ void VideoOverlayWindowNativeWidgetMac::
-   params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
-   params->style_mask = NSWindowStyleMaskFullSizeContentView;
- }
+@@ -19,6 +48,340 @@ VideoOverlayWindowNativeWidgetMac::~Vide
+ void VideoOverlayWindowNativeWidgetMac::PopulateCreateWindowParams(
+     const views::Widget::InitParams& widget_params,
+     remote_cocoa::mojom::CreateWindowParams* params) {
+-  params->window_class = remote_cocoa::mojom::WindowClass::kFrameless;
+-  params->style_mask = NSWindowStyleMaskFullSizeContentView;
++  params->window_class = remote_cocoa::mojom::WindowClass::kDefault;
++  params->style_mask = NSWindowStyleMaskBorderless;
++}
 +
 +void VideoOverlayWindowNativeWidgetMac::InitNativeWidget(
 +    views::Widget::InitParams params) {
@@ -4254,7 +4259,7 @@ Index: src/chrome/browser/ui/views/overlay/video_overlay_window_native_widget_ma
 +  if (video_) {
 +    video_->RefreshNativeControls();
 +  }
-+}
+ }
 Index: src/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/views/overlay/video_overlay_window_views.cc
