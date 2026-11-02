@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3331 @@
+@@ -0,0 +1,3343 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -3438,20 +3438,25 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _returning = NO;
 +}
 +- (void)returnToTab:(id)sender {
-+  if (_invalidated || _state.blocked || _returning) return;
++  if (_invalidated || _hiding || _state.blocked || _returning) return;
++  const uint64_t generation = _sessionGeneration;
 +  [self stopMotion];
++  if (_invalidated || _hiding || _sessionGeneration != generation) return;
 +  if (!_state.HasEffect(Effect::kReturn) || ReduceMotion() || !_openerWindow.visible) {
 +    [self deliver:Action::kReturn value:0]; return;
 +  }
 +  _returning = YES; _returnCompleted = NO; _returnFrame = _pipWindow.frame;
 +  [self refreshChrome];
 +  _returnStart = NSProcessInfo.processInfo.systemUptime;
-+  const uint64_t generation = _sessionGeneration;
 +  __weak ArciumPiPNativeOverlay* weakSelf = self;
 +  _returnTimer = [NSTimer timerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer* timer) {
 +    ArciumPiPNativeOverlay* overlay = weakSelf;
-+    if (!overlay || overlay->_invalidated || !overlay->_returning ||
-+        overlay->_sessionGeneration != generation) { [timer invalidate]; return; }
++    const auto ownsReturn = [&] {
++      return overlay && !overlay->_invalidated && !overlay->_hiding &&
++          overlay->_returning && overlay->_returnTimer == timer &&
++          overlay->_sessionGeneration == generation;
++    };
++    if (!ownsReturn()) { [timer invalidate]; return; }
 +    const double u = std::clamp((NSProcessInfo.processInfo.systemUptime - overlay->_returnStart) / .22, 0.0, 1.0);
 +    const double ease = 1 - std::pow(1-u, 3);
 +    const NSRect original = overlay->_returnFrame;
@@ -3462,7 +3467,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    [overlay setWindowFrame:NSMakeRect(NSMidX(original)+delta.x*ease-NSWidth(original)*scale/2,
 +        NSMidY(original)+delta.y*ease-NSHeight(original)*scale/2,
 +        NSWidth(original)*scale, NSHeight(original)*scale) animate:NO];
++    // Native setters can synchronously hide, replace the session, or start a
++    // different Return. Never resume writes through that ownership boundary.
++    if (!ownsReturn()) { [timer invalidate]; return; }
 +    overlay->_pipWindow.alphaValue = 1-ease;
++    if (!ownsReturn()) { [timer invalidate]; return; }
 +    if (u >= 1) {
 +      [overlay->_returnTimer invalidate]; overlay->_returnTimer = nil;
 +      // The action is asynchronous. Keep the completed flight invisible until
@@ -3581,6 +3590,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  // previous session without changing playback or destroying the native host.
 +  ActionCallback callback = _delivery ? _delivery->callback : ActionCallback{};
 +  _delivery = std::make_shared<Delivery>(Delivery{std::move(callback)});
++  // Hide is an input boundary even when this panel never held key focus.
++  // Do not rely on resign notifications to reject old Changed callbacks.
++  [self cancelGestureInput];
 +  _nativeVisible = NO;
 +  _mouseInside = NO;
 +  _suppressMouseUp = NO;

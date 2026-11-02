@@ -57,6 +57,7 @@ static int checks=0;
 static void Check(bool pass,const char* reason) { ++checks; if(!pass) { std::fprintf(stderr,"FAIL: %s\n",reason); std::exit(1); } }
 static void Exception(NSException* e) { std::fprintf(stderr,"EXCEPTION: %s\n%s\n",e.description.UTF8String,e.callStackSymbols.description.UTF8String); }
 #include "LifecycleChecks.inc"
+#include "SessionChecks.inc"
 int main() { @autoreleasepool {
   NSSetUncaughtExceptionHandler(Exception);
   std::fprintf(stderr,"checkpoint: native initialization\n");
@@ -347,5 +348,6 @@ int main() { @autoreleasepool {
   hoverWindow.admitGestureInput=NO;
 
   CheckLifecycle();
+  CheckSessionBoundaries();
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);
 } return 0; }

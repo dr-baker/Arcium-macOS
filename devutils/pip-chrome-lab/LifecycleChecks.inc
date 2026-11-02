@@ -28,6 +28,10 @@ static void NoLifecycleOrder(id,SEL,NSWindowOrderingMode,NSInteger) {}
   [super setFrame:rect display:display];
   if (_frameHook) { auto callback=_frameHook; _frameHook=nil; callback(); }
 }
+- (void)setFrame:(NSRect)rect display:(BOOL)display animate:(BOOL)animate {
+  [super setFrame:rect display:display animate:NO];
+  if (_frameHook) { auto callback=_frameHook; _frameHook=nil; callback(); }
+}
 - (void)setFrameOrigin:(NSPoint)point {
   [super setFrameOrigin:point];
   if (_frameHook) { auto callback=_frameHook; _frameHook=nil; callback(); }

@@ -80,3 +80,8 @@ until the host hides the card; an explicit cancellation restores it immediately.
 Hidden lifecycle checks cover focus restoration after a cancelled pinch, late
 gesture callbacks, synchronous refresh during hiding and Return/reopen ordering.
 They do not establish the cause of the reported transient black corner bar.
+
+Return ticks recheck their timer and session ownership after native frame and
+opacity setters. Tests replace the session, or start a different Return, while a
+tick is executing. Hide also interrupts pinch explicitly without relying on key
+loss; a reused card rejects the previous gesture's continuation.
