@@ -7,6 +7,11 @@
 @implementation LabPanel
 - (BOOL)canBecomeKeyWindow { return YES; }
 - (BOOL)canBecomeMainWindow { return NO; }
+// Appearance-only AppKit hooks, scoped to this standalone lab's card panel.
+// Native clear glass has no public active-state setting. Gesture focus must
+// not change its appearance; these do not make the panel key or active.
+- (BOOL)hasKeyAppearance { return YES; }
+- (BOOL)_hasKeyAppearance { return YES; }
 @end
 @interface LabBackdrop : NSView
 @property(nonatomic,strong) NSImage* image;

@@ -36,3 +36,9 @@ Reduce Motion keeps the title still, with its complete text in the tooltip and
 accessibility value. The corner-radius slider specifies the base radius at
 480×270; it scales with the controls. The default of 24 aligns the corner center
 with the nearby round button at an 8-point inset.
+
+The lab card keeps the same active glass appearance while focus changes. This
+uses two appearance-only AppKit hooks on `LabPanel`, matching the Opus lab;
+they do not change actual key status or activate the app. These hooks are not
+part of the browser patch. Hidden tests now cover responder handoff and the
+recognizer action on a nonactivating panel; hardware delivery remains manual.
