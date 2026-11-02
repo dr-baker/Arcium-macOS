@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3359 @@
+@@ -0,0 +1,3385 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -1069,6 +1069,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +
 +@interface ArciumPiPPressureFeedback : NSObject {
 +  NSWindow* _window;
++  uint64_t _generation;
 +  __weak NSWindow* _parent;
 +  CALayer* fxRoot;
 +  CALayer* stringRoot;
@@ -1139,24 +1140,30 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  return self;
 +}
 +- (void)close {
++  ++_generation;
 +  [_window.parentWindow removeChildWindow:_window];
 +  [_window orderOut:nil];
 +}
 +- (BOOL)update:(const Motion&)model frame:(NSRect)frame screen:(NSScreen*)screen
 +           now:(double)now dt:(double)dt enabled:(BOOL)enabled {
 +  if (!enabled || !screen || !_parent.visible) { [self close]; return YES; }
++  const Motion snapshot = model;
++  const uint64_t generation = _generation;
 +  if (!NSEqualRects(_window.frame,screen.frame)) [_window setFrame:screen.frame display:NO];
++  if (_generation != generation) return YES;
 +  if (!_window.parentWindow) [_parent addChildWindow:_window ordered:NSWindowBelow];
++  if (_generation != generation) return YES;
 +  [_window orderWindow:NSWindowBelow relativeTo:_parent.windowNumber];
++  if (_generation != generation) return YES;
 +  const NSPoint fxOrigin = screen.frame.origin;
 +  for (CALayer* layer in @[stringRoot,stringOcclusion,threadGlow,threadShape])
 +    layer.frame = fxRoot.bounds;
-+  const Motion* motion = &model;
-+  const bool dragging = model.phase == Phase::Dragging;
-+  const bool pressMode = dragging && model.settings.docking == Docking::AllEdges && model.tucked == Side::None;
++  const Motion* motion = &snapshot;
++  const bool dragging = snapshot.phase == Phase::Dragging;
++  const bool pressMode = dragging && snapshot.settings.docking == Docking::AllEdges && snapshot.tucked == Side::None;
 +  constexpr double kPad = 0, kCardRadius = 20;
-+  const pip_motion::Point position = model.position;
-+  const double w = model.size.width, h = model.size.height;
++  const pip_motion::Point position = snapshot.position;
++  const double w = snapshot.size.width, h = snapshot.size.height;
 +  const double cardScale = frame.size.width / std::max(1.0,w);
 +  const double leanX = NSMidX(frame)-(position.x+w/2), leanY = NSMidY(frame)-(position.y+h/2);
 +  // Straight edge strings join into the inset border loop only during a corner press.
@@ -1960,9 +1967,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      // when the gesture completes, never at an intermediate size.
 +      [self clearMotionPresentation];
 +    } else if (motion || (needs_presentation && [self ensureMotion])) {
-+      const BOOL done = [self updateMotionVisuals];
-+      if (!done || motion->phase == Phase::Dragging || motion->phase == Phase::Settling)
-+        [self startMotionTimer];
++      if (![self refreshMotionPresentation]) return;
 +    }
 +  }
 +  if (_returning && !_state.HasEffect(Effect::kReturn) && !_state.blocked) {
@@ -2646,7 +2651,10 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +        motion->size.width, motion->size.height) animate:NO];
 +    if (_motionGeneration != generation) return;
 +  }
-+  [_pressureFeedback close]; _pressureFeedback = nil;
++  ArciumPiPPressureFeedback* pressure = _pressureFeedback;
++  _pressureFeedback = nil;
++  [pressure close];
++  if (_motionGeneration != generation) return;
 +  gestures.reset(); motion.reset(); _dragging = NO; awaitingLanding = NO;
 +  _pendingPan = NO; _scrolling = NO; _magnifying = NO; _resizing = NO;
 +  lift = liftVelocity = settleAmount = settleVelocity = 0;
@@ -2678,6 +2686,18 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [_shadowWindow orderOut:nil]; _shadowWindow = nil; ambientShadow = contactShadow = nil;
 +  [_shadeView removeFromSuperview]; _shadeView = nil; rimShade = nil;
 +  _pipWindow.hasShadow = _originalShadow;
++}
++- (BOOL)refreshMotionPresentation {
++  if (_hiding || _invalidated || !motion) return NO;
++  const uint64_t generation = _motionGeneration;
++  const auto current = [&] {
++    return !_hiding && !_invalidated && motion && _motionGeneration == generation;
++  };
++  const BOOL done = [self updateMotionVisuals];
++  if (!current()) return NO;
++  if (!done || motion->phase == Phase::Dragging || motion->phase == Phase::Settling)
++    [self startMotionTimer];
++  return current();
 +}
 +- (BOOL)updateMotionVisuals {
 +  if (_hiding || _invalidated || !motion) return YES;
@@ -2874,7 +2894,8 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  BOOL pressureDone = YES;
 +  if (_state.HasEffect(Effect::kStrings)) {
 +    if (!_pressureFeedback) _pressureFeedback = [[ArciumPiPPressureFeedback alloc] initWithParent:_pipWindow screen:screen];
-+    pressureDone = [_pressureFeedback update:*motion frame:frame screen:screen now:now dt:dt enabled:on];
++    __attribute__((objc_precise_lifetime)) ArciumPiPPressureFeedback* pressure = _pressureFeedback;
++    pressureDone = [pressure update:*motion frame:frame screen:screen now:now dt:dt enabled:on];
 +  } else {
 +    [_pressureFeedback close]; _pressureFeedback = nil;
 +  }
@@ -3124,8 +3145,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    }
 +    [self stopMotion];
 +    _preferredWidth = frame.size.width;
-+    if (_state.HasVisualEffects() && [self ensureMotion] && ![self updateMotionVisuals])
-+      [self startMotionTimer];
++    if (_state.HasVisualEffects() && [self ensureMotion] && ![self refreshMotionPresentation]) return;
 +    [self rememberPlacement];
 +    return;
 +  }
@@ -3207,7 +3227,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    if (!_pendingPan) return NO;
 +    _consumeMomentum = YES;
 +    if (event.scrollingDeltaX == 0 && event.scrollingDeltaY == 0) return YES;
++    const uint64_t generation = _motionGeneration;
 +    [self stopMotion];
++    if (_hiding || _invalidated || _motionGeneration != generation + 1) return NO;
 +    _gestureStartFrame = _pipWindow.frame;
 +    if (![self ensureMotion]) return NO;
 +    [self updateMotionScreen:[self screenPoint:event]];
@@ -3217,7 +3239,6 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    hapticKey = pendingKey = -1; slowSince = -1; settleTapped = NO;
 +    awaitingLanding = NO; _nativeVisible = NO;
 +    [self refreshChrome]; [self haptic:NSHapticFeedbackPatternAlignment];
-+    [self startMotionTimer];
 +  }
 +  _consumeMomentum = YES;
 +  if (!cancelled) {
@@ -3280,7 +3301,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _consumeMomentum = NO; _pendingPan = NO;
 +  if (!_magnifying) {
 +    if (ended || cancelled) return;
++    const uint64_t generation = _motionGeneration;
 +    [self stopMotion];
++    if (_hiding || _invalidated || _motionGeneration != generation + 1) return;
 +    if (![self ensureMotion]) return;
 +    [self updateMotionScreen:NSMakePoint(NSMidX(_pipWindow.frame), NSMidY(_pipWindow.frame))];
 +    _magnifyStartFrame = _pipWindow.frame;
@@ -3311,6 +3334,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +      {motion->position.x, motion->position.y, motion->size.width, motion->size.height},
 +      integralArea, _sizeLimits);
 +  const NSRect frame = cancelled ? _magnifyStartFrame : ToNSRect(integral);
++  const uint64_t generation = _motionGeneration;
 +  if (ended || cancelled) {
 +    motion->resize({frame.size.width, frame.size.height});
 +    motion->placeAt({frame.origin.x, frame.origin.y});
@@ -3318,11 +3342,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    _pendingResizeFrame.reset();
 +    [self pauseMotionFrames];
 +    [self setWindowFrame:frame animate:NO];
++    if (_hiding || _invalidated || !motion || _motionGeneration != generation) return;
 +  } else {
 +    [self queueResizeFrame:frame];
 +  }
 +  if (ended || cancelled) {
-+    if (![self updateMotionVisuals]) [self startMotionTimer];
++    if (![self refreshMotionPresentation]) return;
 +    if (!cancelled) [self rememberPlacement];
 +    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
 +    [self refreshChrome];
@@ -3381,15 +3406,16 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +                                              ToRect(screen.visibleFrame),
 +                                              _aspect, width, _sizeLimits))];
 +  } else if (phase == 2 && _resizing) {
++    const uint64_t session = _sessionGeneration, generation = _motionGeneration;
 +    [self flushResizeFrame];
++    if (_hiding || _invalidated || _sessionGeneration != session || _motionGeneration != generation) return;
 +    [self pauseMotionFrames];
 +    _resizing = NO;
 +    _nativeVisible = _mouseInside || [self keepsKeyboardControlsVisible];
 +    [self refreshChrome];
 +    [self armHideTimer];
 +    _preferredWidth = NSWidth(_pipWindow.frame);
-+    if (_state.HasVisualEffects() && [self ensureMotion] && ![self updateMotionVisuals])
-+      [self startMotionTimer];
++    if (_state.HasVisualEffects() && [self ensureMotion] && ![self refreshMotionPresentation]) return;
 +    [self rememberPlacement];
 +  }
 +}
@@ -6346,14 +6372,14 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls_unittest.m
 +}
 +
 +TEST_F(ArciumPiPNativeControlsTest, HoverMagnificationFallbackNeedsNoClick) {
-+  window_.testVisible = YES;
++  ((ArciumPiPTestWindow*)window_).testVisible = YES;
 +  const NSRect original = window_.frame;
 +  auto* event = [ArciumPiPFallbackMagnifyEvent new];
 +  event.testWindow = window_; event.testDelta = .15;
 +  [Overlay() magnifyWithEvent:event];
 +  EXPECT_GT(NSWidth(window_.frame), NSWidth(original));
 +  EXPECT_FALSE([[Overlay() valueForKey:@"magnifying"] boolValue]);
-+  window_.testVisible = NO;
++  ((ArciumPiPTestWindow*)window_).testVisible = NO;
 +  const NSRect hidden = window_.frame;
 +  [Overlay() magnifyWithEvent:event];
 +  ExpectSameFrame(window_.frame, hidden);

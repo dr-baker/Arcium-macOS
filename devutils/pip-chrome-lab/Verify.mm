@@ -3,6 +3,7 @@
 #include <cstdio>
 #import <objc/runtime.h>
 static int activationRequests=0;
+static void QuietNativeHaptic(id,SEL,NSHapticFeedbackPattern) {}
 static void RecordActivation(id,SEL,BOOL) { ++activationRequests; }
 static BOOL RecordRestore(id,SEL,NSApplicationActivationOptions) { return YES; }
 @interface HiddenGesturePanel : NSPanel
@@ -63,6 +64,7 @@ int main() { @autoreleasepool {
   NSSetUncaughtExceptionHandler(Exception);
   std::fprintf(stderr,"checkpoint: native initialization\n");
   [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyProhibited];
+  method_setImplementation(class_getInstanceMethod(ArciumPiPNativeOverlay.class,@selector(haptic:)),(IMP)QuietNativeHaptic);
   method_setImplementation(class_getInstanceMethod(NSApplication.class,@selector(activateIgnoringOtherApps:)),(IMP)RecordActivation);
   method_setImplementation(class_getInstanceMethod(NSRunningApplication.class,@selector(activateWithOptions:)),(IMP)RecordRestore);
   using namespace arcium::pip;
@@ -351,5 +353,6 @@ int main() { @autoreleasepool {
   CheckLifecycle();
   CheckSessionBoundaries();
   CheckMotionBoundaries();
+  CheckFreshPanBoundary();
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);
 } return 0; }
