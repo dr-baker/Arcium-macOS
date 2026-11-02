@@ -13,10 +13,13 @@ from pathlib import Path
 import plistlib
 import shutil
 import signal
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -36,6 +39,131 @@ def json_tail(text: str) -> dict:
 def plist(path: Path) -> dict:
     with path.open("rb") as handle:
         return plistlib.load(handle)
+
+
+class ExecutableIdentityTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.bundle = self.root / "Arcium.app"
+        self.main = self.bundle / "Contents/MacOS/Helium"
+        self.main.parent.mkdir(parents=True)
+        self.main.write_bytes(b"browser")
+        self.alias = self.root / "code_sign_clone/Arcium.app.bundle/Contents/MacOS/Helium"
+        self.alias.parent.mkdir(parents=True)
+        self.alias.hardlink_to(self.main)
+
+    def test_kernel_inode_alias_is_the_installed_executable(self) -> None:
+        with patch.object(apps, "process_path", return_value=str(self.alias)):
+            self.assertTrue(apps.process_runs(42, self.main))
+        self.alias.unlink()
+        self.alias.write_bytes(self.main.read_bytes())
+        with patch.object(apps, "process_path", return_value=str(self.alias)):
+            self.assertFalse(apps.process_runs(42, self.main))
+
+    def test_missing_executable_is_not_an_alias(self) -> None:
+        with patch.object(apps, "process_path", return_value=None):
+            self.assertFalse(apps.process_runs(42, self.main))
+        self.alias.unlink()
+        with patch.object(apps, "process_path", return_value=str(self.alias)):
+            self.assertFalse(apps.process_runs(42, self.main))
+
+    def test_alias_discovery_includes_helpers_but_not_equal_copies(self) -> None:
+        helper = self.bundle / "Contents/Frameworks/Helper.app/Contents/MacOS/Helper"
+        helper.parent.mkdir(parents=True)
+        helper.write_bytes(b"helper")
+        alias_helper = self.alias.parents[2] / helper.relative_to(self.bundle)
+        alias_helper.parent.mkdir(parents=True)
+        alias_helper.hardlink_to(helper)
+        unrelated = self.root / "Other.app/Contents/MacOS/Helium"
+        unrelated.parent.mkdir(parents=True)
+        unrelated.write_bytes(self.main.read_bytes())
+        paths = {42: str(self.alias), 43: str(alias_helper), 44: str(unrelated)}
+        with patch.object(apps, "command_lines", return_value=dict.fromkeys(paths, "")), \
+                patch.object(apps, "process_path", side_effect=paths.get), \
+                patch.object(apps, "executable", return_value=self.main):
+            self.assertEqual(apps.processes_in(self.bundle), [42, 43])
+            self.assertEqual(apps.main_processes_in(self.bundle), [42])
+
+    def test_ready_requires_profile_owner_even_for_an_inode_alias(self) -> None:
+        with patch.object(apps, "process_path", return_value=str(self.alias)), \
+                patch.object(apps, "alive", return_value=True), \
+                patch.object(apps, "profile_owner", return_value=42):
+            self.assertTrue(apps.wait_for_owner(self.root, 42, self.main, timeout=.1, steady=0))
+        with patch.object(apps, "process_path", return_value=str(self.alias)), \
+                patch.object(apps, "alive", return_value=True), \
+                patch.object(apps, "profile_owner", return_value=43):
+            self.assertFalse(apps.wait_for_owner(self.root, 42, self.main, timeout=.01, steady=0))
+
+    def test_foreign_hostname_still_refused_with_a_live_pid(self) -> None:
+        (self.root / "SingletonLock").symlink_to("foreign-host-42")
+        with patch.object(apps.socket, "gethostname", return_value="local-host"), \
+                patch.object(apps, "alive", return_value=True):
+            self.assertEqual(apps.lock_state(self.root), ("foreign", 42))
+            self.assertIsNone(apps.profile_owner(self.root))
+
+
+class LocalProfileSocketTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory(prefix="pip-owner-", dir="/private/tmp")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.profile = self.root / "profile"
+        self.profile.mkdir()
+        self.endpoint = self.root / "socket"
+        self.socket = socket.socket(socket.AF_UNIX)
+        self.addCleanup(self.socket.close)
+        self.socket.bind(str(self.endpoint))
+        (self.profile / "SingletonSocket").symlink_to(self.endpoint)
+        self.lock = self.profile / "SingletonLock"
+        self.lock.symlink_to("different-host-42")
+        self.output = f"p42\nu{os.getuid()}\nn{self.endpoint}\n"
+        self.enterContext(patch.object(apps.socket, "gethostname", return_value="local-host"))
+        self.enterContext(patch.object(apps, "alive", return_value=True))
+        self.enterContext(patch.object(apps, "command_lines", return_value={
+            42: f"browser --user-data-dir={self.profile} --no-first-run"}))
+
+    def result(self, text: str | None = None):
+        return subprocess.CompletedProcess([], 0, self.output if text is None else text, "")
+
+    def test_different_host_needs_exact_socket_pid_uid_and_profile(self) -> None:
+        with patch.object(apps.subprocess, "run", return_value=self.result()):
+            self.assertEqual(apps.profile_owner(self.profile), 42)
+        for text in (self.output.replace("p42", "p43"), self.output.replace(f"u{os.getuid()}", "u999999"),
+                     self.output.replace(str(self.endpoint), str(self.root / "other"))):
+            with self.subTest(text=text), patch.object(apps.subprocess, "run", return_value=self.result(text)):
+                self.assertEqual(apps.lock_state(self.profile), ("foreign", 42))
+        with patch.object(apps, "command_lines", return_value={42: "browser --user-data-dir=/other"}), \
+                patch.object(apps.subprocess, "run") as query:
+            self.assertIsNone(apps.profile_owner(self.profile))
+            query.assert_not_called()
+
+    def test_missing_non_socket_and_unverifiable_ownership_stay_foreign(self) -> None:
+        with patch.object(apps.subprocess, "run", side_effect=subprocess.TimeoutExpired("lsof", 3)):
+            self.assertIsNone(apps.profile_owner(self.profile))
+        with patch.object(apps.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")):
+            self.assertIsNone(apps.profile_owner(self.profile))
+        self.endpoint.unlink()
+        self.assertIsNone(apps.profile_owner(self.profile))
+        self.endpoint.write_bytes(b"not a socket")
+        self.assertIsNone(apps.profile_owner(self.profile))
+
+    def test_retargeted_socket_or_lock_does_not_establish_ownership(self) -> None:
+        def replace_lock(*args, **kwargs):
+            self.lock.unlink()
+            self.lock.symlink_to("different-host-43")
+            return self.result()
+        with patch.object(apps.subprocess, "run", side_effect=replace_lock):
+            self.assertEqual(apps.lock_state(self.profile), ("foreign", 42))
+        self.lock.unlink()
+        self.lock.symlink_to("different-host-42")
+        def replace_socket(*args, **kwargs):
+            self.endpoint.unlink()
+            self.endpoint.write_bytes(b"replacement")
+            return self.result()
+        with patch.object(apps.subprocess, "run", side_effect=replace_socket):
+            self.assertIsNone(apps.profile_owner(self.profile))
 
 
 @unittest.skipUnless(REQUIRED, "needs quilt, ninja, clang, and codesign")

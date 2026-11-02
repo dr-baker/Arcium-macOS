@@ -95,7 +95,7 @@ def running(app: Path, profile: Path) -> dict | None:
     if pid is None and not others:
         return None
     path = apps.process_path(pid) if pid else None
-    installed = pid is not None and app.is_dir() and path == str(apps.executable(app).resolve())
+    installed = pid is not None and app.is_dir() and apps.process_runs(pid, apps.executable(app))
     command = apps.command_lines().get(pid, "") if pid else ""
     return {"pid": pid, "executable": path, "installed": installed, "others": others,
             "mock_keychain": "--use-mock-keychain" in command}
