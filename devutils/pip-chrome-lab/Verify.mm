@@ -16,6 +16,14 @@
 @implementation TestPinchRecognizer
 - (NSGestureRecognizerState)state { return self.testState; }
 @end
+@interface TrackingTestEvent : NSEvent
+@property(nonatomic,strong) NSTrackingArea* area;
+@property NSEventType kind;
+@end
+@implementation TrackingTestEvent
+- (NSEventType)type { return self.kind; }
+- (NSTrackingArea*)trackingArea { return self.area; }
+@end
 @interface HoverMagnifyEvent : NSEvent
 @property(nonatomic,weak) NSWindow* targetWindow;
 @property CGFloat delta;
@@ -209,6 +217,27 @@ int main() { @autoreleasepool {
   NSTrackingArea* titleTracking=[title valueForKey:@"titleTracking"];
   [title updateTrackingAreas];
   Check([title valueForKey:@"titleTracking"]==titleTracking,"relayout preserves live title hover tracking");
+  auto* trackingEvent=[TrackingTestEvent new];
+  trackingEvent.kind=NSEventTypeMouseExited;
+  trackingEvent.area=[[NSTrackingArea alloc] initWithRect:NSZeroRect options:NSTrackingMouseEnteredAndExited|NSTrackingActiveAlways owner:title userInfo:nil];
+  [overlay mouseExited:trackingEvent];
+  Check([[overlay valueForKey:@"mouseInside"] boolValue],"child tracking exit cannot clear whole-card hover");
+  [overlay performSelector:@selector(mouseExited:) withObject:nil];
+  trackingEvent.kind=NSEventTypeMouseEntered;
+  [overlay mouseEntered:trackingEvent];
+  Check(![[overlay valueForKey:@"mouseInside"] boolValue],"child tracking enter cannot reveal whole-card chrome");
+  const NSRect savedWindowFrame=window.frame;
+  [window setFrameOrigin:NSMakePoint(-10000,-10000)];
+  trackingEvent.area=tracking;
+  [overlay mouseEntered:trackingEvent];
+  Check(![[overlay valueForKey:@"mouseInside"] boolValue],"stale own enter outside physical window is rejected");
+  NSPoint physical=NSEvent.mouseLocation;
+  [window setFrameOrigin:NSMakePoint(physical.x-200,physical.y-100)];
+  [overlay performSelector:@selector(mouseEntered:) withObject:nil];
+  trackingEvent.kind=NSEventTypeMouseExited;
+  [overlay mouseExited:trackingEvent];
+  Check([[overlay valueForKey:@"mouseInside"] boolValue],"stale own exit inside physical window preserves gesture focus");
+  [window setFrame:savedWindowFrame display:NO];
   window.admitGestureInput=YES;
   Check([overlay acceptsGestureInput],"attached nonactivating panel admits gesture input");
   auto* recognizer=[TestPinchRecognizer new];

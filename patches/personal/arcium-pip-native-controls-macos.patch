@@ -389,7 +389,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 ===================================================================
 --- /dev/null
 +++ src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
-@@ -0,0 +1,3216 @@
+@@ -0,0 +1,3230 @@
 +// Copyright 2026 The Arcium Authors
 +// Use of this source code is governed by a BSD-style license.
 +
@@ -476,6 +476,11 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +          [NSImageSymbolConfiguration
 +              configurationWithPointSize:size
 +                                  weight:NSFontWeightMedium]];
++}
++bool PointerInsideView(NSView* view) {
++  if (!view.window) return false;
++  const NSPoint point = [view convertPoint:[view.window convertPointFromScreen:NSEvent.mouseLocation] fromView:nil];
++  return NSPointInRect(point, view.bounds);
 +}
 +NSView* Capsule(NSView* content, CGFloat radius);
 +void Present(NSView* view, BOOL visible, BOOL animate) {
@@ -696,10 +701,12 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self addTrackingArea:_titleTracking];
 +}
 +- (void)mouseEntered:(NSEvent*)event {
++  if (event && ((event.type == NSEventTypeMouseEntered && event.trackingArea != _titleTracking) || !PointerInsideView(self))) return;
 +  if (_hovered) return;
 +  _hovered = YES; [self refreshText];
 +}
 +- (void)mouseExited:(NSEvent*)event {
++  if (event && ((event.type == NSEventTypeMouseExited && event.trackingArea != _titleTracking) || PointerInsideView(self))) return;
 +  _pressed = NO;
 +  if (!_hovered) return;
 +  _hovered = NO; [self refreshText];
@@ -1662,7 +1669,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +    ArciumPiPNativeOverlay* overlay = weakSelf;
 +    if (!overlay || ![overlay acceptsGestureInput]) return event;
 +    if (event.type == NSEventTypeMouseMoved) {
-+      if (overlay->_mouseInside && ![overlay eventOverCard:event]) [overlay mouseExited:event];
++      const BOOL inside = PointerInsideView(overlay);
++      if (overlay->_mouseInside && !inside) [overlay mouseExited:event];
++      else if (!overlay->_mouseInside && inside) [overlay mouseEntered:event];
 +      return event;
 +    }
 +    // Pointer ownership outlives hidden glyphs and re-hit-tests outside the card.
@@ -2207,6 +2216,9 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +}
 +- (BOOL)acceptsFirstResponder { return YES; }
 +- (void)mouseEntered:(NSEvent*)event {
++  // Descendant tracking events can bubble through the responder chain, and
++  // queued events can describe an old pointer position after focus changes.
++  if (event && ((event.type == NSEventTypeMouseEntered && event.trackingArea != _tracking) || !PointerInsideView(self))) return;
 +  if (!_invalidated && !_state.blocked && !_returning) {
 +    if (!_pipWindow.keyWindow) _previousKeyWindow = NSApp.keyWindow;
 +    // This Chromium window already has activation independence. Take only
@@ -2223,6 +2235,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  [self armHideTimer];
 +}
 +- (void)mouseMoved:(NSEvent*)event {
++  if (event && !PointerInsideView(self)) { [self mouseExited:event]; return; }
 +  _mouseInside = YES;
 +  if (_state.blocked || _tucked != geo::Side::kNone) {
 +    return;
@@ -2241,6 +2254,7 @@ Index: src/chrome/browser/ui/views/overlay/arcium_pip_native_controls.mm
 +  _previousKeyWindow = nil;
 +}
 +- (void)mouseExited:(NSEvent*)event {
++  if (event && ((event.type == NSEventTypeMouseExited && event.trackingArea != _tracking) || PointerInsideView(self))) return;
 +  if (!_dragging && !_magnifying) [self restoreGestureFocus];
 +  _mouseInside = NO;
 +  if (!_seeking && !_dragging && ![self keepsKeyboardControlsVisible]) {
