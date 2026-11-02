@@ -29,3 +29,10 @@ Hidden tests create AppKit windows without ordering or activating them. They
 check the actual production controls and pinch-release lifecycle, as well as
 integral-center geometry. Hardware gesture delivery, native glass appearance
 and Chromium video jitter still require visible testing.
+
+The title fills the gap between the corner controls. Long titles fade at the
+edge and scroll on hover; clicking and releasing the title returns the video.
+Reduce Motion keeps the title still, with its complete text in the tooltip and
+accessibility value. The corner-radius slider specifies the base radius at
+480×270; it scales with the controls. The default of 24 aligns the corner center
+with the nearby round button at an 8-point inset.

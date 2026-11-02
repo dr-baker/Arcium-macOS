@@ -46,7 +46,8 @@ int main() { @autoreleasepool {
   NSWindow* window=[[NSWindow alloc] initWithContentRect:NSMakeRect(100,100,640,360) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
   window.releasedWhenClosed=NO;
   std::fprintf(stderr,"checkpoint: constructing production controls\n");
-  NativeControls controls(window,[](Action,double){});
+  int returns=0;
+  NativeControls controls(window,[&returns](Action action,double){ if (action==Action::kReturn) ++returns; });
   auto* overlay=(ArciumPiPNativeOverlay*)controls.GetNativeView().Get();
   overlay.frame=window.contentView.bounds; [window.contentView addSubview:overlay];
   State state; state.can_play=state.can_seek=true; state.duration=100; state.title=u"White title without a pill";
@@ -58,7 +59,11 @@ int main() { @autoreleasepool {
     Check(NSEqualSizes(shade.frame.size,size),"full-video overlay");
     Check(NSMaxY(vignette.frame)==size.height,"vignette at top only");
     Check(NSHeight(vignette.frame)<size.height,"vignette does not cover whole video");
-    Check(std::abs(NSMidX(title.frame)-size.width/2)<.01,"title centered");
+    NSView* left=[overlay valueForKey:@"returnGlass"]; NSView* right=[overlay valueForKey:@"tuckGlass"];
+    const CGFloat gap=6*geometry::ControlScale(size.width,size.height);
+    Check(std::abs(NSMinX(title.frame)-NSMaxX(left.frame)-gap)<.01,"title uses left space");
+    Check(std::abs(NSMaxX(title.frame)-NSMinX(right.frame)+gap)<.01,"title uses right space");
+    Check(std::abs(geometry::CornerRadius(size.width,size.height)-NSMidX(left.frame))<.01,"button and window corners concentric");
     Check(title.textColor==NSColor.whiteColor,"white title");
     auto* slider=(ArciumPiPSlider*)[overlay valueForKey:@"slider"];
     auto* cell=(ArciumPiPSliderCell*)slider.cell;
@@ -100,5 +105,64 @@ int main() { @autoreleasepool {
   Check(((NSView*)[overlay valueForKey:@"vignetteView"]).hidden,"vignette suppressed during pinch");
   Check(((NSView*)[overlay valueForKey:@"title"]).hidden,"title suppressed during pinch");
   [overlay setValue:@NO forKey:@"magnifying"];
+  [overlay pointerInteraction];
+  controls.FocusControls(false);  // Delayed host focus after a pointer press.
+  [overlay performSelector:@selector(mouseExited:) withObject:nil];
+  Check(![overlay keepsKeyboardControlsVisible],"pointer focus does not become a keyboard pin");
+  Check(((NSView*)[overlay valueForKey:@"glassContainer"]).hidden,"pointer exit hides complete native button group");
+  controls.ReleaseFocus();
+  NSTimer* expired=[overlay valueForKey:@"hideTimer"]; [expired invalidate];
+  state.show_controls=false; controls.Update(state);
+  state.show_controls=true; controls.Update(state);
+  Check(((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"state-driven reveal always has a dismissal timer");
+  state.title=u"A very long video title that should fade rather than use an ellipsis and scroll on hover to expose the entire title";
+  controls.Update(state); [overlay setValue:@YES forKey:@"mouseInside"]; [overlay setValue:@YES forKey:@"nativeVisible"];
+  [overlay refreshChrome]; [overlay layoutSubtreeIfNeeded];
+  auto* title=(ArciumPiPTitle*)[overlay valueForKey:@"title"];
+  Check(title.lineBreakMode==NSLineBreakByClipping,"no title ellipsis");
+  Check(title.layer.mask!=nil,"overflow uses progressive fade");
+  Check([title accessibilityRole]==NSAccessibilityButtonRole,"title exposes return action");
+  [title performSelector:@selector(mouseEntered:) withObject:nil];
+  CATextLayer* text=[title valueForKey:@"textLayer"];
+  if (!ReduceMotion()) {
+    Check([text animationForKey:@"marquee"]!=nil,"hover starts compositor marquee");
+    CAKeyframeAnimation* fade=(CAKeyframeAnimation*)[title.layer.mask animationForKey:@"fadeLeading"];
+    Check([fade.values[2][2] doubleValue]==1,"terminal marquee pause reveals trailing characters");
+  }
+  Check(!((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"marquee keeps controls while reading");
+  [title performSelector:@selector(mouseExited:) withObject:nil];
+  Check(((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"leaving title resumes dismissal");
+  Check([text animationForKey:@"marquee"]==nil,"exit stops marquee");
+  [title performSelector:@selector(mouseEntered:) withObject:nil];
+  title.stringValue=@"Short";
+  Check(title.layer.mask==nil,"short title needs no fade");
+  Check(((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"hovered long-to-short title resumes dismissal");
+  [(NSTimer*)[overlay valueForKey:@"hideTimer"] fire];
+  Check(((NSView*)[overlay valueForKey:@"glassContainer"]).hidden,"title update timer actually dismisses buttons");
+  [overlay setValue:@YES forKey:@"nativeVisible"]; [overlay refreshChrome];
+  [title performSelector:@selector(mouseEntered:) withObject:nil];
+  title.stringValue=@"A very long video title that needs the full marquee to be read while hovered";
+  Check(!((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"hovered short-to-long title pauses dismissal");
+  NSSize oldSize=title.frame.size;
+  [title setFrameSize:NSMakeSize(3000,oldSize.height)];
+  Check(((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"fitting hovered title after resize resumes dismissal");
+  [title setFrameSize:oldSize];
+  Check(!((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"overflow after resize pauses dismissal");
+  title.hidden=YES;
+  Check(((NSTimer*)[overlay valueForKey:@"hideTimer"]).valid,"hiding a hovered title resumes dismissal");
+  title.hidden=NO; title.stringValue=@"Short";
+  NSPoint center=[title convertPoint:NSMakePoint(NSMidX(title.bounds),NSMidY(title.bounds)) toView:nil];
+  NSEvent* down=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:center modifierFlags:0 timestamp:1 windowNumber:window.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];
+  NSEvent* up=[NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:center modifierFlags:0 timestamp:1.1 windowNumber:window.windowNumber context:nil eventNumber:2 clickCount:1 pressure:0];
+  [title mouseDown:down];
+  Check(returns==0,"title waits for click release");
+  [title mouseUp:up];
+  __block BOOL delivered=NO;
+  dispatch_async(dispatch_get_main_queue(), ^{ delivered=YES; });
+  for (int turn=0;turn<50 && !delivered;++turn)
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode,.01,false);
+  Check(delivered,"main queue delivers native actions");
+  Check(returns==1,"clicking title returns video to tab");
+
   std::printf("PASS %d complete-production AppKit and geometry checks; no window ordering/activation\n",checks);
 } return 0; }

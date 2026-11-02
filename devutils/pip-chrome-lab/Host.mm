@@ -81,8 +81,8 @@
     case arcium::pip::Action::kBack15: _state.position=std::max(0.,_state.position-15); break;
     case arcium::pip::Action::kForward15: _state.position=std::min(_state.duration,_state.position+15); break;
     case arcium::pip::Action::kMute: _status.stringValue=@"Video stays muted in this lab"; break;
-    case arcium::pip::Action::kReturn: [_card orderOut:nil]; _status.stringValue=@"Returned · Reset position brings the window back"; break;
-    case arcium::pip::Action::kClose: [_card orderOut:nil]; _status.stringValue=@"Closed · Reset position brings the window back"; break;
+    case arcium::pip::Action::kReturn: _controls->RestorePlacementForHide(); [_card orderOut:nil]; _status.stringValue=@"Returned · Reset position brings the window back"; break;
+    case arcium::pip::Action::kClose: _controls->RestorePlacementForHide(); [_card orderOut:nil]; _status.stringValue=@"Closed · Reset position brings the window back"; break;
     default: break;
   }
   if (action==arcium::pip::Action::kBack15 || action==arcium::pip::Action::kForward15)
@@ -94,7 +94,11 @@
   _settings.title=@"PiP controls · live appearance"; _settings.releasedWhenClosed=NO;
   _tuning=[NSMutableDictionary dictionary];
   NSArray* names=@[@"Overlay dim",@"Top vignette",@"Corner radius",@"Title size",@"Test lightness"];
-  double values[]={.24,.62,26,12,.65}, mins[]={0,0,6,9,0}, maxs[]={.6,.9,40,20,1};
+  if ([NSUserDefaults.standardUserDefaults integerForKey:@"Appearance schema"]<2) {
+    [NSUserDefaults.standardUserDefaults setDouble:24 forKey:@"Corner radius"];
+    [NSUserDefaults.standardUserDefaults setInteger:2 forKey:@"Appearance schema"];
+  }
+  double values[]={.24,.62,24,12,.65}, mins[]={0,0,6,9,0}, maxs[]={.6,.9,40,20,1};
   for (NSUInteger i=0;i<names.count;++i) {
     CGFloat y=300-i*45;
     NSTextField* label=[NSTextField labelWithString:names[i]]; label.frame=NSMakeRect(20,y,115,22); [_settings.contentView addSubview:label];
@@ -121,7 +125,7 @@
   ((CAGradientLayer*)top.layer).colors=@[(__bridge id)NSColor.clearColor.CGColor,(__bridge id)[NSColor colorWithWhite:0 alpha:_tuning[@"Top vignette"].doubleValue].CGColor];
   CGFloat scale=std::clamp(std::min(NSWidth(overlay.bounds)/480.,NSHeight(overlay.bounds)/270.),.8,1.45);
   ((NSTextField*)[overlay valueForKey:@"title"]).font=[NSFont systemFontOfSize:_tuning[@"Title size"].doubleValue*scale weight:NSFontWeightSemibold];
-  _card.contentView.layer.cornerRadius=_tuning[@"Corner radius"].doubleValue;
+  _card.contentView.layer.cornerRadius=_tuning[@"Corner radius"].doubleValue*scale;
   _backdrop.lightness=_tuning[@"Test lightness"].doubleValue;
   if ([sender isKindOfClass:NSSlider.class] && [((NSSlider*)sender).identifier isEqual:@"Test lightness"]) { _backdrop.image=nil; _video.hidden=YES; }
   _backdrop.needsDisplay=YES;
@@ -131,6 +135,7 @@
   [self performSelector:@selector(tune:) withObject:nil afterDelay:0];
 }
 - (void)reset:(id)sender {
+  _controls->RestorePlacementForHide();
   [_card setFrame:NSMakeRect(100,180,640,360) display:NO];
   _controls->Reanchor(16./9.,{}); [_card orderFront:nil];
   _status.stringValue=@"Reset · tuning unchanged";
