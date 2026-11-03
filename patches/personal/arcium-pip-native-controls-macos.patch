@@ -8180,7 +8180,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
 ===================================================================
 --- src.orig/chrome/browser/ui/helium/arcium_settings_model.cc
 +++ src/chrome/browser/ui/helium/arcium_settings_model.cc
-@@ -41,6 +41,9 @@
+@@ -44,6 +44,9 @@
  #include "chrome/browser/ui/views/helium/glass_surface_configuration.h"
  #include "chrome/browser/ui/views/helium/surface_style.h"
  #include "chrome/common/pref_names.h"
@@ -8190,16 +8190,16 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
  #include "components/prefs/pref_service.h"
  #include "ui/color/color_provider.h"
  #include "ui/color/color_id.h"
-@@ -57,7 +60,7 @@ constexpr char kSharedPaletteDarkChromeC
+@@ -60,7 +63,7 @@ constexpr char kSharedPaletteDarkChromeC
  constexpr char kSharedPaletteControlColorIDKey[] = "controlColorID";
  constexpr size_t kSharedPaletteConfigurationKeyCount = 13;
  
--constexpr std::array<std::string_view, 44> kProfilePreferences = {
+-constexpr std::array<std::string_view, 45> kProfilePreferences = {
 +constexpr auto kProfilePreferences = std::to_array<std::string_view>({
      prefs::kRestoreOnStartup,
      prefs::kPromptForDownload,
      prefs::kHeliumLittleArcExternalLinks,
-@@ -66,6 +69,18 @@ constexpr std::array<std::string_view, 4
+@@ -69,6 +72,18 @@ constexpr std::array<std::string_view, 4
      prefs::kNewTabNextToActive,
      prefs::kTabCyclingMRU,
      prefs::kArciumAutoPictureInPictureEnabled,
@@ -8218,7 +8218,7 @@ Index: src/chrome/browser/ui/helium/arcium_settings_model.cc
      prefs::kShiftRightClickContextMenu,
      prefs::kHeliumLayout,
      prefs::kVerticalTabsUncollapsedWidth,
-@@ -102,7 +117,7 @@ constexpr std::array<std::string_view, 4
+@@ -106,7 +121,7 @@ constexpr std::array<std::string_view, 4
      helium::kHeliumActiveSpaceIdPref,
      helium::kArciumChromeAppearancePref,
      arcium_settings::kSharedPalettePref,

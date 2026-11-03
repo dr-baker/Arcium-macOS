@@ -14,7 +14,6 @@
   "new_app_installed": false,
   "previous_installed_product_source": "366d397dad4cf1899f765590b4e7e421aadb5846",
   "previous_installed_core": "fd7c9080745e66f846a25665e3f57cf612da7169",
-  "native_pip_patch_unchanged_from_delivered": true,
   "core_automatic_pip_patches_unchanged_from_delivered": true,
   "reviewed_core_head": "3f757a0427ecfb8ba1667c2ff9970adb04c03a88",
   "merged_core_tree_matches_reviewed_head": true,
@@ -24,6 +23,19 @@
     "all_later_outer_gn_edits_apply_zero_fuzz": true,
     "browser_chrome_sites_and_appearance_sources_each_retained_once": true,
     "other_appearance_sections_unchanged": true,
+    "full_ci": "pending fresh CI"
+  },
+  "native_pip_added_code_unchanged_from_delivered": true,
+  "native_pip_context_refreshed_for_main": true,
+  "native_preferences_context_refresh": {
+    "input_preferences_retained_in_order": 45,
+    "mac_only_pip_effect_preferences": 10,
+    "files_replayed_zero_fuzz": 22,
+    "prefix_sections": 193,
+    "prefix_patches": 110,
+    "native_sections": 22,
+    "all_file_hashes_match_full_refresh": true,
+    "astra_verdict": "no blocking findings",
     "full_ci": "pending fresh CI"
   }
 }

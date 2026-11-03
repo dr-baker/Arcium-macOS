@@ -5,8 +5,9 @@ The PiP source now includes published core main `9bfca487` and macOS main
 and panel-opening fixes. Reviewed core `3f757a04` is merged as `9732e46a`. The macOS pin now names that
 merged commit; their source trees are identical.
 
-The delivered native PiP patch and core automatic-PiP patches are byte-identical
-to the installed candidate. The integration keeps current main's browser test
+The native PiP patch preserves all added production code from the installed
+candidate; its input context is refreshed for current main. The core
+automatic-PiP patches are byte-identical to the installed candidate. The integration keeps current main's browser test
 fixture and separately preserves the two scope metadata corrections. Duplicate
 compatibility edits were removed, first-run assertions retained, and Sites and
 PiP test dependencies combined. The string catalog now includes the two
@@ -31,3 +32,13 @@ against the reconciled file; the new hunk and every later macOS GN edit apply
 with zero fuzz. All other sections of the appearance patch are unchanged.
 [Astra approved the repair](appearance-gn-review.md). Fresh full-series and
 substitution checks remain the merge gate.
+
+The next CI run exposed another stale context: main now has 45 profile
+preferences, while the native PiP patch expected 44. The repaired context keeps
+all 45 preferences in order and the ten macOS-only PiP effect preferences. A
+broader replay applied 193 preceding sections from 110 patches across all 22
+files touched by native PiP, then all 22 PiP sections, with zero fuzz. Every
+resulting file matches the complete Quilt refresh. Patch lint, the
+build-entrypoint check and all four wrapper tests pass.
+[Astra approved the preference-context repair](preferences-context-review.md).
+Fresh full CI remains required; no new Chromium build or installation occurred.
