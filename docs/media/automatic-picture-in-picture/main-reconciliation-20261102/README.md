@@ -2,7 +2,8 @@
 
 The PiP source now includes published core main `9bfca487` and macOS main
 `50fc1165`, including the hibernated-favicon framing correction, command Sites
-and panel-opening fixes. The reconciled core is `3f757a0427ecfb8ba1667c2ff9970adb04c03a88`.
+and panel-opening fixes. Reviewed core `3f757a04` is merged as `9732e46a`. The macOS pin now names that
+merged commit; their source trees are identical.
 
 The delivered native PiP patch and core automatic-PiP patches are byte-identical
 to the installed candidate. The integration keeps current main's browser test
@@ -22,3 +23,11 @@ a new Chromium build or installation. The running app remains the preceding
 `366d397d` product with core `fd7c9080`; it does not gain the favicon correction
 until the reconciled source is built and installed. Previous optical and
 hardware acceptance limits remain with Daniel.
+
+The first combined macOS CI run exposed a stale appearance-patch context in
+`chrome/test/BUILD.gn`. Its refreshed hunk retains the appearance test source
+alongside the browser-chrome and Command Sites sources. The old context fails
+against the reconciled file; the new hunk and every later macOS GN edit apply
+with zero fuzz. All other sections of the appearance patch are unchanged.
+[Astra approved the repair](appearance-gn-review.md). Fresh full-series and
+substitution checks remain the merge gate.

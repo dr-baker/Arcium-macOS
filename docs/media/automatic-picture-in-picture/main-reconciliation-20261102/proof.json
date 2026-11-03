@@ -1,5 +1,5 @@
 {
-  "core": "3f757a0427ecfb8ba1667c2ff9970adb04c03a88",
+  "core": "9732e46a1303bb8e02d1b41a9d6fff92293dd475",
   "published_core_main": "9bfca487e53d0103a9e9264ec709158afeb69078",
   "published_macos_main": "50fc1165d54bd0886fe5a92842c86d592dd92281",
   "favicon_fix_included": true,
@@ -15,5 +15,15 @@
   "previous_installed_product_source": "366d397dad4cf1899f765590b4e7e421aadb5846",
   "previous_installed_core": "fd7c9080745e66f846a25665e3f57cf612da7169",
   "native_pip_patch_unchanged_from_delivered": true,
-  "core_automatic_pip_patches_unchanged_from_delivered": true
+  "core_automatic_pip_patches_unchanged_from_delivered": true,
+  "reviewed_core_head": "3f757a0427ecfb8ba1667c2ff9970adb04c03a88",
+  "merged_core_tree_matches_reviewed_head": true,
+  "appearance_gn_context_refresh": {
+    "old_hunk_rejected": true,
+    "new_hunk_applies_zero_fuzz": true,
+    "all_later_outer_gn_edits_apply_zero_fuzz": true,
+    "browser_chrome_sites_and_appearance_sources_each_retained_once": true,
+    "other_appearance_sections_unchanged": true,
+    "full_ci": "pending fresh CI"
+  }
 }
