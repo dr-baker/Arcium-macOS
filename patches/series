@@ -70,9 +70,11 @@ personal/arcium-ui-workshop-macos.patch
 personal/arcium-command-design-presets-macos.patch
 personal/arcium-command-bar-styles-macos.patch
 personal/arcium-command-design-tokens-macos.patch
+personal/arcium-command-sites-macos.patch
 personal/arcium-spaces-browser-window-interface-macos.patch
 personal/arcium-crashpad-component-linkage-macos.patch
 personal/arcium-dmg-first-run-defaults-macos.patch
 personal/arcium-command-style-previews-macos.patch
 personal/arcium-content-frame-macos.patch
+personal/arcium-command-panel-first-frame-macos.patch
 personal/arcium-pip-native-controls-macos.patch
