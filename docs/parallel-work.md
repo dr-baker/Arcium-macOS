@@ -5,9 +5,10 @@ sits at one patch position at a time, so parallel patch work needs one
 integrator and a scratch per worker.
 
 For an enrolled build directory, use the [build lane queue](build-lane.md)
-to request the next integration session. Notes stay in the shared record;
-the watcher messages the next requester when it can claim. Existing explicit
-ownership remains in force until the coordinator completes activation.
+to request the next integration session (`lane request` claims an idle lane
+inline; when queued, notes stay in the shared record and the watcher messages
+the next requester when it can claim). Existing explicit ownership remains in
+force until the coordinator completes activation.
 
 ## Roles
 
