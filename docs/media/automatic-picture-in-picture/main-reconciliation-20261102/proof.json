@@ -1,0 +1,19 @@
+{
+  "core": "3f757a0427ecfb8ba1667c2ff9970adb04c03a88",
+  "published_core_main": "9bfca487e53d0103a9e9264ec709158afeb69078",
+  "published_macos_main": "50fc1165d54bd0886fe5a92842c86d592dd92281",
+  "favicon_fix_included": true,
+  "core_tooling_tests_passed": 16,
+  "macos_wrapper_tests_passed": 4,
+  "affected_compatibility_files_replayed_zero_fuzz": 13,
+  "independent_replay_sections": 98,
+  "independent_replay_patches": 65,
+  "astra_verdict": "previous blocker resolved; no open findings",
+  "full_merged_series_ci": "pending fresh CI",
+  "merged_source_compiled": false,
+  "new_app_installed": false,
+  "previous_installed_product_source": "366d397dad4cf1899f765590b4e7e421aadb5846",
+  "previous_installed_core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "native_pip_patch_unchanged_from_delivered": true,
+  "core_automatic_pip_patches_unchanged_from_delivered": true
+}
