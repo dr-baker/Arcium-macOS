@@ -1,0 +1,43 @@
+--- a/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
++++ b/chrome/browser/ui/cocoa/arcium_settings_swift/Sources/ArciumSettingsUI/ArciumSettingsViews.swift
+@@ -565,6 +565,18 @@ private struct GeneralSettingsPage: View
+                     }
+                 }
+ 
++                Section("Privacy and terms") {
++                    HStack {
++                        Button("Privacy policy") {
++                            store.actionInvoked(name: "open_privacy")
++                        }
++                        Button("Terms of use") {
++                            store.actionInvoked(name: "open_terms")
++                        }
++                    }
++                    .buttonStyle(.settings(.secondary))
++                }
++
+                 Button("More settings…") {
+                     store.actionInvoked(name: "open_advanced")
+                 }
+--- a/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
++++ b/chrome/browser/ui/cocoa/arcium_settings_window_controller.mm
+@@ -2842,6 +2842,19 @@ void SettingsModelProfileWillBeDestroyed
+       params.window_action = NavigateParams::WindowAction::kShowWindow;
+       Navigate(&params);
+     }
++  } else if ([name isEqualToString:@"open_privacy"] ||
++             [name isEqualToString:@"open_terms"]) {
++    Profile* profile = model_ ? model_->profile() : nullptr;
++    if (profile) {
++      const char* url = [name isEqualToString:@"open_privacy"]
++                            ? "chrome://setup/privacy.html"
++                            : "chrome://setup/terms.html";
++      NavigateParams params(profile, GURL(url),
++                            ui::PAGE_TRANSITION_AUTO_BOOKMARK);
++      params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
++      params.window_action = NavigateParams::WindowAction::kShowWindow;
++      Navigate(&params);
++    }
+   } else if ([name isEqualToString:@"open_advanced"]) {
+     Profile* profile = model_ ? model_->profile() : nullptr;
+     if (profile) {
