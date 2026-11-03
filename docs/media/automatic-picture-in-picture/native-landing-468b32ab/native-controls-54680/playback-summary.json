@@ -1,0 +1,307 @@
+{
+  "pid": 54680,
+  "probe": "separate bounded read-only scalar evaluations",
+  "samples": [
+    {
+      "checkpoint": "inline-baseline",
+      "source_file": "arcium-pip-hidden-inline-baseline-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:08:46.404Z"
+        },
+        "visibility": {
+          "value": "visible",
+          "at": "2026-10-28T18:08:46.464Z"
+        },
+        "activated": {
+          "value": false,
+          "at": "2026-10-28T18:08:46.582Z"
+        },
+        "pip": {
+          "value": false,
+          "at": "2026-10-28T18:08:46.641Z"
+        },
+        "paused": {
+          "value": false,
+          "at": "2026-10-28T18:08:46.826Z"
+        },
+        "currentTime": {
+          "value": 1.089068,
+          "at": "2026-10-28T18:08:46.884Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:08:46.941Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:08:47.059Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:08:47.445Z"
+        }
+      },
+      "errors": []
+    },
+    {
+      "checkpoint": "paused-baseline",
+      "source_file": "arcium-pip-hidden-paused-baseline-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:09:49.640Z"
+        },
+        "visibility": {
+          "value": "hidden",
+          "at": "2026-10-28T18:09:49.697Z"
+        },
+        "activated": {
+          "value": true,
+          "at": "2026-10-28T18:09:49.811Z"
+        },
+        "pip": {
+          "value": true,
+          "at": "2026-10-28T18:09:49.867Z"
+        },
+        "paused": {
+          "value": true,
+          "at": "2026-10-28T18:09:50.040Z"
+        },
+        "currentTime": {
+          "value": 47.710032,
+          "at": "2026-10-28T18:09:50.096Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:09:50.152Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:09:50.263Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:09:50.606Z"
+        }
+      },
+      "errors": []
+    },
+    {
+      "checkpoint": "resume-first",
+      "source_file": "arcium-pip-hidden-resume-first-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:10:20.676Z"
+        },
+        "visibility": {
+          "value": "hidden",
+          "at": "2026-10-28T18:10:20.734Z"
+        },
+        "activated": {
+          "value": true,
+          "at": "2026-10-28T18:10:20.848Z"
+        },
+        "pip": {
+          "value": true,
+          "at": "2026-10-28T18:10:20.906Z"
+        },
+        "paused": {
+          "value": false,
+          "at": "2026-10-28T18:10:21.088Z"
+        },
+        "currentTime": {
+          "value": 53.800291,
+          "at": "2026-10-28T18:10:21.147Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:10:21.205Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:10:21.322Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:10:21.664Z"
+        }
+      },
+      "errors": []
+    },
+    {
+      "checkpoint": "resume-second",
+      "source_file": "arcium-pip-hidden-resume-second-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:10:34.124Z"
+        },
+        "visibility": {
+          "value": "hidden",
+          "at": "2026-10-28T18:10:34.181Z"
+        },
+        "activated": {
+          "value": true,
+          "at": "2026-10-28T18:10:34.294Z"
+        },
+        "pip": {
+          "value": true,
+          "at": "2026-10-28T18:10:34.351Z"
+        },
+        "paused": {
+          "value": false,
+          "at": "2026-10-28T18:10:34.521Z"
+        },
+        "currentTime": {
+          "value": 67.235665,
+          "at": "2026-10-28T18:10:34.578Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:10:34.636Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:10:34.750Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:10:35.101Z"
+        }
+      },
+      "errors": []
+    },
+    {
+      "checkpoint": "paused-after-resume",
+      "source_file": "arcium-pip-hidden-paused-after-resume-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:10:54.218Z"
+        },
+        "visibility": {
+          "value": "hidden",
+          "at": "2026-10-28T18:10:54.275Z"
+        },
+        "activated": {
+          "value": true,
+          "at": "2026-10-28T18:10:54.387Z"
+        },
+        "pip": {
+          "value": true,
+          "at": "2026-10-28T18:10:54.443Z"
+        },
+        "paused": {
+          "value": true,
+          "at": "2026-10-28T18:10:54.614Z"
+        },
+        "currentTime": {
+          "value": 78.444806,
+          "at": "2026-10-28T18:10:54.671Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:10:54.727Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:10:54.840Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:10:55.176Z"
+        }
+      },
+      "errors": []
+    },
+    {
+      "checkpoint": "paused-after-scrub",
+      "source_file": "arcium-pip-hidden-paused-after-scrub-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:11:26.371Z"
+        },
+        "visibility": {
+          "value": "hidden",
+          "at": "2026-10-28T18:11:26.431Z"
+        },
+        "activated": {
+          "value": true,
+          "at": "2026-10-28T18:11:26.546Z"
+        },
+        "pip": {
+          "value": true,
+          "at": "2026-10-28T18:11:26.606Z"
+        },
+        "paused": {
+          "value": true,
+          "at": "2026-10-28T18:11:26.780Z"
+        },
+        "currentTime": {
+          "value": 78.444806,
+          "at": "2026-10-28T18:11:26.836Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:11:26.893Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:11:27.008Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:11:27.353Z"
+        }
+      },
+      "errors": []
+    },
+    {
+      "checkpoint": "paused-track-click",
+      "source_file": "arcium-pip-hidden-paused-track-click-54680.jsonl",
+      "media": {
+        "constant": {
+          "value": 1,
+          "at": "2026-10-28T18:13:36.423Z"
+        },
+        "visibility": {
+          "value": "hidden",
+          "at": "2026-10-28T18:13:36.479Z"
+        },
+        "activated": {
+          "value": true,
+          "at": "2026-10-28T18:13:36.592Z"
+        },
+        "pip": {
+          "value": true,
+          "at": "2026-10-28T18:13:36.649Z"
+        },
+        "paused": {
+          "value": true,
+          "at": "2026-10-28T18:13:36.819Z"
+        },
+        "currentTime": {
+          "value": 357.214943,
+          "at": "2026-10-28T18:13:36.876Z"
+        },
+        "muted": {
+          "value": true,
+          "at": "2026-10-28T18:13:36.932Z"
+        },
+        "readyState": {
+          "value": 4,
+          "at": "2026-10-28T18:13:37.044Z"
+        },
+        "constant-after": {
+          "value": 1,
+          "at": "2026-10-28T18:13:37.382Z"
+        }
+      },
+      "errors": []
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "outer": "6e386003d81ed374f6de1b478c97d535c1d017bb",
+  "core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "outer_main": "9ee47eb2794e5379a108a1c4c778bc65e438cedb",
+  "core_main": "8ee8d05551a660cf9858e73cbb7deed2ce082208",
+  "lab": "aacdad42607b2c85fa4d00df55ffa75df422302e",
+  "contains_outer_main": true,
+  "contains_core_main": true,
+  "lab_models_unchanged": true
+}

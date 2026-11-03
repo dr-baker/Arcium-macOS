@@ -1,0 +1,146 @@
+[
+  {
+    "timestamp": "2026-10-28T07:26:22.995Z",
+    "label": "468-native-pause",
+    "kind": "diagnostic-read-only-CDP",
+    "pid": 76644,
+    "port": 65086,
+    "target": "84871814EF04008978F707DCA99C89A8",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 85.348459,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-28T15:47:54.040Z",
+    "label": "468-after-sharing-picker-tool-stall",
+    "kind": "diagnostic-read-only-CDP",
+    "pid": 76644,
+    "port": 65086,
+    "target": "84871814EF04008978F707DCA99C89A8",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 85.348459,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-28T15:49:36.091Z",
+    "label": "468-fullscreen-physical-back-click",
+    "kind": "diagnostic-read-only-CDP",
+    "pid": 76644,
+    "port": 65086,
+    "target": "84871814EF04008978F707DCA99C89A8",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 70.348469,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-28T15:50:35.779Z",
+    "label": "468-native-forward-inactive",
+    "kind": "diagnostic-read-only-CDP",
+    "pid": 76644,
+    "port": 65086,
+    "target": "84871814EF04008978F707DCA99C89A8",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 85.348469,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-28T16:04:41.472Z",
+    "label": "468-return-inline-paused",
+    "kind": "diagnostic-read-only-CDP",
+    "pid": 76644,
+    "port": 65086,
+    "target": "84871814EF04008978F707DCA99C89A8",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "visible",
+      "activated": true,
+      "pip": false,
+      "video": {
+        "paused": true,
+        "muted": true,
+        "currentTime": 106.321097,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  },
+  {
+    "timestamp": "2026-10-28T16:05:47.550Z",
+    "label": "468-short-cycle-immediate-departure",
+    "kind": "diagnostic-read-only-CDP",
+    "pid": 76644,
+    "port": 65086,
+    "target": "84871814EF04008978F707DCA99C89A8",
+    "state": {
+      "url": "https://www.youtube.com/watch?v=eyZEqSPeMwg",
+      "webdriver": false,
+      "visibility": "hidden",
+      "activated": true,
+      "pip": true,
+      "video": {
+        "paused": false,
+        "muted": true,
+        "currentTime": 108.044053,
+        "duration": 2067.421,
+        "readyState": 4,
+        "networkState": 2,
+        "error": null
+      }
+    }
+  }
+]

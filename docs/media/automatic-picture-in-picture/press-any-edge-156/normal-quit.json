@@ -1,0 +1,17 @@
+{
+  "at": 1793259800.009992,
+  "pid": 3928,
+  "process_path": "None",
+  "profile_owner": null,
+  "lock_state": [
+    "none",
+    null
+  ],
+  "placement": {
+    "corner": 1,
+    "version": 2,
+    "width": 384.0,
+    "x": 0.9999461596443459,
+    "y": 0.04862038003251875
+  }
+}

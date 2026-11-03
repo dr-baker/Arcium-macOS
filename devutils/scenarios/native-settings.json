@@ -47,7 +47,7 @@
     "Treat every check as unverified until the selected bundle produces the recorded result.",
     "Run the native ArciumSettingsUI Swift package tests separately; the GN tests above do not execute Swift contracts.",
     "Capture preference values before changing them and restore them after testing. Prepare disposable Favorites, Pins, and normal tabs with distinguishable nonprivate URLs.",
-    "Verify the baseline Auto Picture-in-Picture feature is disabled. Exercise automatic entry separately with the native-settings-auto-pip-enabled contract; an unavailable row is not automatic-entry proof."
+    "Verify Auto Picture-in-Picture is available by default. Exercise automatic entry separately with the automatic-picture-in-picture contract; an editable row is not automatic-entry proof."
   ],
   "steps": [
     "Open Settings with Command-Comma and the application menu; confirm that each action opens the native AppKit window without creating a settings tab.",
@@ -59,7 +59,7 @@
     "Toggle Show Spaces in Dock menu, requesting the Dock menu after each change. Confirm it switches between Space and profile shortcuts while retaining New Window and New Incognito Window.",
     "Select Vertical layout and toggle Show sidebar collapse button. Confirm its visibility changes and the collapse shortcut still works. Select another layout and confirm the row disables while retaining its saved value.",
     "Select Dynamic layout and toggle Show New Tab button. Confirm its visibility changes and other New Tab commands still work. Select another layout and confirm the row disables while retaining its saved value.",
-    "With the automatic Picture-in-Picture feature disabled, confirm the row is unavailable. In the separate feature-enabled run, exercise eligible automatic entry with the preference on and off, manual entry with the preference off, and an already-open PiP window during the preference change.",
+    "Confirm automatic Picture-in-Picture is editable by default. Exercise eligible automatic entry with the preference on and off, manual entry with the preference off, and an already-open PiP window during the preference change. Relaunch separately with --disable-features=BrowserInitiatedAutomaticPictureInPicture and confirm the row is unavailable.",
     "With an extension theme active, verify the accent control explains why it cannot be edited. Change an available window background color and confirm the theme and its control accent remain active.",
     "Find a command, record a new shortcut, cancel a second recording with Escape, exercise conflict confirmation, and reset one command.",
     "Begin recording a shortcut and move keyboard focus to another control. Begin a separate recording and switch to another app. Confirm both recordings cancel without changing the binding or intercepting later key presses.",

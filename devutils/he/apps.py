@@ -152,6 +152,23 @@ def process_path(pid: int) -> str | None:
     return os.fsdecode(buffer.raw[:length]) if length > 0 else None
 
 
+def _same_executable(actual: str | None, expected: Path) -> bool:
+    if actual is None:
+        return False
+    if actual == str(expected.resolve()):
+        return True
+    try:
+        # macOS can report a code_sign_clone alias of the installed inode.
+        return os.path.samefile(actual, expected)
+    except OSError:
+        return False
+
+
+def process_runs(pid: int, expected: Path) -> bool:
+    """Whether the kernel executable is the expected file, including inode aliases."""
+    return _same_executable(process_path(pid), expected)
+
+
 def alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -162,11 +179,47 @@ def alive(pid: int) -> bool:
     return True
 
 
+def _owns_profile_socket(user_data_dir: Path, pid: int) -> bool:
+    """Prove a differently named host lock belongs to this local profile process."""
+    link = user_data_dir / "SingletonSocket"
+    try:
+        if pid <= 0 or not link.is_symlink() or not uses_profile(pid, user_data_dir):
+            return False
+        target = link.resolve(strict=True)
+        before = target.stat()
+        if not stat.S_ISSOCK(before.st_mode) or before.st_uid != os.getuid():
+            return False
+        result = subprocess.run(
+            ["/usr/sbin/lsof", "-nP", "-a", "-p", str(pid), "-U", "-Fpun"],
+            capture_output=True, text=True, check=False, timeout=3,
+        )
+        if result.returncode:
+            return False
+        owner_pid = owner_uid = None
+        owns = False
+        for line in result.stdout.splitlines():
+            if line.startswith("p"):
+                owner_pid, owner_uid = line[1:], None
+            elif line.startswith("u"):
+                owner_uid = line[1:]
+            elif line.startswith("n/") and owner_pid == str(pid) and owner_uid == str(os.getuid()):
+                try:
+                    opened = Path(line[1:]).stat()
+                except OSError:
+                    continue
+                owns |= (opened.st_dev, opened.st_ino) == (before.st_dev, before.st_ino)
+        after = link.stat()
+        return (owns and (before.st_dev, before.st_ino) == (after.st_dev, after.st_ino)
+                and alive(pid))
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def lock_state(user_data_dir: Path) -> tuple[str, int | None]:
     """("none" | "live" | "stale" | "foreign", pid) for a profile's SingletonLock.
 
-    A lock naming another host cannot be checked from here, so callers treat
-    it as possibly in use.
+    A differently named host remains foreign unless its PID demonstrably owns
+    this profile's local Unix socket and was launched for this exact profile.
     """
     try:
         target = os.readlink(user_data_dir / "SingletonLock")
@@ -178,6 +231,12 @@ def lock_state(user_data_dir: Path) -> tuple[str, int | None]:
     if not pid.isdigit():
         return "foreign", None
     if host != socket.gethostname():
+        if _owns_profile_socket(user_data_dir, int(pid)):
+            try:
+                if os.readlink(user_data_dir / "SingletonLock") == target:
+                    return "live", int(pid)
+            except OSError:
+                pass
         return "foreign", int(pid)
     return ("live" if alive(int(pid)) else "stale"), int(pid)
 
@@ -185,17 +244,11 @@ def lock_state(user_data_dir: Path) -> tuple[str, int | None]:
 def profile_owner(user_data_dir: Path) -> int | None:
     """The live local process holding a Chromium profile's SingletonLock.
 
-    The lock is a symlink to "<hostname>-<pid>". A lock naming another host or
-    a dead process does not count.
+    The lock is a symlink to "<hostname>-<pid>". A different hostname needs
+    independent local socket ownership proof; dead processes do not count.
     """
-    try:
-        target = os.readlink(user_data_dir / "SingletonLock")
-    except OSError:
-        return None
-    host, _, pid = target.rpartition("-")
-    if not pid.isdigit() or host != socket.gethostname():
-        return None
-    return int(pid) if alive(int(pid)) else None
+    state, pid = lock_state(user_data_dir)
+    return pid if state == "live" else None
 
 
 def command_lines() -> dict[int, str]:
@@ -211,17 +264,29 @@ def command_lines() -> dict[int, str]:
 def processes_in(bundle: Path) -> list[int]:
     """PIDs whose executable lives inside `bundle`."""
     prefix = str(bundle.resolve()) + "/"
-    return [pid for pid in command_lines() if (path := process_path(pid)) and path.startswith(prefix)]
+    result = []
+    for pid in command_lines():
+        path = process_path(pid)
+        if not path:
+            continue
+        if path.startswith(prefix):
+            result.append(pid)
+            continue
+        # Preserve the relative helper path when macOS aliases the whole bundle.
+        _, separator, relative = path.partition("/Contents/")
+        if separator and _same_executable(path, bundle / "Contents" / relative):
+            result.append(pid)
+    return result
 
 
 def main_processes_in(bundle: Path) -> list[int]:
     """Browser main processes running from `bundle`: its main executable, not
     helpers or the crash handler."""
     try:
-        main = str(executable(bundle).resolve())
+        main = executable(bundle)
     except HeError:
         return []
-    return [pid for pid in processes_in(bundle) if process_path(pid) == main]
+    return [pid for pid in processes_in(bundle) if process_runs(pid, main)]
 
 
 def browser_processes_in(bundle: Path) -> list[int]:
@@ -261,9 +326,8 @@ def wait_for_owner(user_data_dir: Path, pid: int, executable_path: Path, timeout
     """True once `pid` runs `executable_path` and owns the profile for `steady` seconds."""
     deadline = time.monotonic() + timeout
     since = None
-    expected = str(executable_path.resolve())
     while time.monotonic() < deadline:
-        if profile_owner(user_data_dir) == pid and process_path(pid) == expected:
+        if profile_owner(user_data_dir) == pid and process_runs(pid, executable_path):
             since = since or time.monotonic()
             if time.monotonic() - since >= steady:
                 return True

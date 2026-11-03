@@ -1,0 +1,340 @@
+[
+  {
+    "label": "468-automatic-entry-corner",
+    "timestamp": 1793172382.3075829,
+    "browser_pid": 76644,
+    "frontmost_pid": 95088,
+    "displays": [
+      {
+        "currentSpace": 3,
+        "spaces": [
+          {
+            "id": 3,
+            "type": 0
+          },
+          {
+            "id": 4,
+            "type": 0
+          },
+          {
+            "id": 5,
+            "type": 0
+          },
+          {
+            "id": 6,
+            "type": 0
+          }
+        ]
+      }
+    ],
+    "pip_windows": [
+      {
+        "app": "Helium Dev - automatic-picture-",
+        "frame": {
+          "Height": 216,
+          "Width": 384,
+          "X": 1332,
+          "Y": 889
+        },
+        "id": 31073,
+        "layer": 3,
+        "minimized": null,
+        "onscreen": true,
+        "pid": 76644,
+        "spaces": [
+          6,
+          5,
+          4,
+          3
+        ],
+        "stackIndex": 19,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "label": "468-native-forward-inactive",
+    "timestamp": 1793202635.1999788,
+    "browser_pid": 76644,
+    "frontmost_pid": 92171,
+    "displays": [
+      {
+        "currentSpace": 3,
+        "spaces": [
+          {
+            "id": 3,
+            "type": 0
+          },
+          {
+            "id": 4,
+            "type": 0
+          },
+          {
+            "id": 5,
+            "type": 0
+          },
+          {
+            "id": 6,
+            "type": 0
+          },
+          {
+            "id": 1593,
+            "type": 4
+          }
+        ]
+      }
+    ],
+    "pip_windows": [
+      {
+        "app": "Helium Dev - automatic-picture-",
+        "frame": {
+          "Height": 216,
+          "Width": 384,
+          "X": 1332,
+          "Y": 889
+        },
+        "id": 31073,
+        "layer": 3,
+        "minimized": null,
+        "onscreen": true,
+        "pid": 76644,
+        "spaces": [
+          6,
+          5,
+          4,
+          1593,
+          3
+        ],
+        "stackIndex": 35,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "label": "468-tucked-before-fullscreen",
+    "timestamp": 1793202690.371647,
+    "browser_pid": 76644,
+    "frontmost_pid": 92171,
+    "displays": [
+      {
+        "currentSpace": 3,
+        "spaces": [
+          {
+            "id": 3,
+            "type": 0
+          },
+          {
+            "id": 4,
+            "type": 0
+          },
+          {
+            "id": 5,
+            "type": 0
+          },
+          {
+            "id": 6,
+            "type": 0
+          }
+        ]
+      }
+    ],
+    "pip_windows": [
+      {
+        "app": "Helium Dev - automatic-picture-",
+        "frame": {
+          "Height": 216,
+          "Width": 384,
+          "X": 1700,
+          "Y": 889
+        },
+        "id": 31073,
+        "layer": 3,
+        "minimized": null,
+        "onscreen": true,
+        "pid": 76644,
+        "spaces": [
+          6,
+          5,
+          4,
+          3
+        ],
+        "stackIndex": 34,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "label": "468-foreign-fullscreen-visible",
+    "timestamp": 1793172654.090642,
+    "browser_pid": 76644,
+    "frontmost_pid": 29219,
+    "displays": [
+      {
+        "currentSpace": 1593,
+        "spaces": [
+          {
+            "id": 3,
+            "type": 0
+          },
+          {
+            "id": 4,
+            "type": 0
+          },
+          {
+            "id": 5,
+            "type": 0
+          },
+          {
+            "id": 6,
+            "type": 0
+          },
+          {
+            "id": 1593,
+            "type": 4
+          }
+        ]
+      }
+    ],
+    "pip_windows": [
+      {
+        "app": "Helium Dev - automatic-picture-",
+        "frame": {
+          "Height": 216,
+          "Width": 384,
+          "X": 1332,
+          "Y": 889
+        },
+        "id": 31073,
+        "layer": 3,
+        "minimized": null,
+        "onscreen": true,
+        "pid": 76644,
+        "spaces": [
+          6,
+          5,
+          4,
+          3,
+          1593
+        ],
+        "stackIndex": 21,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "label": "468-foreign-fullscreen-tucked",
+    "timestamp": 1793202714.562193,
+    "browser_pid": 76644,
+    "frontmost_pid": 29219,
+    "displays": [
+      {
+        "currentSpace": 1598,
+        "spaces": [
+          {
+            "id": 3,
+            "type": 0
+          },
+          {
+            "id": 4,
+            "type": 0
+          },
+          {
+            "id": 5,
+            "type": 0
+          },
+          {
+            "id": 6,
+            "type": 0
+          },
+          {
+            "id": 1598,
+            "type": 4
+          }
+        ]
+      }
+    ],
+    "pip_windows": [
+      {
+        "app": "Helium Dev - automatic-picture-",
+        "frame": {
+          "Height": 216,
+          "Width": 384,
+          "X": 1700,
+          "Y": 889
+        },
+        "id": 31073,
+        "layer": 3,
+        "minimized": null,
+        "onscreen": true,
+        "pid": 76644,
+        "spaces": [
+          6,
+          5,
+          4,
+          3,
+          1598
+        ],
+        "stackIndex": 38,
+        "title": ""
+      }
+    ]
+  },
+  {
+    "label": "468-foreign-fullscreen-restored",
+    "timestamp": 1793202738.387649,
+    "browser_pid": 76644,
+    "frontmost_pid": 29219,
+    "displays": [
+      {
+        "currentSpace": 1598,
+        "spaces": [
+          {
+            "id": 3,
+            "type": 0
+          },
+          {
+            "id": 4,
+            "type": 0
+          },
+          {
+            "id": 5,
+            "type": 0
+          },
+          {
+            "id": 6,
+            "type": 0
+          },
+          {
+            "id": 1598,
+            "type": 4
+          }
+        ]
+      }
+    ],
+    "pip_windows": [
+      {
+        "app": "Helium Dev - automatic-picture-",
+        "frame": {
+          "Height": 216,
+          "Width": 384,
+          "X": 1332,
+          "Y": 889
+        },
+        "id": 31073,
+        "layer": 3,
+        "minimized": null,
+        "onscreen": true,
+        "pid": 76644,
+        "spaces": [
+          6,
+          5,
+          4,
+          3,
+          1598
+        ],
+        "stackIndex": 37,
+        "title": ""
+      }
+    ]
+  }
+]

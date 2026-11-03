@@ -1,0 +1,31 @@
+{
+  "pid": 42228,
+  "bundle_id": "net.imput.helium.dev.3f3a9fc5b0ac8867",
+  "core": "8397a055183bbbb30c5649e2fbfa3a68712e2a31",
+  "diagnostics": "Read-only CDP explicit port65085, navigator.webdriver=false on every observation; no CDP input, playback, PiP, navigation, target creation or synthetic gesture.",
+  "native_input": "Computer Use native AX, explicit sky_click for PiP center, native keyboard auto, native omnibox alt+Return to restore example.com. keep placement throughout.",
+  "passed": {
+    "fresh_muted": "Native AX Mute while paused=true,currentTime=0,muted=false -> muted=true before first native Play; no prior playback on this loaded public page.",
+    "automatic_pip": "Native alt+Return opened example.com tab; hidden=true,pip=true,paused=false,muted=true,currentTime141.015738.",
+    "native_pip_pause": "Native sky_click center: paused=true at197.274322; repeated observation16.167seconds later exactly197.274322.",
+    "native_pip_resume": "Native AX Play current control: paused=false,time201.285595; later224.825748 before next pause.",
+    "icon": "Actual captures05 Play triangle and07 Pause bars.",
+    "seek": "Native paused rewind224.825748->209.825755(-14.999993); native forward209.825755->224.825755(+15).",
+    "roomy": "Native384x216 window; clear rounded glass, legible white transport icons, gold themed progress and visible thumb.",
+    "paused_return": "Native AX Back to tab: hidden/piptrue pausedtrue226.491471 -> visible/pipfalse pausedtrue226.491471.",
+    "public_tabs": "YouTube public video and example.com restored natively; app PID42228 retained; filtering unchanged; no OS volume inputs."
+  },
+  "manual_gates": {
+    "compact_resize": "Native drag766,430->566,318 had no resize. Tool explicitly reports app_post cannot drive window-server drag; global pointer fallback disabled. Compact284x160 and roomy restoration twice not verified. No environment or privacy changes.",
+    "playing_return_cycle": "One bounded foreground follow-up after root NSRunningApplication activation: native snapshot showed Pause but diagnostic immediately afterward was paused=true,muted=true,currentTime284.192234,visibilityhidden,pipfalse. Native k then Example Domain tab did not sustain playback (pausedtrue284.19224,pipfalse). Returned public opener natively; no repeated focus attempts. Playing return remains unverified.",
+    "continuous_video": "Unavailable; root may encode actual native capture sequence with honest label.",
+    "hardware_and_persistence": "Native hardware controls, prolonged playback and new-app quit/relaunch preference persistence remain pending; not exercised in final native pass."
+  },
+  "observations_to_review": [
+    "First auto native name-based mute attempt unexpectedly replaced public tabs with New Tab in samePID. Explicit bundle/AX inputs then succeeded; source cause unknown; no production failure inferred.",
+    "After paused native seeks, later native snapshot showed Pause/currentTime225 and then226.49. Async YouTube resumption source unestablished; seek measurements were sampled paused.",
+    "Native AX BackToTab tool reported could not click despite actual diagnostic effect."
+  ],
+  "final_state": "Same independent PID42228, public YouTube + example.com tabs, final public opener selected, paused/muted; PiPclosed. No CDP mutation, preference/filtering unchanged. Mac mute unchanged.",
+  "followup": "One additional native follow-up after root foreground activation; source of immediate background paused state not established. No recorder retry because priority playing cycle did not pass."
+}

@@ -111,8 +111,8 @@ configured for remote execution but running offline. A stricter existing
 `SISO_LIMITS` local ceiling stays in effect. Use `--jobs`, rather than raw
 `-j` or `-local_jobs` flags.
 
-Recent console input caps the requested local
-ceiling at two. Idle builds retain the machine-relative default above.
+Local builds retain the requested ceiling regardless of recent console input;
+desktop responsiveness uses scheduling backoff rather than a fixed two-job cap.
 Remote builds cap local work, Siso preprocessing and dependency scanning at
 two, preserving stricter ambient limits. These are ceilings, not a promise
 of constant CPU utilization; existing memory/CPU admission and backoff remain.

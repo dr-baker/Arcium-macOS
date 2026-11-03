@@ -1,0 +1,37 @@
+{
+  "final_outer": "9f0688a4ddf92f25b3542d68ce0d2907efef343e",
+  "final_core": "fd7c9080745e66f846a25665e3f57cf612da7169",
+  "final_app": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/upstream-156-20261027/.arcium/standalone/arcium-156-selected-pip-9f0688a4/browser/Helium Dev - arcium-156-full-pip.app",
+  "native_live_outer": "3cf285687e10de5e9c997bd65de620875239ed49",
+  "native_live_pid": 24595,
+  "comparisons": [
+    {
+      "from_outer": "30a304233ce8fff19cb00377743a02e2f839b6aa",
+      "to_outer": "3cf285687e10de5e9c997bd65de620875239ed49",
+      "app_entries_from": 708,
+      "app_entries_to": 708,
+      "changed_app_entries": [],
+      "changed_libraries": [],
+      "component_libraries": 530
+    },
+    {
+      "from_outer": "30a304233ce8fff19cb00377743a02e2f839b6aa",
+      "to_outer": "9f0688a4ddf92f25b3542d68ce0d2907efef343e",
+      "app_entries_from": 708,
+      "app_entries_to": 708,
+      "changed_app_entries": [],
+      "changed_libraries": [],
+      "component_libraries": 530
+    },
+    {
+      "from_outer": "3cf285687e10de5e9c997bd65de620875239ed49",
+      "to_outer": "9f0688a4ddf92f25b3542d68ce0d2907efef343e",
+      "app_entries_from": 708,
+      "app_entries_to": 708,
+      "changed_app_entries": [],
+      "changed_libraries": [],
+      "component_libraries": 530
+    }
+  ],
+  "all_identical": true
+}

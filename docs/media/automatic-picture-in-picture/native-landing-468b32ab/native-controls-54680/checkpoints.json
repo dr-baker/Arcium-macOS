@@ -1,0 +1,35 @@
+{
+  "capture_kind": "frame-sampled native Computer Use",
+  "continuous_capture": false,
+  "tested_outer": "468b32abe6e950116158652b05b256a4f55d73df",
+  "core": "845368ed6045b80fa2bd3ff99d9db4c3c103a576",
+  "pid": 54680,
+  "original_tool_item": "turn-item:provider:codex:native-item:call_2660a5a0795f423c937f5cab6c1d164d",
+  "image_processing": "Unedited original Computer Use JPEGs; video uses letterboxing only. No interpolated frames.",
+  "frames": [
+    {
+      "file": "frame-0.jpg",
+      "captured_at_ms": 1793210982695,
+      "label": "native Pause after automatic PiP",
+      "sha256": "d254281c79cac1325eac480792476caca3a0217383e28efe6e0235beda65f5fc"
+    },
+    {
+      "file": "frame-1.jpg",
+      "captured_at_ms": 1793211015750,
+      "label": "single native Resume",
+      "sha256": "878b09a7b97e73fb05cd56ec63d876a3984081ac6543fde70305c6e381e0bc65"
+    },
+    {
+      "file": "frame-2.jpg",
+      "captured_at_ms": 1793211046542,
+      "label": "native Pause after confirmed resumed playback",
+      "sha256": "63668fea4b2a7f879a5dab5f497dc982f0b2d95246a24cb588c3636407ab26d5"
+    },
+    {
+      "file": "frame-3.jpg",
+      "captured_at_ms": 1793211155646,
+      "label": "paused timeline click",
+      "sha256": "9c1012f61c1f3d9bcaaa2a848110e7f67407809d7f82b4312679929968e3069a"
+    }
+  ]
+}

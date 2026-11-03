@@ -319,8 +319,6 @@ def run(paths, targets, *, jobs=None, execution='auto', remote_jobs=None, guarde
             raise HeError('build preconditions failed: finish pending timestamps and fix he check problems first')
     edges = None
     initial_activity = activity.sample().record()
-    if initial_activity and initial_activity['state'] == 'active':
-        jobs = min(jobs, 2)
     if guarded or (config and execution != 'local'):
         planning_overflow = bool(config and (execution == 'remote' or
             (config.get('auto_min_compiles') is not None and initial_activity['state'] == 'active')))
@@ -333,7 +331,7 @@ def run(paths, targets, *, jobs=None, execution='auto', remote_jobs=None, guarde
             raise HeError('cannot count this dry-run plan; inspect .arcium/last-plan.txt before remote use')
     console = activity.sample().record()
     eligible = remote.planned_compiles(paths) if config else None
-    jobs = min(requested_jobs, 2) if console and console['state'] == 'active' else requested_jobs
+    jobs = requested_jobs
     minimum = config.get('auto_min_compiles') if config else None
     use_cloud = bool(config and (execution == 'remote' or
         (console['state'] == 'active' and minimum is not None and edges is not None and
@@ -382,6 +380,7 @@ def run(paths, targets, *, jobs=None, execution='auto', remote_jobs=None, guarde
                 if isinstance(error, Interrupted):
                     raise
                 raise HeError(str(error)) from error
+            jobs = requested_jobs
             evidence.message(f'he build: remote unavailable: {error}\nContinuing offline with {jobs} local jobs.')
             evidence.current().record['selected_execution'] = 'local'
             evidence.current().event('execution_decision', execution='local', reason='remote preparation failed after cleanup')

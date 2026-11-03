@@ -1,0 +1,48 @@
+{
+  "diagnostics": {
+    "evidence_id": "2debaaeab3f84436bc2d6f95b7187246",
+    "manifest": "/Volumes/ArciumBuild-20260930-a4a62591/ArciumBuild/upstream-156-20261027/.arcium/build-evidence/2debaaeab3f84436bc2d6f95b7187246/manifest.json",
+    "targets": [
+      "chrome",
+      "arcium_feature_settings_unit_tests"
+    ],
+    "status": "success",
+    "returncode": 0,
+    "evidence_status": "complete",
+    "evidence_errors": [],
+    "output_drain_status": "ok",
+    "steps": 480,
+    "finished_at": "2026-10-30T16:20:08.228179+00:00",
+    "source_revision_at_build": "6e386003d81ed374f6de1b478c97d535c1d017bb",
+    "core_revision": "fd7c9080745e66f846a25665e3f57cf612da7169"
+  },
+  "patch": {
+    "path": "/Users/daniel/Developer/Helium/helium-macos/agent_features/.worktrees/arcium-156-pip/patches/personal/arcium-pip-native-controls-macos.patch",
+    "sha256": "a329e40b896301038bb8998cd90cfbcbd997f5fe06e2642d6c4a778fe26d1273",
+    "matches_frozen_applied": true
+  },
+  "native_tests": {
+    "results": "/private/tmp/arcium-pip-native-final-pass-results.json",
+    "success_count": 62,
+    "other_status_count": 0,
+    "retry_count": 0,
+    "seconds": 20
+  },
+  "swift": {
+    "log": "/private/tmp/arcium-pip-effects-swift-tests.log",
+    "passed": 106,
+    "failures": 0,
+    "source_proof": {
+      "Sources/ArciumSettingsUI/ArciumSettingsModels.swift": true,
+      "Sources/ArciumSettingsUI/ArciumSettingsViews.swift": true,
+      "Tests/ArciumSettingsUITests/ArciumSettingsUIContractTests.swift": true
+    }
+  },
+  "strict_replay": {
+    "log": "/private/tmp/arcium-pip-final-replay.log",
+    "patches": 590,
+    "fuzz_lines": 0,
+    "failed_or_reject_lines": 0,
+    "limitation": "Full replay predates final explicit-aspect fixture correction; no fresh replay performed by this worker."
+  }
+}

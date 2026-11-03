@@ -1,0 +1,24 @@
+{
+  "pid": 97228,
+  "app": "/private/tmp/ArciumPiPNativeDragProbe.app",
+  "at": 1793213564.238631,
+  "activity": {
+    "observed_at": 1793213564.1621099,
+    "observed_monotonic": 386235.430660541,
+    "idle_seconds": 1059.775439166,
+    "on_console": true,
+    "login_done": true,
+    "display_asleep": false,
+    "locked_hint": null,
+    "error": null,
+    "state": "idle",
+    "reason": "no recent console input",
+    "age_seconds": 0.021359459031373262,
+    "idle_cutoff_seconds": 300,
+    "lock_hint_available": false,
+    "scope": "recent-input heuristic; no apps, windows or input contents collected"
+  },
+  "log": "/private/tmp/arcium-pip-native-drag-probe-attempt2.jsonl",
+  "purpose": "existing CUA binding only; no rebind or media playback",
+  "timeout_seconds": 180
+}
