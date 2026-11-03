@@ -6,7 +6,7 @@ The existing lane.lock inode remains the command exclusion mechanism.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import fcntl
 import json
 import os
@@ -103,6 +103,17 @@ class Lane:
                 raise HeError("shared command is active; ownership cannot change") from None
             yield
 
+    @contextmanager
+    def _try_command_lock(self):
+        self.state.mkdir(parents=True, exist_ok=True)
+        with (self.state / "lane.lock").open("a+") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+            yield True
+
     def status(self):
         from . import resources
         if not self.db.exists():
@@ -133,17 +144,56 @@ class Lane:
         data["notes"].append({"request": request, "author": author,
                               "at": time.time(), "text": text})
 
-    def request(self, thread, worktree, note, key):
-        with self.transaction() as (db, data):
+    @staticmethod
+    def _can_claim_idle(data, request_id: str, now: float) -> bool:
+        if data["paused"] or data["owner"] is not None or data["command"] is not None:
+            return False
+        offer = data["offer"]
+        if offer and (not offer["deadline"] or offer["deadline"] > now):
+            return False
+        waiting = sorted((r for r in data["requests"] if r["state"] == "waiting"),
+                         key=lambda r: r["created"])
+        return bool(waiting) and waiting[0]["id"] == request_id
+
+    def _grant_owner(self, data, item, now: float) -> dict:
+        if data["offer"]:
+            self.find(data, data["offer"]["request"])["state"] = "deferred"
+            self.invalidate_offer(data)
+        data["generation"] += 1
+        generation = data["generation"]
+        owner = {"request": item["id"], "thread": item["thread"], "worktree": item["worktree"],
+                 "generation": generation, "token": secrets.token_urlsafe(32), "since": now}
+        item["state"] = "owned"
+        data["owner"] = owner
+        return {**item, "request": item["id"], "generation": generation,
+                "token": owner["token"], "since": now, "handoff": data["handoff"]}
+
+    def request(self, thread, worktree, note, key, *, claim_if_idle=False):
+        resolved = str(Path(worktree).resolve())
+        with ExitStack() as lock_stack, self.transaction() as (db, data):
+            if not note.strip():
+                raise HeError("a nonempty note is required")
+            now = time.time()
             for item in data["requests"]:
                 if item["thread"] == thread and item["key"] == key:
-                    return item
-            item = {"id": uuid.uuid4().hex, "thread": thread, "worktree": str(Path(worktree).resolve()),
-                    "key": key, "state": "waiting", "created": time.time()}
+                    if (claim_if_idle and item["state"] == "waiting"
+                            and item["worktree"] == resolved
+                            and self._can_claim_idle(data, item["id"], now)
+                            and lock_stack.enter_context(self._try_command_lock())):
+                        granted = self._grant_owner(data, item, now)
+                        self.save(db, data)
+                        return granted
+                    return dict(item)
+            item = {"id": uuid.uuid4().hex, "thread": thread, "worktree": resolved,
+                    "key": key, "state": "waiting", "created": now}
             data["requests"].append(item)
             self.add_note(data, item["id"], thread, note)
+            result = (self._grant_owner(data, item, now)
+                      if (claim_if_idle and self._can_claim_idle(data, item["id"], now)
+                          and lock_stack.enter_context(self._try_command_lock()))
+                      else dict(item))
             self.save(db, data)
-            return item
+            return result
 
     def note(self, request, thread, text):
         with self.transaction() as (db, data):
@@ -190,34 +240,40 @@ class Lane:
         return bool(watcher and watcher.get("verified") and time.time() - watcher["seen"] < 30)
 
     def offer_next(self):
-        with self.command_lock(), self.transaction() as (db, data):
-            if data["paused"] or data["owner"] or data["command"] or not self.healthy(data):
+        if not self.db.is_file():
+            with self.transaction():
                 return
-            offer = data["offer"]
-            if offer:
-                if not offer["deadline"] or offer["deadline"] > time.time():
+        with self._try_command_lock() as locked:
+            if not locked:
+                return
+            with self.transaction() as (db, data):
+                if data["paused"] or data["owner"] or data["command"] or not self.healthy(data):
                     return
-                self.find(data, offer["request"])["state"] = "deferred"
-                self.invalidate_offer(data)
-            waiting = sorted((r for r in data["requests"] if r["state"] == "waiting"),
-                             key=lambda r: r["created"])
-            if waiting:
-                item = waiting[0]
-                data["generation"] += 1
-                generation = data["generation"]
-                event_id = f"he-lane-{data['id']}-{item['id']}-{generation}"
-                data["offer"] = {"request": item["id"], "generation": generation,
-                                 "event": event_id, "deadline": None}
-                item["state"] = "offered"
-                message = (f"Build lane turn offer for {self.state.parent}. Read `he agent lane status --json`, "
-                           f"then claim with `he agent lane claim {item['id']} --thread {item['thread']} "
-                           f"--offer {generation}`. This message is not a grant. "
-                           f"Previous handoff: {data['handoff'] or 'none recorded'}. "
-                           "Use the current lane tooling, retain the reservation through packaging, "
-                           "and release with handoff notes. No acknowledgment message is needed.")
-                data["outbox"].append({"id": event_id, "threadId": item["thread"], "message": message,
-                                       "state": "pending", "attempts": 0, "next": 0, "error": None})
-            self.save(db, data)
+                offer = data["offer"]
+                if offer:
+                    if not offer["deadline"] or offer["deadline"] > time.time():
+                        return
+                    self.find(data, offer["request"])["state"] = "deferred"
+                    self.invalidate_offer(data)
+                waiting = sorted((r for r in data["requests"] if r["state"] == "waiting"),
+                                 key=lambda r: r["created"])
+                if waiting:
+                    item = waiting[0]
+                    data["generation"] += 1
+                    generation = data["generation"]
+                    event_id = f"he-lane-{data['id']}-{item['id']}-{generation}"
+                    data["offer"] = {"request": item["id"], "generation": generation,
+                                     "event": event_id, "deadline": None}
+                    item["state"] = "offered"
+                    message = (f"Build lane turn offer for {self.state.parent}. Read `he agent lane status --json`, "
+                               f"then claim with `he agent lane claim {item['id']} --thread {item['thread']} "
+                               f"--offer {generation}`. This message is not a grant. "
+                               f"Previous handoff: {data['handoff'] or 'none recorded'}. "
+                               "Use the current lane tooling, retain the reservation through packaging, "
+                               "and release with handoff notes. No acknowledgment message is needed.")
+                    data["outbox"].append({"id": event_id, "threadId": item["thread"], "message": message,
+                                           "state": "pending", "attempts": 0, "next": 0, "error": None})
+                self.save(db, data)
 
     def claim(self, request, thread, generation, worktree):
         with self.command_lock(), self.transaction() as (db, data):
@@ -359,6 +415,12 @@ def add_parser(commands):
     req.add_argument("--thread", required=True)
     req.add_argument("--key", required=True, help="stable task name for idempotent requests")
     req.add_argument("--note", required=True)
+    req_mode = req.add_mutually_exclusive_group()
+    req_mode.set_defaults(claim_if_idle=True)
+    req_mode.add_argument("--claim-if-idle", dest="claim_if_idle", action="store_true",
+                          help="claim immediately when the lane is unpaused and idle (default)")
+    req_mode.add_argument("--queue-only", dest="claim_if_idle", action="store_false",
+                          help="enqueue without claiming an idle lane inline")
     for name in ("note", "cancel", "defer", "requeue"):
         command = actions.add_parser(name)
         command.add_argument("request")
@@ -391,7 +453,8 @@ def main(paths, args):
     elif action == "status":
         result = lane.status()
     elif action == "request":
-        result = lane.request(args.thread, paths.worktree, args.note, args.key)
+        result = lane.request(args.thread, paths.worktree, args.note, args.key,
+                              claim_if_idle=args.claim_if_idle)
     elif action == "note":
         lane.note(args.request, args.thread, args.note)
     elif action in ("cancel", "defer", "requeue"):
@@ -444,13 +507,7 @@ def main(paths, args):
                 raise HeError("a lane watcher is already running") from None
             while True:
                 lane.heartbeat(args.delivery_verified, identity)
-                try:
-                    lane.offer_next()
-                except HeError:
-                    # A live command is expected while the watcher runs.
-                    # Database/transport failures must remain visible to supervision.
-                    if not lane.status().get("owner"):
-                        raise
+                lane.offer_next()
                 lane.deliver_one(notify)
                 if args.once:
                     break

@@ -266,6 +266,131 @@ class LaneTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(count.read_text().splitlines()), 1)
 
+    def test_idle_request_claims_inline_without_outbox_and_omits_token_from_status(self):
+        claimed = self.lane.request("a", self.root, "build and package", "build", claim_if_idle=True)
+        self.assertEqual(claimed["state"], "owned")
+        self.assertEqual(claimed["request"], claimed["id"])
+        self.assertEqual(claimed["generation"], 1)
+        self.assertTrue(claimed["token"])
+        self.assertIsNone(claimed["handoff"])
+        status = self.lane.status()
+        self.assertEqual(status["outbox"], [])
+        self.assertIsNone(status["offer"])
+        self.assertEqual(status["owner"]["request"], claimed["id"])
+        self.assertNotIn(claimed["token"], json.dumps(status))
+
+        repeated = self.lane.request("a", self.root, "build and package", "build", claim_if_idle=True)
+        self.assertEqual(repeated["id"], claimed["id"])
+        self.assertEqual(repeated["state"], "owned")
+        self.assertNotIn("token", repeated)
+
+        with mock.patch.dict(os.environ, {TOKEN_ENV: claimed["token"]}):
+            self.assertEqual(run_locked(self.lane.state / "lane.lock", [sys.executable, "-c", "pass"],
+                                        label="inline-test", worktree=self.root), 0)
+        self.lane.release(claimed["token"], "clean handoff")
+
+        second = self.lane.request("b", self.root, "second session", "build-2", claim_if_idle=True)
+        self.assertEqual(second["state"], "owned")
+        self.assertEqual(second["generation"], 2)
+        self.assertEqual(second["handoff"], "clean handoff")
+        self.assertEqual(self.lane.status()["outbox"], [])
+
+    def test_idle_claim_falls_back_to_waiting_when_paused_queued_or_locked(self):
+        self.lane.set_paused(True, "hold")
+        first = self.lane.request("a", self.root, "first", "k1", claim_if_idle=True)
+        self.assertEqual(first["state"], "waiting")
+        self.assertNotIn("token", first)
+
+        self.lane.set_paused(False, "resume")
+        second = self.lane.request("b", self.root, "second", "k2", claim_if_idle=True)
+        self.assertEqual(second["state"], "waiting")
+        self.assertNotIn("token", second)
+        self.assertIsNone(self.lane.status()["owner"])
+
+        foreign = self.lane.request("a", self.root / "other", "first", "k1", claim_if_idle=True)
+        self.assertEqual(foreign["state"], "waiting")
+        self.assertNotIn("token", foreign)
+
+        granted = self.lane.request("a", self.root, "first", "k1", claim_if_idle=True)
+        self.assertEqual(granted["state"], "owned")
+        self.assertEqual(granted["id"], first["id"])
+        self.lane.release(granted["token"], "done")
+
+        with self.lane.command_lock():
+            still_waiting = self.lane.request("b", self.root, "second", "k2", claim_if_idle=True)
+            third = self.lane.request("c", self.root, "third", "k3", claim_if_idle=True)
+            self.assertEqual(still_waiting["state"], "waiting")
+            self.assertEqual(third["state"], "waiting")
+            self.lane.offer_next()
+            self.assertIsNone(self.lane.status()["offer"])
+
+    def test_idle_claim_respects_live_offer_and_reclaims_expired_offer(self):
+        a = self.request("a")
+        self.lane.offer_next()
+        b = self.lane.request("b", self.root, "behind undelivered offer", "kb", claim_if_idle=True)
+        self.assertEqual(b["state"], "waiting")
+        self.assertNotIn("token", b)
+
+        self.lane.deliver_one(lambda _: "msg-a", offer_seconds=60)
+        c = self.lane.request("c", self.root, "behind active offer", "kc", claim_if_idle=True)
+        self.assertEqual(c["state"], "waiting")
+        self.lane.change_request(b["id"], "b", "cancelled")
+        self.lane.change_request(c["id"], "c", "cancelled")
+
+        with mock.patch("he.lane.time.time", return_value=time.time() + 120):
+            d = self.lane.request("d", self.root, "reclaim expired offer", "kd", claim_if_idle=True)
+        self.assertEqual(d["state"], "owned")
+        self.assertEqual(d["generation"], 2)
+        status = self.lane.status()
+        self.assertIsNone(status["offer"])
+        self.assertEqual(next(r for r in status["requests"] if r["id"] == a["id"])["state"], "deferred")
+        self.assertEqual(len(status["outbox"]), 1)
+
+    def test_concurrent_idle_claim_grants_single_winner(self):
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(
+                lambda i: self.lane.request(f"t-{i}", self.root, "race", "build", claim_if_idle=True),
+                range(8)))
+        winners = [r for r in results if "token" in r]
+        waiters = [r for r in results if r["state"] == "waiting"]
+        self.assertEqual(len(winners), 1)
+        self.assertEqual(winners[0]["generation"], 1)
+        self.assertEqual(len(waiters), 7)
+        self.assertEqual(self.lane.status()["outbox"], [])
+        self.lane.release(winners[0]["token"], "clear")
+        for r in waiters:
+            self.lane.change_request(r["id"], r["thread"], "cancelled")
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            same = list(pool.map(
+                lambda _: self.lane.request("same", self.root, "idempotent race", "k", claim_if_idle=True),
+                range(8)))
+        self.assertEqual(len({r["id"] for r in same}), 1)
+        self.assertEqual(len([r for r in same if "token" in r]), 1)
+
+    def test_cli_request_claims_idle_by_default_and_queue_only_opts_out(self):
+        env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+        base = [sys.executable, "-m", "he", "--worktree", str(self.root), "--build-dir", str(self.root), "lane"]
+        queued = json.loads(subprocess.run(
+            [*base, "request", "--thread", "a", "--key", "q", "--note", "queue only", "--queue-only"],
+            env=env, text=True, capture_output=True, timeout=5, check=True).stdout)
+        self.assertEqual(queued["state"], "waiting")
+        self.assertNotIn("token", queued)
+        self.lane.change_request(queued["id"], "a", "cancelled")
+
+        claimed = json.loads(subprocess.run(
+            [*base, "request", "--thread", "b", "--key", "c", "--note", "default idle claim"],
+            env=env, text=True, capture_output=True, timeout=5, check=True).stdout)
+        self.assertEqual(claimed["state"], "owned")
+        self.assertTrue(claimed["token"])
+        self.assertEqual(self.lane.status()["outbox"], [])
+
+        contended = json.loads(subprocess.run(
+            [*base, "request", "--thread", "c", "--key", "w", "--note", "contended"],
+            env=env, text=True, capture_output=True, timeout=5, check=True).stdout)
+        self.assertEqual(contended["state"], "waiting")
+        self.assertNotIn("token", contended)
+
 
 class NotifierTest(unittest.TestCase):
     def test_mcp_handshake_and_stable_send_key(self):

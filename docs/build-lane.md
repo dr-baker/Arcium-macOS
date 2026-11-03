@@ -2,8 +2,10 @@
 
 The implementation is opt-in. A database reserves one physical build directory
 across source changes, builds, and packaging. The existing OS lock still
-serializes individual commands. A watcher sends the next requester a turn
-offer; the requester must claim it before changing the build directory.
+serializes individual commands. An uncontended `lane request` claims an idle
+lane inline; when the lane is busy or paused, the request queues and a watcher
+sends the next requester a turn offer to claim before changing the build
+directory.
 
 ## Production installation
 
@@ -60,17 +62,27 @@ he agent lane status --json
 he agent lane request --thread THREAD_ID --key TASK_NAME --note 'Scope, revisions, targets, packaging needed'
 ```
 
-Keep the returned request ID. Repeating a request with the same thread and key
-returns the same request. Use a new key for a separate build session. Update
-notes with `he agent lane note REQUEST --thread THREAD_ID --note TEXT`.
-Notes do not send messages. Wait for a turn offer; do independent work or end
-the turn instead of polling agents.
+Keep the returned request ID. When the lane is unpaused, unowned, and has no
+active command, live offer, or earlier waiter, `lane request` claims the turn
+inline (`"state": "owned"`), returning `"generation"`, `"token"`, and the
+previous `"handoff"` once without sending a watcher message. Export
+`HELIUM_LANE_TOKEN` directly from that output. Pass `--queue-only` when you want
+to enqueue without claiming immediately.
+
+When the lane is busy or paused, `lane request` returns `"state": "waiting"`.
+Repeating a request with the same thread and key returns the same request (and
+claims inline if it is now at the head of an idle lane from the same worktree;
+already-owned requests omit `"token"` on repeat). Use a new key for a separate
+build session. Update notes with
+`he agent lane note REQUEST --thread THREAD_ID --note TEXT`. Notes do not send
+messages. While waiting, wait for a turn offer; do independent work or end the
+turn instead of polling agents.
 
 The offer contains the exact claim command:
 
 ```sh
 he agent lane claim REQUEST --thread THREAD_ID --offer GENERATION
-export HELIUM_LANE_TOKEN='token returned by claim'
+export HELIUM_LANE_TOKEN='token returned by request or claim'
 ```
 
 Retain the token across shell calls. Status output omits it. Run the usual
@@ -201,8 +213,9 @@ remain at a stable path while launchd runs it.
 2. Send one real readiness message to the coordinator using the notifier.
    Supply JSON on stdin with `threadId`, `message`, `mode: "auto"`, and a
    unique stable `clientRequestId`. Verify the returned `messageId` and the
-   actual thread message. Then test a temporary queued request through offer,
-   delivery, and claim after its requesting agent has ended its turn.
+   actual thread message. Then test a temporary queued request (`--queue-only`
+   when unpaused) through offer, delivery, and claim after its requesting
+   agent has ended its turn.
 
 3. Initialize the temporary lane with
    `he agent lane init --coordinator THREAD_ID`. It starts paused. Define the

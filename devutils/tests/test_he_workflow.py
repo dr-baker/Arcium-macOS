@@ -34,21 +34,29 @@ class WorkflowTest(unittest.TestCase):
         lane = Lane(state)
         lane.heartbeat(True)
         self.m.he("lane", "resume", "--note", "fixture delivery verified")
-        request = json.loads(self.m.he("lane", "request", "--thread", "a", "--key", "build",
-                                      "--note", "fixture integration").stdout)
-        lane.offer_next()
-        generation = lane.status()["offer"]["generation"]
-        owner = json.loads(self.m.he("lane", "claim", request["id"], "--thread", "a",
-                                    "--offer", str(generation)).stdout)
+        claimed = json.loads(self.m.he("lane", "request", "--thread", "a", "--key", "build",
+                                       "--note", "fixture integration").stdout)
+        self.assertEqual(claimed["state"], "owned")
+        self.assertEqual(lane.status()["outbox"], [])
+        queued = json.loads(self.m.he("lane", "request", "--thread", "b", "--key", "followup",
+                                      "--note", "queued integration").stdout)
+        self.assertEqual(queued["state"], "waiting")
+        self.assertNotIn("token", queued)
         refused = self.m.he("merge", check=False)
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("reservation", refused.stderr)
-        self.m.he("merge", HELIUM_LANE_TOKEN=owner["token"])
-        self.m.he("push", HELIUM_LANE_TOKEN=owner["token"])
-        self.assertEqual(lane.status()["owner"]["request"], request["id"])
-        self.m.he("lane", "release", "--note", "fixture replay complete", HELIUM_LANE_TOKEN=owner["token"])
-        stale = self.m.he("pop", check=False, HELIUM_LANE_TOKEN=owner["token"])
+        self.m.he("merge", HELIUM_LANE_TOKEN=claimed["token"])
+        self.m.he("push", HELIUM_LANE_TOKEN=claimed["token"])
+        self.assertEqual(lane.status()["owner"]["request"], claimed["id"])
+        self.m.he("lane", "release", "--note", "fixture replay complete", HELIUM_LANE_TOKEN=claimed["token"])
+        stale = self.m.he("pop", check=False, HELIUM_LANE_TOKEN=claimed["token"])
         self.assertNotEqual(stale.returncode, 0)
+        lane.offer_next()
+        generation = lane.status()["offer"]["generation"]
+        owner = json.loads(self.m.he("lane", "claim", queued["id"], "--thread", "b",
+                                    "--offer", str(generation)).stdout)
+        self.assertEqual(lane.status()["owner"]["request"], queued["id"])
+        self.m.he("lane", "release", "--note", "queued handoff complete", HELIUM_LANE_TOKEN=owner["token"])
 
     # Catalog -----------------------------------------------------------------
 
